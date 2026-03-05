@@ -700,7 +700,8 @@ BCF files are written when:
 | TLS/Proxy | Caddy | Auto HTTPS, simple config, static file serving |
 | Password hash | Argon2id | OWASP recommended, memory-hard, side-channel resistant |
 | Crypto backend | aws-lc-rs | Replaces ring, FIPS-capable, actively maintained |
-| LLM provider (v1) | Anthropic Claude | Primary ecosystem, tool use support, streaming |
+| LLM API format | OpenAI-compatible | De facto standard; works with OpenRouter, Ollama, OpenAI, vLLM, etc. |
+| LLM provider (v1) | OpenRouter | Multi-model access (Claude, GPT-4, Llama, etc.) via single API key |
 | Frontend framework | SvelteKit (static) | Svelte 5 runes, minimal JS, Caddy serves the build |
 | Styling | Tailwind CSS | Utility-first, design tokens via config |
 | MCP transport (v1) | stdio | Simplest, works for local MCP servers |
@@ -726,7 +727,9 @@ and validates at startup (fail-fast on missing required values).
 DATABASE_URL=postgres://sober:password@localhost:5432/sober
 QDRANT_URL=http://localhost:6334
 REDIS_URL=redis://localhost:6379
-ANTHROPIC_API_KEY=sk-ant-...
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=anthropic/claude-sonnet-4
 
 # Optional (with defaults)
 HOST=0.0.0.0
