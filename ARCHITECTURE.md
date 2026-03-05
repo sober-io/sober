@@ -80,7 +80,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
 | `sober-mcp` | MCP server/client implementation for tool interop |
-| `sober-llm` | Multi-provider LLM abstraction (Anthropic, OpenAI, Ollama, etc.) |
+| `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
 
 ---
 
@@ -285,7 +285,7 @@ adapters that normalize messages into internal `AgentMessage` format.
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
-| Primary DB | PostgreSQL 16 | Users, groups, permissions, audit logs, plugin registry |
+| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Blob Store | S3-compatible (MinIO) | Large artifacts, code snapshots, binary contexts |
 | Cache | Redis | Session tokens, rate limiting, hot context cache |

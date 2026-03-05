@@ -108,7 +108,7 @@ docker compose up -d
 
 - Each crate has a single responsibility (see @ARCHITECTURE.md crate map).
 - Cross-crate dependencies flow downward: api → agent → memory/crypto → core.
-- `sober-cli` depends on `sober-core` only. It does NOT depend on `sober-api`.
+- `sober-cli` depends on `sober-core` and `sober-crypto`. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
 - All async code uses `tokio` runtime.
 - Database queries use `sqlx` with compile-time checked queries where possible.
@@ -141,7 +141,7 @@ docker compose up -d
 ### Rust
 - `axum` — HTTP framework
 - `tokio` — Async runtime
-- `sqlx` — Database (PostgreSQL)
+- `sqlx` — Database (PostgreSQL 17)
 - `qdrant-client` — Vector database
 - `ed25519-dalek` — Signing
 - `aes-gcm` — Symmetric encryption
@@ -160,7 +160,6 @@ docker compose up -d
 ### Frontend
 - `@sveltejs/kit` — Framework (Svelte 5 runes only)
 - `tailwindcss` — Styling
-- `@anthropic-ai/sdk` — Claude API (if client-side needed)
 
 ## MCP Servers for Development
 
