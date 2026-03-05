@@ -25,13 +25,13 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Clients                              │
-│  PWA (Svelte)  │  Discord Bot  │  WhatsApp  │  CLI  │  API │
+│  PWA (Svelte)  │  Discord Bot  │  WhatsApp  │  CLI (sober/soberctl)  │  API │
 └──────┬──────────────┬──────────────┬──────────┬──────┬──────┘
        │              │              │          │      │
        ▼              ▼              ▼          ▼      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    API Gateway (sober-api)                   │
-│  Rate Limiting │ Auth Middleware │ Channel Routing │ WAF     │
+│  Rate Limiting │ Auth Middleware │ Channel Routing │ WAF │ Admin Socket │
 └──────────────────────────┬──────────────────────────────────┘
                            │
        ┌───────────────────┼───────────────────┐
@@ -77,7 +77,8 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-agent` | Agent orchestration, replica lifecycle, task delegation, self-evolution |
 | `sober-plugin` | Plugin registry, sandboxed execution, security audit, code generation |
 | `sober-crypto` | Keypair management, envelope encryption, signing, injection detection |
-| `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters |
+| `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
+| `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
 | `sober-mcp` | MCP server/client implementation for tool interop |
 | `sober-llm` | Multi-provider LLM abstraction (Anthropic, OpenAI, Ollama, etc.) |
 
@@ -300,3 +301,18 @@ Docker Compose (dev) → Kubernetes (prod)
 
 Each crate compiles to a separate binary where appropriate (API gateway,
 agent worker, etc.) or is linked as a library crate.
+
+### CLI Administration
+
+The `sober-cli` crate produces two binaries:
+
+- **`sober`** — Offline operations that connect directly to PostgreSQL. Migrations,
+  user management, DB seed/backup/restore, config validation. Works without a running
+  API server.
+- **`soberctl`** — Runtime operations that connect to the API server via a Unix admin
+  socket (`/run/sober/admin.sock`). Agent inspection/control, task queue management,
+  memory pruning, live health checks, plugin management.
+
+The Unix socket requires no authentication — access is controlled by filesystem
+permissions on the socket file. The API server only binds the admin socket when
+configured to do so (opt-in).

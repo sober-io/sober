@@ -17,6 +17,7 @@ and Svelte 5 (frontend). See @ARCHITECTURE.md for full system design.
 sober/
 ├── backend/          # Rust workspace (Cargo)
 │   ├── crates/       # Individual library/binary crates
+│   │   └── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
 │   └── migrations/   # SQL migrations (sqlx)
 ├── frontend/         # SvelteKit PWA
 ├── shared/           # Protobuf schemas, shared types
@@ -40,6 +41,8 @@ sober/
 cd backend && cargo build
 cargo test --workspace
 cargo run -p sober-api          # Start API server
+cargo run --bin sober -- --help # CLI admin tool (offline ops)
+cargo run --bin soberctl -- --help # CLI admin tool (runtime ops)
 
 # Frontend
 cd frontend && pnpm install
@@ -105,6 +108,7 @@ docker compose up -d
 
 - Each crate has a single responsibility (see @ARCHITECTURE.md crate map).
 - Cross-crate dependencies flow downward: api → agent → memory/crypto → core.
+- `sober-cli` depends on `sober-core` only. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
 - All async code uses `tokio` runtime.
 - Database queries use `sqlx` with compile-time checked queries where possible.
@@ -148,6 +152,7 @@ docker compose up -d
 - `wasmtime` — Plugin sandbox
 - `openidconnect` — OIDC client
 - `webauthn-rs` — Passkey/FIDO2
+- `clap` — CLI argument parsing (derive)
 - `tracing` — Structured logging
 - `thiserror` — Error types
 - `rustls` — TLS (pure Rust)
