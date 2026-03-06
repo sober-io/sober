@@ -93,6 +93,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
 | `sober-mcp` | MCP server/client implementation for tool interop |
+| `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
 | `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
 
 ---

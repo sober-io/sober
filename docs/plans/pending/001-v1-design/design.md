@@ -33,7 +33,7 @@ and call external tools via MCP.
 - Replica agents, task delegation
 - Discord, WhatsApp, Telegram channels
 - `soberctl` (runtime CLI — the admin socket exists but no CLI client yet)
-- Sandboxed code execution
+- Sandboxed code execution (plugin/WASM --- bwrap process sandbox is included)
 - External API tools beyond MCP
 - S3/MinIO blob storage (local filesystem for now)
 - BCF encryption and compression (format supports flags, but unused in v1)
@@ -53,6 +53,7 @@ and call external tools via MCP.
 | `sober-llm` | lib | LLM engine trait, Anthropic Claude provider, streaming |
 | `sober-agent` | lib | Agent loop, tool trait, v1 tools (web search, URL fetch) |
 | `sober-mcp` | lib | MCP client (stdio transport), tool discovery, proxy calls |
+| `sober-sandbox` | lib | bwrap process sandbox, policy profiles, network proxy, audit |
 | `sober-api` | bin | Axum HTTP/WS server, auth routes, chat, rate limiting, admin socket |
 | `sober-cli` | bin | `sober` binary: user management, migrations, config validation |
 
@@ -61,7 +62,10 @@ and call external tools via MCP.
 ```
 sober-api (bin)
   ├── sober-agent
+  │     ├── sober-sandbox
+  │     │     └── sober-core
   │     ├── sober-mcp
+  │     │     ├── sober-sandbox
   │     │     └── sober-core
   │     ├── sober-llm
   │     │     └── sober-core

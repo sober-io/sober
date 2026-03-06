@@ -258,6 +258,7 @@ Both error types map to `AppError` from `sober-core`.
 - `sober-llm` --- LLM engine abstraction
 - `sober-memory` --- context loading, vector storage
 - `sober-mcp` --- MCP client for external tools
+- `sober-sandbox` --- process sandboxing for tool execution and artifact runs
 - `reqwest` --- HTTP client for web_search and fetch_url tools
 - `sqlx` --- message storage
 - `tokio` --- async runtime, spawn for MCP processes
@@ -267,6 +268,7 @@ Both error types map to `AppError` from `sober-core`.
 ### sober-mcp
 
 - `sober-core` --- shared types
+- `sober-sandbox` --- sandbox MCP server child processes
 - `tokio` --- process management, async I/O
 - `serde`, `serde_json` --- JSON-RPC serialization
 - `tracing` --- structured logging

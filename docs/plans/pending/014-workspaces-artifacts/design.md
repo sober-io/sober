@@ -115,6 +115,9 @@ Split by ownership:
 | `state.json` | JSON | Agent | Learned observations, cached state. User can read, shouldn't edit. |
 | `soul.md` | Markdown | User | Workspace-level SOUL.md layer. Agent can propose changes. |
 
+The `config.toml` file includes a `[sandbox]` section for execution sandbox
+policy. See 015-sandbox design for profile and override configuration.
+
 TOML for human-edited config (supports comments, readable). JSON for
 agent-managed state (trivial to serialize/deserialize programmatically).
 
