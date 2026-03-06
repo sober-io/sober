@@ -33,16 +33,16 @@ and `sober-core` (shared types, errors, config). v1 is password-only with admin-
 ## Session Validation (Middleware)
 
 - Extract the session token from the cookie.
-- SHA-256 hash the token and look it up — check Redis cache first, fall back to the database.
+- SHA-256 hash the token and look it up — check moka in-memory cache first, fall back to PostgreSQL.
 - Verify the session has not expired.
-- Load user and roles from the database (cache in Redis).
+- Load user and roles from the database (cache in moka).
 - Attach user context to request extensions via axum `Extension<AuthUser>`.
 - `AuthUser` struct fields: `user_id`, `email`, `username`, `roles` (`Vec<String>`),
   `scopes` (`Vec<ScopeId>`).
 
 ## Logout
 
-- Delete session from both the database and Redis cache.
+- Delete session from both the database and the moka in-memory cache.
 - Clear the session cookie.
 
 ## RBAC
@@ -78,7 +78,7 @@ Each variant maps to the appropriate `AppError` variant (`Unauthorized`, `Forbid
 | `sober-crypto` | `hash_password`, `verify_password` |
 | `sober-core` | `AppError`, shared types, config |
 | `sqlx` | Database queries |
-| `redis` | Session cache |
+| `moka` | In-memory session/user cache |
 | `rand` | Session token generation |
 | `sha2` | Session token hashing |
 | `axum` | Middleware, extractors |

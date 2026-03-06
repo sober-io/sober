@@ -106,11 +106,15 @@ service SchedulerService {
     rpc ForceRun(ForceRunRequest) returns (Empty);
 }
 
-// shared/proto/agent.proto
+// shared/proto/agent.proto (agent is a gRPC server from day one — C1)
 service AgentService {
     rpc ExecuteTask(TaskRequest) returns (TaskResponse);
     rpc WakeAgent(WakeRequest) returns (WakeResponse);
 }
+
+// TaskRequest includes context fields so the agent can resolve
+// user identity, conversation, and workspace for prompt assembly.
+// See plan.md step 1 for full proto definition.
 ```
 
 ### Security -- Two Layers
@@ -193,8 +197,8 @@ the same proto definitions.
 - `sober-scheduler` added to workspace
 
 ### Modified crates
-- `sober-agent` becomes a gRPC server (in addition to being a library)
-- `sober-api` becomes a gRPC client (calls agent and scheduler)
+- `sober-agent` is already a gRPC server (decided in C1 --- agent is gRPC from day one, not converted later). This plan defines the agent's TaskRequest proto with context fields the agent needs for resolution.
+- `sober-api` is already a gRPC client of the agent (established in 012). This plan adds the scheduler as an additional gRPC target for the API.
 - `sober-cli` gains `soberctl scheduler` subcommands
 
 ### New shared artifacts

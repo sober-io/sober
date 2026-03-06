@@ -21,6 +21,8 @@ Create `backend/crates/sober-sandbox/` with `Cargo.toml`:
 - `uuid = { version = "1", features = ["v7"] }`
 - `chrono = { version = "0.4", features = ["serde"] }`
 - `thiserror = "2"`
+- `hyper = { version = "1", features = ["http1", "server"] }`
+- `hyper-util = { version = "0.1", features = ["tokio"] }`
 
 Add `"crates/sober-sandbox"` to the workspace members in `backend/Cargo.toml`.
 
@@ -149,24 +151,68 @@ The core sandbox execution engine:
 7. Collect stdout, stderr, exit code into `SandboxResult`.
 8. Tear down proxy if started.
 
-### 9. Implement `proxy.rs`
+### 9. Implement `proxy.rs` — HTTPS CONNECT proxy and socat bridge
 
-Socat proxy lifecycle for `NetMode::AllowedDomains`:
+The proxy is the most complex part of the sandbox. It is a custom HTTP proxy
+built with `hyper` that listens on a Unix domain socket and filters outbound
+connections by domain.
+
+**Public API:**
 
 - `ProxyBridge::start(allowed_domains, denied_domains) -> Result<ProxyBridge, SandboxError>`
-- `ProxyBridge::port() -> u16` --- the port inside the sandbox
+- `ProxyBridge::socket_path() -> &Path` --- the host-side UDS path
+- `ProxyBridge::sandbox_port() -> u16` --- the loopback port inside the sandbox
 - `ProxyBridge::stop(self) -> Result<Vec<String>, SandboxError>` --- returns denied request log
 
-Implementation:
-1. Start a lightweight HTTP proxy (consider `hyper` or a simple TCP forwarder).
-2. Start socat to bridge from sandbox loopback to the proxy Unix socket.
-3. Proxy inspects CONNECT requests, checks domain against allowlist/denylist.
-4. Denied domains are logged and the connection is rejected.
-5. On `stop`, kill socat process and return the denied request log.
+**Sub-tasks:**
 
-**Note:** The proxy implementation is the most complex part. For the initial
-version, a simple domain-checking CONNECT proxy is sufficient. Full SOCKS5
-support can be added later.
+**9a. Hyper-based HTTPS CONNECT proxy**
+
+Add `hyper` and `hyper-util` as dependencies. Implement an HTTP proxy that:
+
+1. Listens on a Unix domain socket (use `hyper::server::conn` with
+   `tokio::net::UnixListener`).
+2. For `CONNECT` requests: parse the host from the request URI, check against
+   the domain allowlist. If allowed, respond `200 Connection Established` and
+   tunnel bytes transparently using `tokio::io::copy_bidirectional` (no TLS
+   termination --- the proxy never sees plaintext). If denied, respond
+   `403 Forbidden` and log the domain.
+3. For plain HTTP requests: check the `Host` header against the allowlist.
+   If allowed, forward the request. If denied, return `403`.
+4. Collect denied domains in a `Arc<Mutex<Vec<String>>>` for reporting.
+5. Non-HTTP traffic cannot reach the proxy (sandbox loopback only routes
+   through the socat bridge to this proxy).
+
+**9b. Socat bridge lifecycle**
+
+Implement socat spawning that bridges the sandbox loopback to the host UDS:
+
+1. Choose a free loopback port for the sandbox side.
+2. Spawn socat: `socat TCP-LISTEN:<port>,bind=127.0.0.1,fork,reuseaddr
+   UNIX-CONNECT:<host-side-uds>`. This socat process runs on the host but
+   its listening socket is passed into the bwrap namespace.
+3. Track the socat `Child` process for cleanup.
+
+**9c. Integration with `BwrapSandbox`**
+
+Wire `ProxyBridge` into `bwrap.rs`:
+
+1. When `NetMode::AllowedDomains`, `BwrapSandbox` starts `ProxyBridge` before
+   spawning bwrap.
+2. Set `HTTP_PROXY=http://127.0.0.1:<port>` and
+   `HTTPS_PROXY=http://127.0.0.1:<port>` in the sandbox environment.
+3. The socat bridge socket is bind-mounted into the namespace so the sandbox
+   process can reach it.
+4. On sandbox exit, call `ProxyBridge::stop()` and include denied domains in
+   `SandboxResult`.
+
+**9d. Proxy unit tests**
+
+- Start proxy, send an allowed CONNECT request, verify `200` and byte tunneling.
+- Send a denied CONNECT request, verify `403` and domain appears in denied log.
+- Send a plain HTTP request to an allowed host, verify forwarding.
+- Send a plain HTTP request to a denied host, verify `403`.
+- Verify proxy shuts down cleanly and returns the denied request list.
 
 ### 10. Implement `audit.rs`
 

@@ -65,8 +65,8 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 │ • Vector DB  │  │ • Keypair Gen  │  │ • Anthropic    │
 │ • Binary Ctx │  │ • Envelope Enc │  │ • OpenAI       │
 │ • Pruning    │  │ • Signing      │  │ • Local/Ollama │
-│ • Scoping    │  │ • Injection    │  │ • Router       │
-│              │  │   Detection    │  │                │
+│ • Scoping    │  │                │  │ • Router       │
+│              │  │                │  │                │
 └──────────────┘  └────────────────┘  └────────────────┘
        │
        ▼
@@ -85,16 +85,32 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-core` | Shared types, error handling, config, domain primitives |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
-| `sober-agent` | Agent orchestration, replica lifecycle, task delegation, self-evolution |
+| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. |
 | `sober-plugin` | Plugin registry, sandboxed execution, security audit, code generation |
-| `sober-crypto` | Keypair management, envelope encryption, signing, injection detection |
+| `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
-| `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution |
+| `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution, injection detection |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
-| `sober-mcp` | MCP server/client implementation for tool interop |
+| `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
 | `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
+
+### Crate Dependency Flow
+
+Cross-crate dependencies flow downward:
+
+```
+sober-api → sober-agent → sober-mind → sober-memory / sober-crypto → sober-core
+                 ↓              ↓
+            sober-sandbox  sober-sandbox
+                 ↑
+            sober-mcp
+```
+
+`sober-agent` and `sober-mcp` depend on `sober-sandbox` for process-level isolation.
+`sober-scheduler` and `sober-agent` do NOT depend on each other as crates — they
+communicate via gRPC at runtime using shared proto definitions.
 
 ---
 
@@ -184,7 +200,7 @@ command other replicas unless explicitly delegated that authority.
 
 ### Prompt Injection Defense
 
-1. **Input Sanitization** — All user input passes through injection classifier
+1. **Input Sanitization** — All user input passes through injection classifier (owned by `sober-mind`)
 2. **Canary Tokens** — Hidden markers in system prompts detect leakage
 3. **Output Filtering** — Responses scanned for leaked system context
 4. **Lockout** — Detected injection attempts trigger actor lockout + alert
@@ -415,7 +431,7 @@ adapters that normalize messages into internal `AgentMessage` format.
 | Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Blob Store | S3-compatible (MinIO) | Large artifacts, code snapshots, binary contexts |
-| Cache | Redis | Session tokens, rate limiting, hot context cache |
+| Cache | In-memory (moka) / Redis | v1: in-memory cache (moka) with PostgreSQL-backed sessions. Redis added when horizontal scaling requires shared cache across instances. |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |
 
 ---

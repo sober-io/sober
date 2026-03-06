@@ -19,7 +19,7 @@ agent state. All artifacts are scoped to user or group for privacy isolation.
 A general-purpose collaboration space. Not tied to a single repo --- can contain
 multiple independent repos, documents, configs, and generated files.
 
-- Scoped to a **user** or **group** (via `scope_id`)
+- Owned by a **user** (via `user_id`). Group ownership can be added later if needed.
 - Multiple users collaborate only through group-scoped workspaces
 - Each workspace has a `.sober/` directory for agent state
 
@@ -200,7 +200,7 @@ CREATE TYPE workspace_state AS ENUM (
 
 CREATE TABLE workspaces (
     id          UUID PRIMARY KEY,
-    scope_id    UUID NOT NULL REFERENCES scopes(id),
+    user_id     UUID NOT NULL REFERENCES users(id),
     name        TEXT NOT NULL,
     description TEXT,
     root_path   TEXT NOT NULL,
@@ -210,7 +210,7 @@ CREATE TABLE workspaces (
     deleted_at  TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(scope_id, name)
+    UNIQUE(user_id, name)
 );
 ```
 
@@ -276,7 +276,7 @@ CREATE TYPE artifact_state AS ENUM (
 CREATE TABLE artifacts (
     id              UUID PRIMARY KEY,
     workspace_id    UUID NOT NULL REFERENCES workspaces(id),
-    scope_id        UUID NOT NULL REFERENCES scopes(id),
+    user_id         UUID NOT NULL REFERENCES users(id),
     kind            artifact_kind NOT NULL,
     state           artifact_state NOT NULL DEFAULT 'draft',
     title           TEXT NOT NULL,
@@ -329,13 +329,13 @@ CREATE TABLE artifact_relations (
 ### Indexes
 
 ```sql
-CREATE INDEX idx_workspaces_scope_id ON workspaces(scope_id);
+CREATE INDEX idx_workspaces_user_id ON workspaces(user_id);
 CREATE INDEX idx_workspaces_state ON workspaces(state);
 CREATE INDEX idx_workspace_repos_workspace_id ON workspace_repos(workspace_id);
 CREATE INDEX idx_worktrees_repo_id ON worktrees(repo_id);
 CREATE INDEX idx_worktrees_state ON worktrees(state);
 CREATE INDEX idx_artifacts_workspace_id ON artifacts(workspace_id);
-CREATE INDEX idx_artifacts_scope_id ON artifacts(scope_id);
+CREATE INDEX idx_artifacts_user_id ON artifacts(user_id);
 CREATE INDEX idx_artifacts_kind ON artifacts(kind);
 CREATE INDEX idx_artifacts_state ON artifacts(state);
 CREATE INDEX idx_artifacts_parent_id ON artifacts(parent_id);
@@ -367,8 +367,8 @@ overrides are available when needed.
 - **Group member** --- read/write access to group workspaces
 - Per-workspace restrictions can further limit a member's access
 
-This uses the existing `user_roles` table with `scope_id` set to the group
-scope. No new tables needed.
+This uses the existing `user_roles` table with group membership. No new tables
+needed.
 
 ---
 
@@ -376,7 +376,7 @@ scope. No new tables needed.
 
 ### Creation
 
-1. DB: insert `workspaces` row, create scope if needed
+1. DB: insert `workspaces` row with `user_id` for ownership
 2. Filesystem: create workspace root directory + `.sober/` with template files
 3. Register any initial repos (clone managed, register linked)
 
@@ -410,16 +410,16 @@ restored (filesystem content is gone).
 When the agent needs to find the workspace for a linked external repo:
 
 ```sql
-SELECT w.id, w.scope_id, wr.id AS repo_id
+SELECT w.id, w.user_id, wr.id AS repo_id
 FROM workspace_repos wr
 JOIN workspaces w ON wr.workspace_id = w.id
 WHERE wr.path = $1
   AND wr.is_linked = true
-  AND w.scope_id IN (/* user's permitted scopes */);
+  AND w.user_id = $2;
 ```
 
-Scope filtering disambiguates if the same external path is linked into multiple
-workspaces by different users/groups.
+User filtering disambiguates if the same external path is linked into multiple
+workspaces by different users.
 
 For managed repos, the workspace is found by traversing up from the repo path
 to the workspace root.
@@ -462,8 +462,9 @@ worktree. No queuing.
   conversations associated with a workspace.
 - **sober-scheduler (015)** --- stale worktree cleanup job. Blob retention
   pruning job.
-- **sober-core (003)** --- new types: `WorkspaceId`, `WorkspaceRepoId`,
-  `WorktreeId`, `ArtifactId`.
+- **sober-core (003)** --- `WorkspaceId` is already defined in sober-core
+  (decided in C13). Additional new types: `WorkspaceRepoId`, `WorktreeId`,
+  `ArtifactId`.
 - **ARCHITECTURE.md** --- update `~/.sober/` paths (was `~/.sober/`), add
   workspace and artifact concepts to system architecture.
 

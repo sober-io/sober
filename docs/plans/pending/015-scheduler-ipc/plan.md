@@ -47,6 +47,10 @@ message TaskRequest {
   string task_type = 2;
   bytes payload = 3;
   string caller_identity = 4;
+  // Context fields for agent resolution
+  optional string user_id = 5;
+  optional string conversation_id = 6;
+  optional string workspace_id = 7;
 }
 
 message TaskResponse {
@@ -189,24 +193,23 @@ Create a tonic interceptor that:
 - [ ] Expired token (if TTL is implemented) is rejected
 - [ ] Wrong service name is rejected
 
-### 4. Implement gRPC server scaffolding for sober-agent
+### 4. Define agent's TaskRequest handling for scheduler context
 
-Add a gRPC server to `sober-agent` that implements `AgentService`:
+> **Note:** sober-agent is already a gRPC server (decided in C1 --- agent is gRPC
+> from day one, implemented in 011). This step does NOT create the gRPC server
+> scaffolding --- that already exists. Instead, it ensures the agent's
+> `ExecuteTask` handler correctly unpacks the context fields (`user_id`,
+> `conversation_id`, `workspace_id`) from `TaskRequest` and uses them to resolve
+> prompt context via sober-mind.
 
-```
-sober-agent/src/
-  grpc/
-    mod.rs           -- server setup, UDS listener
-    agent_service.rs -- AgentService implementation
-```
+Verify/update `AgentServiceImpl::execute_task`:
 
-- `start_grpc_server(socket_path, agent)` --- bind to Unix socket, register
-  service with identity interceptor, serve
-- `AgentServiceImpl` --- delegates `ExecuteTask` to the agent's task execution
-  logic, delegates `WakeAgent` to trigger an agent wake cycle
+- Extract optional `user_id`, `conversation_id`, `workspace_id` from `TaskRequest`
+- Build a `PromptContext` (from sober-mind) using these fields
+- Pass the context to the agent's task execution logic
 
-- [ ] Server starts and binds to a Unix socket
-- [ ] Client can connect and call `WakeAgent`
+- [ ] Agent resolves user/workspace context from TaskRequest fields
+- [ ] Missing context fields (e.g., system tasks with no user) are handled gracefully
 
 ### 5. Create sober-scheduler module structure
 
@@ -333,18 +336,14 @@ scheduled job via gRPC.
 - [ ] Agent can create a job on the scheduler
 - [ ] Agent can cancel a job on the scheduler
 
-### 12. Add sober-api gRPC clients
+### 12. Add sober-api gRPC client for scheduler
 
-Update `sober-api` to use gRPC clients instead of direct library calls for
-agent and scheduler:
+> **Note:** sober-api already uses a gRPC client to invoke the agent (established
+> in 012). This step adds the scheduler as an additional gRPC target.
 
-- `AgentClient::connect(socket_path)` --- for agent invocation
-- `SchedulerClient::connect(socket_path)` --- for scheduler management
+Add `SchedulerClient::connect(socket_path)` to sober-api for scheduler management.
 
-The API server becomes a gRPC client to both services.
-
-- [ ] API server can invoke agent via gRPC
-- [ ] API server can list/create/cancel scheduled jobs
+- [ ] API server can list/create/cancel scheduled jobs via gRPC to scheduler
 
 ### 13. Add soberctl scheduler commands
 

@@ -15,10 +15,14 @@ admin Unix socket.
 pub struct AppState {
     pub db: PgPool,
     pub redis: RedisPool,
-    pub agent: Agent,
+    pub agent_client: AgentClient,
     pub config: AppConfig,
 }
 ```
+
+`AgentClient` is a tonic gRPC client (`AgentServiceClient`) that connects to the
+agent's Unix domain socket at `/run/sober/agent.sock`. The API server does NOT
+instantiate an `Agent` directly — it communicates with the agent process via gRPC.
 
 Wrapped in `Arc<AppState>` and passed via axum `State`.
 
@@ -31,8 +35,8 @@ Wrapped in `Arc<AppState>` and passed via axum `State`.
   /auth/login                POST    — login, returns session cookie
   /auth/logout               POST    — logout (requires auth)
   /auth/me                   GET     — current user info (requires auth)
-  /conversations             GET     — list conversations (requires auth)
-  /conversations             POST    — create conversation (requires auth)
+  /conversations             GET     — list conversations (requires auth, scoped by user_id)
+  /conversations             POST    — create conversation (requires auth, scoped by user_id, no scope_id)
   /conversations/:id         GET     — get conversation with messages (requires auth)
   /conversations/:id         PATCH   — update title (requires auth)
   /conversations/:id         DELETE  — delete conversation (requires auth)
@@ -57,18 +61,21 @@ Tower layers, applied in order:
 
 - Client connects to `/api/v1/ws` with session cookie.
 - Server validates session, upgrades to WebSocket.
-- Client sends JSON messages:
+- Single WebSocket endpoint at `/api/v1/ws` (no path parameter). All messages
+  include `conversation_id` in the payload for multiplexing.
+- **Client-to-server messages (ClientWsMessage):**
   - `{ "type": "chat.message", "conversation_id": "...", "content": "..." }`
   - `{ "type": "chat.cancel", "conversation_id": "..." }`
-- Server streams AgentEvents as JSON:
-  - `chat.delta` — incremental text token
-  - `chat.tool_use` — tool invocation started
-  - `chat.tool_result` — tool invocation completed
-  - `chat.done` — agent response finished
-  - `chat.error` — error during processing
-- One WebSocket connection per user (multiplexed by `conversation_id`).
-- On `chat.message`: spawn tokio task for `agent.handle_message`, forward
-  AgentEvent stream to WebSocket.
+- **Server-to-client messages (ServerWsMessage):**
+  - `{ "type": "chat.delta", "conversation_id": "...", "content": "..." }`
+  - `{ "type": "chat.tool_use", "conversation_id": "...", "tool_call": {...} }`
+  - `{ "type": "chat.tool_result", "conversation_id": "...", "tool_call_id": "...", "output": "..." }`
+  - `{ "type": "chat.done", "conversation_id": "...", "message_id": "..." }`
+  - `{ "type": "chat.error", "conversation_id": "...", "error": "..." }`
+- One WebSocket connection per user (multiplexed by `conversation_id` in every message).
+- On `chat.message`: spawn tokio task, call agent via gRPC streaming
+  (`agent_client.handle_message`), forward AgentEvent stream to WebSocket
+  with the originating `conversation_id` attached to each event.
 - On `chat.cancel`: signal the agent task to cancel via `tokio::CancellationToken`.
 - Handle disconnects gracefully (drop agent task).
 
@@ -106,8 +113,8 @@ Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 2. Init tracing subscriber.
 3. Connect to PostgreSQL (`sqlx::PgPool`).
 4. Connect to Redis.
-5. Connect to Qdrant (via sober-memory `MemoryStore`).
-6. Create `Agent` (with LLM engine, memory, tools).
+5. Connect to agent gRPC service via UDS (`AgentServiceClient` connecting to `/run/sober/agent.sock`).
+6. Build `AppState` with `AgentClient` (not an `Agent` instance).
 7. Build router and apply middleware stack.
 8. Optionally bind admin Unix socket.
 9. Bind TCP listener, serve.
@@ -126,7 +133,8 @@ Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 |-------|---------|
 | `sober-core` | Shared types, AppError, config |
 | `sober-auth` | Authentication middleware and handlers |
-| `sober-agent` | Agent orchestration |
+| `tonic` | gRPC client for agent service |
+| `prost` | Protocol Buffers types |
 | `axum` | HTTP framework (features: ws, json, macros) |
 | `axum-extra` | Cookie extraction |
 | `tokio` | Async runtime (full features) |

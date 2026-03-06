@@ -14,15 +14,15 @@ isolation, optional encryption, and optional compression.
 v1 implements BCF incrementally. Encryption and compression flags exist in the
 format but are unused in this version.
 
-### Header (16 bytes)
+### Header (28 bytes)
 
 | Offset | Size | Field       | Value / Notes                                      |
 |--------|------|-------------|----------------------------------------------------|
 | 0      | 4    | Magic       | `0x53 0xD5 0x42 0x45` ("SOBE")                     |
 | 4      | 2    | Version     | `1` (u16 LE)                                       |
 | 6      | 2    | Flags       | `0x0000` (u16 --- bit 0: encrypted, bit 1: compressed) |
-| 8      | 8    | Scope ID    | First 8 bytes of scope UUID (u64 LE)               |
-| 16     | 4    | Chunk Count | u32 LE                                             |
+| 8      | 16   | Scope ID    | Full 128-bit UUID (LE)                             |
+| 24     | 4    | Chunk Count | u32 LE                                             |
 
 ### Chunk Table
 
@@ -42,7 +42,7 @@ Array of entries immediately following the header. Each entry:
 | 1     | Conversation | UTF-8    | Summary or key exchange            |
 | 2     | Embedding    | raw f32  | Raw f32 vector (little-endian)     |
 | 3--5  | Reserved     | ---      | Skill, Preference, Code (not in v1) |
-| 6     | Soul         | UTF-8    | Soul layer data (used by sober-mind, post-v1) |
+| 6     | Soul         | UTF-8    | Soul layer data (used by sober-mind) |
 
 ### Usage
 
@@ -117,6 +117,8 @@ metadata.
 Context loading follows the principle of least privilege:
 
 - Load only the scopes permitted for the current request.
+- Scope mapping: user scope = `user_id`, session scope = `conversation_id`. No
+  separate scopes table — scope identity is derived from existing domain IDs.
 - Budget-based: retrieve at most N tokens of context (configurable).
 - Priority order: session scope (most recent) > user scope (personal facts) >
   system scope (global knowledge).
@@ -135,6 +137,11 @@ ContextLoader::load(
     budget: usize,
 ) -> Result<Context>
 ```
+
+> **Note:** The `query_vector` parameter is a pre-computed embedding vector. The
+> caller (sober-agent) is responsible for calling `LlmEngine::embed()` on the
+> query text and passing the resulting vector here. `ContextLoader` does NOT
+> perform embedding internally — sober-memory has no dependency on sober-llm.
 
 `Context` struct fields: `facts: Vec<String>`, `recent_messages: Vec<Message>`,
 `total_tokens: usize`.

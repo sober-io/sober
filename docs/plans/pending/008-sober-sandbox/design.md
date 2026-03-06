@@ -249,10 +249,36 @@ Most specific wins. Overrides replace individual fields, not the whole profile.
 ### Network filtering (AllowedDomains mode)
 
 1. bwrap launches with `--unshare-net` (loopback only inside sandbox)
-2. Host-side: socat bridges a Unix socket to a filtering HTTP/SOCKS5 proxy
-3. Inside sandbox: `HTTP_PROXY` / `HTTPS_PROXY` env vars point to the bridged port
-4. Proxy checks each request against the domain allowlist/denylist, rejects
+2. Host-side: a custom HTTPS CONNECT proxy (built with `hyper`) listens on a
+   Unix domain socket outside the sandbox
+3. socat bridges the host-side UDS into the bwrap namespace, exposing it as a
+   TCP port on the sandbox's loopback interface
+4. Inside sandbox: `HTTP_PROXY` / `HTTPS_PROXY` env vars point to the bridged
+   loopback port
+5. Proxy checks each request against the domain allowlist/denylist, rejects
    unauthorized domains
+
+### Proxy implementation details
+
+The proxy is a lightweight HTTP proxy built with `hyper`:
+
+- **Listens on a Unix domain socket** on the host filesystem (not a TCP port).
+  This avoids exposing the proxy to non-sandboxed processes.
+- **socat bridging:** `socat TCP-LISTEN:<port>,bind=127.0.0.1,fork,reuseaddr
+  UNIX-CONNECT:<host-side-uds>` runs inside the bwrap namespace (passed as
+  part of the sandbox init), bridging sandbox loopback to the host UDS.
+- **HTTPS CONNECT handling:** The proxy reads the `CONNECT` request's host
+  header, checks the domain against the allowlist. If allowed, responds with
+  `200 Connection Established` and tunnels bytes transparently (no TLS
+  termination). If denied, responds with `403 Forbidden` and logs the attempt.
+- **Plain HTTP:** For non-CONNECT requests, the proxy checks the `Host` header
+  against the allowlist before forwarding.
+- **Non-HTTP traffic is blocked:** Only TCP connections through the HTTP proxy
+  are permitted. The sandbox has no direct network access (loopback only via
+  `--unshare-net`), so all external traffic must go through the proxy.
+- **Connection lifecycle:** Proxy starts before bwrap, shuts down after the
+  sandboxed process exits. Denied request domains are collected and returned
+  in the `SandboxResult`.
 
 ### Process lifecycle
 

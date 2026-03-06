@@ -81,31 +81,47 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
 ## WebSocket — `$lib/stores/websocket.svelte.ts`
 
-Shared reactive state for WebSocket connection using Svelte 5 runes in a `.svelte.ts`
-module:
+Singleton reactive WebSocket connection using Svelte 5 runes. Connects to `/api/v1/ws`
+(no conversation ID in URL). All messages include `conversation_id` in the payload.
+The store routes incoming messages to conversation-specific handlers.
 
 ```ts
-export function createWebSocket(conversationId: string) {
+type MessageHandler = (data: ServerWsMessage) => void;
+
+export const websocket = (() => {
   let ws = $state<WebSocket | null>(null);
   let connected = $state(false);
   let error = $state<string | null>(null);
+  const handlers = new Map<string, MessageHandler>(); // keyed by conversation_id
 
   function connect() {
+    if (ws) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${location.host}/api/v1/ws/${conversationId}`);
+    ws = new WebSocket(`${protocol}//${location.host}/api/v1/ws`);
     ws.onopen = () => { connected = true; error = null; };
     ws.onclose = () => { connected = false; ws = null; };
     ws.onerror = () => { error = 'Connection lost'; };
+    ws.onmessage = (e) => {
+      const msg: ServerWsMessage = JSON.parse(e.data);
+      const handler = handlers.get(msg.conversation_id);
+      if (handler) handler(msg);
+    };
   }
 
   function disconnect() {
     ws?.close();
     ws = null;
     connected = false;
+    handlers.clear();
   }
 
-  function send(data: unknown) {
-    ws?.send(JSON.stringify(data));
+  function send(msg: ClientWsMessage) {
+    ws?.send(JSON.stringify(msg));
+  }
+
+  function subscribe(conversationId: string, handler: MessageHandler) {
+    handlers.set(conversationId, handler);
+    return () => { handlers.delete(conversationId); };
   }
 
   return {
@@ -114,11 +130,9 @@ export function createWebSocket(conversationId: string) {
     connect,
     disconnect,
     send,
-    onMessage(handler: (data: unknown) => void) {
-      if (ws) ws.onmessage = (e) => handler(JSON.parse(e.data));
-    },
+    subscribe,
   };
-}
+})();
 ```
 
 ---
@@ -236,7 +250,7 @@ let { content, streaming = false }: Props = $props();
 |---|---|---|
 | Conversation list | `(app)/+page.ts` | `api('/conversations')` |
 | Conversation messages | `(app)/chat/[id]/+page.ts` | `api('/conversations/${id}')` |
-| Real-time chat | `(app)/chat/[id]/+page.svelte` | WebSocket (not load functions) |
+| Real-time chat | `(app)/chat/[id]/+page.svelte` | WebSocket singleton (`websocket.subscribe`) |
 | MCP servers | `(app)/settings/mcp/+page.ts` | `api('/mcp/servers')` |
 | Auth state | Root `+layout.ts` | `api('/auth/me')` |
 
@@ -298,11 +312,16 @@ interface McpServer {
 ### WebSocket Message Types
 
 ```ts
-type WsMessage =
-  | { type: 'chat.message'; message: Message }
-  | { type: 'chat.delta'; content: string }
-  | { type: 'chat.tool_use'; tool_call: ToolCall }
-  | { type: 'chat.tool_result'; tool_call_id: string; output: string }
-  | { type: 'chat.done'; message_id: string }
-  | { type: 'chat.error'; error: string };
+// Client-to-server messages — all include conversation_id
+type ClientWsMessage =
+  | { type: 'chat.message'; conversation_id: string; content: string }
+  | { type: 'chat.cancel'; conversation_id: string };
+
+// Server-to-client messages — all include conversation_id for routing
+type ServerWsMessage =
+  | { type: 'chat.delta'; conversation_id: string; content: string }
+  | { type: 'chat.tool_use'; conversation_id: string; tool_call: ToolCall }
+  | { type: 'chat.tool_result'; conversation_id: string; tool_call_id: string; output: string }
+  | { type: 'chat.done'; conversation_id: string; message_id: string }
+  | { type: 'chat.error'; conversation_id: string; error: string };
 ```

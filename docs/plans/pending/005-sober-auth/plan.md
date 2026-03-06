@@ -7,7 +7,7 @@
 ## Steps
 
 1. **Add dependencies to Cargo.toml.**
-   Add `sober-crypto`, `sober-core` as workspace dependencies. Add `sqlx`, `redis`, `rand`,
+   Add `sober-crypto`, `sober-core` as workspace dependencies. Add `sqlx`, `moka`, `rand`,
    `sha2`, `axum`, `axum-extra`, `tower`, `tokio`, `serde`, `thiserror`, `tracing`.
 
 2. **Create module structure.**
@@ -30,12 +30,12 @@
 
 5. **Implement `session.rs`.**
    - `create_session` — generate 256-bit random token, SHA-256 hash it, store hash in DB
-     and Redis, return raw token.
-   - `validate_session` — accept raw token, hash it, check Redis first then DB, verify expiry,
-     return session metadata.
-   - `delete_session` — remove from both DB and Redis.
-   - `cleanup_expired` — delete all expired sessions from DB and invalidate corresponding
-     Redis entries.
+     and moka cache, return raw token.
+   - `validate_session` — accept raw token, hash it, check moka cache first then DB, verify
+     expiry, return session metadata.
+   - `delete_session` — remove from both DB and moka cache.
+   - `cleanup_expired` — delete all expired sessions from DB (moka entries expire via TTL
+     automatically).
 
 6. **Implement `middleware.rs`.**
    - `AuthMiddleware` as a tower `Layer` that extracts the session cookie, validates the
@@ -78,6 +78,6 @@
 - All unit tests pass.
 - Integration tests pass against a real PostgreSQL instance.
 - `cargo clippy -p sober-auth -- -D warnings` is clean.
-- No plaintext session tokens stored anywhere (only SHA-256 hashes in DB and Redis).
+- No plaintext session tokens stored anywhere (only SHA-256 hashes in DB and moka cache).
 - Session cookie has `HttpOnly`, `Secure`, and `SameSite=Lax` flags set.
 - Expired sessions are rejected even if still present in the database.

@@ -199,13 +199,16 @@ pub struct OpenAiCompatibleEngine {
 | Together   | `https://api.together.xyz/v1`    | `meta-llama/Llama-3-70b`      |
 | vLLM       | `http://localhost:8000/v1`       | `mistralai/Mistral-7B`        |
 
-All configured via environment variables:
+All configured via `sober-core`'s centralized `LlmConfig` struct. `sober-llm` does
+NOT parse environment variables independently — it receives its config from the
+caller. The config fields map to these env vars (parsed by `sober-core`):
 
 ```env
 LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_API_KEY=sk-or-...
 LLM_MODEL=anthropic/claude-sonnet-4
 LLM_MAX_TOKENS=4096
+EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
 ### Endpoints Used

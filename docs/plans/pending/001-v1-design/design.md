@@ -15,7 +15,7 @@ and call external tools via MCP.
 
 **What v1 includes:**
 
-- 9 Rust crates in a cargo workspace
+- 12 Rust crates in a cargo workspace
 - SvelteKit frontend (static adapter, Tailwind CSS)
 - Password authentication with Argon2id
 - Admin-approved user registration via `sober` CLI
@@ -52,38 +52,49 @@ and call external tools via MCP.
 | `sober-memory` | lib | BCF format, Qdrant integration, scoped retrieval |
 | `sober-llm` | lib | LLM engine trait, Anthropic Claude provider, streaming |
 | `sober-mind` | lib | SOUL.md resolution, prompt assembly, access masks, soul layers |
-| `sober-agent` | lib | Agent loop, tool trait, v1 tools (web search, URL fetch) |
+| `sober-agent` | bin (gRPC) | Agent loop, tool trait, v1 tools (web search, URL fetch) |
 | `sober-mcp` | lib | MCP client (stdio transport), tool discovery, proxy calls |
 | `sober-sandbox` | lib | bwrap process sandbox, policy profiles, network proxy, audit |
 | `sober-api` | bin | Axum HTTP/WS server, auth routes, chat, rate limiting, admin socket |
+| `sober-scheduler` | bin | Autonomous tick engine, interval + cron scheduling, job persistence |
 | `sober-cli` | bin | `sober` binary: user management, migrations, config validation |
 
 ### 2.2 Dependency Flow
 
 ```
-sober-api (bin)
-  ├── sober-agent
-  │     ├── sober-mind
-  │     │     ├── sober-memory
-  │     │     ├── sober-crypto
-  │     │     └── sober-core
-  │     ├── sober-sandbox
-  │     │     └── sober-core
-  │     ├── sober-mcp
-  │     │     ├── sober-sandbox
-  │     │     └── sober-core
-  │     ├── sober-llm
-  │     │     └── sober-core
-  │     ├── sober-memory
-  │     │     └── sober-core
-  │     └── sober-core
+sober-api (bin — HTTP/WS gateway)
   ├── sober-auth
   │     ├── sober-crypto
   │     │     └── sober-core
   │     └── sober-core
   └── sober-core
+      (calls sober-agent via gRPC/UDS at runtime)
+
+sober-agent (bin — gRPC server)
+  ├── sober-mind
+  │     ├── sober-memory
+  │     ├── sober-crypto
+  │     └── sober-core
+  ├── sober-sandbox
+  │     └── sober-core
+  ├── sober-mcp
+  │     ├── sober-sandbox
+  │     └── sober-core
+  ├── sober-llm
+  │     └── sober-core
+  ├── sober-memory
+  │     └── sober-core
+  └── sober-core
+
+sober-scheduler (bin — tick engine)
+  ├── sober-crypto
+  │     └── sober-core
+  └── sober-core
+      (calls sober-agent via gRPC/UDS at runtime)
 
 sober-cli (bin)
+  ├── sober-crypto
+  │     └── sober-core
   └── sober-core
 ```
 
@@ -91,7 +102,8 @@ sober-cli (bin)
 
 - Dependencies flow downward only. No cycles.
 - `sober-api` is a leaf binary — nothing depends on it.
-- `sober-cli` depends on `sober-core` only. Admin protocol types live in `sober-core`.
+- `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` communicate with it via gRPC over Unix domain sockets at runtime, not as a crate dependency. Proto definitions live in `shared/proto/`.
+- `sober-cli` depends on `sober-core` and `sober-crypto`. Admin protocol types live in `sober-core`.
 - All crates depend on `sober-core` for shared types and errors.
 
 ---
@@ -100,8 +112,9 @@ sober-cli (bin)
 
 ### 3.1 PostgreSQL (relational data)
 
-All tables use UUIDv7 primary keys. All timestamps are `timestamptz`. Every table
-with user-owned data has a `scope_id` column for isolation.
+All tables use UUIDv7 primary keys. All timestamps are `timestamptz`. Scope
+isolation uses `user_id` directly — there is no separate `scopes` table. User
+scope = user_id, system scope is implicit, session scope = conversation_id.
 
 Enum-like columns use PostgreSQL custom types (`CREATE TYPE ... AS ENUM`) for
 DB-level validation and clean mapping to Rust enums via sqlx. Adding variants
@@ -111,7 +124,6 @@ is a one-line `ALTER TYPE ... ADD VALUE` migration.
 
 ```sql
 CREATE TYPE user_status AS ENUM ('pending', 'active', 'disabled');
-CREATE TYPE scope_kind AS ENUM ('system', 'user', 'group', 'session');
 CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system', 'tool');
 ```
 
@@ -143,13 +155,15 @@ CREATE TABLE users (
 );
 
 -- User-Role mapping (many-to-many, supports multiple roles per user)
+-- scope_id: UUID_NIL (00000000-...-000000000000) = global grant.
+-- For scoped grants (future): scope_id = the target user_id or group_id.
 CREATE TABLE user_roles (
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role_id     UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    scope_id    UUID REFERENCES scopes(id),  -- NULL = global, set = scoped to group/context
+    scope_id    UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
     granted_by  UUID REFERENCES users(id),
     granted_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id, role_id, COALESCE(scope_id, '00000000-0000-0000-0000-000000000000'))
+    PRIMARY KEY (user_id, role_id, scope_id)
 );
 
 -- Sessions
@@ -161,30 +175,19 @@ CREATE TABLE sessions (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Scopes
-CREATE TABLE scopes (
-    id          UUID PRIMARY KEY,
-    kind        scope_kind NOT NULL,
-    owner_id    UUID REFERENCES users(id),
-    parent_id   UUID REFERENCES scopes(id),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Conversations
+-- Conversations (scoped by user_id — no separate scopes table)
 CREATE TABLE conversations (
     id          UUID PRIMARY KEY,
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    scope_id    UUID NOT NULL REFERENCES scopes(id),
     title       TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Messages
+-- Messages (scoped via conversation → user_id, no separate scope_id)
 CREATE TABLE messages (
     id              UUID PRIMARY KEY,
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    scope_id        UUID NOT NULL REFERENCES scopes(id),
     role            message_role NOT NULL,
     content         TEXT NOT NULL,
     tool_calls      JSONB,         -- structured tool call data if role=assistant
@@ -242,7 +245,7 @@ CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
   "id": "<UUIDv7>",
   "vector": [0.0, ...],  // embedding from LLM
   "payload": {
-    "scope_id": "<UUID>",
+    "user_id": "<UUID>",
     "chunk_type": "fact|conversation|embedding",
     "content": "...",
     "source_message_id": "<UUID>",
@@ -269,11 +272,11 @@ Global (system scope)
 
 **Enforcement:**
 
-- Every query includes `scope_id` in its WHERE clause
-- Auth middleware resolves the user's permitted scopes
-- Qdrant queries filter by `scope_id` in the payload
-- A user can never access another user's scope
-- Session scopes are created per conversation and pruned on conversation end
+- Every query includes `user_id` in its WHERE clause (no separate scope_id)
+- Auth middleware resolves the authenticated user
+- Qdrant queries filter by `user_id` in the payload
+- A user can never access another user's data
+- Session scope is the conversation itself (conversation_id), ephemeral context pruned on conversation end
 
 ### 3.4 Redis
 
@@ -614,9 +617,9 @@ v1 seeds two roles:
 New users get the `user` role on approval. The first user created via
 `sober user create --admin` gets both `user` and `admin` roles.
 
-**Scope-aware roles (future):** The `user_roles.scope_id` column is nullable.
-`NULL` means the role is global. When set, the role applies only within that
-scope (e.g., admin of a specific group). v1 only uses global roles.
+**Scope-aware roles (future):** The `user_roles.scope_id` column uses UUID_NIL
+(`00000000-...-000000000000`) for global grants. For scoped grants (future),
+scope_id is set to the target user_id or group_id. v1 only uses global roles.
 
 All endpoints check roles via session middleware. Scope isolation is enforced at
 the query level — users can only access their own data.
@@ -721,8 +724,8 @@ BCF files are written when:
 | Compression (future) | zstd | Fast, good ratio, will be used in BCF when enabled |
 | Encryption (future) | AES-256-GCM | Will protect BCF chunks when enabled |
 | Signing (future) | Ed25519 | For replica authentication when implemented |
-| Protobuf | Dropped from v1 | No gRPC needed; JSON REST is sufficient |
-| `shared/` directory | Repurposed | Used for shared TypeScript types, not protobuf |
+| gRPC (agent) | Included in v1 | sober-agent is a gRPC server from day one; sober-api and sober-scheduler call it via UDS |
+| `shared/` directory | Proto definitions | `shared/proto/` holds gRPC service definitions for inter-process communication |
 
 ---
 
@@ -782,3 +785,19 @@ OpenTelemetry export is deferred to post-v1.
 
 CI runs: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`,
 `cargo audit`, `pnpm check`, `pnpm test`.
+
+---
+
+## Decision Record
+
+Decisions from critical review, applied 2026-03-06:
+
+| Code | Decision | Summary |
+|------|----------|---------|
+| C1 | gRPC agent from day one | `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` call it via gRPC/UDS at runtime, not as a crate dependency. Proto definitions live in `shared/proto/`. |
+| C2 | No scopes table | Scope isolation uses `user_id` directly. User scope = user_id, system scope is implicit, session scope = conversation_id. No separate `scopes` table or `scope_id` foreign keys on conversations/messages. |
+| C6 | CLI depends on sober-crypto | `sober-cli` depends on `sober-core` and `sober-crypto` (needs crypto for password hashing during user creation). |
+| C7 | Canonical config var names | Environment variables use `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `HOST`, `PORT`, `RUST_LOG`. No provider-specific keys. |
+| C12 | user_roles PK fix | `user_roles.scope_id` is `NOT NULL` with UUID_NIL as sentinel for global grants. Primary key is `(user_id, role_id, scope_id)` — clean composite, no COALESCE. |
+| C14 | Scheduler stub included | `sober-scheduler` is a binary crate in the skeleton from the start. |
+| C18 | sober-sandbox in dep tree | `sober-sandbox` is a library crate. `sober-agent` and `sober-mcp` both depend on it. Included in the v1 dependency tree. |

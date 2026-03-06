@@ -50,8 +50,7 @@ Config sections:
 |---------|--------|---------------|
 | Database | `DatabaseConfig` | `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS` |
 | Qdrant | `QdrantConfig` | `QDRANT_URL`, `QDRANT_API_KEY` |
-| Redis | `RedisConfig` | `REDIS_URL` |
-| LLM | `LlmConfig` | `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` |
+| LLM | `LlmConfig` | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_MAX_TOKENS`, `EMBEDDING_MODEL` |
 | Server | `ServerConfig` | `HOST`, `PORT` |
 | Auth | `AuthConfig` | `SESSION_SECRET`, `SESSION_TTL_SECONDS` |
 | SearXNG | `SearxngConfig` | `SEARXNG_URL` |
@@ -62,7 +61,7 @@ Config sections:
 All entity IDs are UUIDv7 (time-ordered) newtypes. A macro generates the boilerplate for
 each type to keep the code DRY.
 
-Types: `UserId`, `ScopeId`, `ConversationId`, `MessageId`, `SessionId`, `RoleId`, `McpServerId`.
+Types: `UserId`, `ScopeId`, `ConversationId`, `MessageId`, `SessionId`, `RoleId`, `McpServerId`, `WorkspaceId`.
 
 Each newtype derives:
 - `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`
@@ -93,6 +92,74 @@ Maps to the `message_role` PostgreSQL enum. Identifies the author type of a mess
 All enums derive: `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Serialize`,
 `Deserialize`, `sqlx::Type`. The sqlx type name and rename_all are set to match the
 PostgreSQL enum (lowercase snake_case).
+
+### Tool Trait
+
+A common trait for all tool implementations, defined in `sober-core` so that downstream
+crates (`sober-mcp`, `sober-plugin`, `sober-agent`) share a single interface.
+
+```rust
+pub struct ToolMetadata {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value, // JSON Schema describing accepted input
+}
+
+pub struct ToolOutput {
+    pub content: serde_json::Value,
+    pub is_error: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ToolError {
+    #[error("Tool not found: {0}")]
+    NotFound(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Execution failed: {0}")]
+    ExecutionFailed(String),
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
+}
+
+#[async_trait]
+pub trait Tool: Send + Sync {
+    fn metadata(&self) -> ToolMetadata;
+    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError>;
+}
+```
+
+`ToolMetadata`, `ToolOutput`, and `ToolError` are concrete types; `Tool` is the trait that
+any tool (MCP, plugin, built-in) must implement.
+
+### Access Mask / Caller Context
+
+Describes who triggered an operation and what they are allowed to access. Used by
+`sober-mind` during prompt assembly and by `sober-agent` for authorization checks.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TriggerKind {
+    Human,
+    Scheduler,
+    Replica,
+    Admin,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallerContext {
+    pub user_id: Option<UserId>,
+    pub trigger: TriggerKind,
+    pub permissions: Vec<Permission>,
+    pub scope_grants: Vec<ScopeId>,
+}
+```
+
+`TriggerKind` determines the access tier (see ARCHITECTURE.md access mask table).
+`CallerContext` is constructed at the entry point (API handler, scheduler tick, replica
+delegation) and threaded through the call chain. The `permissions` field holds the
+caller's resolved RBAC/ABAC permissions; `scope_grants` lists the scopes the caller
+may read from or write to.
 
 ### Admin Protocol Types
 
@@ -153,6 +220,12 @@ declare direct dependencies on utility crates:
 - `pub use uuid::Uuid;`
 - `pub use chrono::{DateTime, Utc};`
 
+### Caching Strategy
+
+v1 uses **moka** for in-memory caching (no Redis). Redis may be introduced post-v1 for
+distributed deployments, but all v1 services run on a single node and moka provides
+sufficient TTL-based caching with minimal operational overhead.
+
 ---
 
 ## Dependencies
@@ -172,3 +245,5 @@ declare direct dependencies on utility crates:
 | `axum-core` | `IntoResponse` trait (minimal axum dependency) |
 | `axum` (with `json`) | `Json` extractor for response serialization |
 | `http` | `StatusCode` type |
+| `async-trait` | Async trait support (for `Tool` trait) |
+| `moka` (with `future`) | In-memory TTL cache (v1 caching layer) |

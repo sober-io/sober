@@ -14,6 +14,7 @@
 - **Soul layers** — per-user and per-group adaptations stored in BCF memory
 - **SOUL.md resolution chain** — base, user-level, and workspace-level layering
 - **Prompt assembly** — dynamic composition of system prompts from soul + context + access controls
+- **Injection detection** — classifies user input for prompt injection attempts before prompt assembly
 - **Trait evolution** — autonomous refinement of per-user/group layers, gated adoption into base soul
 - **Access control masks** — what each caller (scheduler, user, replica) can see and do
 - **Self-modification governance** — graduated trust for memory, plugins, soul, and code changes
@@ -26,6 +27,12 @@ No hardcoded tiers. One engine composes the prompt dynamically based on trigger
 context:
 
 ```
+┌─────────────────────────────────────┐
+│        Injection Classifier         │
+│  (runs on user input first)         │
+│  Reject / flag / pass               │
+└──────────────┬──────────────────────┘
+               ▼
 ┌─────────────────────────────────────┐
 │          Prompt Assembly            │
 │                                     │
@@ -58,6 +65,38 @@ access mask:
   internal tier. Result surfaces later (next conversation, notification, etc.).
 
 The human-facing context decides which path based on the nature of the request.
+
+### Injection Detection
+
+The injection classifier runs on all user input **before** prompt assembly.
+It is the first line of defense against prompt injection attacks.
+
+- **Module:** `injection.rs` within `sober-mind`
+- **Input:** Raw user message text
+- **Output:** `InjectionVerdict` — one of `Pass`, `Flagged(reason)`, or
+  `Rejected(reason)`
+- **On `Rejected`:** The message is not passed to prompt assembly. The caller
+  receives an error indicating the input was rejected.
+- **On `Flagged`:** The message proceeds to prompt assembly, but a canary
+  warning is injected into the context so the agent is aware of the risk.
+- **On `Pass`:** Normal flow.
+
+The classifier uses heuristic pattern matching (instruction override patterns,
+role-play injection, context boundary manipulation). It does NOT use an LLM
+call — it must be fast and deterministic. The detection logic lives in
+`sober-mind` because it is tightly coupled to prompt assembly: the classifier
+needs to understand what constitutes a boundary violation in the context of the
+prompt format being assembled.
+
+```rust
+pub enum InjectionVerdict {
+    Pass,
+    Flagged { reason: String },
+    Rejected { reason: String },
+}
+
+pub fn classify_input(input: &str) -> InjectionVerdict;
+```
 
 ---
 
@@ -170,14 +209,20 @@ All proposed changes are logged regardless of outcome:
 
 ```
 sober-mind depends on:
-  ├── sober-core    (types, config)
+  ├── sober-core    (types, config, AccessMask)
   ├── sober-memory  (load/store soul layers in BCF)
-  ├── sober-crypto  (sign soul change audit entries)
-  └── sober-auth    (access control context for masks)
+  └── sober-crypto  (sign soul change audit entries)
 
 sober-agent depends on sober-mind
   (calls prompt assembly before every LLM invocation)
 ```
+
+`sober-mind` does **not** depend on `sober-auth`. Access control is represented
+by `AccessMask`, a type defined in `sober-core`. The caller (typically
+`sober-agent`) is responsible for constructing the `AccessMask` from the
+authenticated session context and passing it into `sober-mind`'s prompt
+assembly functions. This keeps `sober-mind` decoupled from the authentication
+stack.
 
 ---
 

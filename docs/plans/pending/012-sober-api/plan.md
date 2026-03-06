@@ -7,9 +7,10 @@
 
 1. **Add dependencies to sober-api `Cargo.toml`.**
    axum (ws, json, macros), axum-extra (cookie), tokio (full), tower, tower-http
-   (cors, trace, request-id), sqlx (postgres), redis, hyper, hyper-util, serde,
-   serde_json, tracing, uuid. Workspace dependencies on sober-core, sober-auth,
-   sober-agent.
+   (cors, trace, request-id), sqlx (postgres), redis, hyper, hyper-util, tonic
+   (gRPC client), prost, serde, serde_json, tracing, uuid. Workspace dependencies
+   on sober-core, sober-auth. Note: sober-agent is NOT a crate dependency — the API
+   communicates with the agent via gRPC client using shared proto definitions.
 
 2. **Create module structure.**
    - `src/main.rs` — entry point, startup, shutdown
@@ -25,8 +26,10 @@
    - `src/admin.rs` — Unix socket listener
 
 3. **Implement `state.rs`.**
-   AppState struct with PgPool, RedisPool, Agent, AppConfig. Constructor that
-   connects to all backends and fails fast on error.
+   AppState struct with PgPool, RedisPool, AgentClient (tonic gRPC client), AppConfig.
+   Constructor connects to PostgreSQL, Redis, and the agent gRPC service at
+   `/run/sober/agent.sock`. Fails fast on error. No `Agent` struct instantiation —
+   the agent runs as a separate process.
 
 4. **Implement `routes/health.rs`.**
    `GET /health` returning `{ "data": { "status": "ok" } }`.
@@ -37,16 +40,20 @@
 
 6. **Implement `routes/conversations.rs`.**
    CRUD handlers: list (paginated), create, get (with messages), update title,
-   delete. All scoped to the authenticated user.
+   delete. All scoped to the authenticated user via user_id. No scope_id on
+   conversation creation — conversations are scoped by user_id only.
 
 7. **Implement `routes/mcp.rs`.**
    CRUD handlers for MCP server configurations. Scoped to the authenticated user.
 
 8. **Implement `routes/ws.rs`.**
-   WebSocket upgrade handler. Session validation from cookie. JSON message
-   parsing (chat.message, chat.cancel). Spawn agent task per message, forward
-   AgentEvent stream to WebSocket. CancellationToken for chat.cancel. Clean
-   disconnect handling.
+   WebSocket upgrade handler at `/api/v1/ws` (single endpoint, no path param).
+   Session validation from cookie. JSON message parsing — all messages include
+   `conversation_id` in payload (ClientWsMessage types: chat.message, chat.cancel).
+   Spawn agent task per chat.message, call agent via gRPC streaming
+   (`agent_client.handle_message`), forward AgentEvent stream to WebSocket with
+   `conversation_id` attached to each ServerWsMessage. CancellationToken for
+   chat.cancel. Track active conversations per connection. Clean disconnect handling.
 
 9. **Implement `middleware/rate_limit.rs`.**
    Redis-backed sliding window rate limiter as a tower Layer. Configurable
@@ -57,9 +64,10 @@
     (health check only for v1). Binds only when ADMIN_SOCKET_PATH is configured.
 
 11. **Implement `main.rs`.**
-    Startup sequence (config, tracing, connections, agent, router, middleware
-    stack, admin socket, TCP listener). Graceful shutdown on SIGTERM/SIGINT
-    with configurable timeout.
+    Startup sequence: config, tracing, connect to PostgreSQL, Redis, agent gRPC
+    service (via UDS). Build AppState with AgentClient. Assemble router +
+    middleware stack. Optionally bind admin socket. Bind TCP listener. Graceful
+    shutdown on SIGTERM/SIGINT with configurable timeout.
 
 12. **Write integration tests: HTTP endpoints.**
     Using `tower::ServiceExt::oneshot`:

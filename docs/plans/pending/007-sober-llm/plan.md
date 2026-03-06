@@ -79,7 +79,9 @@ for optional fields to keep requests clean.
 `OpenAiCompatibleEngine` struct:
 - Fields: `reqwest::Client`, `base_url`, `api_key` (Option), `model`, `default_max_tokens`
 - Constructor: `new(base_url, api_key, model, max_tokens) -> Self`
-- `from_config(config: &LlmConfig) -> Self` convenience constructor
+- `from_config(config: &LlmConfig) -> Self` — takes `sober-core`'s `LlmConfig` (fields:
+    `base_url`, `api_key`, `model`, `max_tokens`, `embedding_model`). sober-llm does NOT
+    read env vars directly; all config comes from sober-core's centralized config.
 - `LlmEngine::complete()`:
   - Build `CompletionRequest` with `stream: false`
   - POST to `{base_url}/chat/completions`

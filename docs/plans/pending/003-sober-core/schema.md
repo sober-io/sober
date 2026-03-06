@@ -70,31 +70,25 @@ OIDC are added post-v1, this column will be altered to nullable.
 
 ### user_roles
 
-Maps users to roles, optionally scoped to a specific scope. A NULL `scope_id` means the
-role is granted globally.
+Maps users to roles, scoped to a specific scope. The nil UUID
+(`00000000-0000-0000-0000-000000000000`) represents a global (unscoped) grant.
 
 ```sql
 CREATE TABLE user_roles (
     user_id    UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     role_id    UUID NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
-    scope_id   UUID REFERENCES scopes (id) ON DELETE CASCADE,
+    scope_id   UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
     granted_by UUID REFERENCES users (id) ON DELETE SET NULL,
     granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT pk_user_roles PRIMARY KEY (
-        user_id,
-        role_id,
-        COALESCE(scope_id, '00000000-0000-0000-0000-000000000000')
-    )
+    PRIMARY KEY (user_id, role_id, scope_id)
 );
 
 CREATE INDEX idx_user_roles_user_id ON user_roles (user_id);
 CREATE INDEX idx_user_roles_role_id ON user_roles (role_id);
-CREATE INDEX idx_user_roles_scope_id ON user_roles (scope_id) WHERE scope_id IS NOT NULL;
+CREATE INDEX idx_user_roles_scope_id ON user_roles (scope_id)
+    WHERE scope_id != '00000000-0000-0000-0000-000000000000';
 ```
-
-The composite primary key uses `COALESCE` to allow at most one global assignment and one
-per-scope assignment of the same role to the same user.
 
 ### sessions
 
@@ -114,52 +108,35 @@ CREATE INDEX idx_sessions_token_hash ON sessions (token_hash);
 CREATE INDEX idx_sessions_expires_at ON sessions (expires_at);
 ```
 
-### scopes
-
-Hierarchical memory scopes. Each scope isolates a context boundary.
-
-```sql
-CREATE TABLE scopes (
-    id         UUID PRIMARY KEY,
-    kind       scope_kind NOT NULL,
-    owner_id   UUID REFERENCES users (id) ON DELETE SET NULL,
-    parent_id  UUID REFERENCES scopes (id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_scopes_kind ON scopes (kind);
-CREATE INDEX idx_scopes_owner_id ON scopes (owner_id) WHERE owner_id IS NOT NULL;
-CREATE INDEX idx_scopes_parent_id ON scopes (parent_id) WHERE parent_id IS NOT NULL;
-```
-
 ### conversations
 
-Chat conversations owned by a user within a scope.
+Chat conversations owned by a user. Scoping is derived from the owning user (user scope)
+or from the conversation itself (session scope). No separate `scopes` table is needed ---
+`ScopeId` is a newtype in application code that can alias `UserId` for user scope or
+`ConversationId` for session scope.
 
 ```sql
 CREATE TABLE conversations (
     id         UUID PRIMARY KEY,
     user_id    UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    scope_id   UUID NOT NULL REFERENCES scopes (id) ON DELETE CASCADE,
     title      TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_conversations_user_id ON conversations (user_id);
-CREATE INDEX idx_conversations_scope_id ON conversations (scope_id);
 CREATE INDEX idx_conversations_updated_at ON conversations (updated_at DESC);
 ```
 
 ### messages
 
-Individual messages within conversations.
+Individual messages within conversations. Scoped to the owning user via the parent
+conversation's `user_id`.
 
 ```sql
 CREATE TABLE messages (
     id              UUID PRIMARY KEY,
     conversation_id UUID NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
-    scope_id        UUID NOT NULL REFERENCES scopes (id) ON DELETE CASCADE,
     role            message_role NOT NULL,
     content         TEXT NOT NULL,
     tool_calls      JSONB,
@@ -169,7 +146,6 @@ CREATE TABLE messages (
 );
 
 CREATE INDEX idx_messages_conversation_id ON messages (conversation_id);
-CREATE INDEX idx_messages_scope_id ON messages (scope_id);
 CREATE INDEX idx_messages_created_at ON messages (created_at);
 CREATE INDEX idx_messages_role ON messages (role);
 ```
@@ -234,18 +210,16 @@ backend/migrations/
     20260306000003_create_users.sql
     20260306000004_create_user_roles.sql
     20260306000005_create_sessions.sql
-    20260306000006_create_scopes.sql
-    20260306000007_create_conversations.sql
-    20260306000008_create_messages.sql
-    20260306000009_create_mcp_servers.sql
-    20260306000010_create_audit_log.sql
+    20260306000006_create_conversations.sql
+    20260306000007_create_messages.sql
+    20260306000008_create_mcp_servers.sql
+    20260306000009_create_audit_log.sql
 ```
 
 **Migration ordering notes:**
 - `create_types` must run first (enums are referenced by later tables).
 - `create_roles` before `create_user_roles` (FK dependency).
 - `create_users` before `create_user_roles`, `create_sessions`, `create_conversations`.
-- `create_scopes` before `create_user_roles` (optional FK), `create_conversations`, `create_messages`.
 - `create_conversations` before `create_messages`.
 
 ---
@@ -254,17 +228,16 @@ backend/migrations/
 
 ```
 roles 1──N user_roles N──1 users
-                  │
-                  └──N scopes (optional)
 
 users 1──N sessions
-users 1──N conversations N──1 scopes
+users 1──N conversations
 users 1──N mcp_servers
 
-conversations 1──N messages N──1 scopes
-
-scopes ?──N scopes (self-referential parent)
-scopes ?──1 users (owner, optional)
+conversations 1──N messages
 
 audit_log ?──1 users (actor, optional)
 ```
+
+Note: Scoping is handled at the application level via `ScopeId` newtypes, not via a
+database table. `ScopeId` can alias `UserId` (user scope) or `ConversationId` (session
+scope). System and group scopes will be added post-v1 if needed.

@@ -8,11 +8,13 @@
 
 Comprehensive observability for the Sober system covering metrics, distributed tracing, structured logging, auto-generated dashboards, and alerting. Designed for both developer insight during development and operational monitoring in production.
 
-## Architecture Decision: Injection Detection Relocation
+## Architecture: Injection Detection in sober-mind
 
-The ARCHITECTURE.md currently places injection detection in `sober-crypto`. This design moves it to `sober-mind`, which owns prompt assembly and the boundary between raw user input and assembled prompts. Crypto should only handle cryptographic operations.
+Injection detection lives in `sober-mind`, which owns prompt assembly and the
+boundary between raw user input and assembled prompts (decided in C9).
+`sober-crypto` handles only cryptographic operations.
 
-Metric renamed accordingly: `sober_mind_injection_detections_total`.
+Metric: `sober_mind_injection_detections_total`.
 
 ---
 
@@ -243,7 +245,7 @@ buckets = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
 - `sober_mind_soul_layers_loaded` (histogram) — how many layers resolved per assembly
 - `sober_mind_trait_evolution_proposals_total` (counter) — labels: `target` (soul_layer/base_soul), `decision` (adopted/rejected/pending)
 - `sober_mind_access_mask_resolutions_total` (counter) — labels: `trigger`
-- `sober_mind_injection_detections_total` (counter) — prompt injection classifier hits (relocated from sober-crypto)
+- `sober_mind_injection_detections_total` (counter) — prompt injection classifier hits
 
 ### `sober-plugin` — Plugin System
 

@@ -375,7 +375,7 @@ CREATE TYPE artifact_relation AS ENUM ('spawned_by', 'supersedes', 'references',
 -- Workspaces
 CREATE TABLE workspaces (
     id          UUID PRIMARY KEY,
-    scope_id    UUID NOT NULL REFERENCES scopes(id),
+    user_id     UUID NOT NULL REFERENCES users(id),
     name        TEXT NOT NULL,
     description TEXT,
     root_path   TEXT NOT NULL,
@@ -385,7 +385,7 @@ CREATE TABLE workspaces (
     deleted_at  TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(scope_id, name)
+    UNIQUE(user_id, name)
 );
 
 -- Git repos within workspaces
@@ -420,7 +420,7 @@ CREATE TABLE worktrees (
 CREATE TABLE artifacts (
     id              UUID PRIMARY KEY,
     workspace_id    UUID NOT NULL REFERENCES workspaces(id),
-    scope_id        UUID NOT NULL REFERENCES scopes(id),
+    user_id         UUID NOT NULL REFERENCES users(id),
     kind            artifact_kind NOT NULL,
     state           artifact_state NOT NULL DEFAULT 'draft',
     title           TEXT NOT NULL,
@@ -460,13 +460,13 @@ CREATE TABLE artifact_relations (
 );
 
 -- Indexes
-CREATE INDEX idx_workspaces_scope_id ON workspaces(scope_id);
+CREATE INDEX idx_workspaces_user_id ON workspaces(user_id);
 CREATE INDEX idx_workspaces_state ON workspaces(state);
 CREATE INDEX idx_workspace_repos_workspace_id ON workspace_repos(workspace_id);
 CREATE INDEX idx_worktrees_repo_id ON worktrees(repo_id);
 CREATE INDEX idx_worktrees_state ON worktrees(state);
 CREATE INDEX idx_artifacts_workspace_id ON artifacts(workspace_id);
-CREATE INDEX idx_artifacts_scope_id ON artifacts(scope_id);
+CREATE INDEX idx_artifacts_user_id ON artifacts(user_id);
 CREATE INDEX idx_artifacts_kind ON artifacts(kind);
 CREATE INDEX idx_artifacts_state ON artifacts(state);
 CREATE INDEX idx_artifacts_parent_id ON artifacts(parent_id);
@@ -475,7 +475,7 @@ CREATE INDEX idx_artifact_relations_target_id ON artifact_relations(target_id);
 
 **Step 2: Verify migration syntax**
 
-Run: `psql -f backend/migrations/YYYYMMDDHHMMSS_create_workspace_tables.sql --single-transaction` against a test database with prior migrations applied (requires `scopes`, `users`, `conversations` tables to exist).
+Run: `psql -f backend/migrations/YYYYMMDDHHMMSS_create_workspace_tables.sql --single-transaction` against a test database with prior migrations applied (requires `users`, `conversations` tables to exist).
 
 Alternatively, if using sqlx migrate: `cargo sqlx migrate run` from `backend/`.
 
@@ -958,12 +958,11 @@ async fn setup_pool() -> PgPool {
 #[sqlx::test]
 async fn create_and_get_workspace(pool: PgPool) {
     let repo = WorkspaceRepository::new(pool);
-    let scope_id = ScopeId::new();
     let user_id = UserId::new();
 
-    // Assumes scopes and users tables are seeded by test fixtures
+    // Assumes users table is seeded by test fixtures
     let ws = repo
-        .create("test-project", Some("A test workspace"), scope_id, user_id, "/tmp/test")
+        .create("test-project", Some("A test workspace"), user_id, "/tmp/test")
         .await
         .unwrap();
 
@@ -977,11 +976,10 @@ async fn create_and_get_workspace(pool: PgPool) {
 #[sqlx::test]
 async fn archive_and_restore_workspace(pool: PgPool) {
     let repo = WorkspaceRepository::new(pool);
-    let scope_id = ScopeId::new();
     let user_id = UserId::new();
 
     let ws = repo
-        .create("archive-test", None, scope_id, user_id, "/tmp/archive")
+        .create("archive-test", None, user_id, "/tmp/archive")
         .await
         .unwrap();
 
@@ -999,11 +997,10 @@ async fn archive_and_restore_workspace(pool: PgPool) {
 #[sqlx::test]
 async fn delete_requires_archived(pool: PgPool) {
     let repo = WorkspaceRepository::new(pool);
-    let scope_id = ScopeId::new();
     let user_id = UserId::new();
 
     let ws = repo
-        .create("delete-test", None, scope_id, user_id, "/tmp/delete")
+        .create("delete-test", None, user_id, "/tmp/delete")
         .await
         .unwrap();
 
@@ -1042,7 +1039,7 @@ use crate::WorkspaceError;
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Workspace {
     pub id: WorkspaceId,
-    pub scope_id: ScopeId,
+    pub user_id: UserId,
     pub name: String,
     pub description: Option<String>,
     pub root_path: String,
@@ -1068,20 +1065,19 @@ impl WorkspaceRepo {
         &self,
         name: &str,
         description: Option<&str>,
-        scope_id: ScopeId,
         created_by: UserId,
         root_path: &str,
     ) -> Result<Workspace, WorkspaceError> {
         let id = WorkspaceId::new();
         let ws = sqlx::query_as::<_, Workspace>(
             r#"
-            INSERT INTO workspaces (id, scope_id, name, description, root_path, created_by)
+            INSERT INTO workspaces (id, user_id, name, description, root_path, created_by)
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             "#,
         )
         .bind(id)
-        .bind(scope_id)
+        .bind(created_by)
         .bind(name)
         .bind(description)
         .bind(root_path)
@@ -1099,14 +1095,14 @@ impl WorkspaceRepo {
             .ok_or_else(|| WorkspaceError::NotFound(id.to_string()))
     }
 
-    pub async fn list_by_scope(
+    pub async fn list_by_user(
         &self,
-        scope_id: ScopeId,
+        user_id: UserId,
     ) -> Result<Vec<Workspace>, WorkspaceError> {
         let workspaces = sqlx::query_as::<_, Workspace>(
-            "SELECT * FROM workspaces WHERE scope_id = $1 AND state != 'deleted' ORDER BY updated_at DESC",
+            "SELECT * FROM workspaces WHERE user_id = $1 AND state != 'deleted' ORDER BY updated_at DESC",
         )
-        .bind(scope_id)
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
         Ok(workspaces)
@@ -1220,7 +1216,7 @@ async fn find_workspace_for_linked_path(pool: PgPool) {
     // register linked repo...
 
     let result = repo_mgr
-        .find_by_linked_path("/home/user/Projects/app", &[scope_id])
+        .find_by_linked_path("/home/user/Projects/app", user_id)
         .await
         .unwrap();
 
@@ -1304,7 +1300,7 @@ impl RepoManager {
     pub async fn find_by_linked_path(
         &self,
         path: &str,
-        permitted_scopes: &[ScopeId],
+        user_id: UserId,
     ) -> Result<Option<(WorkspaceId, WorkspaceRepoRow)>, WorkspaceError> {
         let row = sqlx::query_as::<_, WorkspaceRepoRow>(
             r#"
@@ -1312,12 +1308,12 @@ impl RepoManager {
             JOIN workspaces w ON wr.workspace_id = w.id
             WHERE wr.path = $1
               AND wr.is_linked = true
-              AND w.scope_id = ANY($2)
+              AND w.user_id = $2
               AND w.state = 'active'
             "#,
         )
         .bind(path)
-        .bind(permitted_scopes)
+        .bind(user_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| (r.workspace_id, r)))
@@ -1470,7 +1466,7 @@ async fn create_and_retrieve_artifact(pool: PgPool) {
 
     let artifact = store.create(CreateArtifact {
         workspace_id,
-        scope_id,
+        user_id,
         kind: ArtifactKind::Document,
         title: "Design doc".into(),
         description: Some("Architecture design".into()),
@@ -1649,7 +1645,7 @@ git commit -m "feat(core): add workspace system configuration"
 
 **Step 3: Update sober-core design (003)**
 
-- Add `WorkspaceId`, `WorkspaceRepoId`, `WorktreeId`, `ArtifactId` to the ID types list
+- `WorkspaceId` is already defined in sober-core (decided in C13). Add `WorkspaceRepoId`, `WorktreeId`, `ArtifactId` to the ID types list
 - Add `WorkspaceState`, `WorktreeState`, `ArtifactKind`, `ArtifactState`, `ArtifactRelation` to the enums list
 - Add `toml` to the dependencies table
 
@@ -1708,7 +1704,7 @@ git commit -m "chore(workspace): clippy fixes and documentation"
 - [ ] Worktree creation rejects duplicate branches with clear error
 - [ ] Artifact state machine validates legal transitions
 - [ ] Artifact visibility filtering excludes traces from non-admins
-- [ ] Linked repo discovery queries work with scope filtering
+- [ ] Linked repo discovery queries work with user_id filtering
 - [ ] `ARCHITECTURE.md` updated with `~/.sober/` paths and workspace crate
 - [ ] `cargo test --workspace` passes
 - [ ] All public items in `sober-workspace` have doc comments

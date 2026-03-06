@@ -7,21 +7,83 @@ MCP client design has been extracted to its own plan document. See
 
 ---
 
+## Deployment Model
+
+`sober-agent` is a **standalone gRPC server binary**, not an in-process library.
+It listens on a Unix domain socket at `/run/sober/agent.sock` and exposes the
+`AgentService` gRPC service defined in `shared/proto/agent.proto`.
+
+Other services (sober-api, sober-scheduler) connect as gRPC clients.
+
+### Proto Service Definition
+
+```protobuf
+// shared/proto/agent.proto
+
+syntax = "proto3";
+package sober.agent.v1;
+
+service AgentService {
+  // Chat — server-streaming RPC. Client sends a message, server streams back
+  // AgentEvents (text deltas, tool calls, done signal).
+  rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
+
+  // Scheduler jobs — unary or server-streaming depending on job type.
+  rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
+}
+
+message HandleMessageRequest {
+  string user_id = 1;
+  string conversation_id = 2;
+  string content = 3;
+}
+
+message ExecuteTaskRequest {
+  string task_id = 1;
+  string task_type = 2;
+  bytes payload = 3;   // JSON-encoded task-specific data
+}
+
+message AgentEvent {
+  oneof event {
+    TextDelta text_delta = 1;
+    ToolCallStart tool_call_start = 2;
+    ToolCallResult tool_call_result = 3;
+    Done done = 4;
+    Error error = 5;
+  }
+}
+
+message TextDelta { string content = 1; }
+message ToolCallStart { string name = 1; string input_json = 2; }
+message ToolCallResult { string name = 1; string output = 2; }
+message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; }
+message Error { string message = 1; }
+```
+
 ## Agent Loop
 
 ```
 User message
-  -> 1. Load context (ContextLoader from sober-memory: Qdrant search + recent DB messages)
-  -> 2. Build prompt (sober-mind assembles: resolved SOUL.md + context + history + access mask + tools)
-  -> 3. Call LLM via sober-llm (OpenAI-compatible, streaming)
-  -> 4. Parse response
-  -> 5a. If tool_calls: execute tools, append tool results, go to step 2
-  -> 5b. If text: stream to client, done
-  -> 6. Store messages in DB + embed in Qdrant
+  -> 1. Receive message (via gRPC HandleMessage)
+  -> 2. Embed user message: call llm.embed(user_message) to get query vector
+  -> 3. Load context: call context_loader.load(query_vector, scope, budget)
+  -> 4. Build prompt (sober-mind assembles: resolved SOUL.md + context + history + access mask + tools)
+  -> 5. Call LLM via sober-llm (OpenAI-compatible, streaming)
+  -> 6. Parse response
+  -> 7a. If tool_calls: execute tools, then:
+         - If any tool is context-modifying: go to step 2 (full prompt rebuild with re-embed + re-load)
+         - Otherwise: append tool results to message array, go to step 5 (re-call LLM without rebuild)
+  -> 7b. If text: stream to client, done
+  -> 8. Store messages in DB + embed in Qdrant
 ```
 
 - **Max tool iterations:** 10 per user message (configurable). Prevents runaway loops.
 - **Context budget:** Configurable token limit (default 4096) for memory retrieval.
+- **Context-modifying tools:** Tools tagged with `context_modifying: true` in their
+  `ToolMetadata` trigger a full prompt rebuild after execution. Examples: memory write,
+  file write. Non-context-modifying tools (e.g., web_search, fetch_url) just append
+  results and re-call the LLM.
 
 ## Agent Struct
 
@@ -43,12 +105,16 @@ pub struct Agent {
 - `conversation_history_limit` --- max messages loaded from conversation history
 - `system_prompt` --- fallback system prompt (sober-mind overrides when available)
 
+The `Agent` struct is wrapped by a tonic gRPC server that implements `AgentService`.
+The gRPC server delegates to `Agent` methods internally.
+
 ## Agent API
 
 ```rust
 impl Agent {
     pub fn new(
         llm: Arc<dyn LlmEngine>,
+        mind: Arc<Mind>,
         memory: Arc<MemoryStore>,
         context_loader: Arc<ContextLoader>,
         tools: Vec<Arc<dyn Tool>>,
@@ -83,10 +149,18 @@ pub enum AgentEvent {
 ```rust
 #[async_trait]
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn input_schema(&self) -> serde_json::Value;
+    fn metadata(&self) -> ToolMetadata;
     async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError>;
+}
+
+pub struct ToolMetadata {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    /// If true, executing this tool invalidates loaded context and triggers
+    /// a full prompt rebuild (re-embed query, re-load context, re-assemble).
+    /// Examples: memory write, file write.
+    pub context_modifying: bool,
 }
 
 pub struct ToolOutput {
@@ -169,6 +243,8 @@ Maps to `AppError` from `sober-core`.
 - `sober-memory` --- context loading, vector storage
 - `sober-mcp` --- MCP client for external tools and resources
 - `sober-sandbox` --- process sandboxing for tool execution and artifact runs
+- `tonic` --- gRPC server framework
+- `prost` --- Protocol Buffers codegen
 - `reqwest` --- HTTP client for web_search and fetch_url tools
 - `sqlx` --- message storage
 - `tokio` --- async runtime

@@ -10,7 +10,9 @@ Date: 2026-03-06
    `frontend/` with Tailwind configured via `@tailwindcss/vite`. If not, bootstrap it.
 
 2. **Create type definitions** in `$lib/types/index.ts`. Define `User`, `Conversation`,
-   `Message`, `ToolCall`, `McpServer`, and `WsMessage` types that mirror backend responses.
+   `Message`, `ToolCall`, `McpServer`, `ClientWsMessage`, and `ServerWsMessage` types
+   that mirror backend message shapes. Client and server WS messages are separate types;
+   all include `conversation_id`.
 
 3. **Create API client** in `$lib/utils/api.ts`. Thin typed wrapper around `fetch` with
    cookie credentials, JSON content type, and `ApiError` class.
@@ -18,9 +20,11 @@ Date: 2026-03-06
 4. **Create auth store** in `$lib/stores/auth.svelte.ts`. Reactive state using `$state`
    rune, exposing `user`, `loading`, `isAuthenticated` via getters.
 
-5. **Create WebSocket store** in `$lib/stores/websocket.svelte.ts`. Factory function
-   returning reactive connection state with `connect`, `disconnect`, `send`, and
-   `onMessage` methods.
+5. **Create WebSocket store** in `$lib/stores/websocket.svelte.ts`. Singleton (not
+   per-conversation factory) that connects to `/api/v1/ws` (no conversation ID in URL).
+   All messages include `conversation_id` in payload. Exposes `connect`, `disconnect`,
+   `send` (takes `ClientWsMessage`), and `subscribe(conversationId, handler)` for
+   routing incoming `ServerWsMessage`s to conversation-specific handlers.
 
 6. **Create root `+layout.ts`** that calls `GET /api/v1/auth/me` and populates the auth
    store. Handle 401 gracefully by setting user to null (do not redirect).
@@ -43,7 +47,9 @@ Date: 2026-03-06
     - `ConversationList.svelte` — sidebar list with "New chat" button.
 
 11. **Create chat page** at `(app)/chat/[id]/+page.svelte` with `+page.ts` load function.
-    Integrate WebSocket store for real-time streaming. Handle all `WsMessage` types:
+    Integrate WebSocket singleton store for real-time streaming. Subscribe to
+    conversation-specific messages via `websocket.subscribe(id, handler)`. Handle
+    all `ServerWsMessage` types:
     deltas appended to current message, tool calls displayed inline, done signals finalize
     the message, errors shown to user.
 
@@ -87,7 +93,7 @@ Date: 2026-03-06
   stubbed.
 - Backend conversation endpoints (`/conversations`, `/conversations/:id`) must exist or
   be stubbed.
-- Backend WebSocket endpoint (`/ws/:conversationId`) must exist or be stubbed.
+- Backend WebSocket endpoint (`/api/v1/ws`) must exist or be stubbed.
 - Backend MCP endpoints (`/mcp/servers`) must exist or be stubbed.
 
 ---

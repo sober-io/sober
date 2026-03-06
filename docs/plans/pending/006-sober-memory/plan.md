@@ -29,9 +29,10 @@
    `BcfFormat`, `ScopeViolation`, `BudgetExceeded`. Implement `From<MemoryError>`
    for `AppError`.
 
-4. **Implement `bcf/types.rs`.** Define `BcfHeader`, `ChunkType` enum (Fact,
-   Conversation, Embedding), `ChunkEntry` (offset, length, type), and `Chunk`
-   (type + owned data).
+4. **Implement `bcf/types.rs`.** Define `BcfHeader` (28 bytes: Magic + Version +
+   Flags + ScopeID as full 128-bit UUID + ChunkCount), `ChunkType` enum (Fact,
+   Conversation, Embedding, Soul), `ChunkEntry` (offset, length, type), and
+   `Chunk` (type + owned data).
 
 5. **Implement `bcf/writer.rs`.** `BcfWriter` builds BCF bytes incrementally:
    collects chunks in memory, then `finish()` writes header + chunk table +

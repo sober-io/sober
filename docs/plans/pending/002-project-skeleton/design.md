@@ -29,7 +29,7 @@ automatically included.
 
 ## Crate Inventory
 
-Nine stub crates, matching the architecture document:
+Twelve stub crates, matching the architecture document:
 
 | Crate | Type | Internal Dependencies |
 |-------|------|-----------------------|
@@ -38,16 +38,21 @@ Nine stub crates, matching the architecture document:
 | `sober-auth` | library | sober-crypto, sober-core |
 | `sober-memory` | library | sober-core |
 | `sober-llm` | library | sober-core |
-| `sober-mcp` | library | sober-core |
-| `sober-agent` | library | sober-mcp, sober-llm, sober-memory, sober-core |
-| `sober-api` | binary | sober-agent, sober-auth, sober-core |
-| `sober-cli` | binary | sober-core |
+| `sober-sandbox` | library | sober-core |
+| `sober-mcp` | library | sober-sandbox, sober-core |
+| `sober-mind` | library | sober-memory, sober-crypto, sober-auth, sober-core |
+| `sober-agent` | binary (gRPC) | sober-mind, sober-mcp, sober-sandbox, sober-llm, sober-memory, sober-core |
+| `sober-api` | binary | sober-auth, sober-core |
+| `sober-scheduler` | binary | sober-crypto, sober-core |
+| `sober-cli` | binary | sober-crypto, sober-core |
 
 Binary crates have `main.rs`; library crates have `lib.rs`. `sober-cli` produces
 two binaries (`sober` and `soberctl`) via `[[bin]]` sections.
 
-Dependency flow is strictly downward: `api -> agent -> {mcp, llm, memory} -> core`
-and `api -> auth -> crypto -> core`. The API crate is a leaf — nothing depends on it.
+Dependency flow is strictly downward: `agent -> {mind, mcp, sandbox, llm, memory} -> core`
+and `api -> auth -> crypto -> core`. `sober-api` and `sober-scheduler` communicate
+with `sober-agent` via gRPC/UDS at runtime, not as crate dependencies. Proto
+definitions live in `shared/proto/`.
 
 ---
 
@@ -113,8 +118,8 @@ for local development. Categories:
 - **Database:** `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS`
 - **Redis:** `REDIS_URL`
 - **Qdrant:** `QDRANT_URL`
-- **API server:** `API_HOST`, `API_PORT`, `ADMIN_SOCKET_PATH`
-- **LLM providers:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+- **API server:** `HOST`, `PORT`, `ADMIN_SOCKET_PATH`
+- **LLM:** `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
 - **Logging:** `RUST_LOG`
 - **Frontend:** `PUBLIC_API_URL`
 
@@ -168,9 +173,14 @@ The frontend is a SvelteKit application:
 
 ## Shared Directory
 
-`shared/` holds shared TypeScript types that mirror backend response shapes.
-No protobuf — types are maintained manually to avoid build toolchain complexity
-at this stage. This can be revisited if type drift becomes a problem.
+`shared/proto/` holds gRPC service definitions (Protocol Buffers) for internal
+inter-process communication. `sober-api` and `sober-scheduler` use these proto
+files to generate gRPC client stubs for calling `sober-agent`. `sober-agent`
+uses them to generate its gRPC server implementation.
+
+Proto file layout:
+- `shared/proto/sober/agent/v1/agent.proto` — agent service definition
+- `shared/proto/sober/scheduler/v1/scheduler.proto` — scheduler service definition
 
 ---
 

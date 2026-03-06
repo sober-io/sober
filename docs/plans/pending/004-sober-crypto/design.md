@@ -25,17 +25,10 @@
   - `verify(key: &VerifyingKey, message: &[u8], signature: &Signature) -> Result<(), CryptoError>`
 - Key serialization: raw bytes (32 bytes each for signing/verifying keys).
 
-## Injection Detection (stub)
-
-- v1 is a logging-only stub — detects patterns but does not block.
-- API: `check_injection(input: &str) -> InjectionReport` where `InjectionReport` contains:
-  - `suspicious: bool`
-  - `patterns: Vec<String>` (matched pattern names)
-  - `score: f32` (0.0--1.0 confidence)
-- Pattern matching: simple string matching against known injection prefixes ("ignore previous instructions", "system prompt:", etc.) and unusual Unicode/control characters.
-- Full ML-based detection deferred to post-v1.
-
 ## Error Type
+
+> **Note:** Injection detection has been moved to `sober-mind`, which owns prompt assembly
+> and input sanitization. `sober-crypto` is strictly for cryptographic operations.
 
 - `CryptoError` enum with `thiserror`: `HashError`, `VerificationError`, `KeyGenerationError`, `SignatureError`.
 - Implements `From<CryptoError>` for `AppError` (maps to `Internal`).
@@ -46,5 +39,4 @@
 - `ed25519-dalek` (with `rand_core` feature)
 - `rand` (for CSPRNG)
 - `thiserror`
-- `serde` (for serializing injection reports)
 - `sober-core` (for `AppError`, types)

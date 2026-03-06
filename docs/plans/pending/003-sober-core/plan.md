@@ -34,8 +34,10 @@ backend/crates/sober-core/src/
   types/
     mod.rs        # Re-exports from submodules
     ids.rs        # UUIDv7 newtype macro and ID types
-    enums.rs      # ScopeKind, UserStatus, MessageRole
+    enums.rs      # ScopeKind, UserStatus, MessageRole, TriggerKind
     api.rs        # ApiResponse<T>, ApiErrorBody
+    tool.rs       # Tool trait, ToolMetadata, ToolOutput, ToolError
+    access.rs     # CallerContext, Permission (placeholder)
 ```
 
 ### 3. Implement `error.rs`
@@ -50,7 +52,8 @@ backend/crates/sober-core/src/
 ### 4. Implement `config.rs`
 
 - Define `AppConfig` with nested section structs: `DatabaseConfig`, `QdrantConfig`,
-  `RedisConfig`, `LlmConfig`, `ServerConfig`, `AuthConfig`, `SearxngConfig`, `AdminConfig`.
+  `LlmConfig`, `ServerConfig`, `AuthConfig`, `SearxngConfig`, `AdminConfig`.
+  (No `RedisConfig` in v1 --- use `moka` for in-memory caching instead.)
 - Implement `AppConfig::load_from_env() -> Result<Self, AppError>`:
   - Call `dotenvy::dotenv().ok()` (non-fatal if `.env` is absent).
   - Read each required variable with `std::env::var`, mapping missing vars to
@@ -68,7 +71,7 @@ backend/crates/sober-core/src/
   - `impl $Name { fn new(), fn from_uuid(), fn as_uuid() }`
   - `impl Display` delegating to inner UUID.
 - Invoke the macro for: `UserId`, `ScopeId`, `ConversationId`, `MessageId`, `SessionId`,
-  `RoleId`, `McpServerId`.
+  `RoleId`, `McpServerId`, `WorkspaceId`.
 
 ### 6. Implement `types/enums.rs`
 
@@ -87,7 +90,29 @@ backend/crates/sober-core/src/
 - `ApiErrorBody` --- struct with `code: String` and `message: String`.
   - Used internally by `AppError::into_response`.
 
-### 8. Implement `admin.rs`
+### 8. Implement `types/tool.rs`
+
+- Define `ToolMetadata` struct: `name: String`, `description: String`, `input_schema: serde_json::Value`.
+- Define `ToolOutput` struct: `content: serde_json::Value`, `is_error: bool`.
+- Define `ToolError` enum with `thiserror`: `NotFound(String)`, `InvalidInput(String)`,
+  `ExecutionFailed(String)`, `Internal(#[from] anyhow::Error)`.
+- Define `Tool` trait (using `async_trait`): `fn metadata(&self) -> ToolMetadata`,
+  `async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError>`.
+- All types derive appropriate traits (`Debug`, `Clone`, `Serialize`, `Deserialize` where applicable).
+
+### 9. Implement `types/access.rs`
+
+- Define `TriggerKind` enum: `Human`, `Scheduler`, `Replica`, `Admin`.
+  - Derive: `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Serialize`, `Deserialize`.
+- Define `CallerContext` struct:
+  - `user_id: Option<UserId>`
+  - `trigger: TriggerKind`
+  - `permissions: Vec<Permission>`
+  - `scope_grants: Vec<ScopeId>`
+- `CallerContext` derives `Debug`, `Clone`.
+- Note: `Permission` enum may be a placeholder in v1, expanded by `sober-auth` later.
+
+### 10. Implement `admin.rs`
 
 - `AdminCommand` enum (serde-tagged):
   - `Ping`, `AgentStatus`, `TaskQueueStatus`, `PruneMemory { scope_id: Option<ScopeId> }`,
@@ -97,7 +122,7 @@ backend/crates/sober-core/src/
 - Both derive `Debug`, `Clone`, `Serialize`, `Deserialize`.
 - Use `#[serde(tag = "type", rename_all = "snake_case")]` for clean JSON representation.
 
-### 9. Implement `tracing.rs`
+### 11. Implement `tracing.rs`
 
 - `pub fn init_tracing(config: &AppConfig)`:
   - Read `SOBER_ENV` to determine format (pretty vs JSON).
@@ -105,7 +130,7 @@ backend/crates/sober-core/src/
   - Build and install the global subscriber.
 - Keep this function idempotent-safe (guard against double-init panics with `try_init`).
 
-### 10. Wire up `lib.rs`
+### 12. Wire up `lib.rs`
 
 - Declare all modules.
 - Re-export key types at the crate root for ergonomic imports:
@@ -117,7 +142,7 @@ backend/crates/sober-core/src/
   - `pub use uuid::Uuid;`
   - `pub use chrono::{DateTime, Utc};`
 
-### 11. Tests
+### 13. Tests
 
 Write unit tests covering:
 
@@ -130,8 +155,11 @@ Write unit tests covering:
   Verify `Display` output matches UUID format.
 - **Enum serialization:** Roundtrip each enum through `serde_json` (serialize then
   deserialize), verify values match. Verify the serialized form is lowercase.
+- **TriggerKind serialization:** Roundtrip all variants through `serde_json`.
+- **CallerContext construction:** Build a `CallerContext` for each `TriggerKind`, verify fields.
+- **ToolError variants:** Construct each variant, verify `Display` output.
 
-### 12. Verification
+### 14. Verification
 
 Run the following and fix any issues:
 

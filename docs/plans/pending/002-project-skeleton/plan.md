@@ -25,7 +25,7 @@ Create `backend/Cargo.toml` with:
 
 ### 2. Create stub crates
 
-Create all eleven crates under `backend/crates/`:
+Create all twelve crates under `backend/crates/`:
 
 **Library crates** (each has `Cargo.toml` + `src/lib.rs`):
 - `sober-core` — no internal dependencies
@@ -33,14 +33,15 @@ Create all eleven crates under `backend/crates/`:
 - `sober-auth` — depends on sober-crypto, sober-core
 - `sober-memory` — depends on sober-core
 - `sober-llm` — depends on sober-core
-- `sober-mcp` — depends on sober-core
+- `sober-sandbox` — depends on sober-core; external dep: `bwrap` process sandboxing
+- `sober-mcp` — depends on sober-sandbox, sober-core
 - `sober-mind` — depends on sober-memory, sober-crypto, sober-auth, sober-core
-- `sober-agent` — depends on sober-mind, sober-mcp, sober-llm, sober-memory, sober-core
 
 **Binary crates** (each has `Cargo.toml` + `src/main.rs`):
-- `sober-api` — `[[bin]] name = "sober-api"`, depends on sober-agent, sober-auth, sober-core
+- `sober-agent` — `[[bin]] name = "sober-agent"`, gRPC server (tonic), depends on sober-mind, sober-mcp, sober-sandbox, sober-llm, sober-memory, sober-core
+- `sober-api` — `[[bin]] name = "sober-api"`, depends on sober-auth, sober-core
 - `sober-scheduler` — `[[bin]] name = "sober-scheduler"`, depends on sober-core, sober-crypto
-- `sober-cli` — two `[[bin]]` sections (`sober` and `soberctl`), depends on sober-core only
+- `sober-cli` — two `[[bin]]` sections (`sober` and `soberctl`), depends on sober-crypto, sober-core
 
 Each `Cargo.toml` inherits `edition.workspace = true` and uses `dep.workspace = true`
 for shared dependencies where applicable.
@@ -48,8 +49,8 @@ for shared dependencies where applicable.
 Library `lib.rs` files contain a doc comment describing the crate's purpose.
 Binary `main.rs` files contain a minimal `fn main()` with a placeholder print.
 
-- [ ] All eleven `backend/crates/*/Cargo.toml` files exist
-- [ ] All eleven `backend/crates/*/src/{lib,main}.rs` files exist
+- [ ] All twelve `backend/crates/*/Cargo.toml` files exist
+- [ ] All twelve `backend/crates/*/src/{lib,main}.rs` files exist
 - [ ] sober-cli has two `[[bin]]` entries and corresponding source files
 
 ### 3. Create migrations directory
@@ -61,7 +62,9 @@ Create `backend/migrations/` as an empty directory with a `.gitkeep` file.
 ### 4. Create `.env.example`
 
 Document all environment variables at the project root. Group by category:
-database, redis, qdrant, API server, LLM providers, logging, frontend.
+database, redis, qdrant, API server, LLM, logging, frontend. Use canonical
+var names: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `HOST`, `PORT`,
+`RUST_LOG`. No provider-specific keys (no `ANTHROPIC_API_KEY` etc.).
 Include comments explaining each variable. No actual secrets.
 
 - [ ] File exists at project root
@@ -154,15 +157,19 @@ and data exploration during development. The connection string matches the
 - [ ] File exists at `.claude/mcp.json`
 - [ ] JSON is valid
 
-### 11. Create `shared/` directory
+### 11. Create `shared/proto/` directory with stub protos
 
-Create `shared/proto/` directory structure for internal gRPC service definitions:
-- `shared/proto/sober/agent/v1/.gitkeep`
-- `shared/proto/sober/scheduler/v1/.gitkeep`
+Create `shared/proto/` directory structure for internal gRPC service definitions
+with minimal stub proto files:
 
-Proto files will be populated in phase 015 (scheduler/IPC).
+- `shared/proto/sober/agent/v1/agent.proto` — stub with `AgentService` and a `Health` RPC
+- `shared/proto/sober/scheduler/v1/scheduler.proto` — stub with `SchedulerService` and a `Health` RPC
 
-- [ ] Directory structure exists
+These stubs enable `tonic-build` in `sober-agent` and `sober-scheduler` from the start.
+Full RPC methods will be added as features are implemented.
+
+- [ ] Proto files exist and are syntactically valid
+- [ ] `sober-agent` and `sober-scheduler` build scripts can compile the protos
 
 ---
 
