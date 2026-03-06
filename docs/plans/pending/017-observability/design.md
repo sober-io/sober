@@ -40,15 +40,24 @@ All backends (Prometheus, Tempo, Loki) are optional consumers. The app writes lo
 
 `sober-core` provides telemetry initialization and shared helpers. Each crate defines its own domain-specific metrics using shared primitives and conventions. Metrics live next to the code they measure.
 
-### `sober-core` Responsibilities
+### `sober-core` Responsibilities (implemented in plan 003)
 
-- `init_telemetry()` replaces current `init_tracing()`:
+`init_telemetry()` is implemented as part of plan 003 (sober-core), not this plan.
+It replaces `init_tracing()` and provides:
+
   1. `tracing-subscriber` with JSON formatter (existing behavior)
   2. OTEL trace exporter layer pointing at Tempo (configurable endpoint, disabled if unset)
   3. Prometheus metrics recorder (always active — in-memory registry)
-- Exports helper functions for metric registration conventions
-- Exports standard label constants: `service`, `method`, `status`, `crate`
-- Exports a `MetricsEndpoint` axum handler that serves `/metrics` in Prometheus format
+
+Additionally, sober-core exports:
+- Helper functions for metric registration conventions
+- Standard label constants: `service`, `method`, `status`, `crate`
+- `MetricsEndpoint` axum handler that serves `/metrics` in Prometheus format
+
+**Plan 017 scope:** This plan covers Docker infrastructure (Prometheus, Tempo, Loki,
+Grafana), per-crate `metrics.toml` files, the dashboard generation tool, alerting rules,
+and gRPC trace propagation interceptors. The core instrumentation API is already in place
+from plan 003.
 
 ### gRPC Trace Propagation
 

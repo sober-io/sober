@@ -278,12 +278,15 @@ Global (system scope)
 - A user can never access another user's data
 - Session scope is the conversation itself (conversation_id), ephemeral context pruned on conversation end
 
-### 3.4 Redis
+### 3.4 In-Memory Cache (moka)
 
-Used for:
+v1 uses **moka** (in-memory TTL cache) instead of Redis. Single-node deployment
+makes Redis unnecessary overhead. Used for:
 - Rate limiting counters (sliding window per user)
-- Session token cache (hot path — avoids DB hit on every request)
-- Future: hot context cache for frequently accessed memory chunks
+- Future: session token cache, hot context cache
+
+Redis is the upgrade path when horizontal scaling requires shared cache across
+instances (post-v1).
 
 ---
 
@@ -546,7 +549,7 @@ Single VPS running Docker Compose with these services:
 | `sober-api` | custom | 3000 (internal) | Rust API server |
 | `postgres` | `postgres:17` | 5432 (internal) | Relational data |
 | `qdrant` | `qdrant/qdrant:latest` | 6333, 6334 (internal) | Vector storage |
-| `redis` | `redis:7` | 6379 (internal) | Cache, rate limiting |
+| ~~`redis`~~ | ~~`redis:7`~~ | ~~6379~~ | *Removed in v1 — using moka in-memory cache* |
 | `searxng` | `searxng/searxng:latest` | 8080 (internal) | Web search |
 
 ### 7.2 Docker Compose Layout
@@ -554,7 +557,7 @@ Single VPS running Docker Compose with these services:
 ```yaml
 # Only Caddy exposes ports to the host
 # All other services communicate on an internal network
-# Volumes for persistent data: postgres, qdrant, redis, caddy config/certs
+# Volumes for persistent data: postgres, qdrant, caddy config/certs
 ```
 
 ### 7.3 Caddy Configuration
@@ -636,7 +639,7 @@ Full injection defense (canary tokens, output filtering, lockout) is deferred.
 
 ### 8.4 Rate Limiting
 
-Redis-backed sliding window rate limiter:
+moka-backed sliding window rate limiter (in-memory):
 
 | Endpoint | Limit |
 |----------|-------|
@@ -717,7 +720,7 @@ BCF files are written when:
 | Frontend framework | SvelteKit (static) | Svelte 5 runes, minimal JS, Caddy serves the build |
 | Styling | Tailwind CSS | Utility-first, design tokens via config |
 | MCP transport (v1) | stdio | Simplest, works for local MCP servers |
-| Session storage | Cookie + DB | HttpOnly cookie, hash in DB, Redis cache for hot path |
+| Session storage | Cookie + DB | HttpOnly cookie, hash in DB, moka cache available via SessionStore trait |
 | CLI admin | `sober` binary | Direct DB access, no API dependency, works offline |
 | Error handling | thiserror + anyhow | thiserror for libs, anyhow in binaries |
 | Serialization | serde + bincode | JSON for API, bincode for BCF chunks |
@@ -738,7 +741,6 @@ and validates at startup (fail-fast on missing required values).
 # Required
 DATABASE_URL=postgres://sober:password@localhost:5432/sober
 QDRANT_URL=http://localhost:6334
-REDIS_URL=redis://localhost:6379
 LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_API_KEY=sk-or-...
 LLM_MODEL=anthropic/claude-sonnet-4

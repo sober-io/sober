@@ -311,17 +311,28 @@ interface McpServer {
 
 ### WebSocket Message Types
 
+These types mirror the `AgentEvent` protobuf definitions from
+`shared/proto/sober/agent/v1/agent.proto` (plan 011). The API gateway
+translates gRPC `AgentEvent` stream events into these JSON WebSocket messages,
+attaching the `conversation_id` for client-side routing.
+
 ```ts
 // Client-to-server messages — all include conversation_id
 type ClientWsMessage =
   | { type: 'chat.message'; conversation_id: string; content: string }
   | { type: 'chat.cancel'; conversation_id: string };
 
-// Server-to-client messages — all include conversation_id for routing
+// Server-to-client messages — all include conversation_id for routing.
+// Maps to AgentEvent proto oneof variants:
+//   TextDelta       → chat.delta
+//   ToolCallStart   → chat.tool_use
+//   ToolCallResult  → chat.tool_result
+//   Done            → chat.done (includes usage stats)
+//   Error           → chat.error
 type ServerWsMessage =
   | { type: 'chat.delta'; conversation_id: string; content: string }
   | { type: 'chat.tool_use'; conversation_id: string; tool_call: ToolCall }
   | { type: 'chat.tool_result'; conversation_id: string; tool_call_id: string; output: string }
-  | { type: 'chat.done'; conversation_id: string; message_id: string }
+  | { type: 'chat.done'; conversation_id: string; message_id: string; usage?: { prompt_tokens: number; completion_tokens: number } }
   | { type: 'chat.error'; conversation_id: string; error: string };
 ```

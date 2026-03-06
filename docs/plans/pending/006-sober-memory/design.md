@@ -151,10 +151,13 @@ ContextLoader::load(
 ## Importance Scoring
 
 - New facts start at importance **1.0**.
-- Importance decays over time. Default decay rate: halves every 30 days.
-- Facts that are retrieved (used in context) receive an importance boost of
-  **+0.2**, capped at **1.0**.
-- Pruning removes chunks below a threshold (default **0.1**).
+- Importance decays over time. Decay half-life configurable via `MEMORY_DECAY_HALF_LIFE_DAYS` (default: 30).
+- Facts that are retrieved (used in context) receive an importance boost configurable via
+  `MEMORY_RETRIEVAL_BOOST` (default: 0.2), capped at **1.0**.
+- Pruning removes chunks below a threshold configurable via `MEMORY_PRUNE_THRESHOLD` (default: 0.1).
+
+These parameters are loaded as part of `AppConfig` in sober-core. Making them configurable
+from day one avoids code changes when calibration is needed.
 
 ---
 

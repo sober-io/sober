@@ -62,7 +62,7 @@ Create `backend/migrations/` as an empty directory with a `.gitkeep` file.
 ### 4. Create `.env.example`
 
 Document all environment variables at the project root. Group by category:
-database, redis, qdrant, API server, LLM, logging, frontend. Use canonical
+database, qdrant, API server, LLM, logging, frontend. Use canonical
 var names: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `HOST`, `PORT`,
 `RUST_LOG`. No provider-specific keys (no `ANTHROPIC_API_KEY` etc.).
 Include comments explaining each variable. No actual secrets.
@@ -74,7 +74,6 @@ Include comments explaining each variable. No actual secrets.
 Define four services at the project root:
 - `postgres` — postgres:17, port 5432, with health check
 - `qdrant` — qdrant/qdrant, ports 6333/6334
-- `redis` — redis:7, port 6379, with health check
 - `searxng` — searxng/searxng, port 8080
 
 Use named volumes for persistent data. Set environment variables from `.env`.
@@ -157,7 +156,29 @@ and data exploration during development. The connection string matches the
 - [ ] File exists at `.claude/mcp.json`
 - [ ] JSON is valid
 
-### 11. Create `shared/proto/` directory with stub protos
+### 11. Create shared test infrastructure in `sober-core`
+
+Add a `test_utils` module in `sober-core` behind a `#[cfg(feature = "test-utils")]` feature
+flag. This module provides shared test helpers for all downstream crates:
+
+- `MockLlmEngine` — implements `LlmEngine` trait, returns configurable canned responses
+  (text-only, tool calls, streaming chunks). Used by agent integration tests.
+- `test_db()` — creates a test PostgreSQL connection pool using `DATABASE_URL` from env,
+  runs migrations, returns `PgPool`. Wraps each test in a transaction that rolls back.
+- `test_config()` — returns an `AppConfig` populated with test defaults.
+- `MockGrpcServer` — minimal tonic server that implements `AgentService` with canned
+  responses for testing gRPC clients.
+
+Each downstream crate can depend on `sober-core` with `features = ["test-utils"]` in
+`[dev-dependencies]`.
+
+For bwrap-dependent tests (plan 008): gate behind `#[cfg(target_os = "linux")]` and skip
+in CI if namespaces are not available (check with `bwrap --version` in a setup step).
+
+- [ ] `test_utils` module exists behind feature flag
+- [ ] Mock types compile (actual implementations filled in by plans 003+)
+
+### 12. Create `shared/proto/` directory with stub protos
 
 Create `shared/proto/` directory structure for internal gRPC service definitions
 with minimal stub proto files:

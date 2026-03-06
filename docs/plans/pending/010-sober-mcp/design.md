@@ -219,6 +219,10 @@ pub struct McpDiscovery {
   conversation
 - **During active call:** configurable timeout, return tool error to LLM
   ("tool X is currently unavailable"), no retry
+- **Minimum cooldown:** configurable delay between restart attempts (default 5s,
+  via `McpConfig::restart_cooldown_secs`). Prevents thrashing if a server
+  crashes immediately on startup. Cooldown doubles after each consecutive
+  failure (5s → 10s → 20s).
 - **Backoff:** configurable consecutive failures (default 3) before giving up
   for this conversation, log warning
 - **No cross-conversation state:** each conversation gets a fresh pool, no
@@ -238,6 +242,10 @@ pub struct McpConfig {
 
     /// Idle timeout before disconnecting an MCP server (default: 300s)
     pub idle_timeout_secs: u32,
+
+    /// Minimum cooldown between restart attempts (default: 5s). Doubles after
+    /// each consecutive failure to prevent thrashing.
+    pub restart_cooldown_secs: u32,
 }
 ```
 

@@ -172,13 +172,13 @@ git commit -m "feat(core): add TelemetryConfig for OTEL and metrics settings"
 
 ---
 
-### Task 3: Replace init_tracing() with init_telemetry()
+### Task 3: Verify init_telemetry() from plan 003
 
-**Files:**
-- Modify: `backend/crates/sober-core/src/tracing.rs` (or create `telemetry.rs`)
-- Modify: `backend/crates/sober-core/src/lib.rs`
+> **Note:** `init_telemetry()` is implemented as part of plan 003 (sober-core).
+> This task only verifies it works correctly with OTEL and Prometheus backends,
+> and extends it if needed for gRPC trace propagation (Task 5).
 
-**Step 1: Write the failing test**
+**Verification test:**
 
 ```rust
 #[test]
@@ -194,14 +194,11 @@ fn init_telemetry_without_otel_does_not_panic() {
 }
 ```
 
-**Step 2: Run test to verify it fails**
-
 Run: `cd backend && cargo test -p sober-core -- init_telemetry`
-Expected: FAIL — `init_telemetry` not found.
+Expected: PASS (already implemented in plan 003).
 
-**Step 3: Implement init_telemetry()**
-
-Create or replace the tracing module with `telemetry.rs`:
+If this fails, the implementation from plan 003 needs to be updated.
+The reference implementation below captures the intent:
 
 ```rust
 use crate::config::TelemetryConfig;
@@ -297,22 +294,8 @@ pub fn init_telemetry(config: &TelemetryConfig) -> TelemetryGuard {
 
 Note: The exact OTEL API may differ — check the `opentelemetry` 0.29+ docs before implementing. The above captures the intent; the builder API evolves between versions. Use context7 MCP or crates.io docs to confirm exact method names.
 
-**Step 4: Update lib.rs**
-
-- Replace `pub use tracing_setup::init_tracing` with `pub use telemetry::{init_telemetry, TelemetryGuard}`
-- Keep backward compatibility: `#[deprecated] pub fn init_tracing(config: &AppConfig) { ... }` if other code calls it, or just replace all call sites.
-
-**Step 5: Run test to verify it passes**
-
-Run: `cd backend && cargo test -p sober-core -- init_telemetry`
-Expected: PASS
-
-**Step 6: Commit**
-
-```bash
-git add backend/crates/sober-core/src/
-git commit -m "feat(core): replace init_tracing with init_telemetry (OTEL + Prometheus)"
-```
+**Verification:** `lib.rs` already exports `pub use telemetry::init_telemetry` (from plan 003).
+No backward compatibility shim needed — `init_tracing` never existed in code.
 
 ---
 

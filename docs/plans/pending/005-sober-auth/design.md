@@ -33,16 +33,33 @@ and `sober-core` (shared types, errors, config). v1 is password-only with admin-
 ## Session Validation (Middleware)
 
 - Extract the session token from the cookie.
-- SHA-256 hash the token and look it up — check moka in-memory cache first, fall back to PostgreSQL.
+- SHA-256 hash the token and look it up via the `SessionStore` trait.
 - Verify the session has not expired.
-- Load user and roles from the database (cache in moka).
+- Load user and roles from the database.
 - Attach user context to request extensions via axum `Extension<AuthUser>`.
 - `AuthUser` struct fields: `user_id`, `email`, `username`, `roles` (`Vec<String>`),
   `scopes` (`Vec<ScopeId>`).
 
+### SessionStore trait
+
+```rust
+#[async_trait]
+pub trait SessionStore: Send + Sync {
+    async fn get(&self, token_hash: &[u8]) -> Result<Option<Session>, AuthError>;
+    async fn create(&self, session: &Session) -> Result<(), AuthError>;
+    async fn delete(&self, token_hash: &[u8]) -> Result<(), AuthError>;
+    async fn cleanup_expired(&self) -> Result<u64, AuthError>;
+}
+```
+
+v1 implementation: `PgSessionStore` — direct PostgreSQL lookups. No in-memory cache.
+A single DB query per request is fast enough with connection pooling for a single-node
+deployment. The trait boundary allows adding a moka-cached implementation later when
+profiling shows it matters, without changing any callers.
+
 ## Logout
 
-- Delete session from both the database and the moka in-memory cache.
+- Delete session from the database via `SessionStore::delete()`.
 - Clear the session cookie.
 
 ## RBAC

@@ -29,7 +29,7 @@ backend/crates/sober-core/src/
   lib.rs          # Public API, module declarations, re-exports
   error.rs        # AppError enum, IntoResponse impl
   config.rs       # AppConfig and section structs, load_from_env()
-  tracing.rs      # init_tracing() function
+  telemetry.rs    # init_telemetry() function (tracing + OTEL + Prometheus)
   admin.rs        # AdminCommand, AdminResponse enums
   types/
     mod.rs        # Re-exports from submodules
@@ -122,13 +122,18 @@ backend/crates/sober-core/src/
 - Both derive `Debug`, `Clone`, `Serialize`, `Deserialize`.
 - Use `#[serde(tag = "type", rename_all = "snake_case")]` for clean JSON representation.
 
-### 11. Implement `tracing.rs`
+### 11. Implement `telemetry.rs`
 
-- `pub fn init_tracing(config: &AppConfig)`:
+- `pub fn init_telemetry(config: &AppConfig)`:
   - Read `SOBER_ENV` to determine format (pretty vs JSON).
   - Configure `EnvFilter` from `RUST_LOG` with a default of `info`.
-  - Build and install the global subscriber.
+  - Build and install the global tracing subscriber.
+  - If `OTEL_EXPORTER_OTLP_ENDPOINT` is set, add OpenTelemetry trace export layer
+    (via `tracing-opentelemetry` + `opentelemetry-otlp`) pointing at Tempo.
+  - Install Prometheus metrics recorder (`metrics-exporter-prometheus`). Always active.
+  - Export `MetricsEndpoint` axum handler for `/metrics` endpoint.
 - Keep this function idempotent-safe (guard against double-init panics with `try_init`).
+- Graceful degradation: app works fine if Tempo/Prometheus are not running.
 
 ### 12. Wire up `lib.rs`
 
@@ -138,7 +143,7 @@ backend/crates/sober-core/src/
   - `pub use config::AppConfig;`
   - `pub use types::*;`
   - `pub use admin::{AdminCommand, AdminResponse};`
-  - `pub use tracing_setup::init_tracing;` (or whatever the module is named)
+  - `pub use telemetry::init_telemetry;`
   - `pub use uuid::Uuid;`
   - `pub use chrono::{DateTime, Utc};`
 

@@ -55,6 +55,7 @@ Config sections:
 | Auth | `AuthConfig` | `SESSION_SECRET`, `SESSION_TTL_SECONDS` |
 | SearXNG | `SearxngConfig` | `SEARXNG_URL` |
 | Admin | `AdminConfig` | `ADMIN_SOCKET_PATH` (default: `/run/sober/admin.sock`) |
+| Memory | `MemoryConfig` | `MEMORY_DECAY_HALF_LIFE_DAYS` (default: 30), `MEMORY_RETRIEVAL_BOOST` (default: 0.2), `MEMORY_PRUNE_THRESHOLD` (default: 0.1) |
 
 ### Domain Primitives --- ID Newtypes
 
@@ -183,13 +184,29 @@ depend on them without `sober-cli` depending on `sober-api`.
 
 Both are `Serialize` + `Deserialize` for JSON encoding over the socket.
 
-### Tracing Setup
+### Telemetry Setup
 
-`init_tracing(config: &AppConfig)` function that configures the `tracing-subscriber`:
-- **Development:** Pretty-printed, human-readable format with ANSI colors.
-- **Production:** JSON-structured format for log aggregation.
-- Log level configurable via `RUST_LOG` env var (defaults to `info`).
-- The environment is determined by a `SOBER_ENV` variable (`development` vs `production`).
+`init_telemetry(config: &AppConfig)` function that configures the full observability stack:
+
+1. **Tracing subscriber** (`tracing-subscriber`):
+   - **Development:** Pretty-printed, human-readable format with ANSI colors.
+   - **Production:** JSON-structured format for log aggregation.
+   - Log level configurable via `RUST_LOG` env var (defaults to `info`).
+   - The environment is determined by a `SOBER_ENV` variable (`development` vs `production`).
+
+2. **OpenTelemetry trace export** (`tracing-opentelemetry` + `opentelemetry-otlp`):
+   - Exports spans to Grafana Tempo (or any OTLP-compatible backend).
+   - Configurable via `OTEL_EXPORTER_OTLP_ENDPOINT`. Disabled if unset.
+   - Service name set via `OTEL_SERVICE_NAME` (auto-set per binary if absent).
+
+3. **Prometheus metrics recorder** (`metrics` + `metrics-exporter-prometheus`):
+   - Always active (in-memory registry). Exposes a `/metrics` handler.
+   - `MetricsEndpoint` axum handler exported for services to mount.
+
+All backends (Prometheus, Tempo) are optional consumers. The app operates
+normally when they are not running. Disabling OTEL export is a config change.
+
+Standard label constants exported: `service`, `method`, `status`, `crate`.
 
 ### Response Envelope Types
 
@@ -247,3 +264,9 @@ sufficient TTL-based caching with minimal operational overhead.
 | `http` | `StatusCode` type |
 | `async-trait` | Async trait support (for `Tool` trait) |
 | `moka` (with `future`) | In-memory TTL cache (v1 caching layer) |
+| `tracing-opentelemetry` | Bridge tracing spans to OpenTelemetry |
+| `opentelemetry` | OTEL API |
+| `opentelemetry-otlp` | OTLP exporter for Tempo |
+| `opentelemetry_sdk` | OTEL SDK runtime |
+| `metrics` | In-process metric registry |
+| `metrics-exporter-prometheus` | Prometheus `/metrics` endpoint |

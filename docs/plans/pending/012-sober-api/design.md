@@ -14,7 +14,6 @@ admin Unix socket.
 ```rust
 pub struct AppState {
     pub db: PgPool,
-    pub redis: RedisPool,
     pub agent_client: AgentClient,
     pub config: AppConfig,
 }
@@ -54,7 +53,7 @@ Tower layers, applied in order:
 1. **Request ID** — generate UUID, attach to tracing span.
 2. **Tracing** — tower-http trace layer; logs method, path, status, duration.
 3. **CORS** — configurable allowed origins.
-4. **Rate limiting** — Redis-backed, per-IP for public endpoints, per-user for authenticated.
+4. **Rate limiting** — moka-backed (in-memory), per-IP for public endpoints, per-user for authenticated.
 5. **Auth** — from sober-auth; extracts session cookie, validates, attaches `AuthUser`.
 
 ## WebSocket Chat
@@ -88,7 +87,10 @@ Tower layers, applied in order:
 
 ## Rate Limiting
 
-Redis-backed sliding window counter.
+moka-backed sliding window counter (in-memory). v1 runs on a single node —
+Redis is unnecessary. Use `Arc<RwLock<HashMap<String, TokenBucket>>>` for
+per-client rate state. Upgrade to Redis when horizontal scaling requires
+shared rate limit state across instances.
 
 | Endpoint               | Limit         | Scope  |
 |------------------------|---------------|--------|
@@ -112,8 +114,7 @@ Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 1. Load config (fail fast on missing or invalid values).
 2. Init tracing subscriber.
 3. Connect to PostgreSQL (`sqlx::PgPool`).
-4. Connect to Redis.
-5. Connect to agent gRPC service via UDS (`AgentServiceClient` connecting to `/run/sober/agent.sock`).
+4. Connect to agent gRPC service via UDS (`AgentServiceClient` connecting to `/run/sober/agent.sock`).
 6. Build `AppState` with `AgentClient` (not an `Agent` instance).
 7. Build router and apply middleware stack.
 8. Optionally bind admin Unix socket.
@@ -141,7 +142,7 @@ Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
 | `tower` | Middleware composition |
 | `tower-http` | CORS, tracing, request-id layers |
 | `sqlx` | PostgreSQL pool |
-| `redis` | Async Redis client |
+| `moka` | In-memory cache (rate limiting, session cache) |
 | `hyper` / `hyper-util` | Unix socket serving |
 | `serde` / `serde_json` | Serialization |
 | `tracing` | Structured logging |

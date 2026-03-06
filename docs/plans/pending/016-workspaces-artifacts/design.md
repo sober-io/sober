@@ -468,9 +468,16 @@ worktree. No queuing.
 - **ARCHITECTURE.md** --- update `~/.sober/` paths (was `~/.sober/`), add
   workspace and artifact concepts to system architecture.
 
-### New crate considerations
+### Crate placement (decided)
 
-This design may warrant a `sober-workspace` crate owning workspace CRUD,
-repo management, worktree lifecycle, and artifact tracking. Alternatively,
-these could live in `sober-core` (types) + `sober-agent` (operations).
-Decision deferred to implementation planning.
+No new `sober-workspace` crate. Split across existing crates:
+
+- **`sober-core`** — Workspace types (`WorkspaceId`, `WorkspaceRepoId`, `WorktreeId`,
+  `ArtifactId`), enums (`WorkspaceState`, `ArtifactKind`, `ArtifactState`,
+  `WorktreeState`, `ArtifactRelation`), and config structs.
+- **`sober-agent`** — Workspace operations: CRUD, repo management, worktree lifecycle,
+  artifact tracking, filesystem operations. The agent already owns task orchestration
+  and is the natural home for workspace-aware operations.
+
+This avoids adding a 13th crate for what is fundamentally agent operational logic
+with shared types.

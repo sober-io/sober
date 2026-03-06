@@ -7,7 +7,7 @@
 
 1. **Add dependencies to sober-api `Cargo.toml`.**
    axum (ws, json, macros), axum-extra (cookie), tokio (full), tower, tower-http
-   (cors, trace, request-id), sqlx (postgres), redis, hyper, hyper-util, tonic
+   (cors, trace, request-id), sqlx (postgres), moka, hyper, hyper-util, tonic
    (gRPC client), prost, serde, serde_json, tracing, uuid. Workspace dependencies
    on sober-core, sober-auth. Note: sober-agent is NOT a crate dependency — the API
    communicates with the agent via gRPC client using shared proto definitions.
@@ -22,12 +22,12 @@
    - `src/routes/mcp.rs` — MCP server config CRUD
    - `src/routes/ws.rs` — WebSocket upgrade and message handling
    - `src/middleware/mod.rs` — middleware re-exports
-   - `src/middleware/rate_limit.rs` — Redis-backed rate limiter
+   - `src/middleware/rate_limit.rs` — moka-backed rate limiter
    - `src/admin.rs` — Unix socket listener
 
 3. **Implement `state.rs`.**
-   AppState struct with PgPool, RedisPool, AgentClient (tonic gRPC client), AppConfig.
-   Constructor connects to PostgreSQL, Redis, and the agent gRPC service at
+   AppState struct with PgPool, AgentClient (tonic gRPC client), AppConfig.
+   Constructor connects to PostgreSQL and the agent gRPC service at
    `/run/sober/agent.sock`. Fails fast on error. No `Agent` struct instantiation —
    the agent runs as a separate process.
 
@@ -56,15 +56,16 @@
    chat.cancel. Track active conversations per connection. Clean disconnect handling.
 
 9. **Implement `middleware/rate_limit.rs`.**
-   Redis-backed sliding window rate limiter as a tower Layer. Configurable
-   limits per endpoint pattern. Returns 429 with Retry-After header.
+   moka-backed sliding window rate limiter as a tower Layer (in-memory, no Redis).
+   Configurable limits per endpoint pattern. Returns 429 with Retry-After header.
+   Upgrade path to Redis documented for horizontal scaling.
 
 10. **Implement `admin.rs`.**
     Unix socket listener using tokio UnixListener. Serves a minimal router
     (health check only for v1). Binds only when ADMIN_SOCKET_PATH is configured.
 
 11. **Implement `main.rs`.**
-    Startup sequence: config, tracing, connect to PostgreSQL, Redis, agent gRPC
+    Startup sequence: config, tracing, connect to PostgreSQL, agent gRPC
     service (via UDS). Build AppState with AgentClient. Assemble router +
     middleware stack. Optionally bind admin socket. Bind TCP listener. Graceful
     shutdown on SIGTERM/SIGINT with configurable timeout.

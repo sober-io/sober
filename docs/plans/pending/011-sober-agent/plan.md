@@ -93,9 +93,21 @@ sober-agent/src/
 - `Agent` struct and `AgentConfig`
 - `Agent::new(...)` constructor (includes `mind: Arc<Mind>` parameter)
 - `Agent::handle_message(user_id, conversation_id, content)`:
-  1. Embed user message: call `llm.embed(content)` to get query vector
-  2. Load context via `context_loader.load(query_vector, scope, budget)`
-  3. Build prompt via `mind.assemble(...)` (resolved SOUL.md + context + history + access mask + tools)
+
+  **Embedding ownership:** The agent loop owns the query embedding step. `sober-memory`'s
+  `ContextLoader` accepts a pre-computed `Vec<f32>` — it does NOT embed internally (no
+  dependency on sober-llm). The data flow is:
+  ```
+  user_message → injection_check (mind) → embed(query) (llm) →
+  load_context(embedding) (memory) → assemble_prompt(context) (mind) →
+  complete(prompt) (llm)
+  ```
+
+  Steps:
+  1. Check for injection via `mind.check_injection(content)` (deterministic, fast)
+  2. Embed user message: call `llm.embed(content)` to get query vector
+  3. Load context via `context_loader.load(query_vector, scope, budget)`
+  4. Build prompt via `mind.assemble(...)` (resolved SOUL.md + context + history + access mask + tools)
   4. Enter loop (up to `max_tool_iterations`):
      a. Call LLM via `sober-llm` (streaming)
      b. If response contains tool_calls: execute each tool, then:
@@ -162,3 +174,23 @@ sober-agent/src/
 - MCP tools and resources are loaded via `McpPool::discover()` and merged into the tool registry.
 - `cargo clippy -- -D warnings` passes.
 - `cargo test --workspace` passes with all new tests green.
+
+---
+
+## Integration Checkpoint
+
+**This checkpoint must pass before proceeding to plans 012–017.**
+
+After plan 011 is complete, prove the full message→agent→LLM→response loop works
+via an integration test harness (no HTTP frontend needed):
+
+1. Construct a `HandleMessageRequest` with test user/conversation IDs.
+2. Send via gRPC to the agent process running on a UDS.
+3. Agent calls LLM (mocked or real if `SOBER_TEST_LLM=1`).
+4. Agent returns a stream of `AgentEvent` messages.
+5. Verify: at least one `TextDelta` event followed by a `Done` event.
+6. Verify: assistant message is persisted in PostgreSQL.
+
+This proves the core loop (gRPC → agent → mind → memory → LLM → stream) before
+the HTTP/WebSocket/frontend layers add complexity. Failures here indicate
+interface mismatches between crates that must be fixed before proceeding.

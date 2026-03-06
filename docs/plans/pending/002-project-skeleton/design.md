@@ -116,7 +116,6 @@ An `.env.example` file documents all environment variables with sensible default
 for local development. Categories:
 
 - **Database:** `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS`
-- **Redis:** `REDIS_URL`
 - **Qdrant:** `QDRANT_URL`
 - **API server:** `HOST`, `PORT`, `ADMIN_SOCKET_PATH`
 - **LLM:** `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
@@ -138,7 +137,7 @@ Services:
 |---------|-------|------|---------|
 | `postgres` | `postgres:17` | 5432 | Primary relational database |
 | `qdrant` | `qdrant/qdrant` | 6333/6334 | Vector storage and search |
-| `redis` | `redis:7` | 6379 | Session cache, rate limiting |
+| *(no Redis in v1 — using moka in-memory cache)* | | | |
 | `searxng` | `searxng/searxng` | 8080 | Web search for agent |
 
 No reverse proxy (Caddy, nginx) in the dev stack. The backend serves the API
@@ -168,6 +167,26 @@ The frontend is a SvelteKit application:
 - Tailwind CSS installed via the `@tailwindcss/vite` plugin
 - Strict TypeScript mode enabled
 - Svelte 5 runes only — no legacy patterns
+
+---
+
+## Shared Test Infrastructure
+
+`sober-core` provides a `test_utils` module behind a `test-utils` feature flag. This
+gives all downstream crates access to shared test helpers without polluting production
+builds:
+
+- Mock LLM engine (canned responses: text, tool calls, streaming)
+- Test database pool (connects to test DB, runs migrations, transaction-per-test)
+- Test config with sensible defaults
+- Mock gRPC server for testing service clients
+
+Downstream crates add `sober-core = { ..., features = ["test-utils"] }` in
+`[dev-dependencies]`. Actual mock implementations are filled in as each crate
+is implemented (plans 003+).
+
+For Linux-specific tests (bwrap sandboxing in plan 008): use `#[cfg(target_os = "linux")]`
+and detect bwrap availability at test runtime.
 
 ---
 
