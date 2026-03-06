@@ -1,16 +1,13 @@
-# 008 --- sober-agent + sober-mcp
+# 008 --- sober-agent
 
 **Date:** 2026-03-06
 
-This design covers both `sober-agent` and `sober-mcp` in a single document since
-they are tightly coupled: `sober-agent` depends on `sober-mcp` for MCP tool
-integration.
+MCP client design has been extracted to its own plan document. See
+`008-sober-mcp/design.md`. This document covers `sober-agent` only.
 
 ---
 
-## sober-agent
-
-### Agent Loop
+## Agent Loop
 
 ```
 User message
@@ -26,7 +23,7 @@ User message
 - **Max tool iterations:** 10 per user message (configurable). Prevents runaway loops.
 - **Context budget:** Configurable token limit (default 4096) for memory retrieval.
 
-### Agent Struct
+## Agent Struct
 
 ```rust
 pub struct Agent {
@@ -46,7 +43,7 @@ pub struct Agent {
 - `conversation_history_limit` --- max messages loaded from conversation history
 - `system_prompt` --- fallback system prompt (sober-mind overrides when available)
 
-### Agent API
+## Agent API
 
 ```rust
 impl Agent {
@@ -70,7 +67,7 @@ impl Agent {
 
 `AgentResponseStream` is a `Stream` of `AgentEvent`.
 
-### AgentEvent
+## AgentEvent
 
 ```rust
 pub enum AgentEvent {
@@ -81,7 +78,7 @@ pub enum AgentEvent {
 }
 ```
 
-### Tool Trait
+## Tool Trait
 
 ```rust
 #[async_trait]
@@ -98,9 +95,9 @@ pub struct ToolOutput {
 }
 ```
 
-### v1 Built-in Tools
+## v1 Built-in Tools
 
-#### 1. web_search
+### 1. web_search
 
 Searches the web via a local SearXNG instance.
 
@@ -108,7 +105,7 @@ Searches the web via a local SearXNG instance.
 - **Implementation:** GET `{SEARXNG_URL}/search?q={query}&format=json`
 - **Output:** Top N results formatted as text (title + URL + snippet)
 
-#### 2. fetch_url
+### 2. fetch_url
 
 Fetches and extracts text content from a URL.
 
@@ -120,15 +117,16 @@ Fetches and extracts text content from a URL.
 - **Implementation:** Uses `reqwest`. HTML is converted to plain text via lightweight
   tag stripping. Output truncated to 8000 characters.
 
-#### 3. MCP tools
+### 3. MCP tools + resources
 
-Dynamically discovered from user-configured MCP servers.
+Dynamically discovered from user-configured MCP servers via `sober-mcp`.
 
 - Loaded per-user from the `mcp_servers` database table
-- Proxied through the `sober-mcp` client
-- Wrapped via `McpToolAdapter` to conform to the `Tool` trait
+- Tools proxied through `McpPool`, wrapped via `McpToolAdapter`
+- Resources proxied through `McpPool`, wrapped via `McpResourceAdapter`
+- Agent can inject resource contents into context when relevant
 
-### Tool Registry
+## Tool Registry
 
 ```rust
 pub struct ToolRegistry {
@@ -138,82 +136,12 @@ pub struct ToolRegistry {
 
 - Built-in tools (`web_search`, `fetch_url`) are registered at startup.
 - MCP tools are loaded per-request based on the user's enabled MCP server
-  configurations.
+  configurations via `McpPool::discover()`.
 - All tools are passed to the LLM as OpenAI-format function definitions.
 
 ---
 
-## sober-mcp
-
-MCP client supporting stdio transport (v1 scope).
-
-### MCP Client
-
-- Spawns the MCP server as a child process (command + args from `mcp_servers` table)
-- Communicates via JSON-RPC 2.0 over stdin/stdout
-- Lifecycle: initialize -> list tools -> execute tool calls -> shutdown
-
-### McpClient Struct
-
-```rust
-pub struct McpClient {
-    process: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-}
-```
-
-### API
-
-```rust
-impl McpClient {
-    pub async fn connect(
-        command: &str,
-        args: &[String],
-        env: &HashMap<String, String>,
-    ) -> Result<Self, McpError>;
-
-    pub async fn initialize(&mut self) -> Result<ServerInfo, McpError>;
-
-    pub async fn list_tools(&mut self) -> Result<Vec<McpToolInfo>, McpError>;
-
-    pub async fn call_tool(
-        &mut self,
-        name: &str,
-        input: serde_json::Value,
-    ) -> Result<String, McpError>;
-
-    pub async fn shutdown(self) -> Result<(), McpError>;
-}
-```
-
-`McpToolInfo` contains: `name`, `description`, `input_schema`.
-
-### McpToolAdapter
-
-Wraps an MCP tool so it implements the `Tool` trait, allowing the agent to use
-MCP tools uniformly alongside built-in tools.
-
-```rust
-pub struct McpToolAdapter {
-    client: Arc<Mutex<McpClient>>,
-    tool_info: McpToolInfo,
-}
-
-impl Tool for McpToolAdapter { ... }
-```
-
-### MCP Connection Pool
-
-- MCP servers are connected per-user, lazily (on first request that needs them).
-- Connections are kept alive for the duration of the user's session/conversation.
-- Shutdown when the conversation ends or on idle timeout.
-
----
-
 ## Error Types
-
-### AgentError
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -229,48 +157,20 @@ pub enum AgentError {
 }
 ```
 
-### McpError
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum McpError {
-    #[error("connection failed: {0}")]
-    ConnectionFailed(String),
-    #[error("initialize failed: {0}")]
-    InitializeFailed(String),
-    #[error("tool call failed: {0}")]
-    ToolCallFailed(String),
-    #[error("protocol error: {0}")]
-    ProtocolError(String),
-    #[error("timeout")]
-    Timeout,
-}
-```
-
-Both error types map to `AppError` from `sober-core`.
+Maps to `AppError` from `sober-core`.
 
 ---
 
 ## Dependencies
 
-### sober-agent
-
 - `sober-core` --- shared types, error handling
 - `sober-mind` --- SOUL.md resolution, prompt assembly, access masks
 - `sober-llm` --- LLM engine abstraction
 - `sober-memory` --- context loading, vector storage
-- `sober-mcp` --- MCP client for external tools
+- `sober-mcp` --- MCP client for external tools and resources
 - `sober-sandbox` --- process sandboxing for tool execution and artifact runs
 - `reqwest` --- HTTP client for web_search and fetch_url tools
 - `sqlx` --- message storage
-- `tokio` --- async runtime, spawn for MCP processes
+- `tokio` --- async runtime
 - `serde`, `serde_json` --- serialization
-- `tracing` --- structured logging
-
-### sober-mcp
-
-- `sober-core` --- shared types
-- `sober-sandbox` --- sandbox MCP server child processes
-- `tokio` --- process management, async I/O
-- `serde`, `serde_json` --- JSON-RPC serialization
 - `tracing` --- structured logging
