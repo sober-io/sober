@@ -209,11 +209,21 @@ pub struct BwrapSandbox {
 
 impl BwrapSandbox {
     pub fn new(policy: SandboxPolicy) -> Self;
+
+    /// Run a command to completion and return its output.
     pub async fn execute(
         &self,
         command: &[String],
         env: &HashMap<String, String>,
     ) -> Result<SandboxResult, SandboxError>;
+
+    /// Spawn a long-running sandboxed process with piped stdin/stdout.
+    /// Used by sober-mcp for MCP server processes that communicate over stdio.
+    pub async fn spawn(
+        &self,
+        command: &[String],
+        env: &HashMap<String, String>,
+    ) -> Result<Child, SandboxError>;
 }
 
 pub struct SandboxResult {

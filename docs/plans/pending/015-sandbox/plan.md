@@ -125,6 +125,9 @@ The core sandbox execution engine:
 
 - `BwrapSandbox::new(policy: SandboxPolicy) -> Self`
 - `BwrapSandbox::execute(command, env) -> Result<SandboxResult, SandboxError>`
+- `BwrapSandbox::spawn(command, env) -> Result<Child, SandboxError>` --- long-running
+  variant that returns a `tokio::process::Child` with piped stdin/stdout instead of
+  waiting for completion. Required by `sober-mcp` for MCP server processes.
 
 `execute` implementation:
 1. Build bwrap argument list from policy:
