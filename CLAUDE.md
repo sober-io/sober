@@ -20,7 +20,7 @@ sober/
 │   │   └── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
 │   └── migrations/   # SQL migrations (sqlx)
 ├── frontend/         # SvelteKit PWA
-├── shared/           # Protobuf schemas, shared types
+├── shared/           # Proto definitions for internal gRPC services
 ├── infra/            # Docker, K8s configs
 ├── docs/
 │   ├── plans/        # Planning documents
@@ -110,6 +110,8 @@ docker compose up -d
 - Cross-crate dependencies flow downward: api → agent → memory/crypto → core.
 - `sober-cli` depends on `sober-core` and `sober-crypto`. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
+- `sober-scheduler` and `sober-agent` must NOT depend on each other as crates. They communicate via gRPC at runtime using shared proto definitions.
+- Internal service communication uses gRPC over Unix domain sockets (tonic + prost). Proto files live in `shared/proto/`.
 - All async code uses `tokio` runtime.
 - Database queries use `sqlx` with compile-time checked queries where possible.
 
@@ -155,6 +157,8 @@ docker compose up -d
 - `clap` — CLI argument parsing (derive)
 - `tracing` — Structured logging
 - `thiserror` — Error types
+- `tonic` — gRPC framework (internal service communication)
+- `prost` — Protocol Buffers codegen
 - `rustls` — TLS (pure Rust)
 
 ### Frontend

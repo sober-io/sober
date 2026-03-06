@@ -33,7 +33,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 │                    API Gateway (sober-api)                   │
 │  Rate Limiting │ Auth Middleware │ Channel Routing │ WAF │ Admin Socket │
 └──────────────────────────┬──────────────────────────────────┘
-                           │
+                           │ gRPC/UDS
        ┌───────────────────┼───────────────────┐
        ▼                   ▼                   ▼
 ┌──────────────┐  ┌────────────────┐  ┌────────────────┐
@@ -45,6 +45,17 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 │ • HW Tokens  │  │ • Delegation   │  │ • Code Gen     │
 │ • RBAC/ABAC  │  │                │  │                │
 └──────────────┘  └───────┬────────┘  └────────────────┘
+                          │ gRPC/UDS
+                          ▲
+                          │
+                 ┌────────┴────────┐
+                 │ sober-scheduler │
+                 │                 │
+                 │ • Tick Engine   │
+                 │ • Cron + Interval│
+                 │ • Job Persist   │
+                 │ • Admin Socket  │
+                 └─────────────────┘
                           │
        ┌──────────────────┼──────────────────┐
        ▼                  ▼                  ▼
@@ -79,6 +90,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-crypto` | Keypair management, envelope encryption, signing, injection detection |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
+| `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
 | `sober-mcp` | MCP server/client implementation for tool interop |
 | `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
 
@@ -261,6 +273,65 @@ latency requirements, and user preferences.
 
 ---
 
+## Internal Service Communication
+
+### Protocol: gRPC over Unix Domain Sockets
+
+All inter-service communication uses gRPC (tonic + prost) over Unix domain sockets.
+Proto definitions live in `shared/proto/`. This avoids circular crate dependencies —
+services generate client/server code from shared proto files and communicate at runtime.
+
+### Security
+
+Two layers of defense:
+
+1. **Filesystem permissions** — Socket files owned by `sober:sober` with `0660`
+   permissions. Only processes running as the right user can connect.
+2. **Ed25519 service identity tokens** — Each service holds a keypair from
+   `sober-crypto`, signs a token passed as gRPC metadata. The receiving service
+   verifies the signature and checks the caller against an allowlist.
+
+For distributed deployment, upgrade to mTLS without protocol changes.
+
+---
+
+## Scheduler
+
+### Overview
+
+`sober-scheduler` is an independent runtime process — a general-purpose tick engine
+that drives autonomous operations without user input. It runs alongside `sober-api`
+as a peer, not a child service.
+
+### Job Categories
+
+| Category | Examples | Resolution |
+|----------|----------|------------|
+| Memory maintenance | BCF compaction, importance decay, pruning | Minutes |
+| System housekeeping | Key rotation, dead replica cleanup, health checks | Seconds-minutes |
+| Proactive agent tasks | Monitoring, scheduled reminders | Minutes (cron) |
+| User-defined jobs | "Summarize my email every morning" | Cron expressions |
+| Self-evolution | Skill/plugin updates, capability assessments | Hours-daily |
+
+### Scheduling Models
+
+- **Interval-based** — `every: 30s`, `every: 5m`. For system tasks.
+- **Cron expressions** — `"0 9 * * MON-FRI"`. For user/agent-defined schedules.
+
+Configurable minimum resolution (default: minute-level, second-level opt-in for system tasks).
+
+### Persistence
+
+- **Ephemeral** (in-memory) — System tasks that re-register on startup.
+- **Persistent** (PostgreSQL) — User/agent-created jobs that survive restarts.
+
+### Management
+
+- `soberctl scheduler list|pause|resume|run|cancel` for admin control.
+- Agent can create/cancel jobs via gRPC during conversations.
+
+---
+
 ## Communication Channels
 
 ### Phase 1: PWA (Svelte)
@@ -299,8 +370,17 @@ adapters that normalize messages into internal `AgentMessage` format.
 Docker Compose (dev) → Kubernetes (prod)
 ```
 
-Each crate compiles to a separate binary where appropriate (API gateway,
-agent worker, etc.) or is linked as a library crate.
+### Independent Runtimes
+
+The system runs as multiple independent processes:
+
+| Process | Role | Socket |
+|---------|------|--------|
+| `sober-api` | HTTP/WS gateway, user-driven entry point | `/run/sober/api-admin.sock` |
+| `sober-scheduler` | Autonomous tick engine, time-driven entry point | `/run/sober/scheduler-admin.sock` |
+| `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
+
+Each process can be started, stopped, and scaled independently.
 
 ### CLI Administration
 
@@ -309,10 +389,9 @@ The `sober-cli` crate produces two binaries:
 - **`sober`** — Offline operations that connect directly to PostgreSQL. Migrations,
   user management, DB seed/backup/restore, config validation. Works without a running
   API server.
-- **`soberctl`** — Runtime operations that connect to the API server via a Unix admin
-  socket (`/run/sober/admin.sock`). Agent inspection/control, task queue management,
-  memory pruning, live health checks, plugin management.
+- **`soberctl`** — Runtime operations that connect to services via Unix admin sockets.
+  Agent inspection/control, task queue management, scheduler management, memory pruning,
+  live health checks, plugin management.
 
-The Unix socket requires no authentication — access is controlled by filesystem
-permissions on the socket file. The API server only binds the admin socket when
-configured to do so (opt-in).
+Admin sockets are secured by filesystem permissions (`0660`, `sober:sober`).
+Services only bind admin sockets when configured to do so (opt-in).
