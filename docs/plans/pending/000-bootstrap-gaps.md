@@ -281,7 +281,7 @@ Phase 0: Project Skeleton
   - Workspace Cargo.toml
   - justfile
   - .env.example
-  - docker-compose.yml (postgres, qdrant, redis)
+  - docker-compose.yml (postgres, qdrant, searxng)
   - CI pipeline (basic)
 
 Phase 1: Foundation
@@ -298,9 +298,10 @@ Phase 3: Storage & Auth (parallel)
 Phase 4: Intelligence
   - sober-llm (Anthropic provider first)
 
-Phase 5: Orchestration
+Phase 5: Orchestration & Sandboxing
   - sober-mind (SOUL.md resolution, prompt assembly, access masks)
   - sober-sandbox (bwrap process sandbox, policy resolution)
+  - sober-mcp (MCP client, stdio transport — depends on sober-sandbox)
   - sober-agent (basic agent loop, no replicas yet)
   - sober-api (HTTP gateway, health check, auth routes)
 
@@ -308,9 +309,13 @@ Phase 6: CLI & Frontend (parallel)
   - sober-cli (sober + soberctl binaries)
   - frontend (SvelteKit skeleton, auth UI, chat UI)
 
-Phase 7: Advanced Features
+Phase 7: Scheduling, Workspaces & Observability
+  - sober-scheduler (tick engine, cron + interval, gRPC IPC)
+  - Workspaces & artifacts (multi-workspace support)
+  - Observability (metrics, tracing, dashboards)
+
+Phase 8: Advanced Features
   - sober-plugin (registry, WASM sandbox — wasmtime or Extism TBD)
-  - sober-mcp (tool interop)
   - Replica system
   - Additional auth methods (passkeys, OIDC)
 ```

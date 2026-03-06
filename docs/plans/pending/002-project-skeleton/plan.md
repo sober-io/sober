@@ -35,7 +35,7 @@ Create all twelve crates under `backend/crates/`:
 - `sober-llm` — depends on sober-core
 - `sober-sandbox` — depends on sober-core; external dep: `bwrap` process sandboxing
 - `sober-mcp` — depends on sober-sandbox, sober-core
-- `sober-mind` — depends on sober-memory, sober-crypto, sober-auth, sober-core
+- `sober-mind` — depends on sober-memory, sober-crypto, sober-core
 
 **Binary crates** (each has `Cargo.toml` + `src/main.rs`):
 - `sober-agent` — `[[bin]] name = "sober-agent"`, gRPC server (tonic), depends on sober-mind, sober-mcp, sober-sandbox, sober-llm, sober-memory, sober-core
@@ -161,13 +161,13 @@ and data exploration during development. The connection string matches the
 Add a `test_utils` module in `sober-core` behind a `#[cfg(feature = "test-utils")]` feature
 flag. This module provides shared test helpers for all downstream crates:
 
-- `MockLlmEngine` — implements `LlmEngine` trait, returns configurable canned responses
-  (text-only, tool calls, streaming chunks). Used by agent integration tests.
 - `test_db()` — creates a test PostgreSQL connection pool using `DATABASE_URL` from env,
   runs migrations, returns `PgPool`. Wraps each test in a transaction that rolls back.
 - `test_config()` — returns an `AppConfig` populated with test defaults.
-- `MockGrpcServer` — minimal tonic server that implements `AgentService` with canned
-  responses for testing gRPC clients.
+- `MockLlmEngine` — **deferred to plan 007** (sober-llm) when the `LlmEngine` trait exists.
+  Stub module with a TODO comment only in this plan.
+- `MockGrpcServer` — **deferred to plan 011** (sober-agent) when the gRPC service is defined.
+  Stub module with a TODO comment only in this plan.
 
 Each downstream crate can depend on `sober-core` with `features = ["test-utils"]` in
 `[dev-dependencies]`.

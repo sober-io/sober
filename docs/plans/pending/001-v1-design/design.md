@@ -663,14 +663,14 @@ moka-backed sliding window rate limiter (in-memory):
 v1 implements BCF incrementally — the header and chunk table are the canonical format,
 but encryption and compression flags are defined but unused.
 
-### 9.1 Header (16 bytes)
+### 9.1 Header (28 bytes)
 
 ```
-Magic:       0x53 0xD5 0x42 0x45 ("SOBE" — Sober with Estonian o)
-Version:     1 (u16 LE)
-Flags:       0x0000 (u16 — bit 0: encrypted, bit 1: compressed; both 0 in v1)
-Scope ID:    first 8 bytes of scope UUID (u64 LE)
-Chunk Count: number of chunks (u32 LE)
+Magic:       0x53 0xD5 0x42 0x45 ("SOBE" — Sober with Estonian õ)  [4 bytes]
+Version:     1 (u16 LE)                                             [2 bytes]
+Flags:       0x0000 (u16 — bit 0: encrypted, bit 1: compressed)    [2 bytes]
+Scope ID:    full 128-bit UUID (u128 LE)                            [16 bytes]
+Chunk Count: number of chunks (u32 LE)                              [4 bytes]
 ```
 
 ### 9.2 Chunk Table
@@ -689,6 +689,7 @@ Type:   u8      — 0=Fact, 1=Conversation, 2=Embedding
 | Fact | 0 | Extracted factual knowledge, stored as UTF-8 text |
 | Conversation | 1 | Conversation summary or key exchange, UTF-8 |
 | Embedding | 2 | Raw f32 vector (for offline/backup; primary vectors in Qdrant) |
+| Soul | 6 | Soul layer data, UTF-8 (used by sober-mind for SOUL.md resolution) |
 
 Skill, Preference, and Code chunk types are reserved (codes 3-5) but not
 implemented in v1.

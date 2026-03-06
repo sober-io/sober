@@ -7,7 +7,7 @@
 ## Steps
 
 1. **Add dependencies to Cargo.toml.**
-   Add `sober-crypto`, `sober-core` as workspace dependencies. Add `sqlx`, `moka`, `rand`,
+   Add `sober-crypto`, `sober-core` as workspace dependencies. Add `sqlx`, `rand`,
    `sha2`, `axum`, `axum-extra`, `tower`, `tokio`, `serde`, `thiserror`, `tracing`.
 
 2. **Create module structure.**
@@ -29,13 +29,16 @@
    before delegating to `sober_crypto::hash_password` and `sober_crypto::verify_password`.
 
 5. **Implement `session.rs`.**
-   - `create_session` — generate 256-bit random token, SHA-256 hash it, store hash in DB
-     and moka cache, return raw token.
-   - `validate_session` — accept raw token, hash it, check moka cache first then DB, verify
-     expiry, return session metadata.
-   - `delete_session` — remove from both DB and moka cache.
-   - `cleanup_expired` — delete all expired sessions from DB (moka entries expire via TTL
-     automatically).
+   - Define `SessionStore` trait with `create`, `validate`, `delete`, `cleanup_expired` methods.
+   - Implement `PgSessionStore` backed by PostgreSQL (the default and only v1 implementation).
+   - `create_session` — generate 256-bit random token, SHA-256 hash it, store hash in DB,
+     return raw token.
+   - `validate_session` — accept raw token, hash it, query DB, verify expiry, return session
+     metadata.
+   - `delete_session` — remove from DB.
+   - `cleanup_expired` — delete all expired sessions from DB.
+   - The `SessionStore` trait allows swapping in a caching layer (e.g., moka or Redis) later
+     without changing callers.
 
 6. **Implement `middleware.rs`.**
    - `AuthMiddleware` as a tower `Layer` that extracts the session cookie, validates the

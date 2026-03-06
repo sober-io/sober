@@ -40,7 +40,7 @@ Twelve stub crates, matching the architecture document:
 | `sober-llm` | library | sober-core |
 | `sober-sandbox` | library | sober-core |
 | `sober-mcp` | library | sober-sandbox, sober-core |
-| `sober-mind` | library | sober-memory, sober-crypto, sober-auth, sober-core |
+| `sober-mind` | library | sober-memory, sober-crypto, sober-core |
 | `sober-agent` | binary (gRPC) | sober-mind, sober-mcp, sober-sandbox, sober-llm, sober-memory, sober-core |
 | `sober-api` | binary | sober-auth, sober-core |
 | `sober-scheduler` | binary | sober-crypto, sober-core |
@@ -176,10 +176,10 @@ The frontend is a SvelteKit application:
 gives all downstream crates access to shared test helpers without polluting production
 builds:
 
-- Mock LLM engine (canned responses: text, tool calls, streaming)
 - Test database pool (connects to test DB, runs migrations, transaction-per-test)
 - Test config with sensible defaults
-- Mock gRPC server for testing service clients
+- Mock LLM engine — deferred to plan 007 (sober-llm) when the `LlmEngine` trait exists
+- Mock gRPC server — deferred to plan 011 (sober-agent) when the gRPC service is defined
 
 Downstream crates add `sober-core = { ..., features = ["test-utils"] }` in
 `[dev-dependencies]`. Actual mock implementations are filled in as each crate

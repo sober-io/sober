@@ -104,10 +104,12 @@ pub struct ToolMetadata {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value, // JSON Schema describing accepted input
+    /// If true, executing this tool invalidates loaded context (e.g., memory writes).
+    pub context_modifying: bool,
 }
 
 pub struct ToolOutput {
-    pub content: serde_json::Value,
+    pub content: String,
     pub is_error: bool,
 }
 

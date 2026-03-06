@@ -92,8 +92,9 @@ backend/crates/sober-core/src/
 
 ### 8. Implement `types/tool.rs`
 
-- Define `ToolMetadata` struct: `name: String`, `description: String`, `input_schema: serde_json::Value`.
-- Define `ToolOutput` struct: `content: serde_json::Value`, `is_error: bool`.
+- Define `ToolMetadata` struct: `name: String`, `description: String`, `input_schema: serde_json::Value`,
+  `context_modifying: bool`.
+- Define `ToolOutput` struct: `content: String`, `is_error: bool`.
 - Define `ToolError` enum with `thiserror`: `NotFound(String)`, `InvalidInput(String)`,
   `ExecutionFailed(String)`, `Internal(#[from] anyhow::Error)`.
 - Define `Tool` trait (using `async_trait`): `fn metadata(&self) -> ToolMetadata`,
