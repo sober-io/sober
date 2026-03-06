@@ -90,6 +90,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-crypto` | Keypair management, envelope encryption, signing, injection detection |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
+| `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
 | `sober-mcp` | MCP server/client implementation for tool interop |
 | `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
@@ -124,7 +125,7 @@ Replaces naive markdown-based memory with a compact binary format:
 └─────────────────────────────────────┘
 ```
 
-Chunk types: `Fact`, `Conversation`, `Skill`, `Preference`, `Embedding`, `Code`.
+Chunk types: `Fact`, `Conversation`, `Skill`, `Preference`, `Embedding`, `Code`, `Soul`.
 
 ### Scoped Memory
 
@@ -270,6 +271,60 @@ trait LlmEngine: Send + Sync {
 Supported backends: Anthropic (Claude), OpenAI, Ollama (local), and any
 OpenAI-compatible API. Router selects engine based on task type, cost,
 latency requirements, and user preferences.
+
+---
+
+## Agent Mind — Identity & Prompt Assembly
+
+### SOUL.md Resolution Chain
+
+The agent's identity is defined by a layered SOUL.md system:
+
+```
+backend/soul/SOUL.md           (base — shipped with the system)
+  └── ~/.sõber/SOUL.md          (user-level overrides/extensions)
+       └── ./.sõber/SOUL.md     (workspace/project-level)
+```
+
+| Layer | Override rules |
+|-------|---------------|
+| Base | Foundation — defines everything |
+| User (`~/.sõber/`) | Full override of base. User controls their instance. |
+| Workspace (`./.sõber/`) | Additive only. Can override style/domain. Cannot contradict ethical boundaries or security rules. |
+
+### Dynamic Prompt Assembly
+
+No hardcoded prompt tiers. One engine composes the system prompt from:
+
+1. **Resolved SOUL.md** (base + user + workspace layers)
+2. **Soul layers** (per-user/group BCF adaptations)
+3. **Task context** (what triggered this interaction)
+4. **Access mask** (what the caller can see and do)
+5. **Relevant memory** (scoped BCF retrieval)
+
+Access masks vary by trigger:
+
+| Trigger | Access |
+|---------|--------|
+| Scheduler / internal | Full — self-reasoning, memory modification, code proposals |
+| Human interaction | Restricted — no internal state, deep requests forwarded to internal tier |
+| Replica delegation | Scoped — only what the delegation grants |
+| Admin (soberctl) | Full read, restricted write |
+
+### Trait Evolution
+
+Per-user/group soul layers evolve autonomously. Base SOUL.md changes require
+high confidence (consistent pattern across many contexts) or admin approval.
+All proposed changes are audit-logged.
+
+### Self-Modification Scope
+
+| Target | Autonomy |
+|--------|----------|
+| Memory / soul layers | Free — autonomous |
+| Plugins / skills | Autonomous with sandbox testing + audit pipeline |
+| Base SOUL.md | High confidence auto-adopt OR admin approval |
+| Core crate code | Propose only — diff + reasoning + tests queued for admin |
 
 ---
 

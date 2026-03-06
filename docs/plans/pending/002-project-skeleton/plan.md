@@ -25,7 +25,7 @@ Create `backend/Cargo.toml` with:
 
 ### 2. Create stub crates
 
-Create all ten crates under `backend/crates/`:
+Create all eleven crates under `backend/crates/`:
 
 **Library crates** (each has `Cargo.toml` + `src/lib.rs`):
 - `sober-core` — no internal dependencies
@@ -34,7 +34,8 @@ Create all ten crates under `backend/crates/`:
 - `sober-memory` — depends on sober-core
 - `sober-llm` — depends on sober-core
 - `sober-mcp` — depends on sober-core
-- `sober-agent` — depends on sober-mcp, sober-llm, sober-memory, sober-core
+- `sober-mind` — depends on sober-memory, sober-crypto, sober-auth, sober-core
+- `sober-agent` — depends on sober-mind, sober-mcp, sober-llm, sober-memory, sober-core
 
 **Binary crates** (each has `Cargo.toml` + `src/main.rs`):
 - `sober-api` — `[[bin]] name = "sober-api"`, depends on sober-agent, sober-auth, sober-core
@@ -47,8 +48,8 @@ for shared dependencies where applicable.
 Library `lib.rs` files contain a doc comment describing the crate's purpose.
 Binary `main.rs` files contain a minimal `fn main()` with a placeholder print.
 
-- [ ] All ten `backend/crates/*/Cargo.toml` files exist
-- [ ] All ten `backend/crates/*/src/{lib,main}.rs` files exist
+- [ ] All eleven `backend/crates/*/Cargo.toml` files exist
+- [ ] All eleven `backend/crates/*/src/{lib,main}.rs` files exist
 - [ ] sober-cli has two `[[bin]]` entries and corresponding source files
 
 ### 3. Create migrations directory

@@ -18,7 +18,8 @@ sober/
 ├── backend/          # Rust workspace (Cargo)
 │   ├── crates/       # Individual library/binary crates
 │   │   └── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
-│   └── migrations/   # SQL migrations (sqlx)
+│   ├── migrations/   # SQL migrations (sqlx)
+│   └── soul/         # Base SOUL.md (agent identity)
 ├── frontend/         # SvelteKit PWA
 ├── shared/           # Proto definitions for internal gRPC services
 ├── infra/            # Docker, K8s configs
@@ -107,7 +108,8 @@ docker compose up -d
 ### Architecture
 
 - Each crate has a single responsibility (see @ARCHITECTURE.md crate map).
-- Cross-crate dependencies flow downward: api → agent → memory/crypto → core.
+- Cross-crate dependencies flow downward: api → agent → mind → memory/crypto → core.
+- `sober-mind` owns prompt assembly, SOUL.md resolution, access masks, and trait evolution. Agent delegates all prompt construction to `sober-mind`.
 - `sober-cli` depends on `sober-core` and `sober-crypto`. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
 - `sober-scheduler` and `sober-agent` must NOT depend on each other as crates. They communicate via gRPC at runtime using shared proto definitions.
