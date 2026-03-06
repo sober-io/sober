@@ -15,7 +15,7 @@ integration.
 ```
 User message
   -> 1. Load context (ContextLoader from sober-memory: Qdrant search + recent DB messages)
-  -> 2. Build prompt (system prompt + context + conversation history + tool definitions)
+  -> 2. Build prompt (sober-mind assembles: resolved SOUL.md + context + history + access mask + tools)
   -> 3. Call LLM via sober-llm (OpenAI-compatible, streaming)
   -> 4. Parse response
   -> 5a. If tool_calls: execute tools, append tool results, go to step 2
@@ -31,6 +31,7 @@ User message
 ```rust
 pub struct Agent {
     llm: Arc<dyn LlmEngine>,
+    mind: Arc<Mind>,
     memory: Arc<MemoryStore>,
     context_loader: Arc<ContextLoader>,
     tools: Vec<Arc<dyn Tool>>,
@@ -43,7 +44,7 @@ pub struct Agent {
 - `max_tool_iterations` --- hard ceiling on tool call rounds per user message
 - `context_token_budget` --- token budget for memory retrieval
 - `conversation_history_limit` --- max messages loaded from conversation history
-- `system_prompt` --- the agent's system prompt
+- `system_prompt` --- fallback system prompt (sober-mind overrides when available)
 
 ### Agent API
 
@@ -255,6 +256,7 @@ Both error types map to `AppError` from `sober-core`.
 ### sober-agent
 
 - `sober-core` --- shared types, error handling
+- `sober-mind` --- SOUL.md resolution, prompt assembly, access masks
 - `sober-llm` --- LLM engine abstraction
 - `sober-memory` --- context loading, vector storage
 - `sober-mcp` --- MCP client for external tools

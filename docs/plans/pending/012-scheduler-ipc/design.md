@@ -23,7 +23,7 @@ as an independent process alongside `sober-api`, both able to trigger the agent.
 | System housekeeping | Key rotation, dead replica cleanup, health checks | Seconds-minutes |
 | Proactive agent tasks | "Check X every hour", monitoring, scheduled reminders | Minutes (cron) |
 | User-defined jobs | "Summarize my email every morning" | Cron expressions |
-| Self-evolution | Periodic skill/plugin updates, capability assessments | Hours-daily |
+| Self-evolution | Periodic skill/plugin updates, capability assessments, soul trait evolution (via sober-mind) | Hours-daily |
 
 ### Scheduling Models
 
@@ -173,6 +173,7 @@ sober-scheduler ──► sober-core (types, config, errors)
                 ──► sober-crypto (service identity)
 
 sober-agent     ──► sober-core
+                ──► sober-mind (prompt assembly, access masks)
                 ──► tonic (gRPC server + client)
                 ──► prost (proto codegen)
                 ──► sober-crypto (service identity)

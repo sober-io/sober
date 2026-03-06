@@ -41,7 +41,8 @@ Array of entries immediately following the header. Each entry:
 | 0     | Fact         | UTF-8    | Extracted knowledge                |
 | 1     | Conversation | UTF-8    | Summary or key exchange            |
 | 2     | Embedding    | raw f32  | Raw f32 vector (little-endian)     |
-| 3--5  | Reserved     | ---      | Skill, Preference, Code (not in v1)|
+| 3--5  | Reserved     | ---      | Skill, Preference, Code (not in v1) |
+| 6     | Soul         | UTF-8    | Soul layer data (used by sober-mind, post-v1) |
 
 ### Usage
 

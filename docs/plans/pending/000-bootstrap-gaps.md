@@ -299,6 +299,7 @@ Phase 4: Intelligence
   - sober-llm (Anthropic provider first)
 
 Phase 5: Orchestration
+  - sober-mind (SOUL.md resolution, prompt assembly, access masks)
   - sober-sandbox (bwrap process sandbox, policy resolution)
   - sober-agent (basic agent loop, no replicas yet)
   - sober-api (HTTP gateway, health check, auth routes)

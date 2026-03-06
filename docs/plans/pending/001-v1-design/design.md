@@ -51,6 +51,7 @@ and call external tools via MCP.
 | `sober-auth` | lib | Registration, password verification, sessions, RBAC |
 | `sober-memory` | lib | BCF format, Qdrant integration, scoped retrieval |
 | `sober-llm` | lib | LLM engine trait, Anthropic Claude provider, streaming |
+| `sober-mind` | lib | SOUL.md resolution, prompt assembly, access masks, soul layers |
 | `sober-agent` | lib | Agent loop, tool trait, v1 tools (web search, URL fetch) |
 | `sober-mcp` | lib | MCP client (stdio transport), tool discovery, proxy calls |
 | `sober-sandbox` | lib | bwrap process sandbox, policy profiles, network proxy, audit |
@@ -62,6 +63,10 @@ and call external tools via MCP.
 ```
 sober-api (bin)
   ├── sober-agent
+  │     ├── sober-mind
+  │     │     ├── sober-memory
+  │     │     ├── sober-crypto
+  │     │     └── sober-core
   │     ├── sober-sandbox
   │     │     └── sober-core
   │     ├── sober-mcp
@@ -291,7 +296,7 @@ User message
 │ 1. Load context          │ ← Retrieve from Qdrant + recent messages from DB
 │    (scoped, minimal)     │
 ├─────────────────────────┤
-│ 2. Build prompt          │ ← System prompt + context + conversation history + tools
+│ 2. Build prompt          │ ← sober-mind assembles: SOUL.md + context + history + access mask + tools
 ├─────────────────────────┤
 │ 3. Call LLM (streaming)  │ ← Anthropic Claude, stream tokens to WebSocket
 ├─────────────────────────┤
