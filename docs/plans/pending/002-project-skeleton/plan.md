@@ -128,7 +128,33 @@ Initialize the SvelteKit project in `frontend/`:
 
 - [ ] Both files exist at project root
 
-### 10. Create `shared/` directory
+### 10. Add PostgreSQL MCP config
+
+Create `.claude/mcp.json` with `crystaldba/postgres-mcp` pointing at the Docker
+Compose dev database:
+
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y", "@crystaldba/postgres-mcp",
+        "postgresql://sober:sober@localhost:5432/sober"
+      ]
+    }
+  }
+}
+```
+
+This gives Claude Code direct DB access for schema inspection, query debugging,
+and data exploration during development. The connection string matches the
+`postgres` service in `docker-compose.yml`.
+
+- [ ] File exists at `.claude/mcp.json`
+- [ ] JSON is valid
+
+### 11. Create `shared/` directory
 
 Create `shared/proto/` directory structure for internal gRPC service definitions:
 - `shared/proto/sober/agent/v1/.gitkeep`
