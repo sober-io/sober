@@ -1,4 +1,4 @@
-# 008 --- sober-mcp
+# 010 --- sober-mcp
 
 **Date:** 2026-03-06
 
@@ -322,10 +322,8 @@ sober-mcp    --> sober-core      (shared types)
 
 | Design | Change |
 |--------|--------|
-| **008 (old)** | Split: MCP parts extracted here, agent parts move to new sober-agent plan |
-| **009 sober-api** | MCP server config CRUD endpoints unchanged; test-connection endpoint added |
-| **011 frontend** | MCP settings page gains tool/resource visibility after test connection |
-| **015 sandbox** | No change --- already documents MCP server sandboxing |
-| **016 observability** | MCP metrics unchanged |
-
-Plan renumbering will be done separately after this design is committed.
+| **011 sober-agent** | Split: MCP parts extracted here, agent parts remain in sober-agent plan |
+| **012 sober-api** | MCP server config CRUD endpoints unchanged; test-connection endpoint added |
+| **014 frontend** | MCP settings page gains tool/resource visibility after test connection |
+| **008 sandbox** | No change --- already documents MCP server sandboxing |
+| **017 observability** | MCP metrics unchanged |

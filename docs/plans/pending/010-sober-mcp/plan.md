@@ -8,14 +8,14 @@
 
 **Tech Stack:** Rust, tokio (process + io-util), serde/serde_json, thiserror, tracing. Depends on `sober-core` (types) and `sober-sandbox` (process isolation).
 
-**Design doc:** `docs/plans/pending/008-sober-mcp/design.md`
+**Design doc:** `docs/plans/pending/010-sober-mcp/design.md`
 
 ---
 
 ## Prerequisites
 
 - `sober-core` (003) must be implemented: `AppError`, `McpServerId`, config types.
-- `sober-sandbox` (015) must be implemented. **Important:** the current sandbox design only has `BwrapSandbox::execute` (run-to-completion). MCP needs a `BwrapSandbox::spawn` method that returns a `Child` with captured stdin/stdout for long-running processes. This must be added to sober-sandbox before starting Task 5.
+- `sober-sandbox` (008) must be implemented. **Important:** the current sandbox design only has `BwrapSandbox::execute` (run-to-completion). MCP needs a `BwrapSandbox::spawn` method that returns a `Child` with captured stdin/stdout for long-running processes. This must be added to sober-sandbox before starting Task 5.
 
 ---
 

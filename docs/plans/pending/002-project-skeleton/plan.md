@@ -160,7 +160,7 @@ Create `shared/proto/` directory structure for internal gRPC service definitions
 - `shared/proto/sober/agent/v1/.gitkeep`
 - `shared/proto/sober/scheduler/v1/.gitkeep`
 
-Proto files will be populated in phase 012 (scheduler/IPC).
+Proto files will be populated in phase 015 (scheduler/IPC).
 
 - [ ] Directory structure exists
 

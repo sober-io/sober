@@ -1,4 +1,4 @@
-# 012 — Internal Scheduler & Service Communication
+# 015 — Internal Scheduler & Service Communication
 
 > Autonomous tick engine and gRPC-based inter-service communication.
 > Date: 2026-03-06

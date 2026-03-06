@@ -1,4 +1,4 @@
-# 014 --- Workspaces, Worktrees & Artifact Management
+# 016 --- Workspaces, Worktrees & Artifact Management
 
 **Date:** 2026-03-06
 
@@ -116,7 +116,7 @@ Split by ownership:
 | `soul.md` | Markdown | User | Workspace-level SOUL.md layer. Agent can propose changes. |
 
 The `config.toml` file includes a `[sandbox]` section for execution sandbox
-policy. See 015-sandbox design for profile and override configuration.
+policy. See 008-sober-sandbox design for profile and override configuration.
 
 TOML for human-edited config (supports comments, readable). JSON for
 agent-managed state (trivial to serialize/deserialize programmatically).
@@ -456,11 +456,11 @@ worktree. No queuing.
 
 ### Modified designs
 
-- **sober-mind (013)** --- `PromptContext` gains `workspace_id: Option<WorkspaceId>`.
+- **sober-mind (009)** --- `PromptContext` gains `workspace_id: Option<WorkspaceId>`.
   Resolution chain uses `.sober/soul.md` from workspace when present.
-- **sober-agent (008)** --- agent loop receives workspace context for
+- **sober-agent (011)** --- agent loop receives workspace context for
   conversations associated with a workspace.
-- **sober-scheduler (012)** --- stale worktree cleanup job. Blob retention
+- **sober-scheduler (015)** --- stale worktree cleanup job. Blob retention
   pruning job.
 - **sober-core (003)** --- new types: `WorkspaceId`, `WorkspaceRepoId`,
   `WorktreeId`, `ArtifactId`.

@@ -1,4 +1,4 @@
-# 014 --- Workspaces, Worktrees & Artifact Management: Implementation Plan
+# 016 --- Workspaces, Worktrees & Artifact Management: Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -1630,7 +1630,7 @@ git commit -m "feat(core): add workspace system configuration"
 
 **Files:**
 - Modify: `ARCHITECTURE.md`
-- Modify: `docs/plans/pending/013-sober-mind/design.md`
+- Modify: `docs/plans/pending/009-sober-mind/design.md`
 - Modify: `docs/plans/pending/003-sober-core/design.md`
 
 **Step 1: Update ARCHITECTURE.md**
@@ -1641,7 +1641,7 @@ git commit -m "feat(core): add workspace system configuration"
 - Document the filesystem layout under a new "Workspace & Artifact System" section
 - Update the crate dependency flow to include `sober-workspace`
 
-**Step 2: Update sober-mind design (013)**
+**Step 2: Update sober-mind design (009)**
 
 - Change `~/.sõber/SOUL.md` to `~/.sober/SOUL.md`
 - Change `./.sõber/SOUL.md` to `.sober/soul.md`
@@ -1656,7 +1656,7 @@ git commit -m "feat(core): add workspace system configuration"
 **Step 4: Commit**
 
 ```bash
-git add ARCHITECTURE.md docs/plans/pending/013-sober-mind/design.md docs/plans/pending/003-sober-core/design.md
+git add ARCHITECTURE.md docs/plans/pending/009-sober-mind/design.md docs/plans/pending/003-sober-core/design.md
 git commit -m "docs(arch): update for workspace system, fix sober path naming"
 ```
 

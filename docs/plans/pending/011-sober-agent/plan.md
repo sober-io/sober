@@ -1,12 +1,12 @@
-# 008 --- sober-agent: Implementation Plan
+# 011 --- sober-agent: Implementation Plan
 
 **Date:** 2026-03-06
 
-**Depends on:** sober-mcp (008-sober-mcp), sober-mind (013), sober-llm (007),
-sober-memory (006), sober-sandbox (015)
+**Depends on:** sober-mcp (010), sober-mind (009), sober-llm (007),
+sober-memory (006), sober-sandbox (008)
 
 MCP implementation has been extracted to its own plan. See
-`008-sober-mcp/` for the MCP client implementation plan.
+`010-sober-mcp/` for the MCP client implementation plan.
 
 ---
 

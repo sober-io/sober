@@ -522,7 +522,7 @@ git commit -m "feat(core): add gRPC trace context propagation helpers"
 
 **Step 1: Create each metrics.toml**
 
-Copy the metric definitions from the design doc (`016-observability/design.md`) into TOML format. Each file follows this structure:
+Copy the metric definitions from the design doc (`017-observability/design.md`) into TOML format. Each file follows this structure:
 
 ```toml
 [crate]

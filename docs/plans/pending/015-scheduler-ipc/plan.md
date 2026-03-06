@@ -1,4 +1,4 @@
-# 012 — sober-scheduler + Internal Service Communication: Implementation Plan
+# 015 — sober-scheduler + Internal Service Communication: Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -13,7 +13,7 @@ filesystem permissions + Ed25519 identity tokens.
 
 **Design:** [design.md](./design.md)
 
-**Prerequisites:** Phases 002 (skeleton), 003 (core), 004 (crypto), 008 (agent).
+**Prerequisites:** Phases 002 (skeleton), 003 (core), 004 (crypto), 011 (agent).
 Phase 002 must be updated to include `sober-scheduler` stub crate and `shared/proto/` directory.
 
 ---

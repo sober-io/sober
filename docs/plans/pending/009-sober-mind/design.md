@@ -1,4 +1,4 @@
-# 013 — sober-mind: Agent Identity, Prompt Assembly & Self-Evolution
+# 009 — sober-mind: Agent Identity, Prompt Assembly & Self-Evolution
 
 > Soul management, dynamic prompt composition, access-controlled reasoning tiers,
 > and autonomous trait evolution.

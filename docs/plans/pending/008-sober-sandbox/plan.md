@@ -1,9 +1,9 @@
-# 015 --- sober-sandbox: Implementation Plan
+# 008 --- sober-sandbox: Implementation Plan
 
 **Date:** 2026-03-06
 **Status:** Pending
 **Depends on:** 003 (sober-core)
-**Must complete before:** 008 (sober-agent, sober-mcp)
+**Must complete before:** 010 (sober-mcp), 011 (sober-agent)
 
 ---
 

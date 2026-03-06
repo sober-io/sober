@@ -1,9 +1,9 @@
-# 008 --- sober-agent
+# 011 --- sober-agent
 
 **Date:** 2026-03-06
 
 MCP client design has been extracted to its own plan document. See
-`008-sober-mcp/design.md`. This document covers `sober-agent` only.
+`010-sober-mcp/design.md`. This document covers `sober-agent` only.
 
 ---
 

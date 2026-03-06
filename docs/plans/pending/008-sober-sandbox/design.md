@@ -1,4 +1,4 @@
-# 015 --- Granular Execution Sandboxing
+# 008 --- Granular Execution Sandboxing
 
 **Date:** 2026-03-06
 
@@ -397,7 +397,7 @@ sober-sandbox --> sober-core     (shared types, config)
 ### Implementation order
 
 `sober-sandbox` depends only on `sober-core`. It must be implemented **before
-sober-agent (008)** since agent tool execution and MCP server spawning go
+sober-agent (011)** since agent tool execution and MCP server spawning go
 through the sandbox. Natural slot: between phases 2 and 5 in the bootstrap
 order --- alongside other utility crates (sober-crypto, sober-memory).
 
@@ -409,6 +409,6 @@ order --- alongside other utility crates (sober-crypto, sober-memory).
 |--------|--------|
 | **000 bootstrap-gaps** | Add `sober-sandbox` to crate map and bootstrap order. Note `bwrap` and `socat` as runtime dependencies. |
 | **001 v1-design** | Add `sober-sandbox` to crate table and dependency flow. Move "sandboxed code execution" from deferred to included (process sandbox via bwrap). Plugin/WASM sandbox remains deferred. |
-| **008 sober-agent** | Tool execution and agent-generated code go through `sober-sandbox`. `McpClient::connect` spawns MCP servers via sandbox. |
-| **014 workspaces** | `.sober/config.toml` gains `[sandbox]` section for profile and overrides. |
+| **011 sober-agent** | Tool execution and agent-generated code go through `sober-sandbox`. `McpClient::connect` spawns MCP servers via sandbox. |
+| **016 workspaces** | `.sober/config.toml` gains `[sandbox]` section for profile and overrides. |
 | **ARCHITECTURE.md** | Add `sober-sandbox` to crate table and system diagram. |

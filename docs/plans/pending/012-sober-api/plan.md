@@ -1,4 +1,4 @@
-# 009 — sober-api: Implementation Plan
+# 012 — sober-api: Implementation Plan
 
 **Date:** 2026-03-06
 **Design:** [design.md](./design.md)
