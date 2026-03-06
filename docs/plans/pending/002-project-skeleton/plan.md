@@ -17,14 +17,15 @@ Create `backend/Cargo.toml` with:
 - `[workspace]` with `members = ["crates/*"]` and `resolver = "2"`
 - `[workspace.package]` with `edition = "2024"`
 - `[workspace.dependencies]` pinning: serde, tokio, thiserror, anyhow, tracing,
-  tracing-subscriber, uuid, sqlx
+  tracing-subscriber, uuid, sqlx, tonic, prost
+- `[workspace.build-dependencies]` pinning: tonic-build
 - `[profile.release]` with `overflow-checks = true`
 
 - [ ] File exists and `cargo metadata` succeeds from `backend/`
 
 ### 2. Create stub crates
 
-Create all nine crates under `backend/crates/`:
+Create all ten crates under `backend/crates/`:
 
 **Library crates** (each has `Cargo.toml` + `src/lib.rs`):
 - `sober-core` — no internal dependencies
@@ -37,6 +38,7 @@ Create all nine crates under `backend/crates/`:
 
 **Binary crates** (each has `Cargo.toml` + `src/main.rs`):
 - `sober-api` — `[[bin]] name = "sober-api"`, depends on sober-agent, sober-auth, sober-core
+- `sober-scheduler` — `[[bin]] name = "sober-scheduler"`, depends on sober-core, sober-crypto
 - `sober-cli` — two `[[bin]]` sections (`sober` and `soberctl`), depends on sober-core only
 
 Each `Cargo.toml` inherits `edition.workspace = true` and uses `dep.workspace = true`
@@ -45,8 +47,8 @@ for shared dependencies where applicable.
 Library `lib.rs` files contain a doc comment describing the crate's purpose.
 Binary `main.rs` files contain a minimal `fn main()` with a placeholder print.
 
-- [ ] All nine `backend/crates/*/Cargo.toml` files exist
-- [ ] All nine `backend/crates/*/src/{lib,main}.rs` files exist
+- [ ] All ten `backend/crates/*/Cargo.toml` files exist
+- [ ] All ten `backend/crates/*/src/{lib,main}.rs` files exist
 - [ ] sober-cli has two `[[bin]]` entries and corresponding source files
 
 ### 3. Create migrations directory
@@ -127,10 +129,13 @@ Initialize the SvelteKit project in `frontend/`:
 
 ### 10. Create `shared/` directory
 
-Create `shared/` with a placeholder `.gitkeep` file. This directory will hold
-shared TypeScript types that mirror backend response shapes.
+Create `shared/proto/` directory structure for internal gRPC service definitions:
+- `shared/proto/sober/agent/v1/.gitkeep`
+- `shared/proto/sober/scheduler/v1/.gitkeep`
 
-- [ ] Directory exists
+Proto files will be populated in phase 012 (scheduler/IPC).
+
+- [ ] Directory structure exists
 
 ---
 
