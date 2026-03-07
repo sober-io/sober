@@ -45,8 +45,10 @@ jobs:
         working-directory: backend
 
       - name: Audit
-        run: cargo install cargo-audit --quiet && cargo audit
-        working-directory: backend
+        uses: rustsec/audit-check@v2.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: backend
 
   frontend-check:
     name: Frontend
