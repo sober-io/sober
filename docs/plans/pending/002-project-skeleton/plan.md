@@ -1,11 +1,16 @@
 # 002 — Project Skeleton: Implementation Plan
 
-**Date:** 2026-03-06
-**Status:** Pending
-**Design:** [design.md](./design.md)
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-This plan bootstraps the Sober repository from docs-only into a buildable,
-testable project skeleton. Every step is atomic and verifiable.
+**Goal:** Bootstrap the Sober repository from docs-only into a buildable, testable
+project skeleton with CI/CD pipelines and all crate stubs.
+
+**Architecture:** Cargo workspace with 13 crates (8 library, 5 binary), SvelteKit
+frontend, three GitHub Actions workflows (CI, release, Docker), and `sober-web` as
+the public-facing entry point.
+
+**Tech Stack:** Rust 2024 edition, SvelteKit + Tailwind CSS, GitHub Actions, GHCR,
+Docker multi-stage builds, `debian:trixie-slim` base image.
 
 ---
 
@@ -25,7 +30,7 @@ Create `backend/Cargo.toml` with:
 
 ### 2. Create stub crates
 
-Create all twelve crates under `backend/crates/`:
+Create all thirteen crates under `backend/crates/`:
 
 **Library crates** (each has `Cargo.toml` + `src/lib.rs`):
 - `sober-core` — no internal dependencies
@@ -42,6 +47,7 @@ Create all twelve crates under `backend/crates/`:
 - `sober-api` — `[[bin]] name = "sober-api"`, depends on sober-auth, sober-core
 - `sober-scheduler` — `[[bin]] name = "sober-scheduler"`, depends on sober-core, sober-crypto
 - `sober-cli` — two `[[bin]]` sections (`sober` and `soberctl`), depends on sober-crypto, sober-core
+- `sober-web` — `[[bin]] name = "sober-web"`, depends on sober-core; external deps: `rust-embed`, `axum`, `hyper-util` (for reverse proxy)
 
 Each `Cargo.toml` inherits `edition.workspace = true` and uses `dep.workspace = true`
 for shared dependencies where applicable.
@@ -49,8 +55,8 @@ for shared dependencies where applicable.
 Library `lib.rs` files contain a doc comment describing the crate's purpose.
 Binary `main.rs` files contain a minimal `fn main()` with a placeholder print.
 
-- [ ] All twelve `backend/crates/*/Cargo.toml` files exist
-- [ ] All twelve `backend/crates/*/src/{lib,main}.rs` files exist
+- [ ] All thirteen `backend/crates/*/Cargo.toml` files exist
+- [ ] All thirteen `backend/crates/*/src/{lib,main}.rs` files exist
 - [ ] sober-cli has two `[[bin]]` entries and corresponding source files
 
 ### 3. Create migrations directory
@@ -98,12 +104,60 @@ Define commands at the project root:
 ### 7. Create CI workflow
 
 Create `.github/workflows/ci.yml`:
-- Triggers on push and pull_request
-- Jobs: backend (fmt, clippy, test, audit) and frontend (install, check)
-- Caches Cargo registry and target directory
+- Triggers on push to main and pull_request
+- Two jobs:
+  - `rust-check`: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, `cargo audit`
+  - `frontend-check`: `pnpm install`, `pnpm check`, `pnpm lint`
+- Caches `~/.cargo/registry` and `target/` via `actions/cache`
 - Uses latest stable Rust and Node.js 24
+- Runs on `ubuntu-latest`
 
-- [ ] File exists
+- [ ] File exists at `.github/workflows/ci.yml`
+- [ ] YAML is valid (`yq` or manual inspection)
+
+### 7b. Create release workflow
+
+Create `.github/workflows/release.yml`:
+- Triggers on push tag `v*`
+- Build matrix for multi-arch binaries:
+  - `x86_64-unknown-linux-gnu` on `ubuntu-latest`
+  - `aarch64-unknown-linux-gnu` on `ubuntu-latest` using `cross`
+  - `x86_64-apple-darwin` on `macos-latest`
+  - `aarch64-apple-darwin` on `macos-latest`
+- Builds all binaries: `sober`, `soberctl`, `sober-api`, `sober-agent`, `sober-scheduler`, `sober-web`
+- Creates per-platform tar.gz archives
+- Creates GitHub Release and uploads archives as assets
+- Caches `~/.cargo/registry` and `target/`
+
+- [ ] File exists at `.github/workflows/release.yml`
+- [ ] YAML is valid
+
+### 7c. Create Docker workflow
+
+Create `.github/workflows/docker.yml`:
+- Triggers on push to main (`:latest` tag) and push tag `v*` (`:v0.1.0` tag)
+- Builds four service images, multi-arch (`linux/amd64`, `linux/arm64`):
+  - `ghcr.io/${{ github.repository }}/sober-api`
+  - `ghcr.io/${{ github.repository }}/sober-agent`
+  - `ghcr.io/${{ github.repository }}/sober-scheduler`
+  - `ghcr.io/${{ github.repository }}/sober-web`
+- Uses `docker/build-push-action` with `docker/setup-buildx-action` and `docker/setup-qemu-action`
+- Logs in to GHCR via `docker/login-action` using `GITHUB_TOKEN`
+- Uses Docker layer caching via `cache-to`/`cache-from` (GitHub Actions cache backend)
+
+Create Dockerfiles:
+- `infra/docker/Dockerfile.service` — shared multi-stage Dockerfile for API, agent, scheduler:
+  - Stage 1: `rust:latest` — `cargo build --release -p $SERVICE`
+  - Stage 2: `debian:trixie-slim` — copy binary, install `ca-certificates`, create `sober` user
+  - Uses `ARG SERVICE` to parameterize which binary to build/copy
+- `infra/docker/Dockerfile.web` — multi-stage Dockerfile for sober-web:
+  - Stage 0: `node:24-slim` — `pnpm install && pnpm build` (SvelteKit static output)
+  - Stage 1: `rust:latest` — `cargo build --release -p sober-web`
+  - Stage 2: `debian:trixie-slim` — copy binary + copy static assets to `/var/lib/sober/static/`
+
+- [ ] Workflow file exists at `.github/workflows/docker.yml`
+- [ ] `infra/docker/Dockerfile.service` exists and is valid
+- [ ] `infra/docker/Dockerfile.web` exists and is valid
 - [ ] YAML is valid
 
 ### 8. Scaffold the frontend
@@ -204,5 +258,9 @@ All of the following must pass before this plan is considered complete:
 - [ ] `pnpm install && pnpm check` succeeds in `frontend/`
 - [ ] `docker compose config` validates without error at project root
 - [ ] All `justfile` commands are defined and syntactically valid
-- [ ] CI workflow YAML is valid
+- [ ] CI workflow YAML is valid (`.github/workflows/ci.yml`)
+- [ ] Release workflow YAML is valid (`.github/workflows/release.yml`)
+- [ ] Docker workflow YAML is valid (`.github/workflows/docker.yml`)
+- [ ] Dockerfiles exist and are syntactically valid (`infra/docker/Dockerfile.service`, `infra/docker/Dockerfile.web`)
+- [ ] All thirteen crates exist (including `sober-web`)
 - [ ] No secrets are committed (no `.env` file, only `.env.example`)
