@@ -4,11 +4,11 @@
 
 **Goal:** Add workspace, worktree, and artifact management --- the collaboration layer where users and the agent produce, version, and track work artifacts.
 
-**Architecture:** No new crate — workspace operations split across existing crates. Types and enums live in `sober-core`. Workspace CRUD, repo management, worktree lifecycle, artifact tracking, and blob storage live in `sober-agent` (the natural home for workspace-aware operations). Database schema is added via sqlx migrations. Filesystem operations create and manage the `/var/lib/sober/` directory tree.
+**Architecture:** New `sober-workspace` library crate for filesystem/git/blob business logic. Types, enums, and repo traits live in `sober-core`. PostgreSQL repo implementations (`PgWorkspaceRepo`, `PgArtifactRepo`, etc.) live in `sober-db`. Agent orchestration stays in `sober-agent`. This split allows `sober-cli` and `sober-scheduler` to use workspace logic without depending on the agent binary.
 
-**Tech Stack:** Rust, sqlx (PostgreSQL), tokio (async fs), serde/serde_json, toml (config parsing), sha2 (blob hashing), git2 (worktree management), thiserror
+**Tech Stack:** Rust, tokio (async fs), serde/serde_json, toml (config parsing), sha2 (blob hashing), git2 (worktree management), thiserror
 
-**Depends on:** 002 (project skeleton), 003 (sober-core types + config)
+**Depends on:** 002 (project skeleton), 003 (sober-core types + config), 005 (sober-db repo pattern)
 
 ---
 

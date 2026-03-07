@@ -96,6 +96,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
 | `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
+| `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage, config parsing. Used by agent, CLI, and scheduler. |
 
 ### Crate Dependency Flow
 

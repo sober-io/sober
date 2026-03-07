@@ -468,16 +468,25 @@ worktree. No queuing.
 - **ARCHITECTURE.md** --- update `~/.sober/` paths (was `~/.sober/`), add
   workspace and artifact concepts to system architecture.
 
-### Crate placement (decided)
+### Crate placement
 
-No new `sober-workspace` crate. Split across existing crates:
+Split across four crates following the repo trait pattern (see 005-sober-db):
 
-- **`sober-core`** — Workspace types (`WorkspaceId`, `WorkspaceRepoId`, `WorktreeId`,
+- **`sober-core`** — Domain types (`WorkspaceId`, `WorkspaceRepoId`, `WorktreeId`,
   `ArtifactId`), enums (`WorkspaceState`, `ArtifactKind`, `ArtifactState`,
-  `WorktreeState`, `ArtifactRelation`), and config structs.
-- **`sober-agent`** — Workspace operations: CRUD, repo management, worktree lifecycle,
-  artifact tracking, filesystem operations. The agent already owns task orchestration
-  and is the natural home for workspace-aware operations.
+  `WorktreeState`, `ArtifactRelation`), repo traits (`WorkspaceRepo`,
+  `ArtifactRepo`, `WorktreeRepo`, `WorkspaceRepoRepo`), and config structs.
+- **`sober-db`** — PostgreSQL implementations: `PgWorkspaceRepo`, `PgArtifactRepo`,
+  `PgWorktreeRepo`, `PgWorkspaceRepoRepo`. Row types private to `sober-db`.
+- **`sober-workspace`** — Business logic independent of the agent loop: filesystem
+  layout management (`/var/lib/sober/workspaces/`), git operations via `git2`
+  (clone, worktree create/remove, branch management), blob storage (content-addressed
+  store with sha2 hashing), workspace config parsing (`.sober/` directory), and
+  stale worktree detection. Depends on `sober-core` (types + repo traits) but NOT
+  on `sober-db` or `sober-agent`.
+- **`sober-agent`** (binary) — Wires repos and workspace services together. Orchestrates
+  workspace-aware operations during the agent loop.
 
-This avoids adding a 13th crate for what is fundamentally agent operational logic
-with shared types.
+This split enables `sober-cli` (`sober workspace list/archive/...`) and
+`sober-scheduler` (stale worktree cleanup, blob pruning) to use workspace
+logic without depending on the agent binary.
