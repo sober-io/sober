@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Pre-commit hook: auto-format staged Rust files with cargo fmt
+
+# Find the backend directory relative to the repo root
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+BACKEND_DIR="$REPO_ROOT/backend"
+
+# Check if any .rs files are staged
+STAGED_RS_FILES="$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')"
+
+if [ -z "$STAGED_RS_FILES" ]; then
+    exit 0
+fi
+
+# Run cargo fmt on the backend workspace
+(cd "$BACKEND_DIR" && cargo fmt -q) || exit 1
+
+# Re-stage any formatted .rs files that were originally staged
+for file in $STAGED_RS_FILES; do
+    git add "$REPO_ROOT/$file"
+done

@@ -130,10 +130,17 @@ Always verify your work before claiming it is complete:
 - Each plan document should include: goal, approach, acceptance criteria, and any open questions.
 - Move plan files between directories as their status changes.
 
+### Git Hooks
+
+- A **pre-commit hook** in `.githooks/` auto-runs `cargo fmt` on staged Rust files.
+- After cloning or creating a new worktree, run **`just setup`** to configure hooks.
+- The hook formats and re-stages `.rs` files automatically — formatting issues never reach CI.
+
 ### Git Workflow & Worktrees
 
 - **Feature development happens exclusively in git worktrees.** Never develop features on the main branch directly.
 - **Worktrees live inside the project** at `.worktrees/` (gitignored). Never create sibling directories.
+- After creating a worktree, run `just setup` inside it to configure git hooks.
 - For every new feature or task:
   1. Create a new worktree: `git worktree add .worktrees/<plan-number>-<feature-name> -b feat/<plan-number>-<feature-name>`
      (e.g., `git worktree add .worktrees/003-auth -b feat/003-auth`)

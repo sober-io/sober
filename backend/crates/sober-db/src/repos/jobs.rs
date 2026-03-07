@@ -98,14 +98,12 @@ impl sober_core::types::JobRepo for PgJobRepo {
     }
 
     async fn cancel(&self, id: JobId) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE jobs SET status = $1 WHERE id = $2 AND status != $1",
-        )
-        .bind(JobStatus::Cancelled)
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query("UPDATE jobs SET status = $1 WHERE id = $2 AND status != $1")
+            .bind(JobStatus::Cancelled)
+            .bind(id.as_uuid())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("job".into()));

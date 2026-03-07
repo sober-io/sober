@@ -1,5 +1,10 @@
 # Sober — Task Runner
 # Run `just --list` to see available commands.
+# Run `just setup` after cloning or creating a new worktree.
+
+# One-time setup: configure git hooks
+setup:
+    git config core.hooksPath .githooks
 
 # Start backend and frontend in watch mode
 dev:
