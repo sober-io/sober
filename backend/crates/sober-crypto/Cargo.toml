@@ -8,3 +8,15 @@ sober-core = { path = "../sober-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# Password hashing
+argon2 = { version = "0.5.3", features = ["std"] }
+
+# Ed25519 signing
+ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
+
+# Cryptographic randomness (0.6 matches argon2 + ed25519-dalek)
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[dev-dependencies]
+proptest = "1.10.0"
