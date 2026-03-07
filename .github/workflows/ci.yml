@@ -44,14 +44,7 @@ jobs:
         run: cargo test --workspace
         working-directory: backend
 
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
-
-      - name: Audit
-        run: cargo audit
-        working-directory: backend
+      # TODO: re-enable cargo-audit step once CI times are acceptable
 
   frontend-check:
     name: Frontend

@@ -1,9 +1,8 @@
 name: Docker
 
+# TODO: re-enable push triggers (branches: [main], tags: ["v*"]) when Docker builds are needed
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
