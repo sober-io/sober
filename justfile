@@ -45,7 +45,8 @@ lint:
 audit:
     cd backend && cargo audit -q
 
-# Tag and push a release (e.g., just release 0.2.0)
+# Tag and push a release manually (e.g., just release 0.2.0)
+# Note: PRs merged to main are auto-tagged and released via CI
 release version:
     #!/usr/bin/env bash
     set -euo pipefail
