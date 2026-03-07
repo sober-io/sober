@@ -25,3 +25,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+sqlx = { workspace = true, features = ["macros"] }
