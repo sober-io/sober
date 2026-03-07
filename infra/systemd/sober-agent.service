@@ -1,0 +1,24 @@
+[Unit]
+Description=Sober Agent (gRPC)
+After=network-online.target
+PartOf=sober.target
+
+[Service]
+Type=notify
+User=sober
+Group=sober
+ExecStart=/opt/sober/bin/sober-agent
+EnvironmentFile=/etc/sober/.env
+Environment=SOBER_CONFIG=/etc/sober/config.toml
+RuntimeDirectory=sober
+StateDirectory=sober
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/sober/data
+
+[Install]
+WantedBy=sober.target

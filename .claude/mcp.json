@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y", "@crystaldba/postgres-mcp",
+        "postgresql://sober:sober@localhost:5432/sober"
+      ]
+    }
+  }
+}

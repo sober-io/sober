@@ -319,7 +319,7 @@ Two modes:
 
 ## Bare-Metal Installation & Service Management
 
-For non-Docker deployments, a single `install.sh` script handles downloading binaries
+For non-Docker deployments, `scripts/install.sh` handles downloading binaries
 from GitHub Releases, creating the directory structure, collecting configuration,
 setting up a system user, and installing systemd services. The same script handles
 fresh installs and upgrades.

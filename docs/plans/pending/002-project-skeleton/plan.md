@@ -350,7 +350,7 @@ level = "info"
 
 ### 15. Create `install.sh`
 
-Create `install.sh` at the project root. The script handles fresh installs,
+Create `scripts/install.sh`. The script handles fresh installs,
 upgrades, and uninstalls. Must be POSIX-compatible shell (no bashisms beyond
 what's needed for readability — target `#!/usr/bin/env bash` with `set -euo pipefail`).
 
@@ -674,9 +674,9 @@ main() {
 main "$@"
 ```
 
-- [ ] `install.sh` exists at project root
+- [ ] `scripts/install.sh` exists
 - [ ] Script is executable (`chmod +x`)
-- [ ] `shellcheck install.sh` passes with no errors
+- [ ] `shellcheck scripts/install.sh` passes with no errors
 - [ ] `--help` flag prints usage information
 - [ ] Script detects missing prerequisites and exits with clear error message
 
@@ -700,5 +700,5 @@ All of the following must pass before this plan is considered complete:
 - [ ] No secrets are committed (no `.env` file, only `.env.example`)
 - [ ] Systemd unit files exist in `infra/systemd/` (5 files)
 - [ ] `config.toml.example` exists in `infra/config/`
-- [ ] `install.sh` exists, is executable, and passes `shellcheck`
+- [ ] `scripts/install.sh` exists, is executable, and passes `shellcheck`
 - [ ] Release archive includes systemd units, config template, and sha256 checksums

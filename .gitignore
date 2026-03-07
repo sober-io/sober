@@ -1,0 +1,23 @@
+# Rust
+target/
+
+# Node
+node_modules/
+
+# SvelteKit
+.svelte-kit/
+build/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+*.swp
+
+# sqlx offline query cache — DO commit this
+# !backend/.sqlx/
