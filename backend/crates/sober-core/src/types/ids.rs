@@ -104,6 +104,31 @@ define_id!(
     WorkspaceId
 );
 
+define_id!(
+    /// Unique identifier for a scheduled job.
+    JobId
+);
+
+define_id!(
+    /// Unique identifier for a git repository registered in a workspace.
+    WorkspaceRepoId
+);
+
+define_id!(
+    /// Unique identifier for a git worktree.
+    WorktreeId
+);
+
+define_id!(
+    /// Unique identifier for a workspace artifact.
+    ArtifactId
+);
+
+define_id!(
+    /// Unique identifier for an audit log entry.
+    AuditLogId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);

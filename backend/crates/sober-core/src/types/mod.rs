@@ -10,6 +10,7 @@ pub use access::{CallerContext, Permission, TriggerKind};
 pub use api::ApiResponse;
 pub use enums::{MessageRole, ScopeKind, UserStatus};
 pub use ids::{
-    ConversationId, McpServerId, MessageId, RoleId, ScopeId, SessionId, ToolId, UserId, WorkspaceId,
+    ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
+    SessionId, ToolId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 pub use tool::{Tool, ToolError, ToolMetadata, ToolOutput};
