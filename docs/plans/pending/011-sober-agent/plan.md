@@ -14,12 +14,13 @@ MCP implementation has been extracted to its own plan. See
 
 Create `shared/proto/agent.proto` with the `AgentService` gRPC service definition:
 - `HandleMessage` — server-streaming RPC for chat (request: user_id, conversation_id, content)
-- `ExecuteTask` — server-streaming RPC for scheduler jobs (request: task_id, task_type, payload)
+- `ExecuteTask` — server-streaming RPC for scheduler jobs (request: task_id, task_type, payload, caller_identity, optional user_id/conversation_id/workspace_id)
+- `WakeAgent` — unary RPC for lightweight nudges (request: reason, caller_identity)
 - `AgentEvent` — response message with oneof: TextDelta, ToolCallStart, ToolCallResult, Done, Error
 
 ### 2. Add dependencies to sober-agent Cargo.toml
 
-- `sober-core`, `sober-llm`, `sober-memory`, `sober-mcp`, `sober-mind` (path dependencies)
+- `sober-core`, `sober-llm`, `sober-memory`, `sober-mcp`, `sober-mind`, `sober-sandbox` (path dependencies)
 - `tonic` — gRPC server framework
 - `prost` — Protocol Buffers codegen
 - `tonic-build` (build dependency) — proto compilation
@@ -56,13 +57,12 @@ sober-agent/src/
   `ContextLoadFailed`, `LlmCallFailed`
 - `From<AgentError>` for `AppError`
 
-### 5. Implement Tool trait in tools/mod.rs
+### 5. Set up tools/mod.rs
 
-- `Tool` trait definition (`metadata()` returning `ToolMetadata`, `execute()`)
-- `ToolMetadata` struct (name, description, input_schema, context_modifying)
-- `ToolOutput` struct (content, is_error)
-- `ToolError` type
-- Re-export from crate root
+- Re-export `Tool`, `ToolMetadata`, `ToolOutput`, `ToolError` from `sober-core::types::tool`
+  (the canonical definition lives in sober-core so that sober-mcp can also implement `Tool`
+  without depending on sober-agent)
+- Add `context_modifying: bool` to `ToolMetadata` if not already present in sober-core
 
 ### 6. Implement tools/web_search.rs
 

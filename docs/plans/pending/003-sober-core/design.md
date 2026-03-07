@@ -272,3 +272,12 @@ sufficient TTL-based caching with minimal operational overhead.
 | `opentelemetry_sdk` | OTEL SDK runtime |
 | `metrics` | In-process metric registry |
 | `metrics-exporter-prometheus` | Prometheus `/metrics` endpoint |
+
+---
+
+## Open Questions
+
+- **Centralized DB access:** v1 has each crate using `sqlx` directly with its own
+  queries and model types. Post-v1, consider centralizing pool management and
+  potentially model types in `sober-core` to reduce duplication and ensure
+  consistent query patterns. The trade-off is coupling vs convenience.

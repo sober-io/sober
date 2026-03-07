@@ -122,11 +122,11 @@ Replaces naive markdown-based memory with a compact binary format:
 
 ```
 ┌─────────────────────────────────────┐
-│ BCF Header (16 bytes)               │
+│ BCF Header (28 bytes)               │
 │  Magic: 0x53 0xD5 0x42 0x45 (SÕBE) │
 │  Version: u16                       │
 │  Flags: u16 (encrypted, compressed) │
-│  Scope ID: u64                      │
+│  Scope ID: UUID (128-bit LE)        │
 │  Chunk Count: u32                   │
 ├─────────────────────────────────────┤
 │ Chunk Table (variable)              │

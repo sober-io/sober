@@ -73,8 +73,9 @@ profiling shows it matters, without changing any callers.
 
 ## Session Cleanup
 
-- Expired sessions are cleaned up periodically by a background tokio task that runs every hour.
-- On login, expired sessions for that specific user are also cleaned up.
+- Expired sessions are cleaned up periodically by a `sober-scheduler` job (see plan 015).
+  `sober-auth` exposes `SessionStore::cleanup_expired()` but does not own the scheduling.
+- On login, expired sessions for that specific user are also cleaned up inline.
 
 ## Error Type
 
@@ -95,7 +96,6 @@ Each variant maps to the appropriate `AppError` variant (`Unauthorized`, `Forbid
 | `sober-crypto` | `hash_password`, `verify_password` |
 | `sober-core` | `AppError`, shared types, config |
 | `sqlx` | Database queries |
-| `moka` | In-memory session/user cache |
 | `rand` | Session token generation |
 | `sha2` | Session token hashing |
 | `axum` | Middleware, extractors |

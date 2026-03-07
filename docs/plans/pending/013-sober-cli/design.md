@@ -37,7 +37,6 @@ sober
 ## User Management
 
 - **create**: Validates email/username format, prompts for password on stdin (with confirmation), hashes with Argon2id via sober-crypto.
-  - Decision: add sober-crypto as a dependency for sober-cli. The CLAUDE.md rule says "sober-cli depends on sober-core only" but this is impractical for password hashing. Update the rule to "sober-cli depends on sober-core and sober-crypto".
 - **approve**: Sets user status to Active, assigns the `user` role.
 - **disable**: Sets user status to Disabled, expires all sessions.
 - **enable**: Sets user status to Active (only if previously Disabled).

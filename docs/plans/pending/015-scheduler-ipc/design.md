@@ -106,15 +106,10 @@ service SchedulerService {
     rpc ForceRun(ForceRunRequest) returns (Empty);
 }
 
-// shared/proto/agent.proto (agent is a gRPC server from day one — C1)
-service AgentService {
-    rpc ExecuteTask(TaskRequest) returns (TaskResponse);
-    rpc WakeAgent(WakeRequest) returns (WakeResponse);
-}
-
-// TaskRequest includes context fields so the agent can resolve
-// user identity, conversation, and workspace for prompt assembly.
-// See plan.md step 1 for full proto definition.
+// shared/proto/agent.proto — canonical definition in 011-sober-agent/design.md.
+// AgentService exposes: HandleMessage (chat streaming), ExecuteTask (scheduler
+// jobs streaming), WakeAgent (lightweight nudge). Full proto with all message
+// types and context fields defined there.
 ```
 
 ### Security -- Two Layers

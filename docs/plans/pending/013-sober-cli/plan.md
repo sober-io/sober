@@ -32,6 +32,4 @@
 - `cargo clippy` passes clean.
 - Exit codes: 0 on success, 1 on error.
 
-## Architecture Doc Updates
 
-Update CLAUDE.md and ARCHITECTURE.md dependency rule: sober-cli now depends on sober-core AND sober-crypto.

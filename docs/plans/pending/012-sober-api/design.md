@@ -88,9 +88,10 @@ Tower layers, applied in order:
 ## Rate Limiting
 
 moka-backed sliding window counter (in-memory). v1 runs on a single node —
-Redis is unnecessary. Use `Arc<RwLock<HashMap<String, TokenBucket>>>` for
-per-client rate state. Upgrade to Redis when horizontal scaling requires
-shared rate limit state across instances.
+Redis is unnecessary. Use `moka::sync::Cache<String, u32>` with TTL matching
+the rate window — moka handles expiry, eviction, and concurrent access
+internally. Upgrade to Redis when horizontal scaling requires shared rate
+limit state across instances.
 
 | Endpoint               | Limit         | Scope  |
 |------------------------|---------------|--------|

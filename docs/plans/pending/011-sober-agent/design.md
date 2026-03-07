@@ -28,8 +28,12 @@ service AgentService {
   // AgentEvents (text deltas, tool calls, done signal).
   rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
 
-  // Scheduler jobs — unary or server-streaming depending on job type.
+  // Scheduler jobs — server-streaming RPC for scheduled task execution.
   rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
+
+  // Wake — lightweight unary RPC for the scheduler to nudge the agent
+  // (e.g., trigger self-evolution check, re-evaluate pending proposals).
+  rpc WakeAgent(WakeRequest) returns (WakeResponse);
 }
 
 message HandleMessageRequest {
@@ -41,7 +45,21 @@ message HandleMessageRequest {
 message ExecuteTaskRequest {
   string task_id = 1;
   string task_type = 2;
-  bytes payload = 3;   // JSON-encoded task-specific data
+  bytes payload = 3;            // JSON-encoded task-specific data
+  string caller_identity = 4;   // signed service identity token
+  // Context fields for agent resolution
+  optional string user_id = 5;
+  optional string conversation_id = 6;
+  optional string workspace_id = 7;
+}
+
+message WakeRequest {
+  string reason = 1;
+  string caller_identity = 2;
+}
+
+message WakeResponse {
+  bool accepted = 1;
 }
 
 message AgentEvent {
@@ -146,28 +164,16 @@ pub enum AgentEvent {
 
 ## Tool Trait
 
-```rust
-#[async_trait]
-pub trait Tool: Send + Sync {
-    fn metadata(&self) -> ToolMetadata;
-    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError>;
-}
+The `Tool` trait, `ToolMetadata`, `ToolOutput`, and `ToolError` are defined in
+`sober-core::types::tool` (see 003-sober-core/design.md). This is the canonical
+location so that both `sober-agent` and `sober-mcp` (which does not depend on
+`sober-agent`) can implement and use the trait.
 
-pub struct ToolMetadata {
-    pub name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
-    /// If true, executing this tool invalidates loaded context and triggers
-    /// a full prompt rebuild (re-embed query, re-load context, re-assemble).
-    /// Examples: memory write, file write.
-    pub context_modifying: bool,
-}
-
-pub struct ToolOutput {
-    pub content: String,
-    pub is_error: bool,
-}
-```
+`sober-agent` re-exports these types and adds `context_modifying: bool` to
+`ToolMetadata` — tools tagged with `context_modifying: true` trigger a full
+prompt rebuild (re-embed query, re-load context, re-assemble) after execution.
+Examples: memory write, file write. Non-context-modifying tools (e.g.,
+web_search, fetch_url) just append results and re-call the LLM.
 
 ## v1 Built-in Tools
 
