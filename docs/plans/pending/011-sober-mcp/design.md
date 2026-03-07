@@ -249,12 +249,16 @@ pub struct McpConfig {
 }
 ```
 
-Loaded from environment / config file alongside `AgentConfig`.
+`McpConfig` is an infrastructure/operational config section within `AppConfig`
+(defined in `sober-core`, loaded from env vars at startup). It controls behavioral
+defaults for MCP client operations. This is separate from per-user MCP server
+registrations, which are runtime data.
 
-### User-facing configuration
+### User-facing configuration (runtime, not AppConfig)
 
 MCP server configs stored per-user in the `mcp_servers` database table
-(schema defined in 003-sober-core):
+(schema defined in 003-sober-core). Loaded by `sober-mcp` at runtime when
+processing requests for a specific user:
 
 - `command`, `args`, `env`, `enabled` per server
 - No command allowlist for v1 (self-hosted, single admin)

@@ -43,6 +43,18 @@ every: 1h    -- importance score decay
 Configurable minimum resolution, defaulting to minute-level. System tasks can opt
 into second-level granularity.
 
+### Configuration
+
+The scheduler uses the `SchedulerConfig` section of `AppConfig` (defined in
+`sober-core`), loaded from environment variables at startup:
+
+| Field | Env var | Default | Purpose |
+|-------|---------|---------|---------|
+| `tick_interval_secs` | `SCHEDULER_TICK_INTERVAL_SECS` | 60 | Main tick loop interval |
+| `agent_socket_path` | `SCHEDULER_AGENT_SOCKET_PATH` | `/run/sober/agent.sock` | Where to reach sober-agent |
+| `admin_socket_path` | `SCHEDULER_ADMIN_SOCKET_PATH` | `/run/sober/scheduler-admin.sock` | Where to bind admin socket |
+| `max_concurrent_jobs` | `SCHEDULER_MAX_CONCURRENT_JOBS` | 10 | Max parallel job execution |
+
 ### Persistence -- Hybrid Model
 
 - **Ephemeral** (in-memory): system housekeeping tasks that re-register on startup.

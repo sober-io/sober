@@ -44,6 +44,18 @@ No configuration framework (e.g., `config` crate) --- direct `std::env::var` cal
 explicit error messages on missing or malformed values. The application fails fast at
 startup if any required variable is absent.
 
+**Scope:** `AppConfig` is strictly for **infrastructure/operational config** --- database
+URLs, ports, API keys, socket paths, timeouts. User-facing and workspace-specific
+configuration (`.sober/config.toml`, MCP server registrations, sandbox policy overrides)
+is loaded at runtime by the crates that own those concerns, not at process startup.
+
+**Single monolithic struct:** All three binaries (`sober-api`, `sober-agent`,
+`sober-scheduler`) load the same `AppConfig`. Unused sections are harmless --- the
+simplicity of one struct outweighs the cost of a few unused fields in memory. Each
+section's `load()` method handles its own validation; binaries that don't need a
+section's env vars won't fail if those vars are absent (all section fields have
+defaults or are wrapped in `Option` when appropriate).
+
 Config sections:
 
 | Section | Struct | Key variables |
@@ -56,6 +68,13 @@ Config sections:
 | SearXNG | `SearxngConfig` | `SEARXNG_URL` |
 | Admin | `AdminConfig` | `ADMIN_SOCKET_PATH` (default: `/run/sober/admin.sock`) |
 | Memory | `MemoryConfig` | `MEMORY_DECAY_HALF_LIFE_DAYS` (default: 30), `MEMORY_RETRIEVAL_BOOST` (default: 0.2), `MEMORY_PRUNE_THRESHOLD` (default: 0.1) |
+| Scheduler | `SchedulerConfig` | `SCHEDULER_TICK_INTERVAL_SECS` (default: 60), `SCHEDULER_AGENT_SOCKET_PATH`, `SCHEDULER_ADMIN_SOCKET_PATH`, `SCHEDULER_MAX_CONCURRENT_JOBS` (default: 10) |
+| MCP | `McpConfig` | `MCP_REQUEST_TIMEOUT_SECS` (default: 30), `MCP_MAX_CONSECUTIVE_FAILURES` (default: 3), `MCP_IDLE_TIMEOUT_SECS` (default: 300) |
+
+**Not in `AppConfig`** (loaded at runtime by owning crates):
+- Workspace config (`.sober/config.toml`) --- loaded by `sober-workspace` per-request
+- MCP server registrations (per-user) --- loaded by `sober-mcp` from database
+- Sandbox policy overrides --- loaded by `sober-sandbox` from TOML resolution chain
 
 ### Domain Primitives --- ID Newtypes
 
@@ -175,7 +194,6 @@ depend on them without `sober-cli` depending on `sober-api`.
 - `AgentStatus` --- query running agent state
 - `TaskQueueStatus` --- query task queue depth and state
 - `PruneMemory { scope_id: Option<ScopeId> }` --- trigger memory pruning
-- `ReloadConfig` --- hot-reload configuration
 - `Shutdown { graceful: bool }` --- initiate shutdown
 
 **`AdminResponse`** --- enum of responses:

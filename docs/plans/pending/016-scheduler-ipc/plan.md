@@ -305,7 +305,8 @@ In `grpc/mod.rs`:
 ### 10. Implement scheduler main.rs
 
 Startup sequence:
-1. Load config (socket paths, DB URL, tick interval)
+1. Load `AppConfig` from env (uses `SchedulerConfig` section for tick interval,
+   socket paths, max concurrent jobs; `DatabaseConfig` for DB URL)
 2. Initialize tracing
 3. Connect to PostgreSQL
 4. Run pending migrations

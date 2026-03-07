@@ -1569,55 +1569,67 @@ git commit -m "feat(workspace): add artifact tracking with state machine and rel
 
 ---
 
-## Task 11: Integration --- Wire Workspace into sober-core Config
+## Task 11: Integration --- Workspace System Defaults in sober-workspace
+
+**Design decision:** Workspace operational defaults (`data_root`, retention periods,
+stale thresholds) are **not** part of `AppConfig`. `AppConfig` is strictly for
+infrastructure config (DB URLs, ports, API keys). Workspace defaults are owned by
+`sober-workspace` and loaded at runtime. Per-project settings come from
+`.sober/config.toml` via the workspace config resolution chain.
 
 **Files:**
-- Modify: `backend/crates/sober-core/src/config.rs`
+- Modify: `backend/crates/sober-workspace/src/config.rs`
 
-**Step 1: Add workspace config section**
+**Step 1: Define workspace system defaults**
 
-Add to `AppConfig`:
+In `sober-workspace`:
 
 ```rust
-pub struct WorkspaceSystemConfig {
+/// Operational defaults for the workspace system.
+/// These are compile-time defaults overridable via `.sober/config.toml`.
+pub struct WorkspaceDefaults {
     /// Root directory for all workspace data.
-    /// Default: /var/lib/sober
     pub data_root: PathBuf,
     /// Blob retention period after workspace deletion (days).
-    /// Default: 90
     pub blob_retention_days: u32,
     /// Workspace archive grace period before hard delete (days).
-    /// Default: 30
     pub archive_grace_period_days: u32,
     /// Worktree stale threshold (hours).
-    /// Default: 24
     pub worktree_stale_hours: u32,
+}
+
+impl Default for WorkspaceDefaults {
+    fn default() -> Self {
+        Self {
+            data_root: PathBuf::from("/var/lib/sober"),
+            blob_retention_days: 90,
+            archive_grace_period_days: 30,
+            worktree_stale_hours: 24,
+        }
+    }
 }
 ```
 
-Load from env vars:
-- `SOBER_DATA_ROOT` (default: `/var/lib/sober`)
-- `SOBER_BLOB_RETENTION_DAYS` (default: `90`)
-- `SOBER_ARCHIVE_GRACE_PERIOD_DAYS` (default: `30`)
-- `SOBER_WORKTREE_STALE_HOURS` (default: `24`)
+These defaults are used as fallbacks when `.sober/config.toml` does not specify
+a value. Environment variable overrides (`SOBER_DATA_ROOT`, etc.) are read by
+`sober-workspace` directly --- not routed through `AppConfig`.
 
-**Step 2: Test config loading**
+**Step 2: Test defaults**
 
 ```rust
 #[test]
-fn workspace_config_defaults() {
-    // No env vars set for workspace config
-    let config = AppConfig::load_from_env().unwrap();
-    assert_eq!(config.workspace.data_root, PathBuf::from("/var/lib/sober"));
-    assert_eq!(config.workspace.blob_retention_days, 90);
+fn workspace_defaults() {
+    let defaults = WorkspaceDefaults::default();
+    assert_eq!(defaults.data_root, PathBuf::from("/var/lib/sober"));
+    assert_eq!(defaults.blob_retention_days, 90);
 }
 ```
 
 **Step 3: Commit**
 
 ```bash
-git add backend/crates/sober-core/src/config.rs
-git commit -m "feat(core): add workspace system configuration"
+git add backend/crates/sober-workspace/src/config.rs
+git commit -m "feat(workspace): add workspace system defaults"
 ```
 
 ---

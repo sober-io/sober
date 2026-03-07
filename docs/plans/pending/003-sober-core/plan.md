@@ -52,15 +52,22 @@ backend/crates/sober-core/src/
 ### 4. Implement `config.rs`
 
 - Define `AppConfig` with nested section structs: `DatabaseConfig`, `QdrantConfig`,
-  `LlmConfig`, `ServerConfig`, `AuthConfig`, `SearxngConfig`, `AdminConfig`.
+  `LlmConfig`, `ServerConfig`, `AuthConfig`, `SearxngConfig`, `AdminConfig`,
+  `SchedulerConfig`, `McpConfig`, `MemoryConfig`.
   (No `RedisConfig` in v1 --- use `moka` for in-memory caching instead.)
+- `AppConfig` is strictly infrastructure/operational config. User-facing config
+  (workspace `.sober/config.toml`, per-user MCP server registrations, sandbox policy
+  overrides) is loaded at runtime by owning crates, not here.
+- All three binaries (`sober-api`, `sober-agent`, `sober-scheduler`) load the same
+  monolithic `AppConfig`. Unused sections are harmless. Each section handles its own
+  validation --- binaries that don't need a section's env vars won't fail if absent.
 - Implement `AppConfig::load_from_env() -> Result<Self, AppError>`:
   - Call `dotenvy::dotenv().ok()` (non-fatal if `.env` is absent).
   - Read each required variable with `std::env::var`, mapping missing vars to
     `AppError::Validation` with a descriptive message.
   - Parse numeric values (port, max connections, TTL) with clear error messages.
   - Apply defaults where documented (e.g., `ADMIN_SOCKET_PATH`).
-- All config fields are owned (`String`, `u16`, `u32`, etc.) --- no lifetimes.
+- All config fields are owned (`String`, `u16`, `u32`, `PathBuf`, etc.) --- no lifetimes.
 
 ### 5. Implement `types/ids.rs`
 
@@ -117,7 +124,7 @@ backend/crates/sober-core/src/
 
 - `AdminCommand` enum (serde-tagged):
   - `Ping`, `AgentStatus`, `TaskQueueStatus`, `PruneMemory { scope_id: Option<ScopeId> }`,
-    `ReloadConfig`, `Shutdown { graceful: bool }`.
+    `Shutdown { graceful: bool }`.
 - `AdminResponse` enum (serde-tagged):
   - `Pong`, `Status(serde_json::Value)`, `Ok`, `Error(String)`.
 - Both derive `Debug`, `Clone`, `Serialize`, `Deserialize`.
