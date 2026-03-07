@@ -44,3 +44,17 @@ lint:
 # Audit dependencies for known vulnerabilities
 audit:
     cd backend && cargo audit -q
+
+# Tag and push a release (e.g., just release 0.2.0)
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TAG="v{{ version }}"
+    if git rev-parse "$TAG" >/dev/null 2>&1; then
+        echo "Error: tag $TAG already exists" >&2
+        exit 1
+    fi
+    echo "Creating release $TAG..."
+    git tag -a "$TAG" -m "Release $TAG"
+    git push origin "$TAG"
+    echo "Pushed $TAG — GitHub Actions will build and publish the release."
