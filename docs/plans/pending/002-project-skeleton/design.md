@@ -178,14 +178,14 @@ builds:
 
 - Test database pool (connects to test DB, runs migrations, transaction-per-test)
 - Test config with sensible defaults
-- Mock LLM engine — deferred to plan 007 (sober-llm) when the `LlmEngine` trait exists
-- Mock gRPC server — deferred to plan 011 (sober-agent) when the gRPC service is defined
+- Mock LLM engine — deferred to plan 008 (sober-llm) when the `LlmEngine` trait exists
+- Mock gRPC server — deferred to plan 012 (sober-agent) when the gRPC service is defined
 
 Downstream crates add `sober-core = { ..., features = ["test-utils"] }` in
 `[dev-dependencies]`. Actual mock implementations are filled in as each crate
 is implemented (plans 003+).
 
-For Linux-specific tests (bwrap sandboxing in plan 008): use `#[cfg(target_os = "linux")]`
+For Linux-specific tests (bwrap sandboxing in plan 009): use `#[cfg(target_os = "linux")]`
 and detect bwrap availability at test runtime.
 
 ---

@@ -1,0 +1,104 @@
+# 006 — sober-auth
+
+**Date:** 2026-03-06
+
+Authentication and authorization crate for Sober. Depends on `sober-crypto` (password hashing)
+and `sober-core` (shared types, errors, config). v1 is password-only with admin-approved registration.
+
+---
+
+## Registration Flow
+
+- User submits email, username, and password via `POST /auth/register`.
+- Password validated (minimum 12 characters), then hashed via sober-crypto's Argon2id.
+- User created with status `Pending` in the database.
+- Response: 201 with message "Registration pending approval".
+- Admin approves via `sober user approve <email>` CLI command, which changes status to `Active`.
+- No email verification in v1 (no email provider configured).
+
+## Login Flow
+
+- User submits email and password via `POST /auth/login`.
+- Look up user by email, then check account status:
+  - `Pending` — return error "account pending approval".
+  - `Disabled` — return error "account disabled".
+  - `Active` — proceed.
+- Verify password via sober-crypto.
+- Generate a 256-bit random session token using `rand`.
+- Hash the token with SHA-256 and store the hash in the `sessions` table with a configurable
+  expiry (default: 30 days).
+- Set an `HttpOnly`, `Secure`, `SameSite=Lax` cookie containing the raw token.
+- Return 200 with user info.
+
+## Session Validation (Middleware)
+
+- Extract the session token from the cookie.
+- SHA-256 hash the token and look it up via the `SessionRepo` trait.
+- Verify the session has not expired.
+- Load user and roles from the database.
+- Attach user context to request extensions via axum `Extension<AuthUser>`.
+- `AuthUser` struct fields: `user_id`, `email`, `username`, `roles` (`Vec<String>`),
+  `scopes` (`Vec<ScopeId>`).
+
+### SessionRepo trait
+
+The `SessionRepo` trait is defined in `sober-core` (alongside other repo traits).
+
+```rust
+#[async_trait]
+pub trait SessionRepo: Send + Sync {
+    async fn get(&self, token_hash: &[u8]) -> Result<Option<Session>, AuthError>;
+    async fn create(&self, session: &Session) -> Result<(), AuthError>;
+    async fn delete(&self, token_hash: &[u8]) -> Result<(), AuthError>;
+    async fn cleanup_expired(&self) -> Result<u64, AuthError>;
+}
+```
+
+v1 implementation: `PgSessionRepo` in `sober-db` — direct PostgreSQL lookups. No in-memory cache.
+A single DB query per request is fast enough with connection pooling for a single-node
+deployment. The trait boundary allows adding a moka-cached implementation later when
+profiling shows it matters, without changing any callers.
+
+## Logout
+
+- Delete session from the database via `SessionRepo::delete()`.
+- Clear the session cookie.
+
+## RBAC
+
+- Roles stored in `roles` and `user_roles` tables (see database schema).
+- v1 defines two roles: `user` and `admin`.
+- Permission checks via an axum extractor: `RequireRole("admin")` — returns 403 if the
+  authenticated user lacks the required role.
+- Scope resolution: when a user authenticates, resolve their permitted scopes (their own
+  user scope plus any group scopes they belong to).
+
+## Session Cleanup
+
+- Expired sessions are cleaned up periodically by a `sober-scheduler` job (see plan 016).
+  `sober-auth` exposes `SessionRepo::cleanup_expired()` but does not own the scheduling.
+- On login, expired sessions for that specific user are also cleaned up inline.
+
+## Error Type
+
+`AuthError` enum with the following variants:
+
+- `InvalidCredentials` — wrong email or password.
+- `AccountPending` — account exists but has not been approved.
+- `AccountDisabled` — account has been disabled by an admin.
+- `SessionExpired` — session token is no longer valid.
+- `InsufficientRole(String)` — user lacks the required role.
+
+Each variant maps to the appropriate `AppError` variant (`Unauthorized`, `Forbidden`, etc.).
+
+## Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `sober-crypto` | `hash_password`, `verify_password` |
+| `sober-core` | `AppError`, shared types, config, repo traits (`SessionRepo`) |
+| `rand` | Session token generation |
+| `sha2` | Session token hashing |
+| `axum` | Middleware, extractors |
+| `tower` | `Layer`, `Service` for middleware |
+| `axum-extra` | `CookieJar` for cookie handling |

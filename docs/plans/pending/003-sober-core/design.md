@@ -275,9 +275,13 @@ sufficient TTL-based caching with minimal operational overhead.
 
 ---
 
-## Open Questions
+## Resolved: DB Access Pattern
 
-- **Centralized DB access:** v1 has each crate using `sqlx` directly with its own
-  queries and model types. Post-v1, consider centralizing pool management and
-  potentially model types in `sober-core` to reduce duplication and ensure
-  consistent query patterns. The trade-off is coupling vs convenience.
+**Decision:** Centralized via `sober-db` crate (see 005-sober-db/design.md).
+
+- **Repo traits** defined in `sober-core` (`UserRepo`, `SessionRepo`, `MessageRepo`, etc.).
+- **PostgreSQL implementations** (`PgUserRepo`, etc.) live in `sober-db`.
+- **Domain types** (`User`, `Session`, `Message`, etc.) defined in `sober-core`.
+  Row types (`FromRow` structs) are private to `sober-db`.
+- Library crates depend only on `sober-core` traits; `sqlx` is contained to `sober-db`.
+- Binaries construct concrete repos at startup and inject as `Arc<dyn Repo>`.

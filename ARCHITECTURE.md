@@ -83,6 +83,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | Crate | Responsibility |
 |-------|---------------|
 | `sober-core` | Shared types, error handling, config, domain primitives |
+| `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`) |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
 | `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. |
@@ -98,15 +99,24 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 
 ### Crate Dependency Flow
 
-Cross-crate dependencies flow downward:
+Cross-crate dependencies flow downward. Binary/service crates depend on `sober-db`
+for PostgreSQL access; library crates depend on `sober-core` for repository traits
+and domain types (never on `sqlx` directly).
 
 ```
-sober-api → sober-agent → sober-mind → sober-memory / sober-crypto → sober-core
-                 ↓              ↓
-            sober-sandbox  sober-sandbox
-                 ↑
-            sober-mcp
+sober-api ──► sober-db ──► sober-core
+          ──► sober-auth ──► sober-core
+sober-agent ──► sober-db ──► sober-core
+            ──► sober-mind ──► sober-memory / sober-crypto ──► sober-core
+                    ↓                ↓
+               sober-sandbox    sober-sandbox
+                    ↑
+               sober-mcp
+sober-scheduler ──► sober-db ──► sober-core
 ```
+
+`sober-db` is the only crate that depends on `sqlx`. It implements the repository
+traits defined in `sober-core`, keeping SQL concerns isolated from business logic.
 
 `sober-agent` and `sober-mcp` depend on `sober-sandbox` for process-level isolation.
 `sober-scheduler` and `sober-agent` do NOT depend on each other as crates — they

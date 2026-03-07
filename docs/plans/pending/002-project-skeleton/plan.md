@@ -164,15 +164,15 @@ flag. This module provides shared test helpers for all downstream crates:
 - `test_db()` — creates a test PostgreSQL connection pool using `DATABASE_URL` from env,
   runs migrations, returns `PgPool`. Wraps each test in a transaction that rolls back.
 - `test_config()` — returns an `AppConfig` populated with test defaults.
-- `MockLlmEngine` — **deferred to plan 007** (sober-llm) when the `LlmEngine` trait exists.
+- `MockLlmEngine` — **deferred to plan 008** (sober-llm) when the `LlmEngine` trait exists.
   Stub module with a TODO comment only in this plan.
-- `MockGrpcServer` — **deferred to plan 011** (sober-agent) when the gRPC service is defined.
+- `MockGrpcServer` — **deferred to plan 012** (sober-agent) when the gRPC service is defined.
   Stub module with a TODO comment only in this plan.
 
 Each downstream crate can depend on `sober-core` with `features = ["test-utils"]` in
 `[dev-dependencies]`.
 
-For bwrap-dependent tests (plan 008): gate behind `#[cfg(target_os = "linux")]` and skip
+For bwrap-dependent tests (plan 009): gate behind `#[cfg(target_os = "linux")]` and skip
 in CI if namespaces are not available (check with `bwrap --version` in a setup step).
 
 - [ ] `test_utils` module exists behind feature flag
