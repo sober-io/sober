@@ -17,6 +17,7 @@ Thumbs.db
 
 # Editor
 .idea/
+.vscode/
 *.swp
 
 # sqlx offline query cache — DO commit this
