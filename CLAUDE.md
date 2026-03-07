@@ -37,17 +37,24 @@ sober/
 
 **Prerequisites:** Node.js 24, Rust (latest stable), pnpm, Docker
 
+> **Token-saving:** All interactive commands use quiet flags to suppress verbose
+> output and only print errors. This keeps Claude Code context lean.
+
 ```bash
 # Backend
-cd backend && cargo build
-cargo test --workspace
-cargo run -p sober-api          # Start API server
-cargo run --bin sober -- --help # CLI admin tool (offline ops)
-cargo run --bin soberctl -- --help # CLI admin tool (runtime ops)
+cd backend && cargo build -q
+cargo test --workspace -q
+cargo run -q -p sober-api          # Start API server
+cargo run -q --bin sober -- --help  # CLI admin tool (offline ops)
+cargo run -q --bin soberctl -- --help # CLI admin tool (runtime ops)
+
+# Linting (errors only)
+cargo clippy -q -- -D warnings
+cargo fmt --check -q
 
 # Frontend
-cd frontend && pnpm install
-pnpm dev                        # Dev server on :5173
+cd frontend && pnpm install --silent
+pnpm dev                            # Dev server on :5173
 
 # Full stack (Docker)
 docker compose up -d
@@ -56,6 +63,38 @@ docker compose up -d
 ---
 
 ## Development Rules
+
+### Quiet Output (Token-Saving)
+
+When running build, test, lint, or check commands interactively, **always** use
+quiet flags to suppress verbose output and only show errors:
+
+| Tool | Quiet flag | Example |
+|------|-----------|---------|
+| `cargo build` | `-q` | `cargo build -q` |
+| `cargo test` | `-q` | `cargo test -p sober-core -q` |
+| `cargo clippy` | `-q` | `cargo clippy -q -- -D warnings` |
+| `cargo check` | `-q` | `cargo check -q` |
+| `cargo fmt` | `-q` | `cargo fmt --check -q` |
+| `cargo doc` | `-q` | `cargo doc -p sober-core --no-deps -q` |
+| `cargo audit` | `-q` | `cargo audit -q` |
+| `pnpm install` | `--silent` | `pnpm install --silent` |
+| `pnpm build` | `--silent` | `pnpm build --silent` |
+| `pnpm test` | `--silent` | `pnpm test --silent` |
+
+This applies to all commands in plan verification steps, acceptance criteria,
+and ad-hoc development — even if a plan doc doesn't include the `-q` flag.
+CI workflows are the exception: they should use normal verbosity for debugging.
+
+### Verify Before Claiming Done
+
+Always verify your work before claiming it is complete:
+
+- After writing or modifying code, run `cargo build -q` to confirm it compiles.
+- After implementing a feature or fix, run relevant tests: `cargo test -p <crate> -q`.
+- After any code change, run `cargo clippy -q -- -D warnings` on affected crates.
+- For frontend changes, run `pnpm check` and `pnpm test --silent`.
+- Never say "this should work" — run it and confirm it does.
 
 ### Dependencies
 
@@ -99,7 +138,7 @@ docker compose up -d
 
 ### Code Style
 
-- Rust: `cargo fmt` + `cargo clippy -- -D warnings`
+- Rust: `cargo fmt --check -q` + `cargo clippy -q -- -D warnings`
 - Svelte: `prettier` + `eslint`
 - All public functions must have doc comments.
 - Error types must be explicit — no `.unwrap()` in library code.

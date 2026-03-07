@@ -90,14 +90,17 @@ Use named volumes for persistent data. Set environment variables from `.env`.
 
 ### 6. Create `justfile`
 
-Define commands at the project root:
+Define commands at the project root. All commands use quiet flags (`-q`,
+`--silent`) to suppress verbose output and only print errors — this saves
+tokens in interactive AI tool sessions:
+
 - `dev` — start backend (cargo-watch) and frontend (pnpm dev) concurrently
-- `build` — cargo build --release + pnpm build
-- `test` — cargo test --workspace + pnpm test
-- `check` — cargo check + cargo clippy + pnpm check
-- `fmt` — cargo fmt + pnpm format
-- `lint` — cargo clippy -- -D warnings + pnpm lint
-- `audit` — cargo audit
+- `build` — `cargo build -q --release` + `pnpm build --silent`
+- `test` — `cargo test --workspace -q` + `pnpm test --silent`
+- `check` — `cargo check -q` + `cargo clippy -q -- -D warnings` + `pnpm check`
+- `fmt` — `cargo fmt --check -q` + `pnpm format`
+- `lint` — `cargo clippy -q -- -D warnings` + `pnpm lint`
+- `audit` — `cargo audit -q`
 
 - [ ] File exists at project root
 - [ ] All commands are defined (syntactically valid)
