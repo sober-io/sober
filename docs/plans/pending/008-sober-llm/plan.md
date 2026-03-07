@@ -27,6 +27,7 @@ Add `sober-llm` to the Cargo workspace. Configure `Cargo.toml` with dependencies
 - `async-trait`
 - `tracing`
 - `thiserror`
+- `agent-client-protocol-schema` (ACP type definitions and traits)
 
 ### 2. Create module structure
 
@@ -38,9 +39,12 @@ backend/crates/sober-llm/src/
   engine.rs           -- LlmEngine trait definition
   client.rs           -- OpenAiCompatibleEngine implementation
   streaming.rs        -- SSE parser for OpenAI streaming format
+  acp.rs              -- AcpEngine: send prompts to ACP agents (Claude Code, Kimi Code)
+  jsonrpc.rs          -- JSON-RPC 2.0 transport over stdio (for ACP)
 ```
 
-No provider-specific subdirectories — one client handles all providers.
+Two engine implementations: `OpenAiCompatibleEngine` (direct HTTP) and `AcpEngine`
+(prompts via local ACP agents). ACP is the primary priority for initial testing.
 
 ### 3. Implement error.rs
 
@@ -121,7 +125,43 @@ for optional fields to keep requests clean.
 - Error mapping: verify `LlmError` variants map to correct `AppError`
 - OpenRouter header detection: verify headers are added when base_url contains "openrouter"
 
-### 9. Integration test
+### 9. Implement acp.rs — ACP engine (PRIMARY PRIORITY)
+
+`AcpEngine` struct — sends prompts to local ACP-compatible agents (Claude Code, Kimi Code):
+
+- Fields: `command`, `args`, `env`, child process handle, JSON-RPC transport
+- `new(config: &AcpConfig) -> Self` — stores config, does not spawn yet
+- `spawn()` — start the agent subprocess, set up stdin/stdout JSON-RPC transport
+- `LlmEngine::complete()`:
+  1. Ensure subprocess is running (spawn if needed)
+  2. Send `initialize` + `session/new` if no active session
+  3. Send `session/prompt` with the `CompletionRequest` messages
+  4. Collect `session/update` notifications until turn completes
+  5. Map accumulated response to `CompletionResponse`
+- `LlmEngine::stream()`:
+  1. Same setup as `complete()`
+  2. Yield `session/update` notifications as `StreamChunk`s via async stream
+- `LlmEngine::embed()` — return `LlmError::Unsupported`
+- `capabilities()` — derive from `initialize` response
+- `model_id()` — return `"acp:{agent_name}/{version}"`
+- `Drop` — kill subprocess
+
+### 10. Implement jsonrpc.rs — JSON-RPC 2.0 transport
+
+- Write JSON-RPC requests to child stdin (newline-delimited)
+- Read JSON-RPC responses and notifications from child stdout
+- Parse and dispatch: responses (have `id`) vs notifications (no `id`)
+- Handle `session/update` notifications: message chunks, tool calls, status updates
+- Timeout handling for unresponsive agents
+
+### 11. ACP unit tests
+
+- JSON-RPC message serialization/deserialization roundtrip
+- `session/update` notification parsing (message chunks, tool calls)
+- Response accumulation: multiple `session/update` chunks → single `CompletionResponse`
+- Mock subprocess: feed pre-recorded JSON-RPC responses, verify `AcpEngine` behavior
+
+### 12. Integration tests — OpenAI-compatible
 
 - Requires `LLM_BASE_URL` and `LLM_API_KEY` env vars; skip with `#[ignore]` if not set
 - Send a simple completion ("What is 2+2?"), verify response has text content
@@ -130,7 +170,15 @@ for optional fields to keep requests clean.
   contains tool_calls
 - Verify `Usage` fields are populated
 
-### 10. Verify
+### 13. Integration tests — ACP
+
+- Requires `claude` or `kimi` binary on PATH; skip with `#[ignore]` if not available
+- Spawn agent via ACP, send a simple prompt, verify response
+- Verify streaming works (collect `session/update` chunks)
+- Verify graceful shutdown (subprocess cleanup)
+- Test with both Claude Code and Kimi Code if available
+
+### 14. Verify
 
 - `cargo clippy -p sober-llm -- -D warnings` — clean
 - `cargo test -p sober-llm` — all unit tests pass
@@ -140,6 +188,7 @@ for optional fields to keep requests clean.
 
 ## Acceptance Criteria
 
+### OpenAI-compatible engine
 - [ ] `LlmEngine` trait compiles and is object-safe (usable as `dyn LlmEngine`)
 - [ ] `OpenAiCompatibleEngine` works with OpenRouter (tested manually or via integration test)
 - [ ] SSE streaming parser handles the OpenAI streaming format correctly
@@ -147,5 +196,16 @@ for optional fields to keep requests clean.
 - [ ] Tool call responses deserialize correctly (including `arguments` as JSON string)
 - [ ] Rate limit errors include `retry_after` when the header is present
 - [ ] `embed()` works when provider supports it, returns `Unsupported` when not
+
+### ACP engine (primary priority)
+- [ ] `AcpEngine` spawns an ACP agent subprocess and communicates via JSON-RPC/stdio
+- [ ] Prompts sent via `session/prompt` produce valid `CompletionResponse`
+- [ ] Streaming works: `session/update` notifications yield `StreamChunk`s
+- [ ] Works with Claude Code (`claude acp`)
+- [ ] Works with Kimi Code (`kimi acp`)
+- [ ] Subprocess is cleaned up on drop / shutdown
+- [ ] `embed()` returns `LlmError::Unsupported`
+
+### General
 - [ ] `cargo clippy` is clean with `-D warnings`
 - [ ] All public items have doc comments

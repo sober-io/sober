@@ -95,7 +95,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
-| `sober-llm` | Multi-provider LLM abstraction (OpenAI-compatible: OpenRouter, Ollama, OpenAI, etc.) |
+| `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
 | `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage, config parsing. Used by agent, CLI, and scheduler. |
 
 ### Crate Dependency Flow
@@ -296,9 +296,23 @@ trait LlmEngine: Send + Sync {
 }
 ```
 
-Supported backends: Anthropic (Claude), OpenAI, Ollama (local), and any
-OpenAI-compatible API. Router selects engine based on task type, cost,
-latency requirements, and user preferences.
+### Transport Modes
+
+Two engine implementations:
+
+| Engine | Transport | Use Case |
+|--------|-----------|----------|
+| `OpenAiCompatibleEngine` | HTTP to provider API | Direct access to OpenRouter, OpenAI, Ollama, etc. |
+| `AcpEngine` | JSON-RPC/stdio to local agent | Send prompts through Claude Code, Kimi Code, Goose, etc. |
+
+**ACP (Agent Client Protocol)** support lets Sõber send prompts to locally installed
+coding agents via the [Agent Client Protocol](https://agentclientprotocol.com/).
+Sõber acts as an ACP client — spawns the agent as a subprocess and communicates
+via JSON-RPC 2.0 over stdio. This leverages the agent's existing API keys and
+capabilities without separate credential configuration.
+
+Router selects engine based on task type, cost, latency requirements, and user
+preferences.
 
 ---
 

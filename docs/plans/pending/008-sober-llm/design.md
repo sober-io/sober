@@ -286,6 +286,108 @@ Maps to `AppError::Internal` at the API boundary.
 
 ---
 
+## ACP Engine (Agent Client Protocol)
+
+In addition to direct HTTP calls via `OpenAiCompatibleEngine`, `sober-llm` supports
+sending prompts **through local ACP-compatible coding agents** — Claude Code, Kimi Code,
+Goose, or any agent implementing the [Agent Client Protocol](https://agentclientprotocol.com/).
+
+Sõber acts as an **ACP client**: it spawns the agent as a subprocess and communicates
+via JSON-RPC 2.0 over stdio, exactly like an editor would. This lets Sõber leverage
+the user's existing agent installations and API keys without configuring provider
+credentials separately.
+
+### Why ACP?
+
+- **Use existing agent credentials** — if the user has Claude Code or Kimi Code
+  installed with API keys configured, Sõber can send prompts through them directly.
+- **Access agent capabilities** — tool use, file access, terminal execution — all
+  mediated by the agent's own permission model.
+- **Framework-agnostic** — ACP is an open standard (JetBrains + Zed). Any
+  ACP-compatible agent works.
+- **Primary testing target** — Claude Code and Kimi Code for initial validation.
+
+### AcpEngine
+
+```rust
+pub struct AcpEngine {
+    command: String,          // e.g., "claude", "kimi"
+    args: Vec<String>,        // e.g., ["acp"] for kimi
+    env: HashMap<String, String>,
+    child: Option<Child>,     // spawned subprocess
+    // JSON-RPC transport over stdin/stdout
+}
+```
+
+### ACP Session Flow
+
+```
+1. SPAWN    → Start agent subprocess (e.g., `claude acp` or `kimi acp`)
+2. INIT     → Send `initialize` JSON-RPC request, negotiate capabilities
+3. AUTH     → Send `authenticate` if agent requires it
+4. SESSION  → Send `session/new` to create a conversation
+5. PROMPT   → Send `session/prompt` with user messages
+6. STREAM   → Receive `session/update` notifications (message chunks, tool calls)
+7. COLLECT  → Accumulate response into CompletionResponse
+8. REPEAT   → Send more prompts in the same session, or create new sessions
+9. SHUTDOWN → Kill subprocess on drop
+```
+
+### Mapping ACP to LlmEngine
+
+The `AcpEngine` implements the same `LlmEngine` trait:
+
+| LlmEngine method | ACP mapping |
+|-------------------|-------------|
+| `complete()` | `session/prompt` → collect all `session/update` chunks → return `CompletionResponse` |
+| `stream()` | `session/prompt` → yield `session/update` notifications as `StreamChunk`s |
+| `embed()` | Returns `LlmError::Unsupported` (ACP agents don't expose embedding endpoints) |
+| `capabilities()` | Derived from `initialize` response capabilities |
+| `model_id()` | Agent name + version from `initialize` (e.g., `"acp:claude-code/1.0"`) |
+
+### Provider Configuration Examples
+
+| Agent       | Command                  | Args      | Notes                       |
+|-------------|--------------------------|-----------|------------------------------|
+| Claude Code | `claude`                 | `["acp"]` | Uses user's Anthropic key    |
+| Kimi Code   | `kimi`                   | `["acp"]` | Uses user's Moonshot key     |
+| Goose       | `goose`                  | `["acp"]` | Uses configured LLM provider |
+
+Configured via `sober-core`'s `AcpConfig`:
+
+```rust
+pub struct AcpConfig {
+    pub name: String,            // display name
+    pub command: String,         // binary to spawn
+    pub args: Vec<String>,       // CLI arguments
+    pub env: HashMap<String, String>, // extra env vars
+}
+```
+
+Env vars parsed by `sober-core`:
+
+```env
+ACP_AGENT_COMMAND=claude
+ACP_AGENT_ARGS=acp
+# Or for Kimi:
+# ACP_AGENT_COMMAND=kimi
+# ACP_AGENT_ARGS=acp
+```
+
+### JSON-RPC Transport
+
+Communication uses JSON-RPC 2.0 over the subprocess's stdin/stdout:
+
+- **Requests** → write JSON-RPC request to child stdin, terminated by newline
+- **Responses** → read JSON-RPC response from child stdout
+- **Notifications** → `session/update` notifications arrive on stdout between
+  request and response (streaming content, tool call status, etc.)
+
+Uses the `agent-client-protocol-schema` Rust crate (v0.11.0+) for type definitions
+and the `Client` trait.
+
+---
+
 ## Dependencies
 
 | Crate         | Purpose                                     |
@@ -299,3 +401,4 @@ Maps to `AppError::Internal` at the API boundary.
 | `async-trait` | Async trait support                         |
 | `tracing`     | Structured logging                          |
 | `thiserror`   | Error types                                 |
+| `agent-client-protocol-schema` | ACP type definitions and traits |
