@@ -41,7 +41,11 @@ jobs:
         working-directory: backend
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude sober-db
+        working-directory: backend
+
+      - name: Test sober-db (unit tests only, integration tests require DATABASE_URL)
+        run: cargo test -p sober-db --lib
         working-directory: backend
 
       # TODO: re-enable cargo-audit step once CI times are acceptable
