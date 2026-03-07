@@ -98,7 +98,10 @@ async fn user_create_with_nonexistent_role_returns_not_found(pool: PgPool) {
         password_hash: "hash".into(),
     };
 
-    let err = repo.create_with_role(input, "nonexistent").await.unwrap_err();
+    let err = repo
+        .create_with_role(input, "nonexistent")
+        .await
+        .unwrap_err();
     assert!(matches!(err, sober_core::error::AppError::NotFound(_)));
 }
 
@@ -112,7 +115,9 @@ async fn user_update_status(pool: PgPool) {
     };
     let user = repo.create(input).await.unwrap();
 
-    repo.update_status(user.id, UserStatus::Active).await.unwrap();
+    repo.update_status(user.id, UserStatus::Active)
+        .await
+        .unwrap();
     let updated = repo.get_by_id(user.id).await.unwrap();
     assert_eq!(updated.status, UserStatus::Active);
 }
@@ -234,7 +239,10 @@ async fn conversation_crud(pool: PgPool) {
     let list = conv_repo.list_by_user(user.id).await.unwrap();
     assert_eq!(list.len(), 1);
 
-    conv_repo.update_title(conv.id, "Updated Title").await.unwrap();
+    conv_repo
+        .update_title(conv.id, "Updated Title")
+        .await
+        .unwrap();
     let updated = conv_repo.get_by_id(conv.id).await.unwrap();
     assert_eq!(updated.title.as_deref(), Some("Updated Title"));
 
@@ -394,7 +402,10 @@ async fn workspace_lifecycle(pool: PgPool) {
         .await
         .unwrap();
 
-    let ws = repo.create(user.id, "My Project", "/home/user/project").await.unwrap();
+    let ws = repo
+        .create(user.id, "My Project", "/home/user/project")
+        .await
+        .unwrap();
     assert_eq!(ws.name, "My Project");
     assert!(!ws.archived);
 
@@ -447,17 +458,26 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
         .unwrap();
     assert_eq!(repo.name, "my-repo");
 
-    let found = repo_repo.find_by_path("/tmp/ws/my-repo", user.id).await.unwrap();
+    let found = repo_repo
+        .find_by_path("/tmp/ws/my-repo", user.id)
+        .await
+        .unwrap();
     assert!(found.is_some());
 
-    let not_found = repo_repo.find_by_path("/nonexistent", user.id).await.unwrap();
+    let not_found = repo_repo
+        .find_by_path("/nonexistent", user.id)
+        .await
+        .unwrap();
     assert!(not_found.is_none());
 
     let repos = repo_repo.list_by_workspace(ws.id).await.unwrap();
     assert_eq!(repos.len(), 1);
 
     // Worktrees
-    let wt = wt_repo.create(repo.id, "feat/test", "/tmp/ws/.worktrees/test").await.unwrap();
+    let wt = wt_repo
+        .create(repo.id, "feat/test", "/tmp/ws/.worktrees/test")
+        .await
+        .unwrap();
     assert!(!wt.stale);
 
     let wts = wt_repo.list_by_repo(repo.id).await.unwrap();
@@ -467,7 +487,10 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
 
     // list_stale finds worktrees created before a given time (and not already stale)
     // Our worktree is now stale=true so it shouldn't appear
-    let stale = wt_repo.list_stale(Utc::now() + chrono::Duration::hours(1)).await.unwrap();
+    let stale = wt_repo
+        .list_stale(Utc::now() + chrono::Duration::hours(1))
+        .await
+        .unwrap();
     assert!(stale.is_empty());
 
     wt_repo.delete(wt.id).await.unwrap();
@@ -537,7 +560,10 @@ async fn artifact_crud_and_relations(pool: PgPool) {
     assert_eq!(all.len(), 2);
 
     // Update state
-    art_repo.update_state(art1.id, ArtifactState::Committed).await.unwrap();
+    art_repo
+        .update_state(art1.id, ArtifactState::Committed)
+        .await
+        .unwrap();
     let updated = art_repo.get_by_id(art1.id).await.unwrap();
     assert_eq!(updated.state, ArtifactState::Committed);
 

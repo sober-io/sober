@@ -133,14 +133,12 @@ impl sober_core::types::UserRepo for PgUserRepo {
     }
 
     async fn update_status(&self, id: UserId, status: UserStatus) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE users SET status = $1, updated_at = now() WHERE id = $2",
-        )
-        .bind(status)
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query("UPDATE users SET status = $1, updated_at = now() WHERE id = $2")
+            .bind(status)
+            .bind(id.as_uuid())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("user".into()));
@@ -150,14 +148,12 @@ impl sober_core::types::UserRepo for PgUserRepo {
     }
 
     async fn get_password_hash(&self, id: UserId) -> Result<String, AppError> {
-        let row: (String,) = sqlx::query_as(
-            "SELECT password_hash FROM users WHERE id = $1",
-        )
-        .bind(id.as_uuid())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?
-        .ok_or_else(|| AppError::NotFound("user".into()))?;
+        let row: (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = $1")
+            .bind(id.as_uuid())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?
+            .ok_or_else(|| AppError::NotFound("user".into()))?;
 
         Ok(row.0)
     }

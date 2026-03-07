@@ -44,10 +44,7 @@ impl sober_core::types::WorktreeRepo for PgWorktreeRepo {
         Ok(row.into())
     }
 
-    async fn list_by_repo(
-        &self,
-        repo_id: WorkspaceRepoId,
-    ) -> Result<Vec<Worktree>, AppError> {
+    async fn list_by_repo(&self, repo_id: WorkspaceRepoId) -> Result<Vec<Worktree>, AppError> {
         let rows = sqlx::query_as::<_, WorktreeRow>(
             "SELECT id, repo_id, branch, path, stale, created_at \
              FROM worktrees WHERE repo_id = $1 \

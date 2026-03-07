@@ -67,11 +67,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn update_next_run(
-        &self,
-        id: JobId,
-        next_run_at: DateTime<Utc>,
-    ) -> Result<(), AppError> {
+    async fn update_next_run(&self, id: JobId, next_run_at: DateTime<Utc>) -> Result<(), AppError> {
         let result = sqlx::query("UPDATE jobs SET next_run_at = $1 WHERE id = $2")
             .bind(next_run_at)
             .bind(id.as_uuid())
@@ -102,12 +98,13 @@ impl sober_core::types::JobRepo for PgJobRepo {
     }
 
     async fn cancel(&self, id: JobId) -> Result<(), AppError> {
-        let result =
-            sqlx::query("UPDATE jobs SET status = 'cancelled' WHERE id = $1 AND status != 'cancelled'")
-                .bind(id.as_uuid())
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query(
+            "UPDATE jobs SET status = 'cancelled' WHERE id = $1 AND status != 'cancelled'",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("job".into()));

@@ -81,14 +81,13 @@ impl sober_core::types::ArtifactRepo for PgArtifactRepo {
     }
 
     async fn update_state(&self, id: ArtifactId, state: ArtifactState) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE artifacts SET state = $1, updated_at = now() WHERE id = $2",
-        )
-        .bind(state)
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result =
+            sqlx::query("UPDATE artifacts SET state = $1, updated_at = now() WHERE id = $2")
+                .bind(state)
+                .bind(id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("artifact".into()));

@@ -105,10 +105,7 @@ pub trait ConversationRepo: Send + Sync {
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
     /// Deletes a conversation and all its messages.
-    fn delete(
-        &self,
-        id: ConversationId,
-    ) -> impl Future<Output = Result<(), AppError>> + Send;
+    fn delete(&self, id: ConversationId) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
@@ -236,10 +233,7 @@ pub trait WorkspaceRepoRepo: Send + Sync {
     ) -> impl Future<Output = Result<Option<WorkspaceRepoEntry>, AppError>> + Send;
 
     /// Deletes a registered repo.
-    fn delete(
-        &self,
-        id: WorkspaceRepoId,
-    ) -> impl Future<Output = Result<(), AppError>> + Send;
+    fn delete(&self, id: WorkspaceRepoId) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Worktree operations.
@@ -280,10 +274,7 @@ pub trait ArtifactRepo: Send + Sync {
     ) -> impl Future<Output = Result<Artifact, AppError>> + Send;
 
     /// Finds an artifact by ID.
-    fn get_by_id(
-        &self,
-        id: ArtifactId,
-    ) -> impl Future<Output = Result<Artifact, AppError>> + Send;
+    fn get_by_id(&self, id: ArtifactId) -> impl Future<Output = Result<Artifact, AppError>> + Send;
 
     /// Lists artifacts in a workspace with optional filters.
     fn list_by_workspace(

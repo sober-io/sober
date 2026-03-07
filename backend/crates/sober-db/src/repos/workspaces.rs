@@ -72,13 +72,12 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
     }
 
     async fn archive(&self, id: WorkspaceId) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE workspaces SET archived = true, updated_at = now() WHERE id = $1",
-        )
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result =
+            sqlx::query("UPDATE workspaces SET archived = true, updated_at = now() WHERE id = $1")
+                .bind(id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("workspace".into()));
@@ -88,13 +87,12 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
     }
 
     async fn restore(&self, id: WorkspaceId) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE workspaces SET archived = false, updated_at = now() WHERE id = $1",
-        )
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result =
+            sqlx::query("UPDATE workspaces SET archived = false, updated_at = now() WHERE id = $1")
+                .bind(id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("workspace".into()));

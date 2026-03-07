@@ -20,11 +20,7 @@ impl PgConversationRepo {
 }
 
 impl sober_core::types::ConversationRepo for PgConversationRepo {
-    async fn create(
-        &self,
-        user_id: UserId,
-        title: Option<&str>,
-    ) -> Result<Conversation, AppError> {
+    async fn create(&self, user_id: UserId, title: Option<&str>) -> Result<Conversation, AppError> {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, ConversationRow>(
             "INSERT INTO conversations (id, user_id, title) \
@@ -70,14 +66,13 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
     }
 
     async fn update_title(&self, id: ConversationId, title: &str) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2",
-        )
-        .bind(title)
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result =
+            sqlx::query("UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2")
+                .bind(title)
+                .bind(id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("conversation".into()));
