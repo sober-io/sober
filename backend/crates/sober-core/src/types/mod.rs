@@ -2,12 +2,17 @@
 
 pub mod access;
 pub mod api;
+pub mod domain;
 pub mod enums;
 pub mod ids;
 pub mod tool;
 
 pub use access::{CallerContext, Permission, TriggerKind};
 pub use api::ApiResponse;
+pub use domain::{
+    Artifact, AuditLogEntry, Conversation, Job, McpServerConfig, Message, Role, Session, User,
+    UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+};
 pub use enums::{
     ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, ScopeKind, UserStatus,
 };

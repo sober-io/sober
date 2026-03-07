@@ -1,0 +1,305 @@
+//! Domain entity types used across all crates.
+//!
+//! These are the canonical representations of database entities. They are
+//! returned by repo trait methods and consumed by business logic. Row types
+//! (`FromRow` structs) are private to `sober-db` and convert into these.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use super::enums::{ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus};
+use super::ids::{
+    ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
+    SessionId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+};
+
+/// A user account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    /// Unique identifier.
+    pub id: UserId,
+    /// Email address (unique).
+    pub email: String,
+    /// Display username (unique).
+    pub username: String,
+    /// Account lifecycle status.
+    pub status: UserStatus,
+    /// When the account was created.
+    pub created_at: DateTime<Utc>,
+    /// When the account was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An authorization role.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Role {
+    /// Unique identifier.
+    pub id: RoleId,
+    /// Role name (unique, e.g. "user", "admin").
+    pub name: String,
+    /// Human-readable description.
+    pub description: String,
+    /// When the role was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A role assigned to a user, optionally scoped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserRole {
+    /// The user who holds this role.
+    pub user_id: UserId,
+    /// The role being granted.
+    pub role_id: RoleId,
+    /// Scope of the grant. Nil UUID means global.
+    pub scope_id: ScopeId,
+    /// Who granted this role (if known).
+    pub granted_by: Option<UserId>,
+    /// When the role was granted.
+    pub granted_at: DateTime<Utc>,
+}
+
+/// An active user session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    /// Unique identifier.
+    pub id: SessionId,
+    /// The user who owns this session.
+    pub user_id: UserId,
+    /// SHA-256 hash of the session token.
+    pub token_hash: String,
+    /// When the session expires.
+    pub expires_at: DateTime<Utc>,
+    /// When the session was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A chat conversation owned by a user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Conversation {
+    /// Unique identifier.
+    pub id: ConversationId,
+    /// The user who owns this conversation.
+    pub user_id: UserId,
+    /// Optional conversation title.
+    pub title: Option<String>,
+    /// When the conversation was created.
+    pub created_at: DateTime<Utc>,
+    /// When the conversation was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A message within a conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    /// Unique identifier.
+    pub id: MessageId,
+    /// The conversation this message belongs to.
+    pub conversation_id: ConversationId,
+    /// Author type (user, assistant, system, tool).
+    pub role: MessageRole,
+    /// Message content.
+    pub content: String,
+    /// Tool call requests (JSON), if this is an assistant message with tool use.
+    pub tool_calls: Option<serde_json::Value>,
+    /// Tool execution result (JSON), if this is a tool response.
+    pub tool_result: Option<serde_json::Value>,
+    /// Approximate token count for context budgeting.
+    pub token_count: Option<i32>,
+    /// When the message was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A per-user MCP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Unique identifier.
+    pub id: McpServerId,
+    /// The user who owns this configuration.
+    pub user_id: UserId,
+    /// Display name for the MCP server.
+    pub name: String,
+    /// Command to start the server.
+    pub command: String,
+    /// Command-line arguments.
+    pub args: serde_json::Value,
+    /// Environment variables.
+    pub env: serde_json::Value,
+    /// Whether the server is enabled.
+    pub enabled: bool,
+    /// When the configuration was created.
+    pub created_at: DateTime<Utc>,
+    /// When the configuration was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A scheduled job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Job {
+    /// Unique identifier.
+    pub id: JobId,
+    /// Human-readable job name.
+    pub name: String,
+    /// Cron expression or interval description.
+    pub schedule: String,
+    /// Job lifecycle status.
+    pub status: JobStatus,
+    /// The job payload (JSON) — defines what to execute.
+    pub payload: serde_json::Value,
+    /// When the job should next run.
+    pub next_run_at: Option<DateTime<Utc>>,
+    /// When the job last ran.
+    pub last_run_at: Option<DateTime<Utc>>,
+    /// When the job was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A workspace containing related projects and artifacts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    /// Unique identifier.
+    pub id: WorkspaceId,
+    /// The user who owns this workspace.
+    pub user_id: UserId,
+    /// Display name.
+    pub name: String,
+    /// Root filesystem path.
+    pub root_path: String,
+    /// Whether the workspace is archived.
+    pub archived: bool,
+    /// When the workspace was created.
+    pub created_at: DateTime<Utc>,
+    /// When the workspace was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A git repository registered within a workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceRepoEntry {
+    /// Unique identifier.
+    pub id: WorkspaceRepoId,
+    /// The workspace this repo belongs to.
+    pub workspace_id: WorkspaceId,
+    /// Display name.
+    pub name: String,
+    /// Filesystem path to the repository.
+    pub path: String,
+    /// Default branch name.
+    pub default_branch: String,
+    /// When the repo was registered.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A git worktree linked to a workspace repo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Worktree {
+    /// Unique identifier.
+    pub id: WorktreeId,
+    /// The repo this worktree belongs to.
+    pub repo_id: WorkspaceRepoId,
+    /// Branch name.
+    pub branch: String,
+    /// Filesystem path to the worktree.
+    pub path: String,
+    /// Whether the worktree has been marked stale.
+    pub stale: bool,
+    /// When the worktree was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A workspace artifact (code, document, config, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    /// Unique identifier.
+    pub id: ArtifactId,
+    /// The workspace this artifact belongs to.
+    pub workspace_id: WorkspaceId,
+    /// Display name.
+    pub name: String,
+    /// Artifact kind.
+    pub kind: ArtifactKind,
+    /// Lifecycle state.
+    pub state: ArtifactState,
+    /// Filesystem path (relative to workspace root).
+    pub path: String,
+    /// When the artifact was created.
+    pub created_at: DateTime<Utc>,
+    /// When the artifact was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An entry in the append-only audit log.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogEntry {
+    /// Unique identifier.
+    pub id: AuditLogId,
+    /// The user who performed the action (if known).
+    pub actor_id: Option<UserId>,
+    /// Action name (e.g. "user.create", "session.delete").
+    pub action: String,
+    /// Target entity type (e.g. "user", "conversation").
+    pub target_type: Option<String>,
+    /// Target entity ID.
+    pub target_id: Option<uuid::Uuid>,
+    /// Additional details (JSON).
+    pub details: Option<serde_json::Value>,
+    /// IP address of the actor.
+    pub ip_address: Option<String>,
+    /// When the action occurred.
+    pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_serializes_correctly() {
+        let user = User {
+            id: UserId::new(),
+            email: "test@example.com".into(),
+            username: "testuser".into(),
+            status: UserStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        assert_eq!(json["email"], "test@example.com");
+        assert_eq!(json["status"], "active");
+    }
+
+    #[test]
+    fn message_with_tool_calls() {
+        let msg = Message {
+            id: MessageId::new(),
+            conversation_id: ConversationId::new(),
+            role: MessageRole::Assistant,
+            content: "Let me search for that.".into(),
+            tool_calls: Some(
+                serde_json::json!([{"name": "web_search", "input": {"query": "rust"}}]),
+            ),
+            tool_result: None,
+            token_count: Some(42),
+            created_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert!(json["tool_calls"].is_array());
+        assert_eq!(json["token_count"], 42);
+    }
+
+    #[test]
+    fn job_serializes_correctly() {
+        let job = Job {
+            id: JobId::new(),
+            name: "memory_prune".into(),
+            schedule: "0 */6 * * *".into(),
+            status: JobStatus::Active,
+            payload: serde_json::json!({"scope": "all"}),
+            next_run_at: Some(Utc::now()),
+            last_run_at: None,
+            created_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&job).unwrap();
+        assert_eq!(json["status"], "active");
+        assert_eq!(json["name"], "memory_prune");
+    }
+}
