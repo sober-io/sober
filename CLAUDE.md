@@ -102,6 +102,13 @@ Always verify your work before claiming it is complete:
 - For frontend changes, run `pnpm check` and `pnpm test --silent`.
 - Never say "this should work" — run it and confirm it does.
 
+### User Interaction
+
+- When you need user input or a decision, **always use the AskUserQuestion tool** — do not
+  embed questions in regular output and hope for a response.
+- If there is long context the user needs to understand before answering, **print the context
+  first**, then follow up with the AskUserQuestion tool.
+
 ### Dependencies
 
 - Always use the **latest stable versions** of all dependencies.
@@ -128,14 +135,16 @@ Always verify your work before claiming it is complete:
 - **Feature development happens exclusively in git worktrees.** Never develop features on the main branch directly.
 - **Worktrees live inside the project** at `.worktrees/` (gitignored). Never create sibling directories.
 - For every new feature or task:
-  1. Create a new worktree: `git worktree add .worktrees/<feature-name> -b feat/<feature-name>`
+  1. Create a new worktree: `git worktree add .worktrees/<plan-number>-<feature-name> -b feat/<plan-number>-<feature-name>`
+     (e.g., `git worktree add .worktrees/003-auth -b feat/003-auth`)
   2. Do all development in that worktree.
   3. When the feature is ready, create a PR from the feature branch.
   4. When the PR is approved and merged, close the worktree: `git worktree remove .worktrees/<feature-name>`
 - Keep worktrees short-lived. One feature per worktree, one worktree per feature.
 - The main worktree stays clean — used only for reviews, releases, and non-feature work.
 
-**Branch naming** — prefix matches commit type:
+**Branch naming** — prefix matches commit type, and **must include the plan number** when
+working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 
 | Prefix | Use case |
 |--------|----------|
@@ -155,7 +164,7 @@ Always verify your work before claiming it is complete:
 - Self-merge is OK (solo project) — self-review before merging.
 - Use **squash merge** to keep main history linear and clean.
 - Never add `Co-Authored-By` or any co-author trailers to commits.
-- PRs based on plans must include the **phase number as a prefix** in the title (e.g., "P1: …", "P2: …").
+- PRs based on plans must include the **plan number as a prefix** in the title (e.g., "#005: …", "#006: …").
 
 **Plan lifecycle tied to git:**
 - When starting a plan, move it from `pending/` to `active/` in the first commit of the feature branch.
