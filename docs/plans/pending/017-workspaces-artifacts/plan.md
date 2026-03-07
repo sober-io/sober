@@ -774,7 +774,7 @@ git commit -m "feat(workspace): add filesystem initialization for .sober/ direct
 - Modify: `backend/crates/sober-workspace/src/blob.rs`
 - Test: inline `#[cfg(test)]` module
 
-Content-addressed blob storage under `/var/lib/sober/blobs/`.
+Content-addressed blob storage under `/opt/sober/data/blobs/`.
 
 **Step 1: Write failing tests**
 
@@ -1601,7 +1601,7 @@ pub struct WorkspaceDefaults {
 impl Default for WorkspaceDefaults {
     fn default() -> Self {
         Self {
-            data_root: PathBuf::from("/var/lib/sober"),
+            data_root: PathBuf::from("/opt/sober/data"),
             blob_retention_days: 90,
             archive_grace_period_days: 30,
             worktree_stale_hours: 24,
@@ -1620,7 +1620,7 @@ a value. Environment variable overrides (`SOBER_DATA_ROOT`, etc.) are read by
 #[test]
 fn workspace_defaults() {
     let defaults = WorkspaceDefaults::default();
-    assert_eq!(defaults.data_root, PathBuf::from("/var/lib/sober"));
+    assert_eq!(defaults.data_root, PathBuf::from("/opt/sober/data"));
     assert_eq!(defaults.blob_retention_days, 90);
 }
 ```

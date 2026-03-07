@@ -51,7 +51,7 @@ blob storage, or inline depending on type.
 ### System-level
 
 ```
-/var/lib/sober/
+/opt/sober/data/
 +-- agent/                              # agent's global workspace (git-tracked)
 |   +-- .git/
 |   +-- soul/
@@ -161,7 +161,7 @@ pub struct PromptContext {
 
 ## 5. Agent State: Global vs Per-Workspace
 
-### Global agent state (`/var/lib/sober/agent/`)
+### Global agent state (`/opt/sober/data/agent/`)
 
 Git-tracked. Contains state that doesn't belong to any user or workspace:
 
@@ -449,9 +449,9 @@ worktree. No queuing.
 
 ### New filesystem paths
 
-- `/var/lib/sober/agent/` --- agent global workspace
-- `/var/lib/sober/workspaces/` --- all user/group workspaces
-- `/var/lib/sober/blobs/` --- content-addressed blob storage
+- `/opt/sober/data/agent/` --- agent global workspace
+- `/opt/sober/data/workspaces/` --- all user/group workspaces
+- `/opt/sober/data/blobs/` --- content-addressed blob storage
 - `~/.sober/` --- user-level config and soul layer
 
 ### Modified designs
@@ -479,7 +479,7 @@ Split across four crates following the repo trait pattern (see 005-sober-db):
 - **`sober-db`** — PostgreSQL implementations: `PgWorkspaceRepo`, `PgArtifactRepo`,
   `PgWorktreeRepo`, `PgWorkspaceRepoRepo`. Row types private to `sober-db`.
 - **`sober-workspace`** — Business logic independent of the agent loop: filesystem
-  layout management (`/var/lib/sober/workspaces/`), git operations via `git2`
+  layout management (`/opt/sober/data/workspaces/`), git operations via `git2`
   (clone, worktree create/remove, branch management), blob storage (content-addressed
   store with sha2 hashing), workspace config parsing (`.sober/` directory), and
   stale worktree detection. Depends on `sober-core` (types + repo traits) but NOT

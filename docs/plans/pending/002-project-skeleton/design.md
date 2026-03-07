@@ -314,3 +314,208 @@ Two modes:
 - `target/`
 - `node_modules/`
 - `.git/`
+
+---
+
+## Bare-Metal Installation & Service Management
+
+For non-Docker deployments, a single `install.sh` script handles downloading binaries
+from GitHub Releases, creating the directory structure, collecting configuration,
+setting up a system user, and installing systemd services. The same script handles
+fresh installs and upgrades.
+
+### Directory Layout
+
+```
+/opt/sober/bin/              # all binaries (api, agent, scheduler, web, sober, soberctl)
+/opt/sober/data/             # persistent data (default, configurable)
+  ├── workspaces/            # user workspaces (git repos, project files)
+  ├── blobs/                 # blob storage
+  └── keys/                  # cryptographic keypairs
+/etc/sober/                  # config.toml + .env (secrets)
+/run/sober/                  # UDS sockets (tmpfs, cleared on reboot)
+/usr/local/bin/sober         # symlink → /opt/sober/bin/sober
+/usr/local/bin/soberctl      # symlink → /opt/sober/bin/soberctl
+/etc/systemd/system/         # sober-*.service + sober.target
+```
+
+All paths under `/opt/sober/data/` are defaults, individually overridable in
+`config.toml`.
+
+### Configuration
+
+Two files in `/etc/sober/`:
+
+**`config.toml`** — structural configuration:
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 3000
+
+[storage]
+data_dir = "/opt/sober/data"
+# workspaces_dir = "/mnt/big-disk/sober/workspaces"
+# blobs_dir = "/mnt/big-disk/sober/blobs"
+
+[database]
+max_connections = 10
+
+[qdrant]
+url = "http://localhost:6334"
+
+[logging]
+level = "info"
+```
+
+**`.env`** — secrets only, mode `0600`:
+
+```bash
+DATABASE_URL=postgres://sober:password@localhost/sober
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=anthropic/claude-sonnet-4
+```
+
+Services load `config.toml` for structure and `.env` for secrets. The `.env` is
+referenced via `EnvironmentFile=` in systemd units.
+
+### User Management
+
+```bash
+# Default: creates `sober` system user
+./install.sh
+
+# Use existing user
+./install.sh --user=myuser
+
+# Non-interactive (automation/Ansible)
+./install.sh --user=sober --yes
+```
+
+- Default `sober` user created with
+  `useradd --system --no-create-home --home-dir /opt/sober/data --shell /usr/sbin/nologin sober`
+- `/opt/sober/` owned by `sober:sober`
+- `/etc/sober/.env` owned by `sober:sober`, mode `0600`
+- `/run/sober/` created via `tmpfiles.d` or systemd `RuntimeDirectory=`
+- Using `--user=root` prints a warning but is allowed
+- No dedicated `--root` flag
+
+### Systemd Services
+
+Individual unit files + a target for group management.
+
+**`sober.target`** — brings up everything:
+
+```ini
+[Unit]
+Description=Sõber AI Agent System
+After=network-online.target
+Wants=sober-agent.service sober-api.service sober-scheduler.service sober-web.service
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Service dependency chain:**
+
+```
+sober-agent.service          (starts first — no deps on other sober services)
+  ├── sober-api.service      (After=sober-agent.service)
+  ├── sober-scheduler.service (After=sober-agent.service)
+  └── sober-web.service      (After=sober-api.service)
+```
+
+**Example unit (`sober-agent.service`):**
+
+```ini
+[Unit]
+Description=Sõber Agent (gRPC)
+After=network-online.target
+PartOf=sober.target
+
+[Service]
+Type=notify
+User=sober
+Group=sober
+ExecStart=/opt/sober/bin/sober-agent
+EnvironmentFile=/etc/sober/.env
+Environment=SOBER_CONFIG=/etc/sober/config.toml
+RuntimeDirectory=sober
+StateDirectory=sober
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/sober/data
+
+[Install]
+WantedBy=sober.target
+```
+
+Usage:
+
+```bash
+systemctl enable --now sober.target    # start everything + enable on boot
+systemctl restart sober-agent          # restart one service
+systemctl status sober-web             # check individual status
+journalctl -u sober-api -f             # follow logs
+```
+
+### Install Script
+
+```bash
+./install.sh [OPTIONS]
+
+Options:
+  --user=<name>        Run services as this user (default: sober, creates if missing)
+  --version=<tag>      Install specific version (default: latest)
+  --yes                Non-interactive mode, skip confirmation prompts
+  --uninstall          Remove binaries and services, preserve config and data
+  --database-url=...   Set DATABASE_URL (skip prompt)
+  --llm-base-url=...   Set LLM_BASE_URL (skip prompt)
+  --llm-api-key=...    Set LLM_API_KEY (skip prompt)
+  --llm-model=...      Set LLM_MODEL (skip prompt)
+```
+
+**Fresh install flow:**
+
+1. Detect OS and architecture (`x86_64`/`aarch64`, Linux only)
+2. Check prerequisites: `systemctl`, `curl`/`wget`
+3. Create system user (if default or `--user` doesn't exist)
+4. Create directory structure (`/opt/sober/`, `/etc/sober/`, etc.)
+5. Download binary archive from GitHub Releases, verify checksum
+6. Extract binaries to `/opt/sober/bin/`, create symlinks in `/usr/local/bin/`
+7. Prompt for required config values (or accept via flags):
+   `DATABASE_URL`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+8. Validate database connection
+9. Write `config.toml` and `.env`
+10. Install systemd unit files and `sober.target`
+11. `systemctl daemon-reload && systemctl enable --now sober.target`
+12. Health check — verify services started
+
+**Upgrade flow (existing install detected):**
+
+1. Detect current version from `/opt/sober/bin/sober-api --version`
+2. Download new binaries
+3. Stop services: `systemctl stop sober.target`
+4. Replace binaries in `/opt/sober/bin/`
+5. Restart services: `systemctl start sober.target`
+6. Health check
+7. Preserve existing config — no prompts for env values
+
+**Uninstall flow (`--uninstall`):**
+
+1. Stop and disable services: `systemctl stop sober.target && systemctl disable sober.target`
+2. Remove systemd unit files and target
+3. `systemctl daemon-reload`
+4. Remove binaries: `/opt/sober/bin/`
+5. Remove symlinks: `/usr/local/bin/sober`, `/usr/local/bin/soberctl`
+6. Print remaining paths:
+   - `Configuration preserved at /etc/sober/`
+   - `Data preserved at /opt/sober/data/`
+   - `To remove manually: rm -rf /etc/sober /opt/sober/data && userdel sober`
