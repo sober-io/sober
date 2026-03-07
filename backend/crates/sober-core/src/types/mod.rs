@@ -6,6 +6,7 @@ pub mod domain;
 pub mod enums;
 pub mod ids;
 pub mod input;
+pub mod repo;
 pub mod tool;
 
 pub use access::{CallerContext, Permission, TriggerKind};
@@ -24,5 +25,9 @@ pub use enums::{
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
     SessionId, ToolId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+};
+pub use repo::{
+    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo,
+    SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{Tool, ToolError, ToolMetadata, ToolOutput};
