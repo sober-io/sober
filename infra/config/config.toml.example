@@ -1,0 +1,18 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+
+[storage]
+data_dir = "/opt/sober/data"
+# Override individual subdirectories:
+# workspaces_dir = "/mnt/big-disk/sober/workspaces"
+# blobs_dir = "/mnt/big-disk/sober/blobs"
+
+[database]
+max_connections = 10
+
+[qdrant]
+url = "http://localhost:6334"
+
+[logging]
+level = "info"

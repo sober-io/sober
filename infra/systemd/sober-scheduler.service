@@ -1,0 +1,24 @@
+[Unit]
+Description=Sober Scheduler (Tick Engine)
+After=network-online.target sober-agent.service
+PartOf=sober.target
+
+[Service]
+Type=notify
+User=sober
+Group=sober
+ExecStart=/opt/sober/bin/sober-scheduler
+EnvironmentFile=/etc/sober/.env
+Environment=SOBER_CONFIG=/etc/sober/config.toml
+RuntimeDirectory=sober
+StateDirectory=sober
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/sober/data
+
+[Install]
+WantedBy=sober.target

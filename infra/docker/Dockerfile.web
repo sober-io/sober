@@ -1,0 +1,24 @@
+FROM node:24-slim AS frontend-builder
+RUN corepack enable
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build
+
+FROM rust:latest AS backend-builder
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY backend/ backend/
+COPY shared/ shared/
+RUN cd backend && cargo build --release -p sober-web
+
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
+COPY --from=backend-builder /build/backend/target/release/sober-web /usr/local/bin/sober-web
+COPY --from=frontend-builder /build/frontend/build /opt/sober/data/static/
+USER sober
+ENTRYPOINT ["sober-web"]

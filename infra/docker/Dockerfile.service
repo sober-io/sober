@@ -1,0 +1,19 @@
+ARG SERVICE=sober-api
+
+FROM rust:latest AS builder
+ARG SERVICE
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY backend/ backend/
+COPY shared/ shared/
+RUN cd backend && cargo build --release -p "${SERVICE}"
+
+FROM debian:trixie-slim
+ARG SERVICE
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
+COPY --from=builder /build/backend/target/release/${SERVICE} /usr/local/bin/${SERVICE}
+USER sober
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/${SERVICE}"]

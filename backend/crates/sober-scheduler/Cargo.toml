@@ -1,0 +1,21 @@
+[package]
+name = "sober-scheduler"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "sober-scheduler"
+path = "src/main.rs"
+
+[dependencies]
+sober-core = { path = "../sober-core" }
+sober-crypto = { path = "../sober-crypto" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }

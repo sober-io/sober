@@ -1,0 +1,16 @@
+[package]
+name = "sober-api"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "sober-api"
+path = "src/main.rs"
+
+[dependencies]
+sober-core = { path = "../sober-core" }
+sober-auth = { path = "../sober-auth" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

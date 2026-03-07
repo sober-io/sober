@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package sober.scheduler.v1;
+
+service SchedulerService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string version = 2;
+}

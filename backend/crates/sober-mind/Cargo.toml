@@ -1,0 +1,12 @@
+[package]
+name = "sober-mind"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+sober-core = { path = "../sober-core" }
+sober-memory = { path = "../sober-memory" }
+sober-crypto = { path = "../sober-crypto" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
