@@ -45,6 +45,7 @@ Twelve stub crates, matching the architecture document:
 | `sober-api` | binary | sober-auth, sober-core |
 | `sober-scheduler` | binary | sober-crypto, sober-core |
 | `sober-cli` | binary | sober-crypto, sober-core |
+| `sober-web` | binary | sober-core |
 
 Binary crates have `main.rs`; library crates have `lib.rs`. `sober-cli` produces
 two binaries (`sober` and `soberctl`) via `[[bin]]` sections.
@@ -145,17 +146,77 @@ directly, and the frontend dev server handles its own requests.
 
 ---
 
-## CI Pipeline
+## CI/CD Pipelines
 
-`.github/workflows/ci.yml` runs on every push and pull request:
+Three GitHub Actions workflows, set up from day one.
 
-1. `cargo fmt --check` — formatting consistency
-2. `cargo clippy -- -D warnings` — lint with warnings as errors
-3. `cargo test --workspace` — all tests
-4. `cargo audit` — dependency vulnerability scan
-5. `pnpm install && pnpm check` — frontend type checking
+### `ci.yml` — Lint, Test, Check
 
-The pipeline uses caching for `~/.cargo` and `target/` to speed up builds.
+**Triggers:** PR opened/updated, push to main
+
+| Job | Steps |
+|-----|-------|
+| `rust-check` | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, `cargo audit` |
+| `frontend-check` | `pnpm install`, `pnpm check` (svelte-check + tsc), `pnpm lint` (prettier + eslint) |
+
+Runs on `ubuntu-latest`. Fast feedback, no artifacts produced. Uses caching for
+`~/.cargo/registry` and `target/`.
+
+### `release.yml` — Binary Builds
+
+**Triggers:** push tag `v*` (e.g., `v0.1.0`)
+
+Build matrix (multi-arch):
+
+| Target | Runner |
+|--------|--------|
+| `x86_64-unknown-linux-gnu` | `ubuntu-latest` |
+| `aarch64-unknown-linux-gnu` | `ubuntu-latest` + `cross` |
+| `x86_64-apple-darwin` | `macos-latest` |
+| `aarch64-apple-darwin` | `macos-latest` |
+
+Produces per-platform tar.gz archives containing all binaries: `sober`, `soberctl`,
+`sober-api`, `sober-agent`, `sober-scheduler`, `sober-web`. Uploaded as GitHub
+Release assets.
+
+### `docker.yml` — Container Images
+
+**Triggers:** push to main (`:latest` tag), push tag `v*` (`:v0.1.0` tag)
+
+Four service images, multi-arch (`linux/amd64`, `linux/arm64`):
+
+| Image | Binary | Purpose |
+|-------|--------|---------|
+| `ghcr.io/.../sober-api` | `sober-api` | API server (headless) |
+| `ghcr.io/.../sober-agent` | `sober-agent` | Agent gRPC server |
+| `ghcr.io/.../sober-scheduler` | `sober-scheduler` | Tick engine |
+| `ghcr.io/.../sober-web` | `sober-web` | Static assets + API reverse proxy |
+
+Multi-stage Dockerfile:
+
+```
+Stage 1: rust:latest          — cargo build --release
+Stage 2: debian:trixie-slim   — copy binary, ca-certificates, create sober user
+```
+
+`sober-web` has an additional first stage:
+
+```
+Stage 0: node:24-slim          — pnpm install && pnpm build (static output)
+Stage 1: rust:latest           — cargo build --release -p sober-web
+Stage 2: debian:trixie-slim    — copy binary + copy static assets
+```
+
+### Caching
+
+All workflows use:
+- `actions/cache` for `~/.cargo/registry` and `target/`
+- Docker layer caching via `docker/build-push-action` cache-to/cache-from
+
+### Registry
+
+GHCR (GitHub Container Registry). Free for private repos with GitHub Actions.
+Seamless transition when repo goes public.
 
 ---
 
@@ -200,6 +261,43 @@ uses them to generate its gRPC server implementation.
 Proto file layout:
 - `shared/proto/sober/agent/v1/agent.proto` — agent service definition
 - `shared/proto/sober/scheduler/v1/scheduler.proto` — scheduler service definition
+
+---
+
+## sober-web Crate
+
+`sober-web` is the single public-facing HTTP entry point. It serves the SvelteKit
+frontend and reverse-proxies API/WebSocket traffic to `sober-api`.
+
+### Routing
+
+```
+Browser -> sober-web (:3000)
+              |-- /api/*     -> proxy to sober-api (UDS or localhost)
+              |-- /ws        -> proxy WebSocket to sober-api
+              |-- /*         -> serve static SvelteKit assets (SPA fallback)
+```
+
+### Asset Serving
+
+Two modes:
+
+- **Embedded (default)** — static assets compiled into the binary via `rust-embed`.
+  Single binary, zero external files. Best for binary distribution.
+- **Directory override** — `sober-web --static-dir /path/to/assets/` serves from
+  filesystem instead. Best for development and custom deployments.
+
+### Deployment Topology
+
+| Process | Port/Socket | Public |
+|---------|-------------|--------|
+| `sober-web` | `:3000` (configurable) | Yes |
+| `sober-api` | UDS or `localhost:8080` | No |
+| `sober-agent` | UDS | No |
+| `sober-scheduler` | UDS | No |
+
+`sober-api` can still be deployed standalone for headless/API-only use cases
+(bots, programmatic access). `sober-web` is the "full stack" entry point.
 
 ---
 

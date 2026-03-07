@@ -1,20 +1,20 @@
-# 020 — Secrets Management, CI/CD & sober-web
+# 020 — Secrets Management
 
 **Date:** 2026-03-07
 **Status:** Pending
-**Scope:** Envelope encryption for user/group secrets, GitHub Actions CI/CD, new `sober-web` crate
+**Scope:** Envelope encryption for user/group secrets, LLM key resolution
+
+CI/CD workflows and `sober-web` crate are covered in [002 — Project Skeleton](../002-project-skeleton/design.md).
 
 ---
 
-## 1. Secrets Management
-
-### Problem
+## Problem
 
 v1 stores LLM API keys as global env vars and MCP credentials as plaintext in the database. Users and groups cannot bring their own provider keys, and there is no encrypted storage for arbitrary secrets.
 
-### Design
+## Design
 
-#### Encryption Model: Server-Side Envelope Encryption
+### Encryption Model: Server-Side Envelope Encryption
 
 Two-layer key hierarchy:
 
@@ -33,7 +33,7 @@ MEK (env var)
 
 **What this protects against:** database-only breach, leaked backups, SQL injection. Does NOT protect against a compromised running server (server holds MEK in memory).
 
-#### Crypto Primitives (`sober-crypto`)
+### Crypto Primitives (`sober-crypto`)
 
 New module extending existing crate:
 
@@ -61,7 +61,7 @@ impl Dek {
 
 Both types use AES-256-GCM from `aws-lc-rs`. MEK wraps DEKs, DEKs wrap data — the types enforce correct usage.
 
-#### Database Schema (`sober-db`)
+### Database Schema (`sober-db`)
 
 ```sql
 CREATE TABLE encryption_keys (
@@ -104,7 +104,7 @@ CREATE TABLE user_secrets (
 - `encrypted_data` — AES-256-GCM ciphertext of a JSON blob containing only the sensitive fields (e.g., `{ "api_key": "sk-..." }` or `{ "client_secret": "ghs_..." }`)
 - `priority` — ordering for provider fallback chains (lower = higher priority). NULL for non-ordered secrets.
 
-#### Example Data
+### Example Data
 
 ```
 Alice's primary LLM key:
@@ -128,7 +128,7 @@ Team1's shared LLM key:
   encrypted_data: encrypt({ "api_key": "sk-..." })
 ```
 
-#### Repository Trait (`sober-core`)
+### Repository Trait (`sober-core`)
 
 ```rust
 #[async_trait]
@@ -149,7 +149,7 @@ pub enum SecretScope {
 }
 ```
 
-#### LLM Key Resolution
+### LLM Key Resolution
 
 Three-tier resolution when the agent needs an LLM provider key:
 
@@ -163,7 +163,7 @@ First available key is used. On provider failure (rate limit, auth error), try n
 
 The system built-in provider chain follows the same multi-provider-with-priority model but is purely config-based (env vars / config file), not stored in the database.
 
-#### Key Rotation
+### Key Rotation
 
 **DEK rotation (per-user, automated):**
 - `sober-scheduler` job, configurable interval
@@ -181,137 +181,10 @@ The system built-in provider chain follows the same multi-provider-with-priority
 
 ---
 
-## 2. CI/CD — GitHub Actions
-
-### Workflows
-
-#### `ci.yml` — Lint, Test, Check
-
-**Triggers:** PR opened/updated, push to main
-
-| Job | Steps |
-|-----|-------|
-| `rust-check` | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --workspace`, `cargo audit` |
-| `frontend-check` | `pnpm install`, `pnpm check` (svelte-check + tsc), `pnpm lint` (prettier + eslint) |
-
-Runs on `ubuntu-latest`. Fast feedback, no artifacts produced.
-
-#### `release.yml` — Binary Builds
-
-**Triggers:** push tag `v*`
-
-Build matrix:
-
-| Target | Runner |
-|--------|--------|
-| `x86_64-unknown-linux-gnu` | `ubuntu-latest` |
-| `aarch64-unknown-linux-gnu` | `ubuntu-latest` + `cross` |
-| `x86_64-apple-darwin` | `macos-latest` |
-| `aarch64-apple-darwin` | `macos-latest` |
-
-Produces per-platform archives containing: `sober`, `soberctl`, `sober-api`, `sober-agent`, `sober-scheduler`, `sober-web`. Uploaded as GitHub Release assets.
-
-#### `docker.yml` — Container Images
-
-**Triggers:** push to main (`:latest`), push tag `v*` (`:v0.1.0`)
-
-Four service images, multi-arch (`linux/amd64`, `linux/arm64`):
-
-| Image | Binary |
-|-------|--------|
-| `ghcr.io/.../sober-api` | API server (headless) |
-| `ghcr.io/.../sober-agent` | Agent gRPC server |
-| `ghcr.io/.../sober-scheduler` | Tick engine |
-| `ghcr.io/.../sober-web` | Static assets + API reverse proxy |
-
-Multi-stage Dockerfile:
-
-```
-Stage 1: rust:latest          — cargo build --release
-Stage 2: debian:trixie-slim   — copy binary, ca-certificates, create sober user
-```
-
-`sober-web` has an additional first stage:
-
-```
-Stage 0: node:24-slim          — pnpm install && pnpm build (static output)
-Stage 1: rust:latest           — cargo build --release -p sober-web
-Stage 2: debian:trixie-slim    — copy binary + copy static assets
-```
-
-### Caching
-
-- `actions/cache` for `~/.cargo/registry` and `target/`
-- Docker layer caching via `docker/build-push-action` cache-to/cache-from
-- Optional `sccache` for Rust compilation caching
-
-### Registry
-
-GHCR (GitHub Container Registry). Free for private repos with GitHub Actions. Seamless transition when repo goes public.
-
----
-
-## 3. New Crate: `sober-web`
-
-### Responsibility
-
-Single public-facing HTTP entry point. Serves the SvelteKit frontend and reverse-proxies API/WebSocket traffic to `sober-api`.
-
-### Routing
-
-```
-Browser -> sober-web (:3000)
-              |-- /api/*     -> proxy to sober-api (UDS or localhost)
-              |-- /ws        -> proxy WebSocket to sober-api
-              |-- /*         -> serve static SvelteKit assets (SPA fallback)
-```
-
-### Asset Serving
-
-Two modes:
-
-- **Embedded (default)** — static assets compiled into the binary via `rust-embed`. Single binary, zero external files. Best for binary distribution.
-- **Directory override** — `sober-web --static-dir /path/to/assets/` serves from filesystem instead. Best for development and custom deployments.
-
-### Architecture Position
-
-`sober-web` depends on: `sober-core` (config).
-`sober-web` does NOT depend on `sober-api` as a crate — it communicates at runtime via HTTP/WebSocket proxy.
-
-`sober-api` can still be deployed standalone for headless/API-only use cases (bots, programmatic access). `sober-web` is the "full stack" entry point.
-
-### Deployment
-
-| Process | Port/Socket | Public |
-|---------|-------------|--------|
-| `sober-web` | `:3000` (configurable) | Yes |
-| `sober-api` | UDS or `localhost:8080` | No |
-| `sober-agent` | UDS | No |
-| `sober-scheduler` | UDS | No |
-
----
-
 ## Architecture Impact
-
-### Crate Map Update
-
-Add `sober-web` to the crate map:
-
-| Crate | Responsibility |
-|-------|---------------|
-| `sober-web` | Static asset serving (embedded + directory), reverse proxy to `sober-api`, SPA routing |
-
-### Dependency Flow Update
-
-```
-sober-web ──► sober-core (config only, runtime proxy to sober-api)
-```
 
 ### Config Additions
 
 | Variable | Purpose |
 |----------|---------|
 | `MASTER_ENCRYPTION_KEY` | Hex-encoded 256-bit MEK for envelope encryption |
-| `WEB_LISTEN_ADDR` | `sober-web` bind address (default `:3000`) |
-| `WEB_STATIC_DIR` | Optional override for static asset directory |
-| `WEB_API_UPSTREAM` | `sober-api` address to proxy to (UDS path or `http://localhost:8080`) |
