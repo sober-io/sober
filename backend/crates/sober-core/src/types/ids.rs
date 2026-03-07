@@ -74,6 +74,12 @@ define_id!(
     ScopeId
 );
 
+impl ScopeId {
+    /// The global (system-wide) scope, used when a scope is not user- or
+    /// group-specific (e.g. default role assignments).
+    pub const GLOBAL: Self = Self(Uuid::nil());
+}
+
 define_id!(
     /// Unique identifier for a conversation.
     ConversationId
@@ -102,6 +108,31 @@ define_id!(
 define_id!(
     /// Unique identifier for a workspace.
     WorkspaceId
+);
+
+define_id!(
+    /// Unique identifier for a scheduled job.
+    JobId
+);
+
+define_id!(
+    /// Unique identifier for a git repository registered in a workspace.
+    WorkspaceRepoId
+);
+
+define_id!(
+    /// Unique identifier for a git worktree.
+    WorktreeId
+);
+
+define_id!(
+    /// Unique identifier for a workspace artifact.
+    ArtifactId
+);
+
+define_id!(
+    /// Unique identifier for an audit log entry.
+    AuditLogId
 );
 
 /// Unique identifier for a tool (string-based, not UUID).

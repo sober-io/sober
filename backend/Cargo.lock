@@ -2315,6 +2315,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sober-db"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde_json",
+ "sober-core",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "sober-llm"
 version = "0.1.0"
 dependencies = [

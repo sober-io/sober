@@ -1,0 +1,28 @@
+[package]
+name = "sober-db"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+# Internal
+sober-core = { path = "../sober-core", features = ["postgres"] }
+
+# Database
+sqlx = { workspace = true }
+
+# Domain primitives
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Serialization
+serde_json = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+sqlx = { workspace = true, features = ["macros"] }

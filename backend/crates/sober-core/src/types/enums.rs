@@ -67,6 +67,84 @@ pub enum MessageRole {
     Tool,
 }
 
+/// Lifecycle state of a scheduled job.
+///
+/// Maps to the `job_status` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "job_status", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum JobStatus {
+    /// Job is active and will run on schedule.
+    Active,
+    /// Job is temporarily paused.
+    Paused,
+    /// Job has been cancelled and will not run again.
+    Cancelled,
+}
+
+/// Lifecycle state of a workspace artifact.
+///
+/// Maps to the `artifact_state` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "artifact_state", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactState {
+    /// Artifact is a draft, not yet finalized.
+    Draft,
+    /// Artifact has been committed/finalized.
+    Committed,
+    /// Artifact has been archived.
+    Archived,
+}
+
+/// Relationship type between two artifacts.
+///
+/// Maps to the `artifact_relation` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "artifact_relation", rename_all = "snake_case")
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactRelation {
+    /// Target artifact is derived from source.
+    DerivedFrom,
+    /// Target artifact supersedes source.
+    Supersedes,
+    /// Target artifact references source.
+    References,
+}
+
+/// Kind of workspace artifact.
+///
+/// Maps to the `artifact_kind` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "artifact_kind", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactKind {
+    /// A code file or snippet.
+    Code,
+    /// A document (markdown, text, etc.).
+    Document,
+    /// A configuration file.
+    Config,
+    /// A generated output (build artifact, report, etc.).
+    Generated,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +209,54 @@ mod tests {
             serde_json::to_string(&MessageRole::Tool).unwrap(),
             "\"tool\""
         );
+    }
+
+    #[test]
+    fn job_status_serde_roundtrip() {
+        for variant in [JobStatus::Active, JobStatus::Paused, JobStatus::Cancelled] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: JobStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn artifact_state_serde_roundtrip() {
+        for variant in [
+            ArtifactState::Draft,
+            ArtifactState::Committed,
+            ArtifactState::Archived,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ArtifactState = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn artifact_relation_serde_roundtrip() {
+        for variant in [
+            ArtifactRelation::DerivedFrom,
+            ArtifactRelation::Supersedes,
+            ArtifactRelation::References,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ArtifactRelation = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn artifact_kind_serde_roundtrip() {
+        for variant in [
+            ArtifactKind::Code,
+            ArtifactKind::Document,
+            ArtifactKind::Config,
+            ArtifactKind::Generated,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ArtifactKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
     }
 }
