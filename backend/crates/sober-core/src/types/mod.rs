@@ -8,7 +8,9 @@ pub mod tool;
 
 pub use access::{CallerContext, Permission, TriggerKind};
 pub use api::ApiResponse;
-pub use enums::{MessageRole, ScopeKind, UserStatus};
+pub use enums::{
+    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, ScopeKind, UserStatus,
+};
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
     SessionId, ToolId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
