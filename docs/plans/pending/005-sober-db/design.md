@@ -263,6 +263,58 @@ pub trait McpServerRepo: Send + Sync {
 }
 ```
 
+### WorkspaceRepo
+
+```rust
+#[async_trait]
+pub trait WorkspaceRepo: Send + Sync {
+    async fn create(&self, user_id: UserId, name: &str, root_path: &str) -> Result<Workspace, AppError>;
+    async fn get_by_id(&self, id: WorkspaceId) -> Result<Workspace, AppError>;
+    async fn list_by_user(&self, user_id: UserId) -> Result<Vec<Workspace>, AppError>;
+    async fn archive(&self, id: WorkspaceId) -> Result<(), AppError>;
+    async fn restore(&self, id: WorkspaceId) -> Result<(), AppError>;
+    async fn delete(&self, id: WorkspaceId) -> Result<(), AppError>;
+}
+```
+
+### WorkspaceRepoRepo
+
+```rust
+#[async_trait]
+pub trait WorkspaceRepoRepo: Send + Sync {
+    async fn register(&self, workspace_id: WorkspaceId, input: RegisterRepo) -> Result<WorkspaceRepo, AppError>;
+    async fn list_by_workspace(&self, workspace_id: WorkspaceId) -> Result<Vec<WorkspaceRepo>, AppError>;
+    async fn find_by_path(&self, path: &str, user_id: UserId) -> Result<Option<WorkspaceRepo>, AppError>;
+    async fn delete(&self, id: WorkspaceRepoId) -> Result<(), AppError>;
+}
+```
+
+### WorktreeRepo
+
+```rust
+#[async_trait]
+pub trait WorktreeRepo: Send + Sync {
+    async fn create(&self, repo_id: WorkspaceRepoId, branch: &str, path: &str) -> Result<Worktree, AppError>;
+    async fn list_by_repo(&self, repo_id: WorkspaceRepoId) -> Result<Vec<Worktree>, AppError>;
+    async fn list_stale(&self, older_than: DateTime<Utc>) -> Result<Vec<Worktree>, AppError>;
+    async fn mark_stale(&self, id: WorktreeId) -> Result<(), AppError>;
+    async fn delete(&self, id: WorktreeId) -> Result<(), AppError>;
+}
+```
+
+### ArtifactRepo
+
+```rust
+#[async_trait]
+pub trait ArtifactRepo: Send + Sync {
+    async fn create(&self, input: CreateArtifact) -> Result<Artifact, AppError>;
+    async fn get_by_id(&self, id: ArtifactId) -> Result<Artifact, AppError>;
+    async fn list_by_workspace(&self, workspace_id: WorkspaceId, filter: ArtifactFilter) -> Result<Vec<Artifact>, AppError>;
+    async fn update_state(&self, id: ArtifactId, state: ArtifactState) -> Result<(), AppError>;
+    async fn add_relation(&self, source: ArtifactId, target: ArtifactId, relation: ArtifactRelation) -> Result<(), AppError>;
+}
+```
+
 ---
 
 ## Impact on Other Crates

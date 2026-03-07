@@ -167,6 +167,7 @@ Independent processes:
 ```
 sober-scheduler ──► sober-core (types, config, errors, repo traits incl. JobRepo)
                 ──► sober-db (PgJobRepo, pool creation)
+                ──► sober-workspace (stale worktree cleanup, blob pruning)
                 ──► tonic (gRPC server + client)
                 ──► prost (proto codegen)
                 ──► sober-crypto (service identity)

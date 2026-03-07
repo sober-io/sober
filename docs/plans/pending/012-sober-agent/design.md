@@ -252,6 +252,7 @@ Maps to `AppError` from `sober-core`.
 - `sober-llm` --- LLM engine abstraction
 - `sober-memory` --- context loading, vector storage
 - `sober-mcp` --- MCP client for external tools and resources
+- `sober-workspace` --- workspace filesystem layout, git operations, blob storage
 - `sober-sandbox` --- process sandboxing for tool execution and artifact runs
 - `tonic` --- gRPC server framework
 - `prost` --- Protocol Buffers codegen
