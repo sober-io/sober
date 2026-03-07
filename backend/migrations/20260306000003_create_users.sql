@@ -8,6 +8,5 @@ CREATE TABLE users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_users_email ON users (email);
-CREATE INDEX idx_users_username ON users (username);
+-- email and username already indexed by their UNIQUE constraints
 CREATE INDEX idx_users_status ON users (status);

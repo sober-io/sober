@@ -111,7 +111,7 @@ impl sober_core::types::UserRepo for PgUserRepo {
             other => AppError::Internal(other.into()),
         })?;
 
-        sqlx::query(
+        let role_result = sqlx::query(
             "INSERT INTO user_roles (user_id, role_id, scope_id) \
              SELECT $1, id, '00000000-0000-0000-0000-000000000000' FROM roles WHERE name = $2",
         )
@@ -120,6 +120,10 @@ impl sober_core::types::UserRepo for PgUserRepo {
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
+
+        if role_result.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!("role '{role}'")));
+        }
 
         tx.commit()
             .await
