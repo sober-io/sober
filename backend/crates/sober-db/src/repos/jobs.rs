@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::error::AppError;
-use sober_core::types::{CreateJob, Job, JobId};
+use sober_core::types::{CreateJob, Job, JobId, JobStatus};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -99,8 +99,9 @@ impl sober_core::types::JobRepo for PgJobRepo {
 
     async fn cancel(&self, id: JobId) -> Result<(), AppError> {
         let result = sqlx::query(
-            "UPDATE jobs SET status = 'cancelled' WHERE id = $1 AND status != 'cancelled'",
+            "UPDATE jobs SET status = $1 WHERE id = $2 AND status != $1",
         )
+        .bind(JobStatus::Cancelled)
         .bind(id.as_uuid())
         .execute(&self.pool)
         .await

@@ -74,6 +74,12 @@ define_id!(
     ScopeId
 );
 
+impl ScopeId {
+    /// The global (system-wide) scope, used when a scope is not user- or
+    /// group-specific (e.g. default role assignments).
+    pub const GLOBAL: Self = Self(Uuid::nil());
+}
+
 define_id!(
     /// Unique identifier for a conversation.
     ConversationId

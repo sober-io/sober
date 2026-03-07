@@ -485,10 +485,10 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
 
     wt_repo.mark_stale(wt.id).await.unwrap();
 
-    // list_stale finds worktrees created before a given time (and not already stale)
+    // list_stale_candidates finds worktrees created before a given time (and not already stale)
     // Our worktree is now stale=true so it shouldn't appear
     let stale = wt_repo
-        .list_stale(Utc::now() + chrono::Duration::hours(1))
+        .list_stale_candidates(Utc::now() + chrono::Duration::hours(1))
         .await
         .unwrap();
     assert!(stale.is_empty());

@@ -252,8 +252,9 @@ pub trait WorktreeRepo: Send + Sync {
         repo_id: WorkspaceRepoId,
     ) -> impl Future<Output = Result<Vec<Worktree>, AppError>> + Send;
 
-    /// Lists worktrees created before the given time.
-    fn list_stale(
+    /// Lists non-stale worktrees created before the given time (candidates
+    /// for marking stale).
+    fn list_stale_candidates(
         &self,
         older_than: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Worktree>, AppError>> + Send;

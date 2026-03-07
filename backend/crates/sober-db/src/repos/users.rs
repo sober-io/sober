@@ -1,7 +1,7 @@
 //! PostgreSQL implementation of [`UserRepo`].
 
 use sober_core::error::AppError;
-use sober_core::types::{CreateUser, User, UserId, UserStatus};
+use sober_core::types::{CreateUser, ScopeId, User, UserId, UserStatus};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -113,10 +113,11 @@ impl sober_core::types::UserRepo for PgUserRepo {
 
         let role_result = sqlx::query(
             "INSERT INTO user_roles (user_id, role_id, scope_id) \
-             SELECT $1, id, '00000000-0000-0000-0000-000000000000' FROM roles WHERE name = $2",
+             SELECT $1, id, $3 FROM roles WHERE name = $2",
         )
         .bind(id)
         .bind(role)
+        .bind(ScopeId::GLOBAL.as_uuid())
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

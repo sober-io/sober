@@ -58,7 +58,10 @@ impl sober_core::types::WorktreeRepo for PgWorktreeRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn list_stale(&self, older_than: DateTime<Utc>) -> Result<Vec<Worktree>, AppError> {
+    async fn list_stale_candidates(
+        &self,
+        older_than: DateTime<Utc>,
+    ) -> Result<Vec<Worktree>, AppError> {
         let rows = sqlx::query_as::<_, WorktreeRow>(
             "SELECT id, repo_id, branch, path, stale, created_at \
              FROM worktrees WHERE stale = false AND created_at < $1 \
