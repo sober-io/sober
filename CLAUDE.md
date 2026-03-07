@@ -126,11 +126,12 @@ Always verify your work before claiming it is complete:
 ### Git Workflow & Worktrees
 
 - **Feature development happens exclusively in git worktrees.** Never develop features on the main branch directly.
+- **Worktrees live inside the project** at `.worktrees/` (gitignored). Never create sibling directories.
 - For every new feature or task:
-  1. Create a new worktree: `git worktree add ../sober-<feature-name> -b feat/<feature-name>`
+  1. Create a new worktree: `git worktree add .worktrees/<feature-name> -b feat/<feature-name>`
   2. Do all development in that worktree.
   3. When the feature is ready, create a PR from the feature branch.
-  4. When the PR is approved and merged, close the worktree: `git worktree remove ../sober-<feature-name>`
+  4. When the PR is approved and merged, close the worktree: `git worktree remove .worktrees/<feature-name>`
 - Keep worktrees short-lived. One feature per worktree, one worktree per feature.
 - The main worktree stays clean — used only for reviews, releases, and non-feature work.
 
@@ -154,6 +155,7 @@ Always verify your work before claiming it is complete:
 - Self-merge is OK (solo project) — self-review before merging.
 - Use **squash merge** to keep main history linear and clean.
 - Never add `Co-Authored-By` or any co-author trailers to commits.
+- PRs based on plans must include the **phase number as a prefix** in the title (e.g., "P1: …", "P2: …").
 
 **Plan lifecycle tied to git:**
 - When starting a plan, move it from `pending/` to `active/` in the first commit of the feature branch.
@@ -260,6 +262,15 @@ Recommended MCP integrations to install for development workflow:
 - PostgreSQL MCP — Direct DB inspection
 - Docker MCP — Container management
 - Memory MCP — Persistent dev context
+
+## Versioning
+
+Use **semantic versioning** (semver) for all releases:
+- **Major** (`X.0.0`) — breaking changes to public APIs or data formats.
+- **Minor** (`0.X.0`) — new features, backward-compatible.
+- **Patch** (`0.0.X`) — bug fixes, backward-compatible.
+
+Tag releases as `vX.Y.Z`. Bump version in `Cargo.toml` workspace and `package.json` as appropriate.
 
 ## Commit Convention
 
