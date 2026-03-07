@@ -1,0 +1,120 @@
+//! PostgreSQL implementation of [`ArtifactRepo`].
+
+use sober_core::error::AppError;
+use sober_core::types::{
+    Artifact, ArtifactFilter, ArtifactId, ArtifactRelation, ArtifactState, CreateArtifact,
+    WorkspaceId,
+};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::rows::ArtifactRow;
+
+/// PostgreSQL-backed artifact repository.
+pub struct PgArtifactRepo {
+    pool: PgPool,
+}
+
+impl PgArtifactRepo {
+    /// Creates a new repository backed by the given connection pool.
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl sober_core::types::ArtifactRepo for PgArtifactRepo {
+    async fn create(&self, input: CreateArtifact) -> Result<Artifact, AppError> {
+        let id = Uuid::now_v7();
+        let row = sqlx::query_as::<_, ArtifactRow>(
+            "INSERT INTO artifacts (id, workspace_id, name, kind, path) \
+             VALUES ($1, $2, $3, $4, $5) \
+             RETURNING id, workspace_id, name, kind, state, path, created_at, updated_at",
+        )
+        .bind(id)
+        .bind(input.workspace_id.as_uuid())
+        .bind(&input.name)
+        .bind(input.kind)
+        .bind(&input.path)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.into())
+    }
+
+    async fn get_by_id(&self, id: ArtifactId) -> Result<Artifact, AppError> {
+        let row = sqlx::query_as::<_, ArtifactRow>(
+            "SELECT id, workspace_id, name, kind, state, path, created_at, updated_at \
+             FROM artifacts WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?
+        .ok_or_else(|| AppError::NotFound("artifact".into()))?;
+
+        Ok(row.into())
+    }
+
+    async fn list_by_workspace(
+        &self,
+        workspace_id: WorkspaceId,
+        filter: ArtifactFilter,
+    ) -> Result<Vec<Artifact>, AppError> {
+        // Build dynamic query based on filter
+        let rows = sqlx::query_as::<_, ArtifactRow>(
+            "SELECT id, workspace_id, name, kind, state, path, created_at, updated_at \
+             FROM artifacts \
+             WHERE workspace_id = $1 \
+               AND ($2::artifact_kind IS NULL OR kind = $2) \
+               AND ($3::artifact_state IS NULL OR state = $3) \
+             ORDER BY updated_at DESC",
+        )
+        .bind(workspace_id.as_uuid())
+        .bind(filter.kind)
+        .bind(filter.state)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn update_state(&self, id: ArtifactId, state: ArtifactState) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE artifacts SET state = $1, updated_at = now() WHERE id = $2",
+        )
+        .bind(state)
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("artifact".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn add_relation(
+        &self,
+        source: ArtifactId,
+        target: ArtifactId,
+        relation: ArtifactRelation,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO artifact_relations (source_id, target_id, relation) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (source_id, target_id, relation) DO NOTHING",
+        )
+        .bind(source.as_uuid())
+        .bind(target.as_uuid())
+        .bind(relation)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+}
