@@ -192,6 +192,7 @@ Initialize the SvelteKit project in `frontend/`:
 - `target/`, `node_modules/`, `.env`, `build/`, `.svelte-kit/`
 - OS files: `.DS_Store`, `Thumbs.db`
 - Editor files: `.idea/`, `*.swp`
+- **Do NOT ignore** `backend/.sqlx/` — this is the offline query cache and must be committed
 
 `.dockerignore` at project root:
 - `target/`, `node_modules/`, `.git/`, `.env`
@@ -548,7 +549,22 @@ install_systemd() {
 The systemd unit files are bundled in the `systemd/` subdirectory of the
 release archive. The script patches the `User=`/`Group=` lines to match `--user`.
 
-**Step 9: Start services and health check**
+**Step 9: Run database migrations**
+
+```bash
+run_migrations() {
+    info "Running database migrations"
+    sudo -u "$SOBER_USER" "$INSTALL_DIR/bin/sober" migrate run \
+        || die "Migration failed. Check DATABASE_URL in $CONFIG_DIR/.env"
+    info "Migrations complete"
+}
+```
+
+Migrations are embedded in the `sober` binary via `sqlx::migrate!()` — no SQL
+files on disk. This step runs on both fresh install and upgrade. sqlx tracks
+which migrations have already been applied, so re-running is safe.
+
+**Step 10: Start services and health check**
 
 ```bash
 start_and_verify() {
@@ -588,8 +604,9 @@ do_upgrade() {
     info "Stopping services"
     systemctl stop sober.target
 
-    info "Binaries updated. Restarting services"
+    info "Binaries updated. Running migrations and restarting"
     install_systemd
+    run_migrations
     start_and_verify
 }
 ```
@@ -641,6 +658,7 @@ main() {
             download_and_extract
             collect_config
             install_systemd
+            run_migrations
             start_and_verify
             ;;
         upgrade)
