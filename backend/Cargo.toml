@@ -9,17 +9,30 @@ repository = "https://github.com/harrisiirak/s-ber"
 
 [workspace.dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 tokio = { version = "1.50.0", features = ["full"] }
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json", "fmt"] }
 uuid = { version = "1.22.0", features = ["v7", "serde"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "uuid", "chrono", "json", "migrate"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "uuid", "chrono", "json", "migrate"] }
+axum = "0.8.8"
+axum-core = "0.5.6"
+http = "1.4.0"
+dotenvy = "0.15.7"
+moka = { version = "0.12.14", features = ["future"] }
 tonic = "0.14.5"
 tonic-build = "0.14.5"
 tonic-prost-build = "0.14.5"
 prost = "0.14.3"
+opentelemetry = "0.31.0"
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+tracing-opentelemetry = "0.32.1"
+metrics = "0.24.3"
+metrics-exporter-prometheus = "0.18.1"
 
 [profile.release]
 overflow-checks = true

@@ -1,0 +1,8 @@
+# cargo-audit configuration
+
+[advisories]
+# RUSTSEC-2023-0071: rsa crate timing sidechannel (Marvin Attack)
+# Transitive dep of sqlx-mysql, present in the lockfile but not compiled —
+# no workspace crate enables the mysql feature. Remove this ignore if we
+# ever add MySQL support or when the rsa crate ships a fix.
+ignore = ["RUSTSEC-2023-0071"]
