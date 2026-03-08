@@ -9,3 +9,15 @@ sober-crypto = { path = "../sober-crypto" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+axum-core = { workspace = true }
+http = { workspace = true }
+chrono = { workspace = true }
+tower = { workspace = true }
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

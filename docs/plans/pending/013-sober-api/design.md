@@ -25,7 +25,8 @@ instantiate an `Agent` directly — it communicates with the agent process via g
 
 The `PgPool` is retained in `AppState` because `sober-api` constructs repo
 implementations from `sober-db` (e.g., `PgSessionRepo`, `PgConversationRepo`)
-and passes them to library crates as `Arc<dyn RepoTrait>`.
+and passes them as generic type parameters to library crates (repo traits use
+RPITIT and are not dyn-compatible — `Arc<dyn Repo>` won't compile).
 
 Wrapped in `Arc<AppState>` and passed via axum `State`.
 

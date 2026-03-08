@@ -27,7 +27,7 @@ pub use input::{
     CreateSession, CreateUser, RegisterRepo, UpdateMcpServer,
 };
 pub use repo::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo, SessionRepo,
-    UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
+    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo, RoleRepo,
+    SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{Tool, ToolError, ToolMetadata, ToolOutput};

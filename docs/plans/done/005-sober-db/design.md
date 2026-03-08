@@ -155,25 +155,28 @@ async fn create_with_role(&self, input: CreateUser, role: &str) -> Result<User, 
 
 ### Wiring at Startup (Binary Responsibility)
 
-Binaries construct concrete repos and pass them as trait objects:
+Binaries construct concrete repos and pass them as generic type parameters.
+Repo traits use RPITIT (`-> impl Future<...> + Send`), which makes them **not
+dyn-compatible** — `Arc<dyn Repo>` won't compile. Generics are used instead:
 
 ```rust
 // In sober-api main()
 let pool = sober_db::create_pool(&config.database).await?;
-let user_repo: Arc<dyn UserRepo> = Arc::new(PgUserRepo::new(pool.clone()));
-let session_repo: Arc<dyn SessionRepo> = Arc::new(PgSessionRepo::new(pool.clone()));
-let conversation_repo: Arc<dyn ConversationRepo> = Arc::new(PgConversationRepo::new(pool.clone()));
-// ... pass to library crates
+let user_repo = PgUserRepo::new(pool.clone());
+let session_repo = PgSessionRepo::new(pool.clone());
+let role_repo = PgRoleRepo::new(pool.clone());
+// ... pass as type parameters to library crates
 ```
 
-Library crates accept `Arc<dyn Repo>` in their constructors:
+Library crates use generic type parameters in their constructors:
 
 ```rust
 // In sober-auth
-pub struct AuthService {
-    user_repo: Arc<dyn UserRepo>,
-    session_repo: Arc<dyn SessionRepo>,
-    crypto: Arc<CryptoService>,
+pub struct AuthService<U: UserRepo, S: SessionRepo, R: RoleRepo> {
+    users: U,
+    sessions: S,
+    roles: R,
+    session_ttl_seconds: u64,
 }
 ```
 
@@ -186,7 +189,7 @@ The following traits are defined in `sober-core` and implemented in `sober-db`:
 ### UserRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait UserRepo: Send + Sync {
     async fn get_by_id(&self, id: UserId) -> Result<User, AppError>;
     async fn get_by_email(&self, email: &str) -> Result<User, AppError>;
@@ -201,7 +204,7 @@ pub trait UserRepo: Send + Sync {
 Replaces `sober-auth`'s `SessionStore` trait.
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait SessionRepo: Send + Sync {
     async fn get(&self, token_hash: &[u8]) -> Result<Option<Session>, AppError>;
     async fn create(&self, session: &Session) -> Result<(), AppError>;
@@ -213,7 +216,7 @@ pub trait SessionRepo: Send + Sync {
 ### ConversationRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait ConversationRepo: Send + Sync {
     async fn create(&self, user_id: UserId, title: Option<&str>) -> Result<Conversation, AppError>;
     async fn get_by_id(&self, id: ConversationId) -> Result<Conversation, AppError>;
@@ -226,7 +229,7 @@ pub trait ConversationRepo: Send + Sync {
 ### MessageRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait MessageRepo: Send + Sync {
     async fn create(&self, input: CreateMessage) -> Result<Message, AppError>;
     async fn list_by_conversation(
@@ -240,7 +243,7 @@ pub trait MessageRepo: Send + Sync {
 ### JobRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait JobRepo: Send + Sync {
     async fn create(&self, input: CreateJob) -> Result<Job, AppError>;
     async fn get_by_id(&self, id: Uuid) -> Result<Job, AppError>;
@@ -254,7 +257,7 @@ pub trait JobRepo: Send + Sync {
 ### McpServerRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait McpServerRepo: Send + Sync {
     async fn list_by_user(&self, user_id: UserId) -> Result<Vec<McpServerConfig>, AppError>;
     async fn create(&self, input: CreateMcpServer) -> Result<McpServerConfig, AppError>;
@@ -266,7 +269,7 @@ pub trait McpServerRepo: Send + Sync {
 ### WorkspaceRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait WorkspaceRepo: Send + Sync {
     async fn create(&self, user_id: UserId, name: &str, root_path: &str) -> Result<Workspace, AppError>;
     async fn get_by_id(&self, id: WorkspaceId) -> Result<Workspace, AppError>;
@@ -280,7 +283,7 @@ pub trait WorkspaceRepo: Send + Sync {
 ### WorkspaceRepoRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait WorkspaceRepoRepo: Send + Sync {
     async fn register(&self, workspace_id: WorkspaceId, input: RegisterRepo) -> Result<WorkspaceRepo, AppError>;
     async fn list_by_workspace(&self, workspace_id: WorkspaceId) -> Result<Vec<WorkspaceRepo>, AppError>;
@@ -292,7 +295,7 @@ pub trait WorkspaceRepoRepo: Send + Sync {
 ### WorktreeRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait WorktreeRepo: Send + Sync {
     async fn create(&self, repo_id: WorkspaceRepoId, branch: &str, path: &str) -> Result<Worktree, AppError>;
     async fn list_by_repo(&self, repo_id: WorkspaceRepoId) -> Result<Vec<Worktree>, AppError>;
@@ -305,7 +308,7 @@ pub trait WorktreeRepo: Send + Sync {
 ### ArtifactRepo
 
 ```rust
-#[async_trait]
+// Uses RPITIT — not dyn-compatible, consumers use generics
 pub trait ArtifactRepo: Send + Sync {
     async fn create(&self, input: CreateArtifact) -> Result<Artifact, AppError>;
     async fn get_by_id(&self, id: ArtifactId) -> Result<Artifact, AppError>;
@@ -329,17 +332,17 @@ pub trait ArtifactRepo: Send + Sync {
 
 - Remove `sqlx` dependency.
 - Remove `SessionStore` trait and `PgSessionStore` --- replaced by `SessionRepo` in core / `PgSessionRepo` in db.
-- Accept `Arc<dyn UserRepo>` and `Arc<dyn SessionRepo>` instead of `PgPool`.
+- Use generic type parameters (`<U: UserRepo, S: SessionRepo, R: RoleRepo>`) instead of `PgPool`.
 
 ### sober-memory (007)
 
 - Remove `sqlx` dependency.
-- `ContextLoader` takes `Arc<dyn MessageRepo>` instead of `&PgPool`.
+- `ContextLoader` takes generic `M: MessageRepo` instead of `&PgPool`.
 
 ### sober-agent (012)
 
 - Remove `sqlx` dependency.
-- `Agent` struct replaces `db: PgPool` with `Arc<dyn MessageRepo>`, `Arc<dyn ConversationRepo>`, `Arc<dyn McpServerRepo>`.
+- `Agent` struct uses generic type parameters for repos (`MessageRepo`, `ConversationRepo`, `McpServerRepo`).
 
 ### sober-api (013)
 
@@ -355,7 +358,7 @@ pub trait ArtifactRepo: Send + Sync {
 ### sober-scheduler (016)
 
 - Remove direct `sqlx` dependency for job queries.
-- Accept `Arc<dyn JobRepo>` instead of `PgPool` for job persistence.
+- Use generic `J: JobRepo` instead of `PgPool` for job persistence.
 - Binary startup creates `PgJobRepo` via `sober-db`.
 
 ---

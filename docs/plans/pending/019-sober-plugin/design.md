@@ -299,8 +299,9 @@ CREATE TABLE plugin_audit_logs (
 ### Registry API
 
 ```rust
-pub struct PluginRegistry {
-    db: Arc<dyn PluginRepo>,
+// Generic over PluginRepo (RPITIT traits are not dyn-compatible)
+pub struct PluginRegistry<P: PluginRepo> {
+    db: P,
 }
 
 impl PluginRegistry {
@@ -340,7 +341,7 @@ pub struct GenerateRequest {
 }
 
 pub struct PluginGenerator {
-    llm: Arc<dyn LlmEngine>,
+    llm: Arc<dyn LlmEngine>, // LlmEngine uses #[async_trait], dyn-compatible
 }
 
 impl PluginGenerator {

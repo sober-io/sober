@@ -128,7 +128,8 @@ Context loading follows the principle of least privilege:
 ### API
 
 ```rust
-ContextLoader::new(memory_store: &MemoryStore, message_repo: Arc<dyn MessageRepo>) -> Self
+// M: MessageRepo — generic, not trait object (RPITIT traits are not dyn-compatible)
+ContextLoader::<M>::new(memory_store: &MemoryStore, message_repo: M) -> Self
 ContextLoader::load(
     user_id: UserId,
     conversation_id: ConversationId,
@@ -143,9 +144,10 @@ ContextLoader::load(
 > query text and passing the resulting vector here. `ContextLoader` does NOT
 > perform embedding internally — sober-memory has no dependency on sober-llm.
 >
-> **Note:** `MessageRepo` is a repo trait defined in `sober-core`. The PostgreSQL
-> implementation (`PgMessageRepo`) lives in `sober-db`. `ContextLoader` accepts
-> `Arc<dyn MessageRepo>` — it does not depend on `sqlx` directly.
+> **Note:** `MessageRepo` is a repo trait defined in `sober-core` (uses RPITIT, not
+> dyn-compatible). The PostgreSQL implementation (`PgMessageRepo`) lives in `sober-db`.
+> `ContextLoader` uses a generic type parameter `M: MessageRepo` — it does not depend
+> on `sqlx` directly.
 
 `Context` struct fields: `facts: Vec<String>`, `recent_messages: Vec<Message>`,
 `total_tokens: usize`.

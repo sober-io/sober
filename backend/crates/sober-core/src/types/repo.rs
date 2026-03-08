@@ -300,6 +300,15 @@ pub trait ArtifactRepo: Send + Sync {
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
+/// Role assignment query operations.
+pub trait RoleRepo: Send + Sync {
+    /// Returns the names of all roles assigned to a user in the global scope.
+    fn get_roles_for_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
+}
+
 /// Audit log operations (append-only).
 pub trait AuditLogRepo: Send + Sync {
     /// Appends an entry to the audit log.
