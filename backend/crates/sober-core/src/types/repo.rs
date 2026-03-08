@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 
 use super::domain::*;
-use super::enums::{ArtifactRelation, ArtifactState, UserStatus};
+use super::enums::{ArtifactRelation, ArtifactState, RoleKind, UserStatus};
 use super::ids::*;
 use super::input::*;
 use crate::error::AppError;
@@ -31,11 +31,11 @@ pub trait UserRepo: Send + Sync {
     /// Creates a new user account.
     fn create(&self, input: CreateUser) -> impl Future<Output = Result<User, AppError>> + Send;
 
-    /// Creates a new user and assigns them a role in a single transaction.
-    fn create_with_role(
+    /// Creates a new user and assigns them one or more roles in a single transaction.
+    fn create_with_roles(
         &self,
         input: CreateUser,
-        role: &str,
+        roles: &[RoleKind],
     ) -> impl Future<Output = Result<User, AppError>> + Send;
 
     /// Updates a user's account status.
@@ -298,6 +298,15 @@ pub trait ArtifactRepo: Send + Sync {
         target: ArtifactId,
         relation: ArtifactRelation,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Role assignment query operations.
+pub trait RoleRepo: Send + Sync {
+    /// Returns the roles assigned to a user in the global scope.
+    fn get_roles_for_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Vec<RoleKind>, AppError>> + Send;
 }
 
 /// Audit log operations (append-only).

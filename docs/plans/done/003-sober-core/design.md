@@ -302,4 +302,6 @@ sufficient TTL-based caching with minimal operational overhead.
 - **Domain types** (`User`, `Session`, `Message`, etc.) defined in `sober-core`.
   Row types (`FromRow` structs) are private to `sober-db`.
 - Library crates depend only on `sober-core` traits; `sqlx` is contained to `sober-db`.
-- Binaries construct concrete repos at startup and inject as `Arc<dyn Repo>`.
+- Repo traits use RPITIT (`-> impl Future<...> + Send`), which makes them **not
+  dyn-compatible**. Library crates use generics (`<U: UserRepo>`) instead of
+  `Arc<dyn Repo>`. Binaries construct concrete repos and pass them as type parameters.

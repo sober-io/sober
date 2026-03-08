@@ -1104,15 +1104,16 @@ pub struct ResolvedLlmKey {
     pub provider: String,
 }
 
-pub struct LlmKeyResolver {
-    secret_repo: Arc<dyn SecretRepo>,
+// Generic over SecretRepo (RPITIT traits are not dyn-compatible)
+pub struct LlmKeyResolver<S: SecretRepo> {
+    secret_repo: S,
     mek: Mek,
     system_config: LlmConfig,
 }
 
-impl LlmKeyResolver {
+impl<S: SecretRepo> LlmKeyResolver<S> {
     pub fn new(
-        secret_repo: Arc<dyn SecretRepo>,
+        secret_repo: S,
         mek: Mek,
         system_config: LlmConfig,
     ) -> Self {

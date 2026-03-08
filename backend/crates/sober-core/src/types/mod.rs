@@ -16,7 +16,8 @@ pub use domain::{
     UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 pub use enums::{
-    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, ScopeKind, UserStatus,
+    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, RoleKind, ScopeKind,
+    UserStatus,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
@@ -27,7 +28,7 @@ pub use input::{
     CreateSession, CreateUser, RegisterRepo, UpdateMcpServer,
 };
 pub use repo::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo, SessionRepo,
-    UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
+    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo, RoleRepo,
+    SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{Tool, ToolError, ToolMetadata, ToolOutput};

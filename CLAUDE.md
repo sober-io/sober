@@ -127,8 +127,11 @@ Always verify your work before claiming it is complete:
   - `docs/plans/pending/` — planned but not yet started
   - `docs/plans/active/` — currently being worked on
   - `docs/plans/done/` — completed (move here when finished)
+- Each plan lives in its own subfolder named `<number>-<topic>` (e.g., `006-auth/`).
+  A plan folder typically contains `design.md` and `plan.md`.
 - Each plan document should include: goal, approach, acceptance criteria, and any open questions.
-- Move plan files between directories as their status changes.
+- **Always move the entire plan folder** between directories when changing status —
+  never move individual files. Use `git mv docs/plans/pending/006-auth docs/plans/active/006-auth`.
 
 ### Git Hooks
 
@@ -174,8 +177,8 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 - PRs based on plans must include the **plan number as a prefix** in the title (e.g., "#005: …", "#006: …").
 
 **Plan lifecycle tied to git:**
-- When starting a plan, move it from `pending/` to `active/` in the first commit of the feature branch.
-- When the PR merges to main, move the plan from `active/` to `done/`.
+- When starting a plan, move the entire plan folder from `pending/` to `active/` in the first commit of the feature branch.
+- When the PR merges to main, move the entire plan folder from `active/` to `done/`.
 
 ### Security
 

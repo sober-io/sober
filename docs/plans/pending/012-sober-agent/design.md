@@ -106,15 +106,22 @@ User message
 ## Agent Struct
 
 ```rust
-pub struct Agent {
+// Generic over repo traits (RPITIT traits are not dyn-compatible).
+// LlmEngine and Tool use #[async_trait] and remain as trait objects.
+pub struct Agent<Msg, Conv, Mcp>
+where
+    Msg: MessageRepo,
+    Conv: ConversationRepo,
+    Mcp: McpServerRepo,
+{
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
     memory: Arc<MemoryStore>,
     context_loader: Arc<ContextLoader>,
     tools: Vec<Arc<dyn Tool>>,
-    message_repo: Arc<dyn MessageRepo>,
-    conversation_repo: Arc<dyn ConversationRepo>,
-    mcp_server_repo: Arc<dyn McpServerRepo>,
+    message_repo: Msg,
+    conversation_repo: Conv,
+    mcp_server_repo: Mcp,
     config: AgentConfig,
 }
 ```
@@ -131,16 +138,16 @@ The gRPC server delegates to `Agent` methods internally.
 ## Agent API
 
 ```rust
-impl Agent {
+impl<Msg: MessageRepo, Conv: ConversationRepo, Mcp: McpServerRepo> Agent<Msg, Conv, Mcp> {
     pub fn new(
         llm: Arc<dyn LlmEngine>,
         mind: Arc<Mind>,
         memory: Arc<MemoryStore>,
         context_loader: Arc<ContextLoader>,
         tools: Vec<Arc<dyn Tool>>,
-        message_repo: Arc<dyn MessageRepo>,
-        conversation_repo: Arc<dyn ConversationRepo>,
-        mcp_server_repo: Arc<dyn McpServerRepo>,
+        message_repo: Msg,
+        conversation_repo: Conv,
+        mcp_server_repo: Mcp,
         config: AgentConfig,
     ) -> Self;
 

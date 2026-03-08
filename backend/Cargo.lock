@@ -2255,10 +2255,19 @@ dependencies = [
 name = "sober-auth"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "axum-core",
+ "chrono",
+ "hex",
+ "http",
+ "rand_core 0.6.4",
  "serde",
+ "sha2",
  "sober-core",
  "sober-crypto",
  "thiserror",
+ "tokio",
+ "tower",
  "tracing",
 ]
 

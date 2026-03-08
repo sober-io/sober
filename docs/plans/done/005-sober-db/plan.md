@@ -1529,8 +1529,9 @@ pub async fn create_cli_pool(database_url: &str) -> Result<PgPool, AppError> {
 //! - [`create_pool`] / [`create_cli_pool`] — connection pool creation
 //! - `Pg*Repo` structs — concrete implementations of repo traits from `sober-core`
 //!
-//! Library crates depend only on `sober-core` repo traits. Binary crates
-//! construct `Pg*Repo` instances at startup and pass them as `Arc<dyn Repo>`.
+//! Library crates depend only on `sober-core` repo traits (which use RPITIT and
+//! are not dyn-compatible). Binary crates construct `Pg*Repo` instances at startup
+//! and pass them as generic type parameters.
 
 mod pool;
 

@@ -25,7 +25,8 @@ instantiate an `Agent` directly — it communicates with the agent process via g
 
 The `PgPool` is retained in `AppState` because `sober-api` constructs repo
 implementations from `sober-db` (e.g., `PgSessionRepo`, `PgConversationRepo`)
-and passes them to library crates as `Arc<dyn RepoTrait>`.
+and passes them as generic type parameters to library crates (repo traits use
+RPITIT and are not dyn-compatible — `Arc<dyn Repo>` won't compile).
 
 Wrapped in `Arc<AppState>` and passed via axum `State`.
 
@@ -35,7 +36,7 @@ Wrapped in `Arc<AppState>` and passed via axum `State`.
 /api/v1/
   /health                    GET     — health check (no auth)
   /auth/register             POST    — register new user
-  /auth/login                POST    — login, returns session cookie
+  /auth/login                POST    — login, returns session cookie + token in body
   /auth/logout               POST    — logout (requires auth)
   /auth/me                   GET     — current user info (requires auth)
   /conversations             GET     — list conversations (requires auth, scoped by user_id)
@@ -47,7 +48,7 @@ Wrapped in `Arc<AppState>` and passed via axum `State`.
   /mcp/servers               POST    — add MCP server config (requires auth)
   /mcp/servers/:id           PATCH   — update MCP server config (requires auth)
   /mcp/servers/:id           DELETE  — remove MCP server config (requires auth)
-  /ws                        GET     — WebSocket upgrade (requires auth via cookie)
+  /ws                        GET     — WebSocket upgrade (requires auth via cookie or Bearer token)
 ```
 
 ## Middleware Stack
@@ -58,11 +59,11 @@ Tower layers, applied in order:
 2. **Tracing** — tower-http trace layer; logs method, path, status, duration.
 3. **CORS** — configurable allowed origins.
 4. **Rate limiting** — moka-backed (in-memory), per-IP for public endpoints, per-user for authenticated.
-5. **Auth** — from sober-auth; extracts session cookie, validates, attaches `AuthUser`.
+5. **Auth** — from sober-auth; extracts session token (`Authorization: Bearer` header first, `sober_session` cookie fallback), validates, attaches `AuthUser`.
 
 ## WebSocket Chat
 
-- Client connects to `/api/v1/ws` with session cookie.
+- Client connects to `/api/v1/ws` with session cookie or Bearer token.
 - Server validates session, upgrades to WebSocket.
 - Single WebSocket endpoint at `/api/v1/ws` (no path parameter). All messages
   include `conversation_id` in the payload for multiplexing.

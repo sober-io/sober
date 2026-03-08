@@ -36,7 +36,8 @@
 
 5. **Implement `routes/auth.rs`.**
    Thin handlers that delegate to sober-auth: register, login (sets HttpOnly
-   session cookie), logout (clears cookie), me (returns current AuthUser).
+   session cookie + returns token in response body for programmatic clients),
+   logout (clears cookie), me (returns current AuthUser).
 
 6. **Implement `routes/conversations.rs`.**
    CRUD handlers: list (paginated), create, get (with messages), update title,
@@ -48,7 +49,7 @@
 
 8. **Implement `routes/ws.rs`.**
    WebSocket upgrade handler at `/api/v1/ws` (single endpoint, no path param).
-   Session validation from cookie. JSON message parsing — all messages include
+   Session validation from cookie or Bearer token. JSON message parsing — all messages include
    `conversation_id` in payload (ClientWsMessage types: chat.message, chat.cancel).
    Spawn agent task per chat.message, call agent via gRPC streaming
    (`agent_client.handle_message`), forward AgentEvent stream to WebSocket with
