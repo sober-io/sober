@@ -69,7 +69,7 @@ async fn user_create_duplicate_email_returns_conflict(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn user_create_with_role_assigns_role(pool: PgPool) {
+async fn user_create_with_roles_assigns_single_role(pool: PgPool) {
     let repo = PgUserRepo::new(pool.clone());
     let input = CreateUser {
         email: "roleuser@example.com".into(),
@@ -77,7 +77,10 @@ async fn user_create_with_role_assigns_role(pool: PgPool) {
         password_hash: "hash".into(),
     };
 
-    let user = repo.create_with_role(input, "user").await.unwrap();
+    let user = repo
+        .create_with_roles(input, &[RoleKind::User])
+        .await
+        .unwrap();
     assert_eq!(user.status, UserStatus::Pending);
 
     // Verify role was assigned by checking the user_roles table directly
@@ -90,6 +93,29 @@ async fn user_create_with_role_assigns_role(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn user_create_with_roles_assigns_multiple_roles(pool: PgPool) {
+    let repo = PgUserRepo::new(pool.clone());
+    let input = CreateUser {
+        email: "multirole@example.com".into(),
+        username: "multirole".into(),
+        password_hash: "hash".into(),
+    };
+
+    let user = repo
+        .create_with_roles(input, &[RoleKind::User, RoleKind::Admin])
+        .await
+        .unwrap();
+    assert_eq!(user.status, UserStatus::Pending);
+
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM user_roles WHERE user_id = $1")
+        .bind(user.id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 2);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn user_create_with_nonexistent_role_returns_not_found(pool: PgPool) {
     let repo = PgUserRepo::new(pool);
     let input = CreateUser {
@@ -99,7 +125,7 @@ async fn user_create_with_nonexistent_role_returns_not_found(pool: PgPool) {
     };
 
     let err = repo
-        .create_with_role(input, "nonexistent")
+        .create_with_roles(input, &[RoleKind::Custom("nonexistent".into())])
         .await
         .unwrap_err();
     assert!(matches!(err, sober_core::error::AppError::NotFound(_)));

@@ -1,7 +1,7 @@
 //! PostgreSQL implementation of [`UserRepo`].
 
 use sober_core::error::AppError;
-use sober_core::types::{CreateUser, ScopeId, User, UserId, UserStatus};
+use sober_core::types::{CreateUser, RoleKind, ScopeId, User, UserId, UserStatus};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -85,7 +85,11 @@ impl sober_core::types::UserRepo for PgUserRepo {
         Ok(row.into())
     }
 
-    async fn create_with_role(&self, input: CreateUser, role: &str) -> Result<User, AppError> {
+    async fn create_with_roles(
+        &self,
+        input: CreateUser,
+        roles: &[RoleKind],
+    ) -> Result<User, AppError> {
         let mut tx = self
             .pool
             .begin()
@@ -111,19 +115,22 @@ impl sober_core::types::UserRepo for PgUserRepo {
             other => AppError::Internal(other.into()),
         })?;
 
-        let role_result = sqlx::query(
-            "INSERT INTO user_roles (user_id, role_id, scope_id) \
-             SELECT $1, id, $3 FROM roles WHERE name = $2",
-        )
-        .bind(id)
-        .bind(role)
-        .bind(ScopeId::GLOBAL.as_uuid())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        for role in roles {
+            let role_name = role.as_str();
+            let role_result = sqlx::query(
+                "INSERT INTO user_roles (user_id, role_id, scope_id) \
+                 SELECT $1, id, $3 FROM roles WHERE name = $2",
+            )
+            .bind(id)
+            .bind(role_name)
+            .bind(ScopeId::GLOBAL.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
 
-        if role_result.rows_affected() == 0 {
-            return Err(AppError::NotFound(format!("role '{role}'")));
+            if role_result.rows_affected() == 0 {
+                return Err(AppError::NotFound(format!("role '{role_name}'")));
+            }
         }
 
         tx.commit()

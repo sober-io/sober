@@ -1,7 +1,7 @@
 //! PostgreSQL implementation of [`RoleRepo`].
 
 use sober_core::error::AppError;
-use sober_core::types::{ScopeId, UserId};
+use sober_core::types::{RoleKind, ScopeId, UserId};
 use sqlx::PgPool;
 
 /// PostgreSQL-backed role repository.
@@ -17,7 +17,7 @@ impl PgRoleRepo {
 }
 
 impl sober_core::types::RoleRepo for PgRoleRepo {
-    async fn get_roles_for_user(&self, user_id: UserId) -> Result<Vec<String>, AppError> {
+    async fn get_roles_for_user(&self, user_id: UserId) -> Result<Vec<RoleKind>, AppError> {
         let rows: Vec<(String,)> = sqlx::query_as(
             "SELECT r.name FROM roles r \
              JOIN user_roles ur ON ur.role_id = r.id \
@@ -29,6 +29,9 @@ impl sober_core::types::RoleRepo for PgRoleRepo {
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(rows.into_iter().map(|(name,)| name).collect())
+        Ok(rows
+            .into_iter()
+            .map(|(name,)| RoleKind::from(name))
+            .collect())
     }
 }

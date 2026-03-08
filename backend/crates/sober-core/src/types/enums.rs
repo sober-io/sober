@@ -4,7 +4,9 @@
 //! serialization and `#[sqlx(type_name, rename_all)]` (behind the `postgres`
 //! feature) for direct mapping to PostgreSQL enum types.
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Memory/authorization scope level.
 ///
@@ -145,6 +147,73 @@ pub enum ArtifactKind {
     Generated,
 }
 
+/// Authorization role kind.
+///
+/// Known roles have dedicated variants for compile-time safety.
+/// Custom roles are supported via [`RoleKind::Custom`] for user-defined roles.
+///
+/// Serializes as a lowercase string (e.g. `"user"`, `"admin"`, `"moderator"`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RoleKind {
+    /// Standard user role.
+    User,
+    /// Administrator role.
+    Admin,
+    /// A custom role defined at runtime.
+    Custom(String),
+}
+
+impl RoleKind {
+    /// Returns the string representation used in the database.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::User => "user",
+            Self::Admin => "admin",
+            Self::Custom(name) => name,
+        }
+    }
+}
+
+impl fmt::Display for RoleKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for RoleKind {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "user" => Self::User,
+            "admin" => Self::Admin,
+            _ => Self::Custom(s),
+        }
+    }
+}
+
+impl From<&str> for RoleKind {
+    fn from(s: &str) -> Self {
+        match s {
+            "user" => Self::User,
+            "admin" => Self::Admin,
+            _ => Self::Custom(s.to_owned()),
+        }
+    }
+}
+
+impl Serialize for RoleKind {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RoleKind {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::from(s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +327,51 @@ mod tests {
             let deserialized: ArtifactKind = serde_json::from_str(&json).unwrap();
             assert_eq!(variant, deserialized);
         }
+    }
+
+    #[test]
+    fn role_kind_from_known_strings() {
+        assert_eq!(RoleKind::from("user"), RoleKind::User);
+        assert_eq!(RoleKind::from("admin"), RoleKind::Admin);
+    }
+
+    #[test]
+    fn role_kind_from_custom_string() {
+        let role = RoleKind::from("moderator");
+        assert_eq!(role, RoleKind::Custom("moderator".into()));
+        assert_eq!(role.as_str(), "moderator");
+    }
+
+    #[test]
+    fn role_kind_serde_roundtrip() {
+        for variant in [
+            RoleKind::User,
+            RoleKind::Admin,
+            RoleKind::Custom("editor".into()),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: RoleKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn role_kind_serializes_as_string() {
+        assert_eq!(serde_json::to_string(&RoleKind::User).unwrap(), "\"user\"");
+        assert_eq!(
+            serde_json::to_string(&RoleKind::Admin).unwrap(),
+            "\"admin\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RoleKind::Custom("mod".into())).unwrap(),
+            "\"mod\""
+        );
+    }
+
+    #[test]
+    fn role_kind_display() {
+        assert_eq!(RoleKind::User.to_string(), "user");
+        assert_eq!(RoleKind::Admin.to_string(), "admin");
+        assert_eq!(RoleKind::Custom("custom".into()).to_string(), "custom");
     }
 }

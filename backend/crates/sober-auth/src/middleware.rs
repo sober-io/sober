@@ -1,9 +1,10 @@
 //! Authentication middleware for axum.
 //!
-//! [`AuthLayer`] is a tower [`Layer`] that extracts the session cookie,
-//! validates it via [`AuthService`], and inserts [`AuthUser`] into request
-//! extensions. If no valid session is found, the request proceeds without
-//! an [`AuthUser`] — downstream extractors handle the 401 response.
+//! [`AuthLayer`] is a tower [`Layer`] that extracts the session token from
+//! either the `Authorization: Bearer` header (preferred) or the `sober_session`
+//! cookie (fallback), validates it via [`AuthService`], and inserts [`AuthUser`]
+//! into request extensions. If no valid session is found, the request proceeds
+//! without an [`AuthUser`] — downstream extractors handle the 401 response.
 
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -61,14 +62,15 @@ where
     }
 }
 
-/// Tower service that validates session cookies and inserts [`AuthUser`].
+/// Tower service that validates session tokens and inserts [`AuthUser`].
 ///
 /// On each request:
-/// 1. Reads the `Cookie` header and finds the `sober_session` cookie.
-/// 2. If found, validates it via [`AuthService::validate_session`].
-/// 3. On success, inserts [`AuthUser`] into request extensions.
-/// 4. On failure or absence, continues without inserting anything.
-/// 5. Always calls the inner service.
+/// 1. Checks the `Authorization: Bearer <token>` header first.
+/// 2. Falls back to the `sober_session` cookie if no `Authorization` header.
+/// 3. If a token is found, validates it via [`AuthService::validate_session`].
+/// 4. On success, inserts [`AuthUser`] into request extensions.
+/// 5. On failure or absence, continues without inserting anything.
+/// 6. Always calls the inner service.
 #[derive(Clone)]
 pub struct AuthMiddleware<Svc, U, S, R>
 where
@@ -102,9 +104,9 @@ where
         let auth_service = self.auth_service.clone();
         let mut inner = self.inner.clone();
 
-        // Extract the cookie value synchronously before the async boundary.
-        // This avoids borrowing the non-Sync request body across an await.
-        let raw_token = extract_cookie(&req);
+        // Extract the token synchronously before the async boundary.
+        // Checks Authorization header first, falls back to cookie.
+        let raw_token = extract_bearer_token(&req).or_else(|| extract_cookie(&req));
 
         Box::pin(async move {
             if let Some(token) = raw_token {
@@ -121,6 +123,22 @@ where
             inner.call(req).await
         })
     }
+}
+
+/// Extracts the raw session token from the `Authorization: Bearer <token>` header.
+fn extract_bearer_token(req: &Request<Body>) -> Option<String> {
+    let auth_header = req
+        .headers()
+        .get(http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+
+    let token = auth_header.strip_prefix("Bearer ")?;
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    Some(token.to_owned())
 }
 
 /// Extracts the raw session token from the `Cookie` header.
@@ -149,4 +167,72 @@ fn extract_cookie(req: &Request<Body>) -> Option<String> {
 #[must_use]
 pub const fn cookie_name() -> &'static str {
     COOKIE_NAME
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_request_with_header(name: http::header::HeaderName, value: &str) -> Request<Body> {
+        Request::builder()
+            .header(name, value)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[test]
+    fn extract_bearer_token_valid() {
+        let req = make_request_with_header(http::header::AUTHORIZATION, "Bearer mytoken123");
+        assert_eq!(extract_bearer_token(&req).as_deref(), Some("mytoken123"));
+    }
+
+    #[test]
+    fn extract_bearer_token_missing_header() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    #[test]
+    fn extract_bearer_token_wrong_scheme() {
+        let req = make_request_with_header(http::header::AUTHORIZATION, "Basic abc123");
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    #[test]
+    fn extract_bearer_token_empty_token() {
+        let req = make_request_with_header(http::header::AUTHORIZATION, "Bearer ");
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    #[test]
+    fn extract_cookie_valid() {
+        let req = make_request_with_header(http::header::COOKIE, "sober_session=abc123");
+        assert_eq!(extract_cookie(&req).as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn extract_cookie_among_multiple() {
+        let req = make_request_with_header(
+            http::header::COOKIE,
+            "other=val; sober_session=tok456; another=x",
+        );
+        assert_eq!(extract_cookie(&req).as_deref(), Some("tok456"));
+    }
+
+    #[test]
+    fn extract_cookie_missing() {
+        let req = make_request_with_header(http::header::COOKIE, "other=val");
+        assert!(extract_cookie(&req).is_none());
+    }
+
+    #[test]
+    fn bearer_takes_priority_over_cookie() {
+        let req = Request::builder()
+            .header(http::header::AUTHORIZATION, "Bearer bearer_token")
+            .header(http::header::COOKIE, "sober_session=cookie_token")
+            .body(Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&req).or_else(|| extract_cookie(&req));
+        assert_eq!(token.as_deref(), Some("bearer_token"));
+    }
 }

@@ -7,7 +7,7 @@
 use chrono::{Duration, Utc};
 use sober_core::error::AppError;
 use sober_core::types::{
-    CreateSession, CreateUser, RoleRepo, SessionRepo, User, UserId, UserRepo, UserStatus,
+    CreateSession, CreateUser, RoleKind, RoleRepo, SessionRepo, User, UserId, UserRepo, UserStatus,
 };
 use tracing::instrument;
 
@@ -78,7 +78,7 @@ where
             password_hash,
         };
 
-        self.users.create_with_role(input, "user").await
+        self.users.create_with_roles(input, &[RoleKind::User]).await
     }
 
     /// Authenticates a user with email and password.

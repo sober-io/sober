@@ -4,6 +4,7 @@
 //! to an appropriate [`AppError`] variant via the [`From`] implementation.
 
 use sober_core::error::AppError;
+use sober_core::types::RoleKind;
 
 /// Authentication and authorization errors.
 #[derive(Debug, thiserror::Error)]
@@ -26,7 +27,7 @@ pub enum AuthError {
 
     /// User does not hold the required role.
     #[error("insufficient role: {0}")]
-    InsufficientRole(String),
+    InsufficientRole(RoleKind),
 }
 
 impl From<AuthError> for AppError {
@@ -71,7 +72,7 @@ mod tests {
 
     #[test]
     fn insufficient_role_maps_to_forbidden() {
-        let app_err: AppError = AuthError::InsufficientRole("admin".into()).into();
+        let app_err: AppError = AuthError::InsufficientRole(RoleKind::Admin).into();
         assert!(matches!(app_err, AppError::Forbidden));
     }
 }

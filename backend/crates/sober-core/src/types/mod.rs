@@ -16,7 +16,8 @@ pub use domain::{
     UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 pub use enums::{
-    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, ScopeKind, UserStatus,
+    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, RoleKind, ScopeKind,
+    UserStatus,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,

@@ -7,7 +7,7 @@
 use axum_core::extract::FromRequestParts;
 use http::request::Parts;
 use sober_core::error::AppError;
-use sober_core::types::UserId;
+use sober_core::types::{RoleKind, UserId};
 
 use crate::error::AuthError;
 
@@ -20,15 +20,15 @@ use crate::error::AuthError;
 pub struct AuthUser {
     /// The user's unique identifier.
     pub user_id: UserId,
-    /// Role names assigned to this user (e.g. `["user", "admin"]`).
-    pub roles: Vec<String>,
+    /// Roles assigned to this user.
+    pub roles: Vec<RoleKind>,
 }
 
 impl AuthUser {
     /// Returns `true` if the user holds the given role.
     #[must_use]
-    pub fn has_role(&self, role: &str) -> bool {
-        self.roles.iter().any(|r| r == role)
+    pub fn has_role(&self, role: &RoleKind) -> bool {
+        self.roles.contains(role)
     }
 }
 
@@ -69,10 +69,10 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let user = AuthUser::from_request_parts(parts, state).await?;
-        if user.has_role("admin") {
+        if user.has_role(&RoleKind::Admin) {
             Ok(RequireAdmin(user))
         } else {
-            Err(AuthError::InsufficientRole("admin".to_owned()).into())
+            Err(AuthError::InsufficientRole(RoleKind::Admin).into())
         }
     }
 }
@@ -86,18 +86,28 @@ mod tests {
     fn has_role_returns_true_for_matching_role() {
         let user = AuthUser {
             user_id: UserId::new(),
-            roles: vec!["user".into(), "admin".into()],
+            roles: vec![RoleKind::User, RoleKind::Admin],
         };
-        assert!(user.has_role("admin"));
-        assert!(user.has_role("user"));
+        assert!(user.has_role(&RoleKind::Admin));
+        assert!(user.has_role(&RoleKind::User));
     }
 
     #[test]
     fn has_role_returns_false_for_missing_role() {
         let user = AuthUser {
             user_id: UserId::new(),
-            roles: vec!["user".into()],
+            roles: vec![RoleKind::User],
         };
-        assert!(!user.has_role("admin"));
+        assert!(!user.has_role(&RoleKind::Admin));
+    }
+
+    #[test]
+    fn has_role_works_with_custom_roles() {
+        let user = AuthUser {
+            user_id: UserId::new(),
+            roles: vec![RoleKind::User, RoleKind::Custom("moderator".into())],
+        };
+        assert!(user.has_role(&RoleKind::Custom("moderator".into())));
+        assert!(!user.has_role(&RoleKind::Admin));
     }
 }
