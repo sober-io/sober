@@ -1,0 +1,10 @@
+//! Qdrant vector store — memory storage, hybrid search, and pruning.
+
+pub mod bm25;
+mod collections;
+mod memory_store;
+mod types;
+
+pub use collections::{system_collection_name, user_collection_name};
+pub use memory_store::MemoryStore;
+pub use types::{MemoryHit, StoreChunk, StoreQuery};

@@ -6,5 +6,15 @@ edition.workspace = true
 [dependencies]
 sober-core = { path = "../sober-core" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Qdrant vector database client
+qdrant-client = "1.17.0"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
