@@ -118,11 +118,11 @@ impl UserRepo for PgUserRepo {
 Compound operations that span multiple tables get their own repo method. The
 transaction is internal to `sober-db` --- traits do not expose transaction types.
 
-Example: `UserRepo::create_with_role` inserts a user and assigns a default role
+Example: `UserRepo::create_with_roles` inserts a user and assigns one or more roles
 in a single transaction.
 
 ```rust
-async fn create_with_role(&self, input: CreateUser, role: &str) -> Result<User, AppError> {
+async fn create_with_roles(&self, input: CreateUser, roles: &[RoleKind]) -> Result<User, AppError> {
     let mut tx = self.pool.begin().await.map_err(|e| AppError::Internal(e.into()))?;
 
     let user_row = sqlx::query_as::<_, UserRow>(
@@ -138,15 +138,17 @@ async fn create_with_role(&self, input: CreateUser, role: &str) -> Result<User, 
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    sqlx::query(
-        "INSERT INTO user_roles (user_id, role_id) \
-         SELECT $1, id FROM roles WHERE name = $2"
-    )
-    .bind(user_row.id)
-    .bind(role)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| AppError::Internal(e.into()))?;
+    for role in roles {
+        sqlx::query(
+            "INSERT INTO user_roles (user_id, role_id) \
+             SELECT $1, id FROM roles WHERE name = $2"
+        )
+        .bind(user_row.id)
+        .bind(role.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    }
 
     tx.commit().await.map_err(|e| AppError::Internal(e.into()))?;
     Ok(user_row.into())
@@ -194,7 +196,7 @@ pub trait UserRepo: Send + Sync {
     async fn get_by_id(&self, id: UserId) -> Result<User, AppError>;
     async fn get_by_email(&self, email: &str) -> Result<User, AppError>;
     async fn create(&self, input: CreateUser) -> Result<User, AppError>;
-    async fn create_with_role(&self, input: CreateUser, role: &str) -> Result<User, AppError>;
+    async fn create_with_roles(&self, input: CreateUser, roles: &[RoleKind]) -> Result<User, AppError>;
     async fn update_status(&self, id: UserId, status: UserStatus) -> Result<(), AppError>;
 }
 ```

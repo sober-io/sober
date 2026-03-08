@@ -22,7 +22,7 @@
 
 3. **Implement `error.rs`.**
    Define `AuthError` enum with variants: `PasswordTooShort`, `InvalidCredentials`,
-   `AccountNotActive`, `SessionNotFound`, `InsufficientRole(String)`.
+   `AccountNotActive`, `SessionNotFound`, `InsufficientRole(RoleKind)`.
    Implement `From<AuthError> for AppError`.
 
 4. **Implement `token.rs`.**
@@ -30,18 +30,19 @@
    - `hash_token(raw_hex)` — SHA-256 hash of hex-decoded token bytes.
 
 5. **Implement `extractor.rs`.**
-   - `AuthUser` struct with `user_id: UserId` and `roles: Vec<String>`.
+   - `AuthUser` struct with `user_id: UserId` and `roles: Vec<RoleKind>`.
    - `AuthUser` implements `FromRequestParts` — extracts from request extensions.
-   - `RequireAdmin(AuthUser)` — wraps `AuthUser`, checks for `admin` role, returns 403 if missing.
+   - `RequireAdmin(AuthUser)` — wraps `AuthUser`, checks for `RoleKind::Admin`, returns 403 if missing.
 
 6. **Add `RoleRepo` trait to `sober-core`.**
-   `get_roles_for_user(user_id) -> Vec<String>`. Implement `PgRoleRepo` in `sober-db`.
+   `get_roles_for_user(user_id) -> Vec<RoleKind>`. Add `RoleKind` enum to `sober-core`
+   with `User`, `Admin`, and `Custom(String)` variants. Implement `PgRoleRepo` in `sober-db`.
 
 7. **Implement `service.rs`.**
    - `AuthService<U: UserRepo, S: SessionRepo, R: RoleRepo>` — generic over repos
      (required because RPITIT traits are not dyn-compatible).
    - `register(email, username, password) -> Result<User>` — validate password length,
-     hash with Argon2id via `spawn_blocking`, create user with `Pending` status and `user` role.
+     hash with Argon2id via `spawn_blocking`, create user with `Pending` status and `[RoleKind::User]` role(s).
    - `login(email, password) -> Result<(String, User)>` — authenticate, **always run Argon2
      before checking status** (prevents timing oracle), create session, return raw token.
    - `validate_session(raw_token) -> Result<AuthUser>` — hash token, look up session, load roles.
@@ -51,8 +52,10 @@
 
 8. **Implement `middleware.rs`.**
    - `AuthLayer<U, S, R>` — tower `Layer` backed by `Arc<AuthService<U, S, R>>`.
-   - `AuthMiddleware<Svc, U, S, R>` — tower `Service` that extracts cookie synchronously
+   - `AuthMiddleware<Svc, U, S, R>` — tower `Service` that extracts token synchronously
      (before async boundary), validates session, inserts `AuthUser` into extensions.
+   - Token extraction: `Authorization: Bearer` header first, `sober_session` cookie fallback.
+   - `extract_bearer_token()` — extracts token from `Authorization: Bearer <token>` header.
    - `extract_cookie()` — parses `Cookie` header, finds `sober_session`, strips quoted-string wrapping.
    - `cookie_name()` — returns the session cookie name constant.
 

@@ -80,14 +80,33 @@ This pattern applies to all crates consuming repo traits from `sober-core`.
 ## Session Validation (Middleware)
 
 - `AuthLayer` is a tower `Layer` that wraps services with `AuthMiddleware`.
-- `AuthMiddleware` extracts the `sober_session` cookie synchronously (before the async
+- `AuthMiddleware` extracts the session token synchronously (before the async
   boundary, since `Body` is not `Sync`), then validates via `AuthService::validate_session`.
+- Token extraction priority: `Authorization: Bearer <token>` header first, falls back
+  to `sober_session` cookie. This supports both browser clients (cookie) and programmatic
+  clients (CLI, bots, API consumers) via Bearer token.
 - On success, inserts `AuthUser` into request extensions. On failure, continues without
   inserting anything — downstream extractors handle the 401.
-- `AuthUser` struct fields: `user_id: UserId`, `roles: Vec<String>`.
+- `AuthUser` struct fields: `user_id: UserId`, `roles: Vec<RoleKind>`.
   Minimal — avoids extra DB lookups per request. Email/username can be loaded on demand.
 - Cookie values with RFC 6265 quoted-string wrapping (double quotes) are stripped.
 - `cookie_name()` is exported for use by route handlers when setting/clearing cookies.
+
+## RoleKind Enum
+
+`RoleKind` is a type-safe representation of authorization roles with known variants and
+extensibility for custom roles:
+
+```rust
+pub enum RoleKind {
+    User,
+    Admin,
+    Custom(String),  // future custom roles
+}
+```
+
+Serializes as a lowercase string (`"user"`, `"admin"`, `"moderator"`). Converts from
+database role name strings via `From<String>`.
 
 ## RoleRepo trait
 
@@ -98,12 +117,12 @@ pub trait RoleRepo: Send + Sync {
     fn get_roles_for_user(
         &self,
         user_id: UserId,
-    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
+    ) -> impl Future<Output = Result<Vec<RoleKind>, AppError>> + Send;
 }
 ```
 
 Implemented as `PgRoleRepo` in `sober-db`, joining `roles` + `user_roles` tables
-filtered by `GLOBAL` scope.
+filtered by `GLOBAL` scope. Role name strings are converted to `RoleKind` variants.
 
 ## Logout
 
@@ -135,7 +154,7 @@ filtered by `GLOBAL` scope.
 - `InvalidCredentials` — wrong email or password.
 - `AccountNotActive` — account is pending or disabled.
 - `SessionNotFound` — session token is invalid or expired.
-- `InsufficientRole(String)` — user lacks the required role.
+- `InsufficientRole(RoleKind)` — user lacks the required role.
 
 Each variant maps to the appropriate `AppError` variant (`Unauthorized`, `Forbidden`, etc.).
 
@@ -144,7 +163,7 @@ Each variant maps to the appropriate `AppError` variant (`Unauthorized`, `Forbid
 | Module | Purpose |
 |--------|---------|
 | `service.rs` | `AuthService` — register, login, logout, validate_session, approve/disable user |
-| `middleware.rs` | `AuthLayer`, `AuthMiddleware`, `cookie_name()`, cookie parsing |
+| `middleware.rs` | `AuthLayer`, `AuthMiddleware`, `cookie_name()`, Bearer + cookie token extraction |
 | `extractor.rs` | `AuthUser`, `RequireAdmin` axum extractors |
 | `error.rs` | `AuthError` enum, `From<AuthError> for AppError` |
 | `token.rs` | `generate_session_token()`, `hash_token()` |
