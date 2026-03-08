@@ -312,7 +312,7 @@ interface McpServer {
 ### WebSocket Message Types
 
 These types mirror the `AgentEvent` protobuf definitions from
-`shared/proto/sober/agent/v1/agent.proto` (plan 012). The API gateway
+`backend/proto/sober/agent/v1/agent.proto` (plan 012). The API gateway
 translates gRPC `AgentEvent` stream events into these JSON WebSocket messages,
 attaching the `conversation_id` for client-side routing.
 

@@ -375,7 +375,7 @@ All proposed changes are audit-logged.
 ### Protocol: gRPC over Unix Domain Sockets
 
 All inter-service communication uses gRPC (tonic + prost) over Unix domain sockets.
-Proto definitions live in `shared/proto/`. This avoids circular crate dependencies —
+Proto definitions live in `backend/proto/`. This avoids circular crate dependencies —
 services generate client/server code from shared proto files and communicate at runtime.
 
 ### Security

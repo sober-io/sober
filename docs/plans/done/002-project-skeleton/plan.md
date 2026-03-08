@@ -247,13 +247,13 @@ in CI if namespaces are not available (check with `bwrap --version` in a setup s
 - [ ] `test_utils` module exists behind feature flag
 - [ ] Mock types compile (actual implementations filled in by plans 003+)
 
-### 12. Create `shared/proto/` directory with stub protos
+### 12. Create `backend/proto/` directory with stub protos
 
-Create `shared/proto/` directory structure for internal gRPC service definitions
+Create `backend/proto/` directory structure for internal gRPC service definitions
 with minimal stub proto files:
 
-- `shared/proto/sober/agent/v1/agent.proto` — stub with `AgentService` and a `Health` RPC
-- `shared/proto/sober/scheduler/v1/scheduler.proto` — stub with `SchedulerService` and a `Health` RPC
+- `backend/proto/sober/agent/v1/agent.proto` — stub with `AgentService` and a `Health` RPC
+- `backend/proto/sober/scheduler/v1/scheduler.proto` — stub with `SchedulerService` and a `Health` RPC
 
 These stubs enable `tonic-build` in `sober-agent` and `sober-scheduler` from the start.
 Full RPC methods will be added as features are implemented.

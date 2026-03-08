@@ -12,7 +12,7 @@ MCP implementation has been extracted to its own plan. See
 
 ### 1. Define agent.proto
 
-Create `shared/proto/agent.proto` with the `AgentService` gRPC service definition:
+Create `backend/proto/agent.proto` with the `AgentService` gRPC service definition:
 - `HandleMessage` — server-streaming RPC for chat (request: user_id, conversation_id, content)
 - `ExecuteTask` — server-streaming RPC for scheduler jobs (request: task_id, task_type, payload, caller_identity, optional user_id/conversation_id/workspace_id)
 - `WakeAgent` — unary RPC for lightweight nudges (request: reason, caller_identity)

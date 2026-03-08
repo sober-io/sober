@@ -102,7 +102,7 @@ sober-cli (bin)
 
 - Dependencies flow downward only. No cycles.
 - `sober-api` is a leaf binary — nothing depends on it.
-- `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` communicate with it via gRPC over Unix domain sockets at runtime, not as a crate dependency. Proto definitions live in `shared/proto/`.
+- `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` communicate with it via gRPC over Unix domain sockets at runtime, not as a crate dependency. Proto definitions live in `backend/proto/`.
 - `sober-cli` depends on `sober-core` and `sober-crypto`. Admin protocol types live in `sober-core`.
 - All crates depend on `sober-core` for shared types and errors.
 
@@ -729,7 +729,7 @@ BCF files are written when:
 | Encryption (future) | AES-256-GCM | Will protect BCF chunks when enabled |
 | Signing (future) | Ed25519 | For replica authentication when implemented |
 | gRPC (agent) | Included in v1 | sober-agent is a gRPC server from day one; sober-api and sober-scheduler call it via UDS |
-| `shared/` directory | Proto definitions | `shared/proto/` holds gRPC service definitions for inter-process communication |
+| Proto definitions | `backend/proto/` | Holds gRPC service definitions for inter-process communication |
 
 ---
 
@@ -797,7 +797,7 @@ Decisions from critical review, applied 2026-03-06:
 
 | Code | Decision | Summary |
 |------|----------|---------|
-| C1 | gRPC agent from day one | `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` call it via gRPC/UDS at runtime, not as a crate dependency. Proto definitions live in `shared/proto/`. |
+| C1 | gRPC agent from day one | `sober-agent` is a standalone gRPC server binary. `sober-api` and `sober-scheduler` call it via gRPC/UDS at runtime, not as a crate dependency. Proto definitions live in `backend/proto/`. |
 | C2 | No scopes table | Scope isolation uses `user_id` directly. User scope = user_id, system scope is implicit, session scope = conversation_id. No separate `scopes` table or `scope_id` foreign keys on conversations/messages. |
 | C6 | CLI depends on sober-crypto | `sober-cli` depends on `sober-core` and `sober-crypto` (needs crypto for password hashing during user creation). |
 | C7 | Canonical config var names | Environment variables use `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `HOST`, `PORT`, `RUST_LOG`. No provider-specific keys. |

@@ -5,8 +5,8 @@
 **Goal:** Add an autonomous scheduler process and gRPC/UDS inter-service communication layer.
 
 **Architecture:** Independent `sober-scheduler` runtime communicates with `sober-agent`
-via gRPC over Unix domain sockets. Both generate client/server code from shared proto
-definitions, avoiding circular crate dependencies. Service calls are authenticated with
+via gRPC over Unix domain sockets. Both generate client/server code from proto
+definitions in `backend/proto/`, avoiding circular crate dependencies. Service calls are authenticated with
 filesystem permissions + Ed25519 identity tokens.
 
 **Tech Stack:** tonic, prost, tonic-build, tokio-cron-scheduler or cron crate, sqlx, sober-crypto
@@ -14,7 +14,7 @@ filesystem permissions + Ed25519 identity tokens.
 **Design:** [design.md](./design.md)
 
 **Prerequisites:** Phases 002 (skeleton), 003 (core), 004 (crypto), 012 (agent).
-Phase 002 must be updated to include `sober-scheduler` stub crate and `shared/proto/` directory.
+Phase 002 must be updated to include `sober-scheduler` stub crate and `backend/proto/` directory.
 
 ---
 
@@ -22,7 +22,7 @@ Phase 002 must be updated to include `sober-scheduler` stub crate and `shared/pr
 
 Before this plan can execute, phase 002 must include:
 - `sober-scheduler` stub crate in the workspace (`backend/crates/sober-scheduler/`)
-- `shared/proto/` directory (replacing the `.gitkeep` placeholder)
+- `backend/proto/` directory (replacing the `.gitkeep` placeholder)
 - `tonic`, `prost`, `tonic-build` in `[workspace.dependencies]`
 
 ---
@@ -31,7 +31,7 @@ Before this plan can execute, phase 002 must include:
 
 ### 1. Create proto definitions
 
-Create `shared/proto/sober/agent/v1/agent.proto`:
+Create `backend/proto/sober/agent/v1/agent.proto`:
 
 ```protobuf
 syntax = "proto3";
@@ -70,7 +70,7 @@ message WakeResponse {
 }
 ```
 
-Create `shared/proto/sober/scheduler/v1/scheduler.proto`:
+Create `backend/proto/sober/scheduler/v1/scheduler.proto`:
 
 ```protobuf
 syntax = "proto3";
@@ -155,10 +155,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .compile_protos(
             &[
-                "../../shared/proto/sober/scheduler/v1/scheduler.proto",
-                "../../shared/proto/sober/agent/v1/agent.proto",
+                "../proto/sober/scheduler/v1/scheduler.proto",
+                "../proto/sober/agent/v1/agent.proto",
             ],
-            &["../../shared/proto"],
+            &["../proto"],
         )?;
     Ok(())
 }

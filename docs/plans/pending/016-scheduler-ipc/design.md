@@ -96,19 +96,19 @@ The agent can also create/cancel scheduled tasks via gRPC during conversations
 ### Protocol: gRPC over Unix Domain Sockets
 
 All inter-service communication uses gRPC (tonic + prost) over Unix domain sockets.
-Proto definitions live in `shared/proto/`.
+Proto definitions live in `backend/proto/`.
 
 **Why gRPC/UDS:**
 - Strongly typed service definitions with code generation
 - Streaming support (useful for agent status updates)
 - Can upgrade to TCP later for distributed deployment without protocol changes
 - `tonic` + `prost` are mature in the Rust ecosystem
-- Resolves the `shared/` directory purpose (proto files for internal communication)
+- Proto files in `backend/proto/` provide strongly typed internal communication contracts
 
 ### Service Definitions
 
 ```protobuf
-// shared/proto/scheduler.proto
+// backend/proto/scheduler.proto
 service SchedulerService {
     rpc CreateJob(CreateJobRequest) returns (Job);
     rpc CancelJob(CancelJobRequest) returns (Empty);
@@ -118,7 +118,7 @@ service SchedulerService {
     rpc ForceRun(ForceRunRequest) returns (Empty);
 }
 
-// shared/proto/agent.proto — canonical definition in 012-sober-agent/design.md.
+// backend/proto/agent.proto — canonical definition in 012-sober-agent/design.md.
 // AgentService exposes: HandleMessage (chat streaming), ExecuteTask (scheduler
 // jobs streaming), WakeAgent (lightweight nudge). Full proto with all message
 // types and context fields defined there.
@@ -190,7 +190,7 @@ sober-agent     ──► sober-core
                 ──► prost (proto codegen)
                 ──► sober-crypto (service identity)
 
-shared/proto/   ◄── both scheduler and agent generate from these
+backend/proto/  ◄── both scheduler and agent generate from these
 ```
 
 No circular crate dependencies. Scheduler and agent communicate at runtime via
@@ -210,7 +210,7 @@ the same proto definitions.
 - `sober-cli` gains `soberctl scheduler` subcommands
 
 ### New shared artifacts
-- `shared/proto/` contains `.proto` files for all internal service definitions
+- `backend/proto/` contains `.proto` files for all internal service definitions
 - Proto codegen integrated into build via `tonic-build` in `build.rs`
 
 ### New dependencies

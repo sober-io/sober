@@ -19,9 +19,9 @@ sober/
 │   ├── crates/       # Individual library/binary crates
 │   │   └── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
 │   ├── migrations/   # SQL migrations (sqlx)
+│   ├── proto/        # Proto definitions for internal gRPC services
 │   └── soul/         # Base SOUL.md (agent identity)
 ├── frontend/         # SvelteKit PWA
-├── shared/           # Proto definitions for internal gRPC services
 ├── infra/            # Docker, K8s configs
 ├── docs/
 │   ├── plans/        # Planning documents
@@ -201,7 +201,7 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 - `sober-cli` depends on `sober-core` and `sober-crypto`. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
 - `sober-scheduler` and `sober-agent` must NOT depend on each other as crates. They communicate via gRPC at runtime using shared proto definitions.
-- Internal service communication uses gRPC over Unix domain sockets (tonic + prost). Proto files live in `shared/proto/`.
+- Internal service communication uses gRPC over Unix domain sockets (tonic + prost). Proto files live in `backend/proto/`.
 - All async code uses `tokio` runtime.
 - Database queries use `sqlx` with compile-time checked queries where possible.
 

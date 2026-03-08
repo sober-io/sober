@@ -53,7 +53,7 @@ two binaries (`sober` and `soberctl`) via `[[bin]]` sections.
 Dependency flow is strictly downward: `agent -> {mind, mcp, sandbox, llm, memory} -> core`
 and `api -> auth -> crypto -> core`. `sober-api` and `sober-scheduler` communicate
 with `sober-agent` via gRPC/UDS at runtime, not as crate dependencies. Proto
-definitions live in `shared/proto/`.
+definitions live in `backend/proto/`.
 
 ---
 
@@ -251,16 +251,16 @@ and detect bwrap availability at test runtime.
 
 ---
 
-## Shared Directory
+## Proto Definitions
 
-`shared/proto/` holds gRPC service definitions (Protocol Buffers) for internal
+`backend/proto/` holds gRPC service definitions (Protocol Buffers) for internal
 inter-process communication. `sober-api` and `sober-scheduler` use these proto
 files to generate gRPC client stubs for calling `sober-agent`. `sober-agent`
 uses them to generate its gRPC server implementation.
 
 Proto file layout:
-- `shared/proto/sober/agent/v1/agent.proto` — agent service definition
-- `shared/proto/sober/scheduler/v1/scheduler.proto` — scheduler service definition
+- `backend/proto/sober/agent/v1/agent.proto` — agent service definition
+- `backend/proto/sober/scheduler/v1/scheduler.proto` — scheduler service definition
 
 ---
 

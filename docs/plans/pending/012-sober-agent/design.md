@@ -11,14 +11,14 @@ MCP client design has been extracted to its own plan document. See
 
 `sober-agent` is a **standalone gRPC server binary**, not an in-process library.
 It listens on a Unix domain socket at `/run/sober/agent.sock` and exposes the
-`AgentService` gRPC service defined in `shared/proto/agent.proto`.
+`AgentService` gRPC service defined in `backend/proto/agent.proto`.
 
 Other services (sober-api, sober-scheduler) connect as gRPC clients.
 
 ### Proto Service Definition
 
 ```protobuf
-// shared/proto/agent.proto
+// backend/proto/agent.proto
 
 syntax = "proto3";
 package sober.agent.v1;
