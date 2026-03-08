@@ -291,6 +291,10 @@ Use **semantic versioning** (semver) for all releases:
 
 Tag releases as `vX.Y.Z`. Bump version in `Cargo.toml` workspace and `package.json` as appropriate.
 
+**PR version bumps:** Every PR that merges to main must bump the version:
+- **Feature PR** (`feat/`) → **minor** bump.
+- **Fix PR** (`fix/`) → **patch** bump.
+
 ## Commit Convention
 
 ```
