@@ -2988,12 +2988,18 @@ dependencies = [
 name = "sober-mind"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "regex",
  "serde",
+ "serde_json",
  "sober-core",
  "sober-crypto",
  "sober-memory",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
