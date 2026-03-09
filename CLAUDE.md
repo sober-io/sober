@@ -5,11 +5,17 @@
 Sõber ("friend" in Estonian) is a self-evolving AI agent system built with Rust (backend)
 and Svelte 5 (frontend). See @ARCHITECTURE.md for full system design.
 
+## Guiding Principles
+
+- **Compiler is your friend.** Lean on Rust's type system and Svelte's compiler checks. If it compiles, it should be close to correct.
+- **Explicit over implicit.** Prefer clear, readable code over clever abstractions.
+- **Fewer dependencies.** Add crates/packages deliberately. Evaluate maintenance status and API surface before adding.
+- **Progressive enhancement.** Start simple, add complexity only when needed. Don't over-architect before there's a reason.
+
 ## Best Practices & Patterns
 
 - Rust: @docs/rust-patterns.md
 - Svelte 5: @docs/svelte-patterns.md
-- Bootstrap guide & guiding principles: @CLAUDE_CODE_BOOTSTRAP.md
 
 ## Repository Structure
 
@@ -178,7 +184,7 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 
 **Plan lifecycle tied to git:**
 - When starting a plan, move the entire plan folder from `pending/` to `active/` in the first commit of the feature branch.
-- When the PR merges to main, move the entire plan folder from `active/` to `done/`.
+- When the plan is complete, move the entire plan folder from `active/` to `done/` as the last commit in the feature branch (before creating the PR). The PR delivers the plan to `done/` when it merges.
 
 ### Security
 
@@ -243,6 +249,24 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 - Integration tests in `tests/` directories.
 - Security-critical code requires property-based testing (proptest).
 - Plugin audit pipeline must have dedicated test suite.
+
+### Authentication Patterns
+
+- Passkeys (WebAuthn) as the primary auth method.
+- Session tokens in `HttpOnly` cookies — not localStorage.
+- Backend validates sessions via middleware; frontend checks auth state in a root layout `load` function.
+
+### Dev Workflow
+
+- **justfile** with common commands: `just dev`, `just build`, `just test`, `just check`, `just fmt`
+- **cargo-watch** for backend hot-reload during development.
+- **Prettier** + **eslint** for frontend formatting/linting.
+
+### Environment & Config
+
+- All config via environment variables, loaded from `.env` in dev.
+- Backend: typed config struct populated from env vars at startup (fail fast on missing config).
+- Frontend: use SvelteKit's `$env/static/public` and `$env/dynamic/private` modules — never expose secrets to the client.
 
 ---
 
