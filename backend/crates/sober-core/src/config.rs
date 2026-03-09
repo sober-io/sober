@@ -37,6 +37,8 @@ pub struct AppConfig {
     pub memory: MemoryConfig,
     /// ACP agent settings (optional — only needed when using ACP transport).
     pub acp: Option<AcpAgentConfig>,
+    /// Envelope encryption settings (secrets management).
+    pub crypto: CryptoConfig,
     /// Runtime environment (development or production).
     pub environment: Environment,
 }
@@ -161,6 +163,16 @@ pub struct MemoryConfig {
     pub prune_threshold: f64,
 }
 
+/// Envelope encryption settings for secrets management.
+#[derive(Debug, Clone)]
+pub struct CryptoConfig {
+    /// Hex-encoded 256-bit master encryption key for envelope encryption.
+    ///
+    /// Required when secrets management is enabled. Generate with:
+    /// `openssl rand -hex 32`
+    pub master_encryption_key: Option<String>,
+}
+
 impl AppConfig {
     /// Loads configuration from environment variables.
     ///
@@ -242,6 +254,9 @@ impl AppConfig {
                     args: args_str.split_whitespace().map(String::from).collect(),
                 }
             }),
+            crypto: CryptoConfig {
+                master_encryption_key: env.opt("MASTER_ENCRYPTION_KEY"),
+            },
             environment,
         })
     }

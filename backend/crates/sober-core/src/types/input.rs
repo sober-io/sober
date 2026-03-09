@@ -7,6 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::domain::SecretScope;
 use super::enums::{ArtifactKind, ArtifactState};
 use super::ids::{ConversationId, UserId, WorkspaceId};
 
@@ -140,4 +141,34 @@ pub struct CreateAuditLog {
     pub details: Option<serde_json::Value>,
     /// IP address.
     pub ip_address: Option<String>,
+}
+
+/// Input for storing a new encrypted secret.
+#[derive(Debug)]
+pub struct NewSecret {
+    /// Which scope (user) owns this secret.
+    pub scope: SecretScope,
+    /// Human-readable label.
+    pub name: String,
+    /// Category (e.g. `"llm_provider"`, `"oauth_app"`).
+    pub secret_type: String,
+    /// Non-sensitive metadata (JSON).
+    pub metadata: serde_json::Value,
+    /// AES-256-GCM encrypted data (nonce || ciphertext).
+    pub encrypted_data: Vec<u8>,
+    /// Priority for ordered fallback chains.
+    pub priority: Option<i32>,
+}
+
+/// Input for updating an existing secret.
+#[derive(Debug, Default)]
+pub struct UpdateSecret {
+    /// New label.
+    pub name: Option<String>,
+    /// New metadata.
+    pub metadata: Option<serde_json::Value>,
+    /// New encrypted data.
+    pub encrypted_data: Option<Vec<u8>>,
+    /// New priority (`Some(None)` clears the priority).
+    pub priority: Option<Option<i32>>,
 }

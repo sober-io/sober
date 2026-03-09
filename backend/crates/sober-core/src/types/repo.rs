@@ -343,3 +343,68 @@ pub trait AuditLogRepo: Send + Sync {
         limit: i64,
     ) -> impl Future<Output = Result<Vec<AuditLogEntry>, AppError>> + Send;
 }
+
+/// Encrypted secret storage operations.
+///
+/// Manages the two-layer key hierarchy: DEKs (data encryption keys) that
+/// are wrapped by a MEK, and user secrets encrypted by DEKs.
+pub trait SecretRepo: Send + Sync {
+    /// Gets the encrypted DEK for a scope, if one exists.
+    fn get_dek(
+        &self,
+        scope: SecretScope,
+    ) -> impl Future<Output = Result<Option<StoredDek>, AppError>> + Send;
+
+    /// Stores or replaces the encrypted DEK for a scope.
+    fn store_dek(
+        &self,
+        scope: SecretScope,
+        encrypted_dek: Vec<u8>,
+        mek_version: i32,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists secret metadata (without encrypted data) for a scope.
+    ///
+    /// Results are ordered by priority (ascending, NULLs last).
+    /// Optionally filters by `secret_type`.
+    fn list_secrets(
+        &self,
+        scope: SecretScope,
+        secret_type: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<SecretMetadata>, AppError>> + Send;
+
+    /// Gets a single secret including its encrypted data.
+    fn get_secret(
+        &self,
+        id: SecretId,
+    ) -> impl Future<Output = Result<Option<SecretRow>, AppError>> + Send;
+
+    /// Gets a single secret by name within a scope.
+    fn get_secret_by_name(
+        &self,
+        scope: SecretScope,
+        name: &str,
+    ) -> impl Future<Output = Result<Option<SecretRow>, AppError>> + Send;
+
+    /// Stores a new secret. Returns the generated ID.
+    fn store_secret(
+        &self,
+        secret: NewSecret,
+    ) -> impl Future<Output = Result<SecretId, AppError>> + Send;
+
+    /// Updates an existing secret.
+    fn update_secret(
+        &self,
+        id: SecretId,
+        update: UpdateSecret,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes a secret by ID.
+    fn delete_secret(&self, id: SecretId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all secret IDs for a scope (for bulk operations like DEK rotation).
+    fn list_secret_ids(
+        &self,
+        scope: SecretScope,
+    ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
+}
