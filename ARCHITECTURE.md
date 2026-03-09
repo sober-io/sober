@@ -98,60 +98,15 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
 | `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage, config parsing. Used by agent, CLI, and scheduler. |
 
-### Crate Dependency Flow
-
-Cross-crate dependencies flow downward. Binary/service crates depend on `sober-db`
-for PostgreSQL access; library crates depend on `sober-core` for repository traits
-and domain types (never on `sqlx` directly).
-
-```
-sober-api ──► sober-db ──► sober-core
-          ──► sober-auth ──► sober-core
-sober-agent ──► sober-db ──► sober-core
-            ──► sober-mind ──► sober-memory / sober-crypto ──► sober-core
-                    ↓                ↓
-               sober-sandbox    sober-sandbox
-                    ↑
-               sober-mcp
-sober-scheduler ──► sober-db ──► sober-core
-```
-
-`sober-db` is the only crate that depends on `sqlx`. It implements the repository
-traits defined in `sober-core`, keeping SQL concerns isolated from business logic.
-
-`sober-agent` and `sober-mcp` depend on `sober-sandbox` for process-level isolation.
-`sober-scheduler` and `sober-agent` do NOT depend on each other as crates — they
-communicate via gRPC at runtime using shared proto definitions.
-
 ---
 
 ## Memory & Context System
 
 ### Binary Context Format (BCF)
 
-Replaces naive markdown-based memory with a compact binary format:
-
-```
-┌─────────────────────────────────────┐
-│ BCF Header (28 bytes)               │
-│  Magic: 0x53 0xD5 0x42 0x45 (SÕBE) │
-│  Version: u16                       │
-│  Flags: u16 (encrypted, compressed) │
-│  Scope ID: UUID (128-bit LE)        │
-│  Chunk Count: u32                   │
-├─────────────────────────────────────┤
-│ Chunk Table (variable)              │
-│  [offset: u64, len: u32, type: u8]  │
-├─────────────────────────────────────┤
-│ Chunks (variable)                   │
-│  Each: zstd-compressed, then        │
-│  optionally AES-256-GCM encrypted   │
-├─────────────────────────────────────┤
-│ Vector Index Footer                 │
-│  Embedded HNSW index for fast       │
-│  similarity search within context   │
-└─────────────────────────────────────┘
-```
+Compact binary format: 28-byte header (magic `SÕBE`, version, flags, scope UUID,
+chunk count) → chunk table → zstd-compressed + optionally AES-256-GCM encrypted
+chunks → embedded HNSW vector index footer.
 
 Chunk types: `Fact`, `Conversation`, `Skill`, `Preference`, `Embedding`, `Code`, `Soul`.
 
@@ -189,21 +144,11 @@ least privilege — only the minimal required scopes are loaded for any operatio
 6. PRUNE    → Replica scrubs local context, retains only signed audit log
 ```
 
-### Task Delegation Protocol
+### Task Delegation
 
-```rust
-struct TaskEnvelope {
-    task_id: Uuid,
-    parent_signature: Ed25519Signature,
-    encrypted_payload: AES256GCMCiphertext,  // task + minimal context
-    scope_grants: Vec<ScopeGrant>,           // what the replica may access
-    deadline: Option<DateTime<Utc>>,
-    priority: TaskPriority,
-}
-```
-
-Only the parent agent can issue commands to its replicas. Replicas cannot
-command other replicas unless explicitly delegated that authority.
+Parent sends encrypted task envelopes (signed, AES-256-GCM encrypted, with explicit
+scope grants). Only the parent can command its replicas unless delegation authority
+is explicitly granted.
 
 ---
 
@@ -230,26 +175,9 @@ command other replicas unless explicitly delegated that authority.
 
 ### Authorization: RBAC + ABAC Hybrid
 
-```rust
-enum Permission {
-    // Knowledge
-    ReadKnowledge(ScopeId),
-    WriteKnowledge(ScopeId),
-    // Tools
-    ExecuteTool(ToolId),
-    InstallPlugin,
-    // Agent
-    SpawnReplica,
-    DelegateTask,
-    // Admin
-    ManageUsers,
-    ManageGroups,
-    AuditLogs,
-}
-```
-
-Permissions are scoped — a user may have `ReadKnowledge` for their own scope
-but not for another user's scope. Group admins can grant group-scoped permissions.
+Permissions are scoped (knowledge, tools, agent, admin). A user may have
+`ReadKnowledge` for their own scope but not another's. Group admins can grant
+group-scoped permissions.
 
 ---
 
@@ -270,49 +198,19 @@ DISCOVER → AUDIT → SANDBOX_TEST → INSTALL → MONITOR → UPDATE/REMOVE
 5. **Code Generation** — For predictable plugin logic, generate native Rust/WASM
    that can execute without LLM in the loop
 
-### Plugin Interface (MCP-Compatible)
-
-```rust
-#[async_trait]
-trait SoberPlugin: Send + Sync {
-    fn metadata(&self) -> PluginMetadata;
-    fn capabilities(&self) -> Vec<Capability>;
-    async fn execute(&self, ctx: &SandboxContext, input: ToolInput) -> Result<ToolOutput>;
-    fn audit_report(&self) -> AuditReport;
-}
-```
+Plugins implement the `SoberPlugin` trait (metadata, capabilities, sandboxed execute, audit report). MCP-compatible.
 
 ---
 
 ## LLM Engine Abstraction
 
-```rust
-#[async_trait]
-trait LlmEngine: Send + Sync {
-    async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse>;
-    async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
-    fn capabilities(&self) -> EngineCapabilities;
-    fn model_id(&self) -> &str;
-}
-```
+`LlmEngine` trait with `complete()`, `embed()`, `capabilities()`, `model_id()`.
 
-### Transport Modes
+Two transports: `OpenAiCompatibleEngine` (HTTP to OpenRouter/OpenAI/Ollama) and
+`AcpEngine` (JSON-RPC/stdio to local coding agents like Claude Code via
+[Agent Client Protocol](https://agentclientprotocol.com/)).
 
-Two engine implementations:
-
-| Engine | Transport | Use Case |
-|--------|-----------|----------|
-| `OpenAiCompatibleEngine` | HTTP to provider API | Direct access to OpenRouter, OpenAI, Ollama, etc. |
-| `AcpEngine` | JSON-RPC/stdio to local agent | Send prompts through Claude Code, Kimi Code, Goose, etc. |
-
-**ACP (Agent Client Protocol)** support lets Sõber send prompts to locally installed
-coding agents via the [Agent Client Protocol](https://agentclientprotocol.com/).
-Sõber acts as an ACP client — spawns the agent as a subprocess and communicates
-via JSON-RPC 2.0 over stdio. This leverages the agent's existing API keys and
-capabilities without separate credential configuration.
-
-Router selects engine based on task type, cost, latency requirements, and user
-preferences.
+Router selects engine based on task type, cost, latency, and user preferences.
 
 ---
 
@@ -394,58 +292,18 @@ For distributed deployment, upgrade to mTLS without protocol changes.
 
 ## Scheduler
 
-### Overview
-
-`sober-scheduler` is an independent runtime process — a general-purpose tick engine
-that drives autonomous operations without user input. It runs alongside `sober-api`
-as a peer, not a child service.
-
-### Job Categories
-
-| Category | Examples | Resolution |
-|----------|----------|------------|
-| Memory maintenance | BCF compaction, importance decay, pruning | Minutes |
-| System housekeeping | Key rotation, dead replica cleanup, health checks | Seconds-minutes |
-| Proactive agent tasks | Monitoring, scheduled reminders | Minutes (cron) |
-| User-defined jobs | "Summarize my email every morning" | Cron expressions |
-| Self-evolution | Skill/plugin updates, capability assessments | Hours-daily |
-
-### Scheduling Models
-
-- **Interval-based** — `every: 30s`, `every: 5m`. For system tasks.
-- **Cron expressions** — `"0 9 * * MON-FRI"`. For user/agent-defined schedules.
-
-Configurable minimum resolution (default: minute-level, second-level opt-in for system tasks).
-
-### Persistence
-
-- **Ephemeral** (in-memory) — System tasks that re-register on startup.
-- **Persistent** (PostgreSQL) — User/agent-created jobs that survive restarts.
-
-### Management
-
-- `soberctl scheduler list|pause|resume|run|cancel` for admin control.
-- Agent can create/cancel jobs via gRPC during conversations.
+Independent tick engine peer to `sober-api`. Supports interval-based (`every: 30s`)
+and cron (`"0 9 * * MON-FRI"`) scheduling. Jobs are either ephemeral (in-memory,
+re-register on startup) or persistent (PostgreSQL). Managed via `soberctl` or
+agent gRPC calls.
 
 ---
 
 ## Communication Channels
 
-### Phase 1: PWA (Svelte)
-- SvelteKit with SSR
-- WebSocket for real-time agent communication
-- Service Worker for offline capability
-- Push notifications
-
-### Phase 2+: Additional Channels
-- Discord bot (via gateway API)
-- WhatsApp (via Business API)
-- Telegram
-- CLI tool
-- Native mobile (Tauri)
-
-All channels route through the unified API gateway with channel-specific
-adapters that normalize messages into internal `AgentMessage` format.
+Phase 1: SvelteKit PWA with WebSocket for real-time agent communication.
+All channels route through the API gateway with channel-specific adapters
+that normalize messages into internal `AgentMessage` format.
 
 ---
 
@@ -481,14 +339,5 @@ Each process can be started, stopped, and scaled independently.
 
 ### CLI Administration
 
-The `sober-cli` crate produces two binaries:
-
-- **`sober`** — Offline operations that connect directly to PostgreSQL. Migrations,
-  user management, DB seed/backup/restore, config validation. Works without a running
-  API server.
-- **`soberctl`** — Runtime operations that connect to services via Unix admin sockets.
-  Agent inspection/control, task queue management, scheduler management, memory pruning,
-  live health checks, plugin management.
-
-Admin sockets are secured by filesystem permissions (`0660`, `sober:sober`).
-Services only bind admin sockets when configured to do so (opt-in).
+`sober` (offline, direct PostgreSQL) and `soberctl` (runtime, via Unix admin sockets).
+Admin sockets secured by filesystem permissions (`0660`, `sober:sober`).
