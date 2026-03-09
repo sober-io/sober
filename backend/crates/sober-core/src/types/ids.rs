@@ -135,6 +135,16 @@ define_id!(
     AuditLogId
 );
 
+define_id!(
+    /// Unique identifier for a stored encrypted secret.
+    SecretId
+);
+
+define_id!(
+    /// Unique identifier for a stored encryption key (DEK).
+    EncryptionKeyId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);

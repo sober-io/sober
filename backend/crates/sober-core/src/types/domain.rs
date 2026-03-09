@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus};
 use super::ids::{
-    ArtifactId, AuditLogId, ConversationId, JobId, McpServerId, MessageId, RoleId, ScopeId,
-    SessionId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, McpServerId, MessageId, RoleId,
+    ScopeId, SecretId, SessionId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -246,6 +246,74 @@ pub struct AuditLogEntry {
     pub ip_address: Option<String>,
     /// When the action occurred.
     pub created_at: DateTime<Utc>,
+}
+
+/// Determines whether a secret or encryption key is scoped to a user.
+///
+/// Future: extend with `Group(GroupId)` when groups are implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SecretScope {
+    /// Secret scoped to an individual user.
+    User(UserId),
+}
+
+/// Metadata returned when listing secrets (no encrypted data included).
+#[derive(Debug, Clone, Serialize)]
+pub struct SecretMetadata {
+    /// Unique identifier.
+    pub id: SecretId,
+    /// Human-readable label.
+    pub name: String,
+    /// Category (e.g. `"llm_provider"`, `"oauth_app"`, `"api_token"`).
+    pub secret_type: String,
+    /// Non-sensitive metadata (JSON) — provider name, base URL, etc.
+    pub metadata: serde_json::Value,
+    /// Priority for ordered fallback chains (lower = higher priority).
+    pub priority: Option<i32>,
+    /// When the secret was created.
+    pub created_at: DateTime<Utc>,
+    /// When the secret was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Full secret row including encrypted data (returned only on explicit fetch).
+#[derive(Debug, Clone)]
+pub struct SecretRow {
+    /// Unique identifier.
+    pub id: SecretId,
+    /// Owning user.
+    pub user_id: UserId,
+    /// Human-readable label.
+    pub name: String,
+    /// Category.
+    pub secret_type: String,
+    /// Non-sensitive metadata (JSON).
+    pub metadata: serde_json::Value,
+    /// AES-256-GCM encrypted data (nonce || ciphertext).
+    pub encrypted_data: Vec<u8>,
+    /// Priority for ordering.
+    pub priority: Option<i32>,
+    /// When the secret was created.
+    pub created_at: DateTime<Utc>,
+    /// When the secret was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A stored DEK (data encryption key) for a user scope.
+#[derive(Debug, Clone)]
+pub struct StoredDek {
+    /// Unique identifier.
+    pub id: EncryptionKeyId,
+    /// Owning user.
+    pub user_id: UserId,
+    /// MEK-wrapped DEK bytes (nonce || ciphertext).
+    pub encrypted_dek: Vec<u8>,
+    /// Which MEK version was used to wrap this DEK.
+    pub mek_version: i32,
+    /// When the DEK was created.
+    pub created_at: DateTime<Utc>,
+    /// When the DEK was last rotated.
+    pub rotated_at: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]
