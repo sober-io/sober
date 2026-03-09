@@ -41,7 +41,11 @@ jobs:
         working-directory: backend
 
       - name: Test
-        run: cargo test --workspace --exclude sober-db
+        run: cargo test --workspace --exclude sober-db --exclude sober-api
+        working-directory: backend
+
+      - name: Test sober-api (unit tests only, integration tests require DATABASE_URL)
+        run: cargo test -p sober-api --lib --bins
         working-directory: backend
 
       - name: Test sober-db (unit tests only, integration tests require DATABASE_URL)
@@ -103,6 +107,10 @@ jobs:
 
       - name: Test sober-db (full integration)
         run: cargo test -p sober-db
+        working-directory: backend
+
+      - name: Test sober-api (integration tests)
+        run: cargo test -p sober-api
         working-directory: backend
 
       - name: Test sober-memory (ignored integration tests)
