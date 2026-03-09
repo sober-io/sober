@@ -20,10 +20,27 @@ build:
     cd backend && cargo build -q --release
     cd frontend && pnpm build --silent
 
-# Run all tests
+# Run unit tests (no Docker required)
 test:
     cd backend && cargo test --workspace -q
     cd frontend && pnpm test --silent
+
+# Run integration tests (starts Docker services, waits for health, runs ignored tests)
+test-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker compose up -d
+    echo "Waiting for services..."
+    docker compose exec -T postgres pg_isready -U sober -q --timeout=30
+    until curl -sf http://localhost:6334/readyz > /dev/null 2>&1; do sleep 1; done
+    echo "Services ready. Running integration tests..."
+    cd backend && cargo test --workspace -q -- --ignored
+    echo "Integration tests passed."
+
+# Run all tests (unit + integration)
+test-all:
+    just test
+    just test-integration
 
 # Type-check and lint everything
 check:
