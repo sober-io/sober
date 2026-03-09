@@ -1,6 +1,89 @@
 //! `sober` — offline CLI for database migrations, user management, config
 //! validation, and other operations that connect directly to PostgreSQL.
 
-fn main() {
-    println!("sober: not yet implemented");
+mod cli;
+mod commands;
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use sober_db::{DatabaseConfig, PgUserRepo, create_pool};
+use tracing_subscriber::EnvFilter;
+
+use cli::{Cli, Command, ConfigCommand, MigrateCommand, UserCommand};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Minimal tracing for CLI output.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
+        .with_target(false)
+        .init();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Config(cmd) => run_config(cmd),
+        Command::User(cmd) => run_user(cmd).await,
+        Command::Migrate(cmd) => run_migrate(cmd).await,
+    }
+}
+
+/// Execute a config subcommand (no database required).
+fn run_config(cmd: ConfigCommand) -> Result<()> {
+    match cmd {
+        ConfigCommand::Validate => commands::config::validate(),
+        ConfigCommand::Show => commands::config::show(),
+    }
+}
+
+/// Execute a user subcommand (requires database connection).
+async fn run_user(cmd: UserCommand) -> Result<()> {
+    let pool = connect_db().await?;
+    let repo = PgUserRepo::new(pool);
+
+    match cmd {
+        UserCommand::Create {
+            email,
+            username,
+            admin,
+        } => commands::user::create(&repo, &email, &username, admin).await,
+        UserCommand::Approve { email } => commands::user::approve(&repo, &email).await,
+        UserCommand::Disable { email } => commands::user::disable(&repo, &email).await,
+        UserCommand::Enable { email } => commands::user::enable(&repo, &email).await,
+        UserCommand::List { status } => commands::user::list(&repo, status).await,
+        UserCommand::ResetPassword { email } => commands::user::reset_password(&repo, &email).await,
+    }
+}
+
+/// Execute a migration subcommand (requires database connection).
+async fn run_migrate(cmd: MigrateCommand) -> Result<()> {
+    let pool = connect_db().await?;
+
+    match cmd {
+        MigrateCommand::Run => commands::migrate::run(&pool).await,
+        MigrateCommand::Status => commands::migrate::status(&pool).await,
+        MigrateCommand::Revert => commands::migrate::revert(&pool).await,
+    }
+}
+
+/// Connect to the database using configuration from environment variables.
+///
+/// Uses a single connection (max_connections=1) since CLI operations are
+/// sequential.
+async fn connect_db() -> Result<sqlx::PgPool> {
+    dotenvy::dotenv().ok();
+
+    let database_url =
+        std::env::var("DATABASE_URL").context("DATABASE_URL environment variable is required")?;
+
+    let config = DatabaseConfig {
+        url: database_url,
+        max_connections: 1,
+    };
+
+    create_pool(&config)
+        .await
+        .context("failed to connect to database")
 }

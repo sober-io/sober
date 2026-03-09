@@ -48,6 +48,16 @@ pub enum UserStatus {
     Disabled,
 }
 
+impl fmt::Display for UserStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pending => f.write_str("pending"),
+            Self::Active => f.write_str("active"),
+            Self::Disabled => f.write_str("disabled"),
+        }
+    }
+}
+
 /// Author type of a message in a conversation.
 ///
 /// Maps to the `message_role` PostgreSQL enum.
