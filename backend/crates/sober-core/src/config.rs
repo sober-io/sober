@@ -35,6 +35,8 @@ pub struct AppConfig {
     pub mcp: McpConfig,
     /// Memory system settings.
     pub memory: MemoryConfig,
+    /// ACP agent settings (optional — only needed when using ACP transport).
+    pub acp: Option<AcpAgentConfig>,
     /// Runtime environment (development or production).
     pub environment: Environment,
 }
@@ -137,6 +139,17 @@ pub struct McpConfig {
     pub idle_timeout_secs: u64,
 }
 
+/// ACP (Agent Client Protocol) agent settings.
+#[derive(Debug, Clone)]
+pub struct AcpAgentConfig {
+    /// Display name for the agent.
+    pub name: String,
+    /// Binary to spawn (e.g. `"claude"`, `"kimi"`).
+    pub command: String,
+    /// CLI arguments (e.g. `["acp"]`).
+    pub args: Vec<String>,
+}
+
 /// Memory system tuning parameters.
 #[derive(Debug, Clone)]
 pub struct MemoryConfig {
@@ -221,6 +234,14 @@ impl AppConfig {
                 retrieval_boost: env.parse("MEMORY_RETRIEVAL_BOOST", 0.2)?,
                 prune_threshold: env.parse("MEMORY_PRUNE_THRESHOLD", 0.1)?,
             },
+            acp: env.opt("ACP_AGENT_COMMAND").map(|command| {
+                let args_str = env.or("ACP_AGENT_ARGS", "acp");
+                AcpAgentConfig {
+                    name: env.or("ACP_AGENT_NAME", &command),
+                    command,
+                    args: args_str.split_whitespace().map(String::from).collect(),
+                }
+            }),
             environment,
         })
     }

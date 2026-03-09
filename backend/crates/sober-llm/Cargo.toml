@@ -6,5 +6,20 @@ edition.workspace = true
 [dependencies]
 sober-core = { path = "../sober-core" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+
+# HTTP client for OpenAI-compatible providers
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "stream"] }
+
+# Async stream support
+futures = "0.3.31"
+async-trait = "0.1.88"
+
+# ACP (Agent Client Protocol) type definitions
+agent-client-protocol-schema = { version = "0.11.0", features = ["unstable"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
