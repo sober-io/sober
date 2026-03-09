@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::MindError;
+use tracing::warn;
 
 /// Section markers that delimit protected content in SOUL.md.
 /// Workspace layers cannot remove or contradict these sections.
@@ -61,9 +62,23 @@ impl SoulResolver {
             ))
         })?;
 
-        // 2. Apply user override (full replacement)
+        // 2. Apply user override (full replacement).
+        //
+        // DESIGN DECISION: The user layer fully replaces the base — no
+        // protected-section validation. This is intentional: the user controls
+        // their own instance (ARCHITECTURE.md: "User controls their instance").
+        // The security boundary is between the *agent* (autonomous) and the
+        // *user* (human owner). SOUL.md §Self-Evolution: "You must never modify
+        // ethical boundaries [...] autonomously" — the constraint targets
+        // autonomous modification, not user customization.
         let resolved = match &self.user_path {
-            Some(path) => read_soul_file(path).await?.unwrap_or(base),
+            Some(path) => match read_soul_file(path).await? {
+                Some(user_content) => {
+                    warn_if_missing_protected_sections(&user_content, path);
+                    user_content
+                }
+                None => base,
+            },
             None => base,
         };
 
@@ -89,6 +104,23 @@ async fn read_soul_file(path: &Path) -> Result<Option<String>, MindError> {
             "failed to read {}: {e}",
             path.display()
         ))),
+    }
+}
+
+/// Logs a warning if a user SOUL.md is missing any protected sections.
+///
+/// This is a safety net — not a hard error — because the user controls their
+/// own instance and may intentionally omit sections.
+fn warn_if_missing_protected_sections(content: &str, path: &Path) {
+    let content_lower = content.to_lowercase();
+    for marker in PROTECTED_MARKERS {
+        if !content_lower.contains(&marker.to_lowercase()) {
+            warn!(
+                path = %path.display(),
+                section = %marker,
+                "user SOUL.md is missing protected section — safety guardrails may be weakened",
+            );
+        }
     }
 }
 

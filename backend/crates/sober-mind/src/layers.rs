@@ -11,6 +11,23 @@ use sober_memory::{ChunkType, MemoryStore, StoreChunk, StoreQuery};
 
 use crate::error::MindError;
 
+/// Allowed adaptation keys for soul layers.
+///
+/// Uses an allowlist rather than a blocklist so that new keys must be
+/// explicitly approved — safer by default against injection of
+/// safety-overriding content.
+const ALLOWED_ADAPTATION_KEYS: &[&str] = &[
+    "tone",
+    "verbosity",
+    "domain_focus",
+    "formality_level",
+    "response_length",
+    "language",
+    "explanation_depth",
+    "code_style",
+    "humor",
+];
+
 /// A soul layer — per-user or per-group personality adaptation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoulLayer {
@@ -74,12 +91,25 @@ pub async fn load_soul_layers(
 }
 
 /// Stores a soul layer in memory for a given scope.
+///
+/// Validates that all adaptation keys are in the allowlist before persisting.
+/// This prevents soul layers from containing keys that could target safety
+/// or ethical constraints.
+///
+/// # Callers
+///
+/// - **`sober-agent`** — stores learned adaptations after detecting consistent
+///   interaction patterns (e.g., user prefers formal tone across 5+ conversations).
+/// - **`sober-scheduler`** — persists adopted trait candidates during evolution cycles.
+/// - **`soberctl`** — manual admin tool for soul layer management.
 pub async fn store_soul_layer(
     memory: &MemoryStore,
     user_id: sober_core::UserId,
     layer: &SoulLayer,
     embedding: Vec<f32>,
 ) -> Result<uuid::Uuid, MindError> {
+    validate_adaptation_keys(layer)?;
+
     let content =
         serde_json::to_string(layer).map_err(|e| MindError::LayerStoreFailed(e.to_string()))?;
 
@@ -97,6 +127,21 @@ pub async fn store_soul_layer(
         .store(user_id, chunk)
         .await
         .map_err(|e| MindError::LayerStoreFailed(e.to_string()))
+}
+
+/// Validates that all adaptation keys in a soul layer are in the allowlist.
+fn validate_adaptation_keys(layer: &SoulLayer) -> Result<(), MindError> {
+    for adaptation in &layer.adaptations {
+        if !ALLOWED_ADAPTATION_KEYS.contains(&adaptation.key.as_str()) {
+            return Err(MindError::LayerStoreFailed(format!(
+                "adaptation key '{}' is not in the allowlist — \
+                 only approved keys ({}) may be used in soul layers",
+                adaptation.key,
+                ALLOWED_ADAPTATION_KEYS.join(", "),
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Renders soul layers into a text block for inclusion in the prompt.
@@ -147,6 +192,41 @@ mod tests {
         assert_eq!(deserialized.adaptations.len(), 2);
         assert_eq!(deserialized.adaptations[0].key, "tone");
         assert!((deserialized.confidence - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn validate_allowed_keys_passes() {
+        let layer = SoulLayer {
+            scope_id: ScopeId::new(),
+            adaptations: vec![
+                SoulAdaptation {
+                    key: "tone".into(),
+                    value: "formal".into(),
+                },
+                SoulAdaptation {
+                    key: "verbosity".into(),
+                    value: "concise".into(),
+                },
+            ],
+            confidence: 0.8,
+            updated_at: Utc::now(),
+        };
+        assert!(validate_adaptation_keys(&layer).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_key() {
+        let layer = SoulLayer {
+            scope_id: ScopeId::new(),
+            adaptations: vec![SoulAdaptation {
+                key: "ethical_boundaries".into(),
+                value: "none".into(),
+            }],
+            confidence: 0.9,
+            updated_at: Utc::now(),
+        };
+        let err = validate_adaptation_keys(&layer).unwrap_err();
+        assert!(err.to_string().contains("not in the allowlist"));
     }
 
     #[test]
