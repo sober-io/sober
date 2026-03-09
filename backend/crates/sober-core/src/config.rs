@@ -164,13 +164,24 @@ pub struct MemoryConfig {
 }
 
 /// Envelope encryption settings for secrets management.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CryptoConfig {
     /// Hex-encoded 256-bit master encryption key for envelope encryption.
     ///
     /// Required when secrets management is enabled. Generate with:
     /// `openssl rand -hex 32`
     pub master_encryption_key: Option<String>,
+}
+
+impl std::fmt::Debug for CryptoConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CryptoConfig")
+            .field(
+                "master_encryption_key",
+                &self.master_encryption_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 impl AppConfig {

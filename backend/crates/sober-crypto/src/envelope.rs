@@ -18,6 +18,32 @@ use rand_core::{OsRng, RngCore};
 
 use crate::error::CryptoError;
 
+/// Encrypt `plaintext` with AES-256-GCM using a fresh random 12-byte nonce.
+fn aes_gcm_encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<EncryptedBlob, CryptoError> {
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
+    Ok(EncryptedBlob {
+        nonce: nonce_bytes,
+        ciphertext,
+    })
+}
+
+/// Decrypt an [`EncryptedBlob`] with AES-256-GCM.
+fn aes_gcm_decrypt(key: &[u8; 32], blob: &EncryptedBlob) -> Result<Vec<u8>, CryptoError> {
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| CryptoError::DecryptionError(e.to_string()))?;
+    let nonce = Nonce::from_slice(&blob.nonce);
+    cipher
+        .decrypt(nonce, blob.ciphertext.as_slice())
+        .map_err(|e| CryptoError::DecryptionError(e.to_string()))
+}
+
 /// AES-256-GCM encrypted payload: 12-byte nonce followed by ciphertext
 /// (including the authentication tag).
 ///
@@ -96,33 +122,12 @@ impl Dek {
 
     /// Encrypt plaintext with a fresh random nonce.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedBlob, CryptoError> {
-        let cipher = Aes256Gcm::new_from_slice(&self.0)
-            .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
-
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|e| CryptoError::EncryptionError(e.to_string()))?;
-
-        Ok(EncryptedBlob {
-            nonce: nonce_bytes,
-            ciphertext,
-        })
+        aes_gcm_encrypt(&self.0, plaintext)
     }
 
     /// Decrypt ciphertext using the nonce from the blob.
     pub fn decrypt(&self, blob: &EncryptedBlob) -> Result<Vec<u8>, CryptoError> {
-        let cipher = Aes256Gcm::new_from_slice(&self.0)
-            .map_err(|e| CryptoError::DecryptionError(e.to_string()))?;
-
-        let nonce = Nonce::from_slice(&blob.nonce);
-
-        cipher
-            .decrypt(nonce, blob.ciphertext.as_slice())
-            .map_err(|e| CryptoError::DecryptionError(e.to_string()))
+        aes_gcm_decrypt(&self.0, blob)
     }
 }
 
@@ -145,31 +150,32 @@ impl Mek {
     /// Returns [`CryptoError::InvalidData`] if the hex string is invalid or
     /// does not decode to exactly 32 bytes.
     pub fn from_hex(hex_str: &str) -> Result<Self, CryptoError> {
-        let bytes = hex::decode(hex_str)
+        let mut decoded = hex::decode(hex_str)
             .map_err(|e| CryptoError::InvalidData(format!("invalid hex: {e}")))?;
-        if bytes.len() != 32 {
+        if decoded.len() != 32 {
+            decoded.fill(0);
             return Err(CryptoError::InvalidData(format!(
                 "MEK must be 32 bytes, got {}",
-                bytes.len()
+                decoded.len()
             )));
         }
         let mut key = [0u8; 32];
-        key.copy_from_slice(&bytes);
+        key.copy_from_slice(&decoded);
+        decoded.fill(0);
         Ok(Self(key))
     }
 
     /// Wrap (encrypt) a DEK for storage in the database.
     pub fn wrap_dek(&self, dek: &Dek) -> Result<EncryptedBlob, CryptoError> {
-        // Reuse AES-256-GCM logic — MEK encrypts the DEK's raw bytes.
-        Dek(self.0).encrypt(dek.as_bytes())
+        aes_gcm_encrypt(&self.0, dek.as_bytes())
     }
 
     /// Unwrap (decrypt) a DEK from its stored form.
     pub fn unwrap_dek(&self, blob: &EncryptedBlob) -> Result<Dek, CryptoError> {
-        let wrapper = Dek(self.0);
-        let raw = wrapper.decrypt(blob)?;
-        // `wrapper` is dropped here.
-        Dek::from_bytes(&raw)
+        let mut raw = aes_gcm_decrypt(&self.0, blob)?;
+        let dek = Dek::from_bytes(&raw);
+        raw.fill(0);
+        dek
     }
 }
 
