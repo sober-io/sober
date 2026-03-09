@@ -50,6 +50,65 @@ jobs:
 
       # TODO: re-enable cargo-audit step once CI times are acceptable
 
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sober
+          POSTGRES_PASSWORD: sober
+          POSTGRES_DB: sober
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sober"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant
+        ports:
+          - 6333:6333
+          - 6334:6334
+    env:
+      DATABASE_URL: postgres://sober:sober@localhost:5432/sober
+      QDRANT_URL: http://localhost:6334
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-integration-
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/readyz > /dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Qdrant failed to become ready" >&2
+          exit 1
+
+      - name: Test sober-db (full integration)
+        run: cargo test -p sober-db
+        working-directory: backend
+
+      - name: Test sober-memory (ignored integration tests)
+        run: cargo test -p sober-memory -- --ignored
+        working-directory: backend
+
   frontend-check:
     name: Frontend
     runs-on: ubuntu-latest
