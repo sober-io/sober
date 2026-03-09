@@ -100,7 +100,7 @@ impl OpenAiCompatibleEngine {
         if self.is_openrouter {
             headers.insert(
                 "HTTP-Referer",
-                HeaderValue::from_static("https://github.com/harrisiirak/sober"),
+                HeaderValue::from_static("https://github.com/sober-io/sober"),
             );
             headers.insert("X-Title", HeaderValue::from_static("Sober"));
         }
