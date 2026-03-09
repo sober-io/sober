@@ -3051,18 +3051,30 @@ name = "sober-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "chrono",
+ "dotenvy",
+ "futures",
  "prost 0.14.3",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "sober-core",
+ "sober-crypto",
+ "sober-db",
  "sober-llm",
  "sober-mcp",
  "sober-memory",
  "sober-mind",
  "sober-sandbox",
+ "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tonic 0.14.5",
  "tonic-prost-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

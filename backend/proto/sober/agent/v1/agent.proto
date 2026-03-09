@@ -3,7 +3,35 @@ syntax = "proto3";
 package sober.agent.v1;
 
 service AgentService {
+  rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
+  rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
+  rpc WakeAgent(WakeRequest) returns (WakeResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message HandleMessageRequest {
+  string user_id = 1;
+  string conversation_id = 2;
+  string content = 3;
+}
+
+message ExecuteTaskRequest {
+  string task_id = 1;
+  string task_type = 2;
+  bytes payload = 3;
+  string caller_identity = 4;
+  optional string user_id = 5;
+  optional string conversation_id = 6;
+  optional string workspace_id = 7;
+}
+
+message WakeRequest {
+  string reason = 1;
+  string caller_identity = 2;
+}
+
+message WakeResponse {
+  bool accepted = 1;
 }
 
 message HealthRequest {}
@@ -12,3 +40,19 @@ message HealthResponse {
   bool healthy = 1;
   string version = 2;
 }
+
+message AgentEvent {
+  oneof event {
+    TextDelta text_delta = 1;
+    ToolCallStart tool_call_start = 2;
+    ToolCallResult tool_call_result = 3;
+    Done done = 4;
+    Error error = 5;
+  }
+}
+
+message TextDelta { string content = 1; }
+message ToolCallStart { string name = 1; string input_json = 2; }
+message ToolCallResult { string name = 1; string output = 2; }
+message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; }
+message Error { string message = 1; }
