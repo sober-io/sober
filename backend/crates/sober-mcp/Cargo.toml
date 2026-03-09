@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 sober-core = { path = "../sober-core" }
 sober-sandbox = { path = "../sober-sandbox" }
-async-trait = "0.1.89"
 base64 = "0.22.1"
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -331,20 +331,33 @@ impl McpPool {
             .get(server_id)
             .ok_or_else(|| McpError::ServerUnavailable(format!("server {server_id} not found")))?;
 
-        // Check cooldown.
+        // Check state and enforce limits.
         if let ServerState::Disconnected {
             last_failure,
             consecutive_failures,
         } = &entry.state
         {
-            let elapsed = last_failure.elapsed();
-            let cooldown = std::time::Duration::from_secs(self.config.restart_cooldown_secs);
+            // Circuit-break: refuse reconnection after too many consecutive failures.
+            if *consecutive_failures >= self.config.max_consecutive_failures {
+                return Err(McpError::ServerUnavailable(format!(
+                    "server {server_id} exceeded max consecutive failures ({} >= {})",
+                    consecutive_failures, self.config.max_consecutive_failures
+                )));
+            }
 
-            if elapsed < cooldown {
+            // Exponential backoff: cooldown doubles after each consecutive failure.
+            let effective_cooldown = std::time::Duration::from_secs(
+                self.config
+                    .restart_cooldown_secs
+                    .saturating_mul(2u64.pow((*consecutive_failures).min(5))),
+            );
+            let elapsed = last_failure.elapsed();
+
+            if elapsed < effective_cooldown {
                 return Err(McpError::ServerUnavailable(format!(
                     "server {server_id} in cooldown ({} failures, {}s remaining)",
                     consecutive_failures,
-                    (cooldown - elapsed).as_secs()
+                    (effective_cooldown - elapsed).as_secs()
                 )));
             }
         } else {
