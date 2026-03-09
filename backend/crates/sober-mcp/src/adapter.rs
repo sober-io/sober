@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use sober_core::types::{Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use tokio::sync::Mutex;
 
 use crate::client::McpClient;
@@ -59,7 +59,14 @@ impl Tool for McpToolAdapter {
         }
     }
 
-    async fn execute(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> {
+        Box::pin(self.execute_inner(input))
+    }
+}
+
+impl McpToolAdapter {
+    /// Inner async implementation proxied through [`Tool::execute`].
+    async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let mut client = self.client.lock().await;
 
         let result = client
