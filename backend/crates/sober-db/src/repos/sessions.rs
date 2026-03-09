@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::rows::SessionRow;
 
 /// PostgreSQL-backed session repository.
+#[derive(Clone)]
 pub struct PgSessionRepo {
     pool: PgPool,
 }

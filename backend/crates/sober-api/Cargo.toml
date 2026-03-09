@@ -1,7 +1,11 @@
 [package]
 name = "sober-api"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
+
+[lib]
+name = "sober_api"
+path = "src/lib.rs"
 
 [[bin]]
 name = "sober-api"
@@ -10,7 +14,36 @@ path = "src/main.rs"
 [dependencies]
 sober-core = { path = "../sober-core" }
 sober-auth = { path = "../sober-auth" }
+sober-db = { path = "../sober-db" }
 anyhow = { workspace = true }
+axum = { workspace = true, features = ["ws", "json", "macros"] }
+axum-core = { workspace = true }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+futures = "0.3"
+http = { workspace = true }
+hyper = "1"
+hyper-util = { version = "0.1.20", features = ["tokio", "server-auto"] }
+moka = { version = "0.12.14", features = ["sync"] }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tower = { workspace = true }
+tower-http = { version = "0.6.8", features = ["cors", "trace", "request-id", "util"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+http-body-util = "0.1"
+sqlx = { workspace = true, features = ["macros"] }
+tokio-tungstenite = "0.28"
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }

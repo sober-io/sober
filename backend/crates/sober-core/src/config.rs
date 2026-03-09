@@ -273,6 +273,21 @@ impl AppConfig {
     }
 }
 
+impl AppConfig {
+    /// Creates a minimal config suitable for integration tests.
+    ///
+    /// Uses dummy values for all required fields. The `DATABASE_URL` is
+    /// intentionally set to a placeholder — tests using `#[sqlx::test]`
+    /// receive their own pool and never read this value.
+    pub fn default_for_test() -> Self {
+        Self::load_from(|key| match key {
+            "DATABASE_URL" => Some("postgres://test:test@localhost/test".into()),
+            _ => None,
+        })
+        .expect("test config must be valid")
+    }
+}
+
 /// Wraps a key-lookup closure with helper methods for common patterns.
 struct EnvSource<F: Fn(&str) -> Option<String>>(F);
 
