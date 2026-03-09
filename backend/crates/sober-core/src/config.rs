@@ -271,9 +271,7 @@ impl AppConfig {
             environment,
         })
     }
-}
 
-impl AppConfig {
     /// Creates a minimal config suitable for integration tests.
     ///
     /// Uses dummy values for all required fields. The `DATABASE_URL` is

@@ -88,7 +88,9 @@ impl AppState {
 async fn connect_agent(config: &AppConfig) -> Result<AgentClient, AppError> {
     let socket_path = config.scheduler.agent_socket_path.clone();
 
-    // tonic requires a URI even for UDS — the host is ignored.
+    // tonic requires a valid URI even for UDS connections. The host and
+    // port below are never used — `connect_with_connector` bypasses them
+    // entirely and connects to `socket_path` instead.
     let channel = Endpoint::try_from("http://[::]:50051")
         .map_err(|e| AppError::Internal(e.into()))?
         .connect_with_connector(service_fn(move |_: Uri| {
