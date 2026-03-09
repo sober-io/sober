@@ -50,6 +50,19 @@ pub trait UserRepo: Send + Sync {
         &self,
         id: UserId,
     ) -> impl Future<Output = Result<String, AppError>> + Send;
+
+    /// Updates the password hash for a user.
+    fn update_password_hash(
+        &self,
+        id: UserId,
+        password_hash: &str,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists users, optionally filtered by status.
+    fn list(
+        &self,
+        status: Option<UserStatus>,
+    ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
 }
 
 /// Session management operations.

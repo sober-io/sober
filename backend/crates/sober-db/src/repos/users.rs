@@ -165,4 +165,45 @@ impl sober_core::types::UserRepo for PgUserRepo {
 
         Ok(row.0)
     }
+
+    async fn update_password_hash(&self, id: UserId, password_hash: &str) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2")
+                .bind(password_hash)
+                .bind(id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("user".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn list(&self, status: Option<UserStatus>) -> Result<Vec<User>, AppError> {
+        let rows = match status {
+            Some(s) => {
+                sqlx::query_as::<_, UserRow>(
+                    "SELECT id, email, username, password_hash, status, created_at, updated_at \
+                     FROM users WHERE status = $1 ORDER BY created_at DESC",
+                )
+                .bind(s)
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, UserRow>(
+                    "SELECT id, email, username, password_hash, status, created_at, updated_at \
+                     FROM users ORDER BY created_at DESC",
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
 }
