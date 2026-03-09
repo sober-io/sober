@@ -1,25 +1,42 @@
 [package]
 name = "sober-agent"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 
 [[bin]]
 name = "sober-agent"
 path = "src/main.rs"
 
+[lib]
+name = "sober_agent"
+path = "src/lib.rs"
+
 [dependencies]
 sober-core = { path = "../sober-core" }
+sober-db = { path = "../sober-db" }
+sober-crypto = { path = "../sober-crypto" }
 sober-mind = { path = "../sober-mind" }
 sober-mcp = { path = "../sober-mcp" }
 sober-sandbox = { path = "../sober-sandbox" }
 sober-llm = { path = "../sober-llm" }
 sober-memory = { path = "../sober-memory" }
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 prost = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

@@ -3,7 +3,15 @@
 //! All tools (MCP, plugin, built-in) implement the [`Tool`] trait. This
 //! provides a unified interface for the agent to discover and execute tools.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use serde::{Deserialize, Serialize};
+
+/// A boxed, `Send`-able future — used as the return type of [`Tool::execute`]
+/// so the trait remains dyn-compatible.
+pub type BoxToolFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + 'a>>;
 
 /// Metadata describing a tool's capabilities and input schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +66,7 @@ pub trait Tool: Send + Sync {
     fn metadata(&self) -> ToolMetadata;
 
     /// Executes the tool with the given JSON input.
-    fn execute(
-        &self,
-        input: serde_json::Value,
-    ) -> impl std::future::Future<Output = Result<ToolOutput, ToolError>> + Send;
+    fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_>;
 }
 
 #[cfg(test)]

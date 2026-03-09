@@ -32,4 +32,4 @@ pub use repo::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, McpServerRepo, MessageRepo, RoleRepo,
     SecretRepo, SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
-pub use tool::{Tool, ToolError, ToolMetadata, ToolOutput};
+pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
