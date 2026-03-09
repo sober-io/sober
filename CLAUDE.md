@@ -181,6 +181,7 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 - Use **squash merge** to keep main history linear and clean.
 - Never add `Co-Authored-By` or any co-author trailers to commits.
 - PRs based on plans must include the **plan number as a prefix** in the title (e.g., "#005: …", "#006: …").
+- **NEVER merge PRs unrelated to the current worktree/branch.** Only merge the PR for the feature you are actively working on. If unsure, ask the user.
 
 **Plan lifecycle tied to git:**
 - When starting a plan, move the entire plan folder from `pending/` to `active/` in the first commit of the feature branch.
@@ -315,9 +316,11 @@ Use **semantic versioning** (semver) for all releases:
 
 Tag releases as `vX.Y.Z`. Bump version in `Cargo.toml` workspace and `package.json` as appropriate.
 
-**PR version bumps:** Every PR that merges to main must bump the version:
-- **Feature PR** (`feat/`) → **minor** bump.
-- **Fix PR** (`fix/`) → **patch** bump.
+**PR version bumps (STRICT — NO EXCEPTIONS):** Every PR that merges to main must bump the version:
+- **Feature PR** (`feat/`) → **MINOR** bump (`0.X.0`). NEVER use patch for features.
+- **Fix PR** (`fix/`) → **patch** bump (`0.0.X`).
+- Always verify the branch prefix (`feat/` vs `fix/`) before deciding the bump type.
+- This applies to ALL affected crate `Cargo.toml` versions, not just the primary crate.
 
 ## Commit Convention
 
