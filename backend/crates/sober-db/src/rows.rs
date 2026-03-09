@@ -5,13 +5,13 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::types::{
-    Artifact, AuditLogEntry, Conversation, Job, McpServerConfig, Message, Role, Session, User,
-    UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    Artifact, AuditLogEntry, Conversation, Job, McpServerConfig, Message, Role, SecretMetadata,
+    SecretRow, Session, StoredDek, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 use sober_core::types::{
-    ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, JobId, JobStatus,
-    McpServerId, MessageId, MessageRole, RoleId, ScopeId, SessionId, UserId, UserStatus,
-    WorkspaceId, WorkspaceRepoId, WorktreeId,
+    ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, EncryptionKeyId, JobId,
+    JobStatus, McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId, UserId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 use uuid::Uuid;
 
@@ -326,6 +326,83 @@ impl From<AuditLogRow> for AuditLogEntry {
             details: row.details,
             ip_address: row.ip_address,
             created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct EncryptionKeyRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub encrypted_dek: Vec<u8>,
+    pub mek_version: i32,
+    pub created_at: DateTime<Utc>,
+    pub rotated_at: Option<DateTime<Utc>>,
+}
+
+impl From<EncryptionKeyRow> for StoredDek {
+    fn from(row: EncryptionKeyRow) -> Self {
+        StoredDek {
+            id: EncryptionKeyId::from_uuid(row.id),
+            user_id: UserId::from_uuid(row.user_id),
+            encrypted_dek: row.encrypted_dek,
+            mek_version: row.mek_version,
+            created_at: row.created_at,
+            rotated_at: row.rotated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct SecretMetadataRow {
+    pub id: Uuid,
+    pub name: String,
+    pub secret_type: String,
+    pub metadata: serde_json::Value,
+    pub priority: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<SecretMetadataRow> for SecretMetadata {
+    fn from(row: SecretMetadataRow) -> Self {
+        SecretMetadata {
+            id: SecretId::from_uuid(row.id),
+            name: row.name,
+            secret_type: row.secret_type,
+            metadata: row.metadata,
+            priority: row.priority,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct UserSecretRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub secret_type: String,
+    pub metadata: serde_json::Value,
+    pub encrypted_data: Vec<u8>,
+    pub priority: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<UserSecretRow> for SecretRow {
+    fn from(row: UserSecretRow) -> Self {
+        SecretRow {
+            id: SecretId::from_uuid(row.id),
+            user_id: UserId::from_uuid(row.user_id),
+            name: row.name,
+            secret_type: row.secret_type,
+            metadata: row.metadata,
+            encrypted_data: row.encrypted_data,
+            priority: row.priority,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }
