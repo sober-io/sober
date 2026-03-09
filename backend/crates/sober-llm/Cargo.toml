@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 sober-core = { path = "../sober-core" }
+sober-crypto = { path = "../sober-crypto" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

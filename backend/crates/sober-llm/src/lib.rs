@@ -16,6 +16,7 @@
 //! - [`engine`] — [`LlmEngine`] trait for engine abstraction.
 //! - [`client`] — [`OpenAiCompatibleEngine`].
 //! - [`acp`] — [`AcpEngine`] for Agent Client Protocol.
+//! - [`resolver`] — Three-tier LLM key resolution (user → system).
 //! - [`types`] — Request/response types for LLM operations.
 //! - [`error`] — [`LlmError`] with `AppError` integration.
 //! - [`streaming`] — SSE parser for streaming responses.
@@ -26,6 +27,7 @@ pub mod client;
 pub mod engine;
 pub mod error;
 pub mod jsonrpc;
+pub mod resolver;
 pub mod streaming;
 pub mod types;
 
@@ -33,4 +35,5 @@ pub use acp::{AcpConfig, AcpEngine};
 pub use client::OpenAiCompatibleEngine;
 pub use engine::LlmEngine;
 pub use error::LlmError;
+pub use resolver::{LlmKeyResolver, ResolvedLlmKey};
 pub use types::{CompletionRequest, CompletionResponse, EngineCapabilities, Message};
