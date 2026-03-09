@@ -7,10 +7,12 @@
 //!
 //! # Modules
 //!
+//! - [`envelope`] — AES-256-GCM envelope encryption (MEK/DEK key hierarchy).
 //! - [`password`] — Argon2id password hashing and verification.
 //! - [`keys`] — Ed25519 keypair generation, signing, and verification.
 //! - [`error`] — [`CryptoError`](error::CryptoError) type with [`AppError`](sober_core::error::AppError) integration.
 
+pub mod envelope;
 pub mod error;
 pub mod keys;
 pub mod password;

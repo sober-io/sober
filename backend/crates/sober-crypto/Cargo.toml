@@ -18,5 +18,12 @@ ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 # Cryptographic randomness (0.6 matches argon2 + ed25519-dalek)
 rand_core = { version = "0.6", features = ["getrandom"] }
 
+# AES-256-GCM for envelope encryption (MEK/DEK)
+aes-gcm = "0.10"
+
+# Hex encoding/decoding (workspace dep)
+hex = { workspace = true }
+
 [dev-dependencies]
 proptest = "1.10.0"
+serde_json = { workspace = true }

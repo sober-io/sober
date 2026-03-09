@@ -20,6 +20,18 @@ pub enum CryptoError {
     /// Signing or signature validation failure.
     #[error("signature error: {0}")]
     Signature(String),
+
+    /// Input data is malformed (wrong length, bad encoding, etc.).
+    #[error("invalid data: {0}")]
+    InvalidData(String),
+
+    /// Symmetric encryption failure (AES-256-GCM).
+    #[error("encryption error: {0}")]
+    EncryptionError(String),
+
+    /// Symmetric decryption failure (AES-256-GCM — wrong key, tampered data).
+    #[error("decryption error: {0}")]
+    DecryptionError(String),
 }
 
 impl From<CryptoError> for AppError {
