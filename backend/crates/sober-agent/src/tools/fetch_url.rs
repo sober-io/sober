@@ -8,8 +8,8 @@ use std::time::Duration;
 use reqwest::Client;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 
-/// Maximum response body size in bytes (1 MB).
-const MAX_BODY_SIZE: usize = 1_048_576;
+/// Maximum response body size in bytes (10 MB).
+const MAX_BODY_SIZE: usize = 10_485_760;
 
 /// Maximum output length in characters sent back to the LLM.
 const MAX_OUTPUT_LEN: usize = 8000;
@@ -17,8 +17,24 @@ const MAX_OUTPUT_LEN: usize = 8000;
 /// HTTP request timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Content types that this tool is willing to fetch.
-const ALLOWED_CONTENT_TYPES: &[&str] = &["text/html", "text/plain", "application/json"];
+/// Content-type prefixes that this tool is willing to fetch.
+///
+/// Any `text/*` content is allowed, plus common structured formats that LLMs
+/// can process as text.
+const ALLOWED_CONTENT_TYPES: &[&str] = &[
+    "text/",
+    "application/json",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/javascript",
+    "application/x-yaml",
+    "application/yaml",
+    "application/toml",
+    "application/csv",
+    "application/ld+json",
+    "application/rss+xml",
+    "application/atom+xml",
+];
 
 /// Built-in tool that fetches the content of a URL.
 pub struct FetchUrlTool {
@@ -164,7 +180,7 @@ impl Tool for FetchUrlTool {
         ToolMetadata {
             name: "fetch_url".to_owned(),
             description:
-                "Fetch the content of a URL. Supports text/html, text/plain, and application/json."
+                "Fetch the content of a URL. Supports text-based content types including HTML, plain text, JSON, XML, YAML, and more."
                     .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -346,15 +362,30 @@ mod tests {
 
     #[test]
     fn content_type_filtering() {
+        // All text/* types are allowed.
         assert!(is_content_type_allowed("text/html"));
         assert!(is_content_type_allowed("text/html; charset=utf-8"));
         assert!(is_content_type_allowed("text/plain"));
-        assert!(is_content_type_allowed("application/json"));
-        assert!(is_content_type_allowed("Application/JSON"));
+        assert!(is_content_type_allowed("text/csv"));
+        assert!(is_content_type_allowed("text/xml"));
+        assert!(is_content_type_allowed("text/markdown"));
         assert!(is_content_type_allowed("TEXT/HTML; charset=utf-8"));
 
+        // Specific application types are allowed.
+        assert!(is_content_type_allowed("application/json"));
+        assert!(is_content_type_allowed("Application/JSON"));
+        assert!(is_content_type_allowed("application/xml"));
+        assert!(is_content_type_allowed("application/yaml"));
+        assert!(is_content_type_allowed("application/javascript"));
+        assert!(is_content_type_allowed("application/rss+xml"));
+        assert!(is_content_type_allowed(
+            "application/ld+json; charset=utf-8"
+        ));
+
+        // Binary types are rejected.
         assert!(!is_content_type_allowed("application/octet-stream"));
         assert!(!is_content_type_allowed("image/png"));
         assert!(!is_content_type_allowed("application/pdf"));
+        assert!(!is_content_type_allowed("video/mp4"));
     }
 }
