@@ -1,6 +1,6 @@
 //! Configuration validation and display commands.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sober_core::config::AppConfig;
 
 /// Validate that all required configuration is present.
@@ -8,27 +8,14 @@ use sober_core::config::AppConfig;
 /// Attempts to load the configuration from environment variables and
 /// reports any missing or invalid values.
 pub fn validate() -> Result<()> {
-    match AppConfig::load_from_env() {
-        Ok(_) => {
-            println!("Configuration is valid.");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("Configuration error: {e}");
-            std::process::exit(1);
-        }
-    }
+    AppConfig::load_from_env().context("configuration validation failed")?;
+    println!("Configuration is valid.");
+    Ok(())
 }
 
 /// Display the resolved configuration with secrets redacted.
 pub fn show() -> Result<()> {
-    let config = match AppConfig::load_from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Configuration error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let config = AppConfig::load_from_env().context("failed to load configuration")?;
 
     println!("=== Sõber Configuration ===\n");
 

@@ -54,6 +54,10 @@ pub async fn create(repo: &PgUserRepo, email: &str, username: &str, admin: bool)
 }
 
 /// Approve a pending user account by setting status to Active.
+///
+/// # TODO
+/// Assign the `user` role upon approval once the RBAC system is implemented
+/// in sober-auth. Currently only updates status; role assignment is deferred.
 pub async fn approve(repo: &PgUserRepo, email: &str) -> Result<()> {
     let user = repo
         .get_by_email(email)
@@ -68,6 +72,7 @@ pub async fn approve(repo: &PgUserRepo, email: &str) -> Result<()> {
         );
     }
 
+    // TODO: Assign the `user` role here once sober-auth RBAC role assignment is implemented.
     repo.update_status(user.id, UserStatus::Active)
         .await
         .context("failed to approve user")?;
@@ -77,6 +82,10 @@ pub async fn approve(repo: &PgUserRepo, email: &str) -> Result<()> {
 }
 
 /// Disable a user account.
+///
+/// # TODO
+/// Expire all active sessions for the disabled user once sober-auth session
+/// management is implemented. Currently only updates status.
 pub async fn disable(repo: &PgUserRepo, email: &str) -> Result<()> {
     let user = repo
         .get_by_email(email)
@@ -87,6 +96,7 @@ pub async fn disable(repo: &PgUserRepo, email: &str) -> Result<()> {
         bail!("user {} is already disabled", email);
     }
 
+    // TODO: Expire all active sessions for this user once sober-auth session management exists.
     repo.update_status(user.id, UserStatus::Disabled)
         .await
         .context("failed to disable user")?;
