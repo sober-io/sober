@@ -159,6 +159,11 @@ where
     }
 
     /// Inner agentic loop: embed → load context → assemble → complete → handle tool calls.
+    ///
+    /// On the first iteration (and after any context-modifying tool), the full
+    /// embed → load → assemble pipeline runs. On subsequent non-rebuild iterations
+    /// the cached `llm_messages` are reused with tool results appended, avoiding
+    /// redundant embedding, context loading, and prompt assembly.
     async fn run_loop(
         &self,
         user_id: UserId,
@@ -166,28 +171,25 @@ where
         content: &str,
     ) -> Result<Vec<AgentEvent>, AgentError> {
         let mut events = Vec::new();
-        let mut accumulated_tool_messages: Vec<LlmMessage> = Vec::new();
+        let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
 
         for iteration in 0..self.config.max_tool_iterations {
             debug!(iteration, "agent loop iteration");
 
-            // a. Embed user message for context retrieval
-            let query_vectors = if needs_rebuild {
-                self.llm
+            if needs_rebuild {
+                // a. Embed user message for context retrieval
+                let query_vectors = self
+                    .llm
                     .embed(&[content])
                     .await
-                    .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?
-            } else {
-                // No need to re-embed — the query hasn't changed
-                vec![vec![]]
-            };
+                    .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
 
-            let query_vector = query_vectors.into_iter().next().unwrap_or_default();
+                let query_vector = query_vectors.into_iter().next().unwrap_or_default();
 
-            // b. Load context
-            let loaded_context = if needs_rebuild {
-                self.context_loader
+                // b. Load context
+                let loaded_context = self
+                    .context_loader
                     .load(
                         LoadRequest {
                             query_vector,
@@ -201,49 +203,39 @@ where
                         &self.memory_config,
                     )
                     .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
-            } else {
-                // Use empty context when continuing tool loop without rebuild
-                LoadedContext {
-                    recent_messages: vec![],
-                    user_memories: vec![],
-                    system_memories: vec![],
-                    estimated_tokens: 0,
-                }
-            };
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-            // c. Assemble prompt via Mind
-            let caller = CallerContext {
-                user_id: Some(user_id),
-                trigger: TriggerKind::Human,
-                permissions: vec![],
-                scope_grants: vec![],
-            };
+                // c. Assemble prompt via Mind
+                let caller = CallerContext {
+                    user_id: Some(user_id),
+                    trigger: TriggerKind::Human,
+                    permissions: vec![],
+                    scope_grants: vec![],
+                };
 
-            let memory_context_text = format_memory_context(&loaded_context);
-            let task_context = TaskContext {
-                description: if memory_context_text.is_empty() {
-                    String::new()
-                } else {
-                    format!("## Relevant Memories\n\n{memory_context_text}")
-                },
-                recent_messages: loaded_context.recent_messages.clone(),
-            };
+                let memory_context_text = format_memory_context(&loaded_context);
+                let task_context = TaskContext {
+                    description: if memory_context_text.is_empty() {
+                        String::new()
+                    } else {
+                        format!("## Relevant Memories\n\n{memory_context_text}")
+                    },
+                    recent_messages: loaded_context.recent_messages.clone(),
+                };
 
-            let tool_metadata = self.tool_registry.tool_metadata();
-            let assembled = self
-                .mind
-                .assemble(&caller, &task_context, &tool_metadata, "")
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                let tool_metadata = self.tool_registry.tool_metadata();
+                let assembled = self
+                    .mind
+                    .assemble(&caller, &task_context, &tool_metadata, "")
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-            // d. Convert domain messages to LLM messages
-            let mut llm_messages = domain_to_llm_messages(&assembled);
+                // d. Convert domain messages to LLM messages (replaces cached messages)
+                llm_messages = domain_to_llm_messages(&assembled);
+                needs_rebuild = false;
+            }
 
-            // Append any accumulated tool messages from previous iterations
-            llm_messages.append(&mut accumulated_tool_messages);
-
-            // e. Call LLM
+            // e. Call LLM with the (possibly cached) messages
             let tool_definitions = self.tool_registry.tool_definitions();
             let req = CompletionRequest {
                 model: self.config.model.clone(),
@@ -272,8 +264,8 @@ where
             if let Some(ref tool_calls) = choice.message.tool_calls
                 && !tool_calls.is_empty()
             {
-                // Add the assistant's tool-call message to accumulated messages
-                accumulated_tool_messages.push(LlmMessage {
+                // Append the assistant's tool-call message to the cached history
+                llm_messages.push(LlmMessage {
                     role: "assistant".to_owned(),
                     content: choice.message.content.clone(),
                     tool_calls: choice.message.tool_calls.clone(),
@@ -283,9 +275,13 @@ where
                 let (tool_events, tool_msgs, any_context_modifying) =
                     self.execute_tool_calls(tool_calls).await;
                 events.extend(tool_events);
-                accumulated_tool_messages.extend(tool_msgs);
 
-                needs_rebuild = any_context_modifying;
+                // Append tool result messages to cached history
+                llm_messages.extend(tool_msgs);
+
+                if any_context_modifying {
+                    needs_rebuild = true;
+                }
                 continue;
             }
 
@@ -336,8 +332,17 @@ where
 
         for tc in tool_calls {
             let tool_name = &tc.function.name;
-            let tool_input: serde_json::Value =
-                serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
+            let tool_input: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                        tool = %tool_name,
+                        error = %e,
+                        "failed to parse tool call arguments from LLM, using null"
+                    );
+                    serde_json::Value::Null
+                }
+            };
 
             events.push(AgentEvent::ToolCallStart {
                 name: tool_name.clone(),

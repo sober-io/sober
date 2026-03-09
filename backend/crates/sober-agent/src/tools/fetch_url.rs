@@ -28,6 +28,8 @@ pub struct FetchUrlTool {
 impl FetchUrlTool {
     /// Creates a new fetch-url tool with a default HTTP client.
     pub fn new() -> Self {
+        // reqwest client construction only fails if the TLS backend fails to
+        // initialize, which is unrecoverable. Panicking is appropriate here.
         let client = Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()
