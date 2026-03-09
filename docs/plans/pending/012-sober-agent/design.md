@@ -87,7 +87,8 @@ User message
   -> 2. Embed user message: call llm.embed(user_message) to get query vector
   -> 3. Load context: call context_loader.load(query_vector, scope, budget)
   -> 4. Build prompt (sober-mind assembles: resolved SOUL.md + context + history + access mask + tools)
-  -> 5. Call LLM via sober-llm (OpenAI-compatible, streaming)
+  -> 5. Resolve LLM API key via LlmKeyResolver (user secret → system env fallback)
+  -> 6. Call LLM via sober-llm (OpenAI-compatible, streaming)
   -> 6. Parse response
   -> 7a. If tool_calls: execute tools, then:
          - If any tool is context-modifying: go to step 2 (full prompt rebuild with re-embed + re-load)

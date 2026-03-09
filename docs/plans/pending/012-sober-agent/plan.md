@@ -3,7 +3,7 @@
 **Date:** 2026-03-06
 
 **Depends on:** sober-mcp (011), sober-mind (010), sober-llm (008),
-sober-memory (007), sober-sandbox (009)
+sober-memory (007), sober-sandbox (009), sober-secrets (020)
 
 MCP implementation has been extracted to its own plan. See
 `011-sober-mcp/` for the MCP client implementation plan.
@@ -109,7 +109,8 @@ sober-agent/src/
   3. Load context via `context_loader.load(query_vector, scope, budget)`
   4. Build prompt via `mind.assemble(...)` (resolved SOUL.md + context + history + access mask + tools)
   4. Enter loop (up to `max_tool_iterations`):
-     a. Call LLM via `sober-llm` (streaming)
+     a. Resolve LLM API key via `LlmKeyResolver` (user secret → system env fallback)
+     b. Call LLM via `sober-llm` (streaming)
      b. If response contains tool_calls: execute each tool, then:
         - If any executed tool has `context_modifying: true`: go to step 1 (full prompt rebuild)
         - Otherwise: append tool results to message array, continue loop (re-call LLM without rebuild)
