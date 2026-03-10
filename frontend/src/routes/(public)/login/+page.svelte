@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { api, ApiError } from '$lib/utils/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import type { User } from '$lib/types';
@@ -20,7 +21,7 @@
 				body: JSON.stringify({ email, password })
 			});
 			auth.setUser(result.user);
-			goto('/');
+			goto(resolve('/'));
 		} catch (err) {
 			if (err instanceof ApiError) {
 				error = err.message;
@@ -33,11 +34,15 @@
 	}
 </script>
 
-<div class="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+<div
+	class="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+>
 	<h1 class="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Sign in</h1>
 
 	{#if error}
-		<div class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+		<div
+			class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+		>
 			{error}
 		</div>
 	{/if}
@@ -58,10 +63,7 @@
 		</div>
 
 		<div>
-			<label
-				for="password"
-				class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-			>
+			<label for="password" class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
 				Password
 			</label>
 			<input
@@ -85,6 +87,6 @@
 
 	<p class="mt-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
 		Don't have an account?
-		<a href="/register" class="text-zinc-900 underline dark:text-zinc-100">Register</a>
+		<a href={resolve('/register')} class="text-zinc-900 underline dark:text-zinc-100">Register</a>
 	</p>
 </div>

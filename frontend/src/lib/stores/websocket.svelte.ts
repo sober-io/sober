@@ -1,3 +1,4 @@
+import { SvelteMap } from 'svelte/reactivity';
 import type { ClientWsMessage, ServerWsMessage } from '$lib/types';
 
 type MessageHandler = (data: ServerWsMessage) => void;
@@ -7,7 +8,7 @@ export const websocket = (() => {
 	let ws = $state<WebSocket | null>(null);
 	let connected = $state(false);
 	let error = $state<string | null>(null);
-	const handlers = new Map<string, MessageHandler>();
+	const handlers = new SvelteMap<string, MessageHandler>();
 
 	function connect() {
 		if (ws) return;

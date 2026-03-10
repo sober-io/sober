@@ -4,6 +4,7 @@
 
 	let { data }: { data: { servers: McpServer[] } } = $props();
 
+	// eslint-disable-next-line svelte/prefer-writable-derived -- servers is mutated by CRUD operations
 	let servers = $state<McpServer[]>([]);
 
 	$effect(() => {
@@ -91,6 +92,8 @@
 		}
 	}
 
+	const argsPlaceholder = '["--flag", "value"]';
+
 	async function deleteServer(id: string) {
 		try {
 			await api(`/mcp/servers/${id}`, { method: 'DELETE' });
@@ -115,7 +118,9 @@
 	</div>
 
 	{#if error}
-		<div class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+		<div
+			class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+		>
 			{error}
 		</div>
 	{/if}
@@ -128,26 +133,69 @@
 			</h2>
 			<div class="space-y-3">
 				<div>
-					<label for="mcp-name" class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Name</label>
-					<input id="mcp-name" type="text" bind:value={formName} class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400" />
+					<label
+						for="mcp-name"
+						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Name</label
+					>
+					<input
+						id="mcp-name"
+						type="text"
+						bind:value={formName}
+						class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400"
+					/>
 				</div>
 				<div>
-					<label for="mcp-command" class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Command</label>
-					<input id="mcp-command" type="text" bind:value={formCommand} class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400" />
+					<label
+						for="mcp-command"
+						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Command</label
+					>
+					<input
+						id="mcp-command"
+						type="text"
+						bind:value={formCommand}
+						class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400"
+					/>
 				</div>
 				<div>
-					<label for="mcp-args" class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Args (JSON array)</label>
-					<input id="mcp-args" type="text" bind:value={formArgs} placeholder='["--flag", "value"]' class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400" />
+					<label
+						for="mcp-args"
+						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+						>Args (JSON array)</label
+					>
+					<input
+						id="mcp-args"
+						type="text"
+						bind:value={formArgs}
+						placeholder={argsPlaceholder}
+						class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400"
+					/>
 				</div>
 				<div>
-					<label for="mcp-env" class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Env (JSON object)</label>
-					<input id="mcp-env" type="text" bind:value={formEnv} placeholder={'{"KEY": "value"}'} class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400" />
+					<label
+						for="mcp-env"
+						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+						>Env (JSON object)</label
+					>
+					<input
+						id="mcp-env"
+						type="text"
+						bind:value={formEnv}
+						placeholder={'{"KEY": "value"}'}
+						class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-mono text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-zinc-400"
+					/>
 				</div>
 				<div class="flex gap-2">
-					<button onclick={saveServer} disabled={submitting || !formName || !formCommand} class="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+					<button
+						onclick={saveServer}
+						disabled={submitting || !formName || !formCommand}
+						class="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+					>
 						{submitting ? 'Saving...' : 'Save'}
 					</button>
-					<button onclick={cancelEdit} class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+					<button
+						onclick={cancelEdit}
+						class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+					>
 						Cancel
 					</button>
 				</div>
@@ -158,32 +206,57 @@
 	<!-- Server list -->
 	<div class="space-y-2">
 		{#each servers as server (server.id)}
-			<div class="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+			<div
+				class="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700"
+			>
 				<div class="min-w-0 flex-1">
 					<div class="flex items-center gap-2">
 						<span class="font-medium text-sm text-zinc-900 dark:text-zinc-100">{server.name}</span>
-						<span class={['inline-block h-2 w-2 rounded-full', server.enabled ? 'bg-green-500' : 'bg-zinc-300 dark:bg-zinc-600']}></span>
+						<span
+							class={[
+								'inline-block h-2 w-2 rounded-full',
+								server.enabled ? 'bg-green-500' : 'bg-zinc-300 dark:bg-zinc-600'
+							]}
+						></span>
 					</div>
 					<div class="mt-0.5 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400">
-						{server.command} {JSON.stringify(server.args)}
+						{server.command}
+						{JSON.stringify(server.args)}
 					</div>
 				</div>
 				<div class="ml-4 flex items-center gap-1">
-					<button onclick={() => toggleEnabled(server)} class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
+					<button
+						onclick={() => toggleEnabled(server)}
+						class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					>
 						{server.enabled ? 'Disable' : 'Enable'}
 					</button>
-					<button onclick={() => startEdit(server)} disabled={editing !== null} class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800">
+					<button
+						onclick={() => startEdit(server)}
+						disabled={editing !== null}
+						class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+					>
 						Edit
 					</button>
 					{#if deleteConfirm === server.id}
-						<button onclick={() => deleteServer(server.id)} class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950">
+						<button
+							onclick={() => deleteServer(server.id)}
+							class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+						>
 							Confirm
 						</button>
-						<button onclick={() => (deleteConfirm = null)} class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
+						<button
+							onclick={() => (deleteConfirm = null)}
+							class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+						>
 							Cancel
 						</button>
 					{:else}
-						<button onclick={() => (deleteConfirm = server.id)} disabled={editing !== null} class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950">
+						<button
+							onclick={() => (deleteConfirm = server.id)}
+							disabled={editing !== null}
+							class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
+						>
 							Delete
 						</button>
 					{/if}

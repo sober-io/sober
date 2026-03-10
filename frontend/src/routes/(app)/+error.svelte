@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 </script>
 
@@ -11,7 +12,7 @@
 			{$page.error?.message ?? 'Something went wrong'}
 		</p>
 		<a
-			href="/"
+			href={resolve('/')}
 			class="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 		>
 			Go home

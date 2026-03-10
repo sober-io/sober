@@ -31,6 +31,7 @@
 	}
 
 	const initialMessages = $derived(data.conversation.messages.map(toChat));
+	// eslint-disable-next-line svelte/prefer-writable-derived -- messages is mutated by WebSocket handlers
 	let messages = $state<ChatMsg[]>([]);
 	let streaming = $state(false);
 	let messagesContainer: HTMLDivElement | undefined = $state();
@@ -143,10 +144,7 @@
 		</h1>
 	</header>
 
-	<div
-		bind:this={messagesContainer}
-		class="flex-1 space-y-4 overflow-y-auto p-4"
-	>
+	<div bind:this={messagesContainer} class="flex-1 space-y-4 overflow-y-auto p-4">
 		{#each messages as msg (msg.id)}
 			<ChatMessage
 				role={msg.role}

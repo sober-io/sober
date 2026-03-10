@@ -16,9 +16,15 @@
 		class="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
 	>
 		{#if loading}
-			<span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"></span>
+			<span
+				class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"
+			></span>
 		{:else}
-			<svg class="h-3 w-3 transition-transform {expanded ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
+			<svg
+				class="h-3 w-3 transition-transform {expanded ? 'rotate-90' : ''}"
+				fill="currentColor"
+				viewBox="0 0 20 20"
+			>
 				<path d="M6 4l8 6-8 6V4z" />
 			</svg>
 		{/if}
@@ -28,11 +34,17 @@
 	{#if expanded}
 		<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
-			<pre class="overflow-x-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{JSON.stringify(input, null, 2)}</pre>
+			<pre
+				class="overflow-x-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{JSON.stringify(
+					input,
+					null,
+					2
+				)}</pre>
 
 			{#if output !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
-				<pre class="overflow-x-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{output}</pre>
+				<pre
+					class="overflow-x-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{output}</pre>
 			{/if}
 		</div>
 	{/if}

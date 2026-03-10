@@ -61,7 +61,7 @@ export type ServerWsMessage =
 			conversation_id: string;
 			tool_call_id: string;
 			output: string;
-		}
+	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
 	| { type: 'chat.error'; conversation_id: string; error: string };
 

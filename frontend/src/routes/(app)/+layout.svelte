@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { api } from '$lib/utils/api';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import ConversationList from '$lib/components/ConversationList.svelte';
 
@@ -39,18 +40,18 @@
 			body: JSON.stringify({})
 		});
 		conversations = [conv, ...conversations];
-		goto(`/chat/${conv.id}`);
+		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
 	}
 
 	function selectConversation(id: string) {
 		sidebarOpen = false;
-		goto(`/chat/${id}`);
+		goto(resolve('/(app)/chat/[id]', { id }));
 	}
 
 	async function handleLogout() {
 		await api('/auth/logout', { method: 'POST' });
 		auth.setUser(null);
-		goto('/login');
+		goto(resolve('/login'));
 	}
 </script>
 
@@ -63,9 +64,19 @@
 	>
 		<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			{#if sidebarOpen}
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M6 18L18 6M6 6l12 12"
+				/>
 			{:else}
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M4 6h16M4 12h16M4 18h16"
+				/>
 			{/if}
 		</svg>
 	</button>
@@ -86,7 +97,9 @@
 			sidebarOpen ? 'translate-x-0' : '-translate-x-full'
 		]}
 	>
-		<div class="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
+		<div
+			class="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800"
+		>
 			<span class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Sõber</span>
 			<button
 				onclick={handleLogout}
@@ -111,7 +124,7 @@
 
 		<div class="border-t border-zinc-200 p-3 dark:border-zinc-800">
 			<a
-				href="/settings/mcp"
+				href={resolve('/settings/mcp')}
 				class="block rounded-md px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800"
 			>
 				MCP Settings

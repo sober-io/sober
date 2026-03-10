@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { api, ApiError } from '$lib/utils/api';
 
 	let email = $state('');
@@ -31,20 +32,19 @@
 	}
 </script>
 
-<div class="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+<div
+	class="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+>
 	{#if registered}
 		<div class="text-center">
 			<h1 class="mb-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
 				Registration submitted
 			</h1>
 			<p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
-				Your account is pending approval. You'll be able to sign in once an administrator
-				approves your account.
+				Your account is pending approval. You'll be able to sign in once an administrator approves
+				your account.
 			</p>
-			<a
-				href="/login"
-				class="text-sm text-zinc-900 underline dark:text-zinc-100"
-			>
+			<a href={resolve('/login')} class="text-sm text-zinc-900 underline dark:text-zinc-100">
 				Back to sign in
 			</a>
 		</div>
@@ -52,17 +52,16 @@
 		<h1 class="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Create account</h1>
 
 		{#if error}
-			<div class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+			<div
+				class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+			>
 				{error}
 			</div>
 		{/if}
 
 		<form onsubmit={handleSubmit} class="space-y-4">
 			<div>
-				<label
-					for="email"
-					class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-				>
+				<label for="email" class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
 					Email
 				</label>
 				<input
@@ -120,7 +119,7 @@
 
 		<p class="mt-4 text-center text-sm text-zinc-500 dark:text-zinc-400">
 			Already have an account?
-			<a href="/login" class="text-zinc-900 underline dark:text-zinc-100">Sign in</a>
+			<a href={resolve('/login')} class="text-zinc-900 underline dark:text-zinc-100">Sign in</a>
 		</p>
 	{/if}
 </div>
