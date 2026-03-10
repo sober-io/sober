@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::rows::UserRow;
 
 /// PostgreSQL-backed user repository.
+#[derive(Clone)]
 pub struct PgUserRepo {
     pool: PgPool,
 }

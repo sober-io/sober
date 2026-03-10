@@ -5,6 +5,7 @@ use sober_core::types::{RoleKind, ScopeId, UserId};
 use sqlx::PgPool;
 
 /// PostgreSQL-backed role repository.
+#[derive(Clone)]
 pub struct PgRoleRepo {
     pool: PgPool,
 }
