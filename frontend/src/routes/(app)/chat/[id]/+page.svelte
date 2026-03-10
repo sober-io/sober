@@ -11,6 +11,7 @@
 		id: string;
 		role: 'User' | 'Assistant' | 'System';
 		content: string;
+		thinkingContent: string;
 		toolCalls?: ToolCall[];
 		streaming: boolean;
 		thinking: boolean;
@@ -33,6 +34,7 @@
 		id: m.id,
 		role: m.role,
 		content: m.content,
+		thinkingContent: '',
 		toolCalls: undefined,
 		streaming: false,
 		thinking: false
@@ -112,6 +114,7 @@
 			id: crypto.randomUUID(),
 			role: 'User',
 			content,
+			thinkingContent: '',
 			streaming: false,
 			thinking: false
 		});
@@ -119,6 +122,7 @@
 			id: crypto.randomUUID(),
 			role: 'Assistant',
 			content: '',
+			thinkingContent: '',
 			streaming: false,
 			thinking: true
 		});
@@ -171,6 +175,13 @@
 
 	const handleWsMessage = (msg: ServerWsMessage) => {
 		switch (msg.type) {
+			case 'chat.thinking': {
+				const last = messages[messages.length - 1];
+				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
+					last.thinkingContent += msg.content;
+				}
+				break;
+			}
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
 				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
@@ -183,6 +194,7 @@
 						id: crypto.randomUUID(),
 						role: 'Assistant',
 						content: msg.content,
+						thinkingContent: '',
 						streaming: true,
 						thinking: false
 					});
@@ -231,6 +243,7 @@
 						id: crypto.randomUUID(),
 						role: 'System',
 						content: `Error: ${msg.error}`,
+						thinkingContent: '',
 						streaming: false,
 						thinking: false
 					});
@@ -260,6 +273,7 @@
 				<ChatMessage
 					role={msg.role}
 					content={msg.content}
+					thinkingContent={msg.thinkingContent}
 					toolCalls={msg.toolCalls}
 					streaming={msg.streaming}
 					thinking={msg.thinking}

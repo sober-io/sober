@@ -7,15 +7,24 @@
 	interface Props {
 		role: 'User' | 'Assistant' | 'System';
 		content: string;
+		thinkingContent?: string;
 		toolCalls?: ToolCall[];
 		streaming?: boolean;
 		thinking?: boolean;
 	}
 
-	let { role, content, toolCalls, streaming = false, thinking = false }: Props = $props();
+	let {
+		role,
+		content,
+		thinkingContent = '',
+		toolCalls,
+		streaming = false,
+		thinking = false
+	}: Props = $props();
 
 	const isUser = $derived(role === 'User');
 	const hasToolCalls = $derived(toolCalls && toolCalls.length > 0);
+	const hasThinkingContent = $derived(thinkingContent.length > 0);
 </script>
 
 <div class={['flex', isUser ? 'justify-end' : 'justify-start']}>
@@ -33,6 +42,19 @@
 			<StreamingText {content} {streaming} />
 		{:else}
 			<div class="whitespace-pre-wrap">{content}</div>
+		{/if}
+
+		{#if hasThinkingContent}
+			<details class="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+				<summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">
+					{thinking ? 'Reasoning...' : 'Reasoning'}
+				</summary>
+				<div
+					class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400"
+				>
+					{thinkingContent}
+				</div>
+			</details>
 		{/if}
 
 		{#if thinking && hasToolCalls}
