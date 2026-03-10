@@ -50,6 +50,11 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 
+    /// Reasoning/thinking content returned by some providers (e.g. Kimi).
+    /// Must be echoed back in subsequent messages when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+
     /// Tool calls made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
@@ -65,6 +70,7 @@ impl Message {
         Self {
             role: "system".to_owned(),
             content: Some(content.into()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -75,6 +81,7 @@ impl Message {
         Self {
             role: "user".to_owned(),
             content: Some(content.into()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -85,6 +92,7 @@ impl Message {
         Self {
             role: "assistant".to_owned(),
             content: Some(content.into()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         }
@@ -95,6 +103,7 @@ impl Message {
         Self {
             role: "tool".to_owned(),
             content: Some(content.into()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
         }

@@ -15,7 +15,7 @@ use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
-use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore};
+use sober_memory::{ChunkType, ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
 use tracing::{debug, warn};
@@ -47,7 +47,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_tool_iterations: 10,
-            context_token_budget: 4096,
+            context_token_budget: 128_000,
             conversation_history_limit: 50,
             hits_per_scope: 10,
             model: "anthropic/claude-sonnet-4".to_owned(),
@@ -68,7 +68,6 @@ where
 {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
-    #[allow(dead_code)]
     memory: Arc<MemoryStore>,
     context_loader: Arc<ContextLoader<Msg>>,
     tool_registry: Arc<ToolRegistry>,
@@ -139,7 +138,7 @@ where
         }
 
         // 2. Store user message
-        let _user_msg = self
+        let user_msg = self
             .message_repo
             .create(CreateMessage {
                 conversation_id,
@@ -153,7 +152,9 @@ where
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Run the agentic loop
-        let events = self.run_loop(user_id, conversation_id, content).await?;
+        let events = self
+            .run_loop(user_id, conversation_id, content, user_msg.id)
+            .await?;
 
         Ok(Box::pin(futures::stream::iter(events.into_iter().map(Ok))))
     }
@@ -169,6 +170,7 @@ where
         user_id: UserId,
         conversation_id: ConversationId,
         content: &str,
+        user_msg_id: sober_core::MessageId,
     ) -> Result<Vec<AgentEvent>, AgentError> {
         let mut events = Vec::new();
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
@@ -178,32 +180,51 @@ where
             debug!(iteration, "agent loop iteration");
 
             if needs_rebuild {
-                // a. Embed user message for context retrieval
-                let query_vectors = self
-                    .llm
-                    .embed(&[content])
-                    .await
-                    .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
+                // a. Embed user message for context retrieval (soft-fail: proceed
+                //    without memory context if embeddings are unavailable).
+                let query_vector = match self.llm.embed(&[content]).await {
+                    Ok(vecs) => vecs.into_iter().next().unwrap_or_default(),
+                    Err(e) => {
+                        warn!(error = %e, "embedding failed, proceeding without memory context");
+                        vec![]
+                    }
+                };
 
-                let query_vector = query_vectors.into_iter().next().unwrap_or_default();
-
-                // b. Load context
-                let loaded_context = self
-                    .context_loader
-                    .load(
-                        LoadRequest {
-                            query_vector,
-                            query_text: content.to_owned(),
-                            user_id,
-                            conversation_id,
-                            token_budget: self.config.context_token_budget,
-                            recent_message_count: self.config.conversation_history_limit,
-                            hits_per_scope: self.config.hits_per_scope,
-                        },
-                        &self.memory_config,
-                    )
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                // b. Load context (skip memory retrieval when no embedding)
+                let loaded_context = if query_vector.is_empty() {
+                    // Still load recent messages even without embeddings.
+                    self.context_loader
+                        .load(
+                            LoadRequest {
+                                query_vector: vec![],
+                                query_text: content.to_owned(),
+                                user_id,
+                                conversation_id,
+                                token_budget: self.config.context_token_budget,
+                                recent_message_count: self.config.conversation_history_limit,
+                                hits_per_scope: 0,
+                            },
+                            &self.memory_config,
+                        )
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
+                } else {
+                    self.context_loader
+                        .load(
+                            LoadRequest {
+                                query_vector,
+                                query_text: content.to_owned(),
+                                user_id,
+                                conversation_id,
+                                token_budget: self.config.context_token_budget,
+                                recent_message_count: self.config.conversation_history_limit,
+                                hits_per_scope: self.config.hits_per_scope,
+                            },
+                            &self.memory_config,
+                        )
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
+                };
 
                 // c. Assemble prompt via Mind
                 let caller = CallerContext {
@@ -264,10 +285,12 @@ where
             if let Some(ref tool_calls) = choice.message.tool_calls
                 && !tool_calls.is_empty()
             {
-                // Append the assistant's tool-call message to the cached history
+                // Append the assistant's tool-call message to the cached history,
+                // preserving reasoning_content so providers like Kimi don't reject it.
                 llm_messages.push(LlmMessage {
                     role: "assistant".to_owned(),
                     content: choice.message.content.clone(),
+                    reasoning_content: choice.message.reasoning_content.clone(),
                     tool_calls: choice.message.tool_calls.clone(),
                     tool_call_id: None,
                 });
@@ -296,13 +319,23 @@ where
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Assistant,
-                    content: text,
+                    content: text.clone(),
                     tool_calls: None,
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+            // h. Fire-and-forget: embed and store conversation turn in vector memory
+            //    so the agent can recall facts across conversations.
+            self.spawn_memory_ingestion(
+                user_id,
+                content.to_owned(),
+                text,
+                user_msg_id,
+                assistant_msg.id,
+            );
 
             events.push(AgentEvent::Done {
                 message_id: assistant_msg.id,
@@ -373,6 +406,85 @@ where
 
         (events, messages, any_context_modifying)
     }
+
+    /// Spawns a background task that embeds and stores both the user message and
+    /// the assistant response in vector memory. This allows the agent to recall
+    /// facts and conversation context across separate conversations.
+    fn spawn_memory_ingestion(
+        &self,
+        user_id: UserId,
+        user_content: String,
+        assistant_content: String,
+        user_msg_id: sober_core::MessageId,
+        assistant_msg_id: sober_core::MessageId,
+    ) {
+        let llm = Arc::clone(&self.llm);
+        let memory = Arc::clone(&self.memory);
+        let scope_id = sober_core::ScopeId::from_uuid(*user_id.as_uuid());
+        let half_life_days = self.memory_config.decay_half_life_days;
+
+        tokio::spawn(async move {
+            let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
+
+            // Embed both messages in a single batch call.
+            let texts: Vec<&str> = vec![&user_content, &assistant_content];
+            let vectors = match llm.embed(&texts).await {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, "memory ingestion: embedding failed, skipping");
+                    return;
+                }
+            };
+
+            if vectors.len() < 2 {
+                warn!(
+                    "memory ingestion: expected 2 vectors, got {}",
+                    vectors.len()
+                );
+                return;
+            }
+
+            // Store user message.
+            if let Err(e) = memory
+                .store(
+                    user_id,
+                    StoreChunk {
+                        dense_vector: vectors[0].clone(),
+                        content: user_content,
+                        chunk_type: ChunkType::Conversation,
+                        scope_id,
+                        source_message_id: Some(user_msg_id),
+                        importance: 0.5,
+                        decay_at,
+                    },
+                )
+                .await
+            {
+                warn!(error = %e, "memory ingestion: failed to store user message");
+            }
+
+            // Store assistant response.
+            if let Err(e) = memory
+                .store(
+                    user_id,
+                    StoreChunk {
+                        dense_vector: vectors[1].clone(),
+                        content: assistant_content,
+                        chunk_type: ChunkType::Conversation,
+                        scope_id,
+                        source_message_id: Some(assistant_msg_id),
+                        importance: 0.5,
+                        decay_at,
+                    },
+                )
+                .await
+            {
+                warn!(error = %e, "memory ingestion: failed to store assistant message");
+            }
+
+            debug!("memory ingestion complete for user {user_id}");
+        });
+    }
 }
 
 /// Converts domain [`DomainMessage`] values to LLM [`LlmMessage`] values.
@@ -388,6 +500,7 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
             LlmMessage {
                 role: role.to_owned(),
                 content: Some(m.content.clone()),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
             }
@@ -425,7 +538,7 @@ mod tests {
     fn agent_config_defaults() {
         let config = AgentConfig::default();
         assert_eq!(config.max_tool_iterations, 10);
-        assert_eq!(config.context_token_budget, 4096);
+        assert_eq!(config.context_token_budget, 128_000);
         assert_eq!(config.conversation_history_limit, 50);
         assert_eq!(config.hits_per_scope, 10);
         assert_eq!(config.model, "anthropic/claude-sonnet-4");

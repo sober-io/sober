@@ -32,6 +32,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Create frontend build stub for rust-embed
+        run: mkdir -p frontend/build && touch frontend/build/index.html
+
       - name: Check formatting
         run: cargo fmt --check
         working-directory: backend
@@ -95,6 +98,9 @@ jobs:
             backend/target
           key: ${{ runner.os }}-cargo-integration-${{ hashFiles('backend/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-integration-
+
+      - name: Create frontend build stub for rust-embed
+        run: mkdir -p frontend/build && touch frontend/build/index.html
 
       - name: Wait for Qdrant
         run: |

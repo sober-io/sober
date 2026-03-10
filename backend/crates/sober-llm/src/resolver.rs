@@ -284,6 +284,7 @@ mod tests {
             model: "anthropic/claude-sonnet-4".into(),
             max_tokens: 4096,
             embedding_model: "text-embedding-3-small".into(),
+            embedding_dim: 1536,
         }
     }
 
@@ -331,6 +332,7 @@ mod tests {
             model: "anthropic/claude-sonnet-4".into(),
             max_tokens: 4096,
             embedding_model: "text-embedding-3-small".into(),
+            embedding_dim: 1536,
         };
         let resolver = LlmKeyResolver::new(repo, test_mek(), config);
         let result = resolver.resolve(test_user_id()).await.expect("resolve");

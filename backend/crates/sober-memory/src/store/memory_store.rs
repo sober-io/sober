@@ -125,11 +125,18 @@ impl MemoryStore {
     }
 
     /// Performs a hybrid dense + BM25 search over a user's collection.
+    ///
+    /// Returns an empty result set when `limit` is 0 or `dense_vector` is empty
+    /// (e.g. when the embedding step was skipped).
     pub async fn search(
         &self,
         user_id: UserId,
         query: StoreQuery,
     ) -> Result<Vec<MemoryHit>, MemoryError> {
+        if query.limit == 0 || query.dense_vector.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let collection = self.collection_for_scope(user_id, query.scope_id);
 
         let sparse = bm25::compute_sparse_vector(&query.query_text);

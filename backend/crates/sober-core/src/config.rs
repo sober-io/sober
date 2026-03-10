@@ -83,6 +83,8 @@ pub struct LlmConfig {
     pub max_tokens: u32,
     /// Model used for embedding generation.
     pub embedding_model: String,
+    /// Dimensionality of the embedding vectors produced by the embedding model.
+    pub embedding_dim: u64,
 }
 
 /// HTTP server settings.
@@ -92,6 +94,10 @@ pub struct ServerConfig {
     pub host: String,
     /// Bind port.
     pub port: u16,
+    /// Maximum requests allowed per rate-limit window.
+    pub rate_limit_max_requests: u32,
+    /// Rate-limit window duration in seconds.
+    pub rate_limit_window_secs: u64,
 }
 
 /// Authentication and session settings.
@@ -221,10 +227,13 @@ impl AppConfig {
                 model: env.or("LLM_MODEL", "anthropic/claude-sonnet-4"),
                 max_tokens: env.parse("LLM_MAX_TOKENS", 4096)?,
                 embedding_model: env.or("EMBEDDING_MODEL", "text-embedding-3-small"),
+                embedding_dim: env.parse("EMBEDDING_DIM", 1536)?,
             },
             server: ServerConfig {
                 host: env.or("HOST", "0.0.0.0"),
                 port: env.parse("PORT", 3000)?,
+                rate_limit_max_requests: env.parse("RATE_LIMIT_MAX_REQUESTS", 600)?,
+                rate_limit_window_secs: env.parse("RATE_LIMIT_WINDOW_SECS", 60)?,
             },
             auth: AuthConfig {
                 session_secret: env.opt("SESSION_SECRET"),

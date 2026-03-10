@@ -1,4 +1,7 @@
 services:
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:17
     ports:
@@ -22,6 +25,11 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   searxng:
     image: searxng/searxng
@@ -30,7 +38,143 @@ services:
     volumes:
       - searxng_data:/etc/searxng
 
+  # ---------------------------------------------------------------------------
+  # Shared image build (all Rust binaries + frontend in one image)
+  # ---------------------------------------------------------------------------
+  # All sober-* services use this single image with different entrypoints.
+  # Build once: docker compose build sober-base
+  sober-base:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.all
+    image: sober:dev
+    entrypoint: ["echo", "base image built"]
+
+  # ---------------------------------------------------------------------------
+  # Database migrations (run-once init container)
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: sober:dev
+    entrypoint: ["sober", "migrate", "run"]
+    environment:
+      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+    depends_on:
+      sober-base:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Application services
+  # ---------------------------------------------------------------------------
+  sober-agent:
+    image: sober:dev
+    entrypoint: ["sober-agent"]
+    environment:
+      SOBER_ENV: development
+      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+      DATABASE_MAX_CONNECTIONS: "10"
+      QDRANT_URL: http://qdrant:6334
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      SEARXNG_URL: http://searxng:8080
+      AGENT_SOCKET_PATH: /run/sober/agent.sock
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
+      SESSION_SECRET: docker-dev-secret
+      SESSION_TTL_SECONDS: "2592000"
+      SCHEDULER_TICK_INTERVAL_SECS: "60"
+      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
+      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+      MEMORY_DECAY_HALF_LIFE_DAYS: "30"
+      MEMORY_RETRIEVAL_BOOST: "0.2"
+      MEMORY_PRUNE_THRESHOLD: "0.1"
+      MCP_REQUEST_TIMEOUT_SECS: "30"
+      MCP_MAX_CONSECUTIVE_FAILURES: "3"
+      MCP_IDLE_TIMEOUT_SECS: "300"
+      RUST_LOG: info
+    volumes:
+      - sober_sockets:/run/sober
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/sober/agent.sock"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  sober-api:
+    image: sober:dev
+    entrypoint: ["sober-api"]
+    ports:
+      - "3000:3000"
+    environment:
+      SOBER_ENV: development
+      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+      DATABASE_MAX_CONNECTIONS: "10"
+      QDRANT_URL: http://qdrant:6334
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
+      SESSION_SECRET: docker-dev-secret
+      SESSION_TTL_SECONDS: "2592000"
+      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
+      SCHEDULER_TICK_INTERVAL_SECS: "60"
+      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      SEARXNG_URL: http://searxng:8080
+      MEMORY_DECAY_HALF_LIFE_DAYS: "30"
+      MEMORY_RETRIEVAL_BOOST: "0.2"
+      MEMORY_PRUNE_THRESHOLD: "0.1"
+      MCP_REQUEST_TIMEOUT_SECS: "30"
+      MCP_MAX_CONSECUTIVE_FAILURES: "3"
+      MCP_IDLE_TIMEOUT_SECS: "300"
+      RUST_LOG: info
+    volumes:
+      - sober_sockets:/run/sober
+    depends_on:
+      sober-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  sober-web:
+    image: sober:dev
+    entrypoint: ["sober-web"]
+    ports:
+      - "8088:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      API_UPSTREAM_URL: http://sober-api:3000
+      STATIC_DIR: /opt/sober/data/static
+      RUST_LOG: sober_web=info
+    depends_on:
+      sober-api:
+        condition: service_healthy
+
 volumes:
   pgdata:
   qdrant_data:
   searxng_data:
+  sober_sockets:
