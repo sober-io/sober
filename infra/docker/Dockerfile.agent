@@ -1,0 +1,16 @@
+FROM rust:latest AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY backend/ backend/
+RUN cd backend && cargo build --release -p sober-agent
+
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
+COPY --from=builder /build/backend/target/release/sober-agent /usr/local/bin/sober-agent
+COPY backend/soul/ /soul/
+RUN mkdir -p /run/sober && chown sober:sober /run/sober
+USER sober
+ENTRYPOINT ["sober-agent"]

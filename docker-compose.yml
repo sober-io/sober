@@ -1,3 +1,28 @@
+x-common-env: &common-env
+  SOBER_ENV: development
+  DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+  DATABASE_MAX_CONNECTIONS: "10"
+  QDRANT_URL: http://qdrant:6334
+  RUST_LOG: info
+
+x-llm-env: &llm-env
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+
+x-memory-env: &memory-env
+  MEMORY_DECAY_HALF_LIFE_DAYS: "30"
+  MEMORY_RETRIEVAL_BOOST: "0.2"
+  MEMORY_PRUNE_THRESHOLD: "0.1"
+
+x-mcp-env: &mcp-env
+  MCP_REQUEST_TIMEOUT_SECS: "30"
+  MCP_MAX_CONSECUTIVE_FAILURES: "3"
+  MCP_IDLE_TIMEOUT_SECS: "300"
+
 services:
   # ---------------------------------------------------------------------------
   # Infrastructure
@@ -39,28 +64,16 @@ services:
       - searxng_data:/etc/searxng
 
   # ---------------------------------------------------------------------------
-  # Shared image build (all Rust binaries + frontend in one image)
-  # ---------------------------------------------------------------------------
-  # All sober-* services use this single image with different entrypoints.
-  # Build once: docker compose build sober-base
-  sober-base:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.all
-    image: sober:dev
-    entrypoint: ["echo", "base image built"]
-
-  # ---------------------------------------------------------------------------
   # Database migrations (run-once init container)
   # ---------------------------------------------------------------------------
   migrate:
-    image: sober:dev
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.cli
     entrypoint: ["sober", "migrate", "run"]
     environment:
       DATABASE_URL: postgres://sober:sober@postgres:5432/sober
     depends_on:
-      sober-base:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
 
@@ -68,37 +81,14 @@ services:
   # Application services
   # ---------------------------------------------------------------------------
   sober-agent:
-    image: sober:dev
-    entrypoint: ["sober-agent"]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.agent
     environment:
-      SOBER_ENV: development
-      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
-      DATABASE_MAX_CONNECTIONS: "10"
-      QDRANT_URL: http://qdrant:6334
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
-      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
-      SEARXNG_URL: http://searxng:8080
+      <<: [*common-env, *llm-env, *memory-env, *mcp-env]
       AGENT_SOCKET_PATH: /run/sober/agent.sock
-      HOST: "0.0.0.0"
-      PORT: "3000"
       ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
-      SESSION_SECRET: docker-dev-secret
-      SESSION_TTL_SECONDS: "2592000"
-      SCHEDULER_TICK_INTERVAL_SECS: "60"
-      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
-      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
-      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
-      MEMORY_DECAY_HALF_LIFE_DAYS: "30"
-      MEMORY_RETRIEVAL_BOOST: "0.2"
-      MEMORY_PRUNE_THRESHOLD: "0.1"
-      MCP_REQUEST_TIMEOUT_SECS: "30"
-      MCP_MAX_CONSECUTIVE_FAILURES: "3"
-      MCP_IDLE_TIMEOUT_SECS: "300"
-      RUST_LOG: info
+      SEARXNG_URL: http://searxng:8080
     volumes:
       - sober_sockets:/run/sober
     depends_on:
@@ -115,38 +105,19 @@ services:
       retries: 10
 
   sober-api:
-    image: sober:dev
-    entrypoint: ["sober-api"]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
     ports:
       - "3000:3000"
     environment:
-      SOBER_ENV: development
-      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
-      DATABASE_MAX_CONNECTIONS: "10"
-      QDRANT_URL: http://qdrant:6334
+      <<: [*common-env, *llm-env, *memory-env, *mcp-env]
       HOST: "0.0.0.0"
       PORT: "3000"
       ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
       SESSION_SECRET: docker-dev-secret
       SESSION_TTL_SECONDS: "2592000"
-      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
-      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
-      SCHEDULER_TICK_INTERVAL_SECS: "60"
-      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
-      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
       SEARXNG_URL: http://searxng:8080
-      MEMORY_DECAY_HALF_LIFE_DAYS: "30"
-      MEMORY_RETRIEVAL_BOOST: "0.2"
-      MEMORY_PRUNE_THRESHOLD: "0.1"
-      MCP_REQUEST_TIMEOUT_SECS: "30"
-      MCP_MAX_CONSECUTIVE_FAILURES: "3"
-      MCP_IDLE_TIMEOUT_SECS: "300"
-      RUST_LOG: info
     volumes:
       - sober_sockets:/run/sober
     depends_on:
@@ -158,9 +129,26 @@ services:
       timeout: 5s
       retries: 10
 
+  sober-scheduler:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.scheduler
+    environment:
+      <<: *common-env
+      SCHEDULER_TICK_INTERVAL_SECS: "60"
+      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
+      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+    volumes:
+      - sober_sockets:/run/sober
+    depends_on:
+      sober-agent:
+        condition: service_healthy
+
   sober-web:
-    image: sober:dev
-    entrypoint: ["sober-web"]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
     ports:
       - "8088:8080"
     environment:

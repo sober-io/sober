@@ -19,11 +19,11 @@ jobs:
       matrix:
         include:
           - service: sober-api
-            dockerfile: infra/docker/Dockerfile.service
+            dockerfile: infra/docker/Dockerfile.api
           - service: sober-agent
-            dockerfile: infra/docker/Dockerfile.service
+            dockerfile: infra/docker/Dockerfile.agent
           - service: sober-scheduler
-            dockerfile: infra/docker/Dockerfile.service
+            dockerfile: infra/docker/Dockerfile.scheduler
           - service: sober-web
             dockerfile: infra/docker/Dockerfile.web
 
@@ -60,6 +60,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: SERVICE=${{ matrix.service }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
