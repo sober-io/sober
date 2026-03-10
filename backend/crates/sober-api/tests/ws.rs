@@ -136,7 +136,11 @@ async fn start_server(pool: PgPool) -> (SocketAddr, String) {
         .await
         .unwrap();
 
-    let config = AppConfig::default_for_test();
+    let config = AppConfig::load_from(|key| match key {
+        "DATABASE_URL" => Some("postgres://unused:unused@localhost/unused".into()),
+        _ => None,
+    })
+    .unwrap();
     let agent_client = start_mock_grpc().await;
     let state = AppState::from_parts(pool, agent_client, auth, config);
 
