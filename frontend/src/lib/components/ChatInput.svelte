@@ -1,10 +1,10 @@
 <script lang="ts">
 	interface Props {
 		onsend: (content: string) => void;
-		disabled?: boolean;
+		busy?: boolean;
 	}
 
-	let { onsend, disabled = false }: Props = $props();
+	let { onsend, busy = false }: Props = $props();
 	let value = $state('');
 
 	const handleKeydown = (e: KeyboardEvent) => {
@@ -16,7 +16,7 @@
 
 	const submit = () => {
 		const trimmed = value.trim();
-		if (!trimmed || disabled) return;
+		if (!trimmed) return;
 		onsend(trimmed);
 		value = '';
 	};
@@ -26,16 +26,15 @@
 	<textarea
 		bind:value
 		onkeydown={handleKeydown}
-		{disabled}
 		placeholder="Send a message..."
 		rows="1"
-		class="flex-1 resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400 dark:focus:ring-zinc-400"
+		class="flex-1 resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400 dark:focus:ring-zinc-400"
 	></textarea>
 	<button
 		onclick={submit}
-		disabled={disabled || !value.trim()}
+		disabled={!value.trim()}
 		class="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 	>
-		Send
+		{busy ? 'Queue' : 'Send'}
 	</button>
 </div>
