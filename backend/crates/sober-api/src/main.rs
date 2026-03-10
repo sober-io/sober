@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let cors = build_cors(&config);
     let rate_limit = RateLimitLayer::new(
         RateLimitConfig {
-            max_requests: 60,
+            max_requests: 600,
             window: Duration::from_secs(60),
         },
         RateLimitScope::User,
