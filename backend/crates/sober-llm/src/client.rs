@@ -22,6 +22,29 @@ use crate::types::{
     StreamChunk,
 };
 
+/// Provider-specific characteristics detected from the base URL.
+///
+/// Different OpenAI-compatible providers require slightly different headers or
+/// behaviors. This struct captures those differences in one place so the engine
+/// can adapt its requests accordingly.
+#[derive(Debug, Clone)]
+struct ProviderHints {
+    /// OpenRouter requires `HTTP-Referer` and `X-Title` headers for ranking.
+    is_openrouter: bool,
+    /// Kimi Coding API validates `User-Agent` for subscription authentication.
+    is_kimi_coding: bool,
+}
+
+impl ProviderHints {
+    /// Detect provider characteristics from a base URL.
+    fn detect(base_url: &str) -> Self {
+        Self {
+            is_openrouter: base_url.contains("openrouter.ai"),
+            is_kimi_coding: base_url.contains("api.kimi.com/coding"),
+        }
+    }
+}
+
 /// An LLM engine backed by an OpenAI-compatible HTTP API.
 ///
 /// Works with any provider that implements the OpenAI Chat Completions format:
@@ -33,8 +56,7 @@ pub struct OpenAiCompatibleEngine {
     model: String,
     embedding_model: String,
     default_max_tokens: u32,
-    is_openrouter: bool,
-    is_kimi_coding: bool,
+    provider: ProviderHints,
 }
 
 impl std::fmt::Debug for OpenAiCompatibleEngine {
@@ -44,8 +66,7 @@ impl std::fmt::Debug for OpenAiCompatibleEngine {
             .field("model", &self.model)
             .field("embedding_model", &self.embedding_model)
             .field("default_max_tokens", &self.default_max_tokens)
-            .field("is_openrouter", &self.is_openrouter)
-            .field("is_kimi_coding", &self.is_kimi_coding)
+            .field("provider", &self.provider)
             .finish()
     }
 }
@@ -60,13 +81,11 @@ impl OpenAiCompatibleEngine {
         max_tokens: u32,
     ) -> Self {
         let base_url = base_url.into();
-        let is_openrouter = base_url.contains("openrouter.ai");
-        let is_kimi_coding = base_url.contains("api.kimi.com/coding");
+        let provider = ProviderHints::detect(&base_url);
 
         Self {
             client: Client::new(),
-            is_openrouter,
-            is_kimi_coding,
+            provider,
             base_url,
             api_key,
             model: model.into(),
@@ -101,7 +120,7 @@ impl OpenAiCompatibleEngine {
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
         // OpenRouter-specific headers for ranking/dashboard.
-        if self.is_openrouter {
+        if self.provider.is_openrouter {
             headers.insert(
                 "HTTP-Referer",
                 HeaderValue::from_static("https://github.com/sober-io/sober"),
@@ -110,7 +129,7 @@ impl OpenAiCompatibleEngine {
         }
 
         // Kimi Coding API validates User-Agent for subscription auth.
-        if self.is_kimi_coding {
+        if self.provider.is_kimi_coding {
             headers.insert(USER_AGENT, HeaderValue::from_static("claude-code/0.1.0"));
         }
 
@@ -278,7 +297,7 @@ mod tests {
             "test-embed",
             4096,
         );
-        assert!(engine.is_openrouter);
+        assert!(engine.provider.is_openrouter);
 
         let engine2 = OpenAiCompatibleEngine::new(
             "https://api.openai.com/v1",
@@ -287,7 +306,7 @@ mod tests {
             "text-embedding-3-small",
             4096,
         );
-        assert!(!engine2.is_openrouter);
+        assert!(!engine2.provider.is_openrouter);
     }
 
     #[test]
@@ -333,7 +352,7 @@ mod tests {
         let engine = OpenAiCompatibleEngine::from_config(&config);
         assert_eq!(engine.model_id(), "anthropic/claude-sonnet-4");
         assert_eq!(engine.default_max_tokens, 8192);
-        assert!(engine.is_openrouter);
+        assert!(engine.provider.is_openrouter);
     }
 
     #[test]
