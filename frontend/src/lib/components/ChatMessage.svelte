@@ -42,10 +42,8 @@
 			<ThinkingIndicator />
 		{:else if streaming}
 			<StreamingText {content} {streaming} />
-		{:else if isUser}
-			<div class="whitespace-pre-wrap">{content}</div>
 		{:else}
-			<div class="prose prose-sm dark:prose-invert max-w-none">{@html renderedContent}</div>
+			<div class="prose prose-sm max-w-none text-inherit">{@html renderedContent}</div>
 		{/if}
 
 		{#if hasThinkingContent}
