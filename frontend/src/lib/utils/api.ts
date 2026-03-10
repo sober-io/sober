@@ -1,3 +1,5 @@
+import type { ApiData } from '$lib/types';
+
 export class ApiError extends Error {
 	status: number;
 	code: string;
@@ -9,9 +11,11 @@ export class ApiError extends Error {
 	}
 }
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+/** Typed API client that unwraps the `{ data: T }` response envelope. */
+export const api = async <T>(path: string, options?: RequestInit): Promise<T> => {
 	const res = await fetch(`/api/v1${path}`, {
 		headers: { 'Content-Type': 'application/json' },
+		credentials: 'include',
 		...options
 	});
 
@@ -20,5 +24,6 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 		throw new ApiError(res.status, body);
 	}
 
-	return res.json();
-}
+	const json: ApiData<T> = await res.json();
+	return json.data;
+};
