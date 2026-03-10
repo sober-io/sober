@@ -72,7 +72,6 @@ where
     context_loader: Arc<ContextLoader<Msg>>,
     tool_registry: Arc<ToolRegistry>,
     message_repo: Arc<Msg>,
-    #[allow(dead_code)]
     conversation_repo: Arc<Conv>,
     #[allow(dead_code)]
     mcp_server_repo: Arc<Mcp>,
@@ -152,11 +151,79 @@ where
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Run the agentic loop
-        let events = self
+        let mut events = self
             .run_loop(user_id, conversation_id, content, user_msg.id)
             .await?;
 
+        // 4. Auto-generate title if conversation has none
+        let conversation = self.conversation_repo.get_by_id(conversation_id).await.ok();
+        if let Some(conv) = conversation
+            && conv.title.is_none()
+        {
+            // Extract assistant response text from events
+            let assistant_text: String = events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentEvent::TextDelta(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect();
+
+            if let Some(title) = self.generate_title(content, &assistant_text).await {
+                // Save title to DB (best-effort)
+                if let Err(e) = self
+                    .conversation_repo
+                    .update_title(conversation_id, &title)
+                    .await
+                {
+                    warn!(error = %e, "failed to save auto-generated title");
+                } else {
+                    events.push(AgentEvent::TitleGenerated(title));
+                }
+            }
+        }
+
         Ok(Box::pin(futures::stream::iter(events.into_iter().map(Ok))))
+    }
+
+    /// Generates a short conversation title from the first user message and assistant reply.
+    async fn generate_title(&self, user_message: &str, assistant_reply: &str) -> Option<String> {
+        let prompt = format!(
+            "Generate a short title (max 6 words) for a conversation that starts with:\n\
+             User: {user_message}\n\
+             Assistant: {}\n\n\
+             Reply with ONLY the title, no quotes or punctuation at the end.",
+            &assistant_reply[..assistant_reply.len().min(200)]
+        );
+
+        let req = CompletionRequest {
+            model: self.config.model.clone(),
+            messages: vec![LlmMessage {
+                role: "user".to_owned(),
+                content: Some(prompt),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            tools: vec![],
+            max_tokens: Some(20),
+            temperature: Some(0.3),
+            stop: vec![],
+            stream: false,
+        };
+
+        match self.llm.complete(req).await {
+            Ok(response) => response
+                .choices
+                .into_iter()
+                .next()
+                .and_then(|c| c.message.content)
+                .map(|t| t.trim().trim_matches('"').to_owned()),
+            Err(e) => {
+                warn!(error = %e, "title generation failed");
+                None
+            }
+        }
     }
 
     /// Inner agentic loop: embed → load context → assemble → complete → handle tool calls.

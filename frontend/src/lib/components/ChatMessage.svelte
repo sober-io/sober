@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ToolCall } from '$lib/types';
+	import { renderMarkdown } from '$lib/utils/markdown';
 	import StreamingText from './StreamingText.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
@@ -25,6 +26,7 @@
 	const isUser = $derived(role === 'User');
 	const hasToolCalls = $derived(toolCalls && toolCalls.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
+	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 </script>
 
 <div class={['flex', isUser ? 'justify-end' : 'justify-start']}>
@@ -41,7 +43,7 @@
 		{:else if streaming}
 			<StreamingText {content} {streaming} />
 		{:else}
-			<div class="whitespace-pre-wrap">{content}</div>
+			<div class="prose prose-sm dark:prose-invert max-w-none">{@html renderedContent}</div>
 		{/if}
 
 		{#if hasThinkingContent}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { Conversation } from '$lib/types';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import { authService } from '$lib/services/auth';
 	import { goto } from '$app/navigation';
@@ -15,9 +15,7 @@
 
 	let { children }: Props = $props();
 
-	let conversations = $state<Conversation[]>([]);
 	let sidebarOpen = $state(false);
-	let loadingConversations = $state(true);
 
 	const activeId = $derived($page.params.id ?? '');
 
@@ -27,17 +25,15 @@
 
 	const loadConversations = async () => {
 		try {
-			conversations = await conversationService.list();
+			conversations.set(await conversationService.list());
 		} catch {
-			conversations = [];
-		} finally {
-			loadingConversations = false;
+			conversations.set([]);
 		}
 	};
 
 	const createConversation = async () => {
 		const conv = await conversationService.create();
-		conversations = [conv, ...conversations];
+		conversations.prepend(conv);
 		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
 	};
 
@@ -108,11 +104,11 @@
 		</div>
 
 		<div class="flex-1 overflow-y-auto">
-			{#if loadingConversations}
+			{#if conversations.loading}
 				<div class="p-4 text-sm text-zinc-500 dark:text-zinc-400">Loading...</div>
 			{:else}
 				<ConversationList
-					{conversations}
+					conversations={conversations.items}
 					{activeId}
 					oncreate={createConversation}
 					onselect={selectConversation}

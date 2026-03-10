@@ -61,7 +61,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - searxng_data:/etc/searxng
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   # ---------------------------------------------------------------------------
   # Database migrations (run-once init container)
@@ -164,5 +164,4 @@ services:
 volumes:
   pgdata:
   qdrant_data:
-  searxng_data:
   sober_sockets:

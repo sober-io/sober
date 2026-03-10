@@ -64,6 +64,7 @@ export type ServerWsMessage =
 			output: string;
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
+	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string };
 
 // API response envelope types

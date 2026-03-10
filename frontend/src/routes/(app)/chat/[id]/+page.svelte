@@ -3,6 +3,8 @@
 	import { page } from '$app/stores';
 	import type { ToolCall, ServerWsMessage, ConversationWithMessages, Message } from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
+	import { conversations } from '$lib/stores/conversations.svelte';
+	import { conversationService } from '$lib/services/conversations';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
@@ -52,6 +54,9 @@
 
 	let isAtBottom = $state(true);
 	let messagesContainer: HTMLDivElement | undefined = $state();
+	let title = $state(data.conversation.title || '');
+	let editingTitle = $state(false);
+	let editTitleValue = $state('');
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -63,6 +68,7 @@
 		messageQueue = [];
 		editingQueueId = null;
 		isAtBottom = true;
+		title = data.conversation.title || '';
 	});
 
 	// Scroll to bottom on conversation change
@@ -232,6 +238,11 @@
 				flushQueue();
 				break;
 			}
+			case 'chat.title': {
+				title = msg.title;
+				conversations.updateTitle(conversationId, msg.title);
+				break;
+			}
 			case 'chat.error': {
 				const last = messages[messages.length - 1];
 				if (last && (last.streaming || last.thinking)) {
@@ -254,13 +265,45 @@
 			}
 		}
 	};
+
+	const startEditTitle = () => {
+		editTitleValue = title || '';
+		editingTitle = true;
+	};
+
+	const saveTitle = async () => {
+		const trimmed = editTitleValue.trim();
+		if (trimmed && trimmed !== title) {
+			title = trimmed;
+			conversations.updateTitle(conversationId, trimmed);
+			await conversationService.updateTitle(conversationId, trimmed);
+		}
+		editingTitle = false;
+	};
 </script>
 
 <div class="flex h-full flex-col">
 	<header class="flex h-14 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
-		<h1 class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-			{data.conversation.title || 'New conversation'}
-		</h1>
+		{#if editingTitle}
+			<input
+				type="text"
+				bind:value={editTitleValue}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') saveTitle();
+					if (e.key === 'Escape') (editingTitle = false);
+				}}
+				onblur={saveTitle}
+				class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
+			/>
+		{:else}
+			<button
+				onclick={startEditTitle}
+				class="text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
+				title="Click to rename"
+			>
+				{title || 'New conversation'}
+			</button>
+		{/if}
 	</header>
 
 	<div class="relative flex-1 overflow-hidden">

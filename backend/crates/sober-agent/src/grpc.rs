@@ -146,6 +146,7 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
         }),
+        AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
         AgentEvent::Error(message) => Event::Error(proto::Error { message }),
     };
 

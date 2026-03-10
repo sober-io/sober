@@ -43,6 +43,8 @@ pub enum AgentEvent {
         /// Token usage statistics.
         usage: Usage,
     },
+    /// An auto-generated title for the conversation.
+    TitleGenerated(String),
     /// An error occurred during processing.
     Error(String),
 }
