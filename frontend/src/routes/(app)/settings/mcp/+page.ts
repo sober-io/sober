@@ -1,7 +1,6 @@
-import { api } from '$lib/utils/api';
-import type { McpServer } from '$lib/types';
+import { mcpService } from '$lib/services/mcp';
 
-export async function load() {
-	const servers = await api<McpServer[]>('/mcp/servers');
+export const load = async () => {
+	const servers = await mcpService.list();
 	return { servers };
-}
+};

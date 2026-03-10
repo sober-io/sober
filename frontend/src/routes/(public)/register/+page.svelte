@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { api, ApiError } from '$lib/utils/api';
+	import { ApiError } from '$lib/utils/api';
+	import { authService } from '$lib/services/auth';
 
 	let email = $state('');
 	let username = $state('');
@@ -9,16 +10,13 @@
 	let submitting = $state(false);
 	let registered = $state(false);
 
-	async function handleSubmit(e: SubmitEvent) {
+	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
 		error = null;
 		submitting = true;
 
 		try {
-			await api('/auth/register', {
-				method: 'POST',
-				body: JSON.stringify({ email, username, password })
-			});
+			await authService.register(email, username, password);
 			registered = true;
 		} catch (err) {
 			if (err instanceof ApiError) {
@@ -29,7 +27,7 @@
 		} finally {
 			submitting = false;
 		}
-	}
+	};
 </script>
 
 <div

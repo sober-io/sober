@@ -20,15 +20,13 @@
 
 	let { data }: { data: PageData } = $props();
 
-	function toChat(m: Message): ChatMsg {
-		return {
-			id: m.id,
-			role: m.role,
-			content: m.content,
-			toolCalls: undefined,
-			streaming: false
-		};
-	}
+	const toChat = (m: Message): ChatMsg => ({
+		id: m.id,
+		role: m.role,
+		content: m.content,
+		toolCalls: undefined,
+		streaming: false
+	});
 
 	const initialMessages = $derived(data.conversation.messages.map(toChat));
 	// eslint-disable-next-line svelte/prefer-writable-derived -- messages is mutated by WebSocket handlers
@@ -58,7 +56,7 @@
 		}
 	});
 
-	function handleWsMessage(msg: ServerWsMessage) {
+	const handleWsMessage = (msg: ServerWsMessage) => {
 		switch (msg.type) {
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
@@ -119,9 +117,9 @@
 				break;
 			}
 		}
-	}
+	};
 
-	function sendMessage(content: string) {
+	const sendMessage = (content: string) => {
 		messages.push({
 			id: crypto.randomUUID(),
 			role: 'User',
@@ -134,7 +132,7 @@
 			conversation_id: conversationId,
 			content
 		});
-	}
+	};
 </script>
 
 <div class="flex h-full flex-col">

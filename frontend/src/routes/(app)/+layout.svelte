@@ -2,7 +2,8 @@
 	import type { Snippet } from 'svelte';
 	import type { Conversation } from '$lib/types';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { api } from '$lib/utils/api';
+	import { conversationService } from '$lib/services/conversations';
+	import { authService } from '$lib/services/auth';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
@@ -24,35 +25,32 @@
 		loadConversations();
 	});
 
-	async function loadConversations() {
+	const loadConversations = async () => {
 		try {
-			conversations = await api<Conversation[]>('/conversations');
+			conversations = await conversationService.list();
 		} catch {
 			conversations = [];
 		} finally {
 			loadingConversations = false;
 		}
-	}
+	};
 
-	async function createConversation() {
-		const conv = await api<Conversation>('/conversations', {
-			method: 'POST',
-			body: JSON.stringify({})
-		});
+	const createConversation = async () => {
+		const conv = await conversationService.create();
 		conversations = [conv, ...conversations];
 		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
-	}
+	};
 
-	function selectConversation(id: string) {
+	const selectConversation = (id: string) => {
 		sidebarOpen = false;
 		goto(resolve('/(app)/chat/[id]', { id }));
-	}
+	};
 
-	async function handleLogout() {
-		await api('/auth/logout', { method: 'POST' });
+	const handleLogout = async () => {
+		await authService.logout();
 		auth.setUser(null);
 		goto(resolve('/login'));
-	}
+	};
 </script>
 
 <div class="flex h-screen bg-white dark:bg-zinc-950">

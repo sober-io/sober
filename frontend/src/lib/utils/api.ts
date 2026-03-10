@@ -12,7 +12,7 @@ export class ApiError extends Error {
 }
 
 /** Typed API client that unwraps the `{ data: T }` response envelope. */
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+export const api = async <T>(path: string, options?: RequestInit): Promise<T> => {
 	const res = await fetch(`/api/v1${path}`, {
 		headers: { 'Content-Type': 'application/json' },
 		credentials: 'include',
@@ -26,4 +26,4 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
 	const json: ApiData<T> = await res.json();
 	return json.data;
-}
+};

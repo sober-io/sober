@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { McpServer } from '$lib/types';
-	import { api, ApiError } from '$lib/utils/api';
+	import { ApiError } from '$lib/utils/api';
+	import { mcpService } from '$lib/services/mcp';
 
 	let { data }: { data: { servers: McpServer[] } } = $props();
 
@@ -22,28 +23,28 @@
 
 	let deleteConfirm = $state<string | null>(null);
 
-	function startAdd() {
+	const startAdd = () => {
 		editing = 'new';
 		formName = '';
 		formCommand = '';
 		formArgs = '';
 		formEnv = '';
-	}
+	};
 
-	function startEdit(server: McpServer) {
+	const startEdit = (server: McpServer) => {
 		editing = server.id;
 		formName = server.name;
 		formCommand = server.command;
 		formArgs = JSON.stringify(server.args);
 		formEnv = JSON.stringify(server.env);
-	}
+	};
 
-	function cancelEdit() {
+	const cancelEdit = () => {
 		editing = null;
 		error = null;
-	}
+	};
 
-	async function saveServer() {
+	const saveServer = async () => {
 		error = null;
 		submitting = true;
 
@@ -60,15 +61,19 @@
 
 		try {
 			if (editing === 'new') {
-				const server = await api<McpServer>('/mcp/servers', {
-					method: 'POST',
-					body: JSON.stringify({ name: formName, command: formCommand, args, env })
+				const server = await mcpService.create({
+					name: formName,
+					command: formCommand,
+					args,
+					env
 				});
 				servers = [...servers, server];
 			} else if (editing) {
-				const server = await api<McpServer>(`/mcp/servers/${editing}`, {
-					method: 'PATCH',
-					body: JSON.stringify({ name: formName, command: formCommand, args, env })
+				const server = await mcpService.update(editing, {
+					name: formName,
+					command: formCommand,
+					args,
+					env
 				});
 				servers = servers.map((s) => (s.id === editing ? server : s));
 			}
@@ -78,31 +83,28 @@
 		} finally {
 			submitting = false;
 		}
-	}
+	};
 
-	async function toggleEnabled(server: McpServer) {
+	const toggleEnabled = async (server: McpServer) => {
 		try {
-			const updated = await api<McpServer>(`/mcp/servers/${server.id}`, {
-				method: 'PATCH',
-				body: JSON.stringify({ enabled: !server.enabled })
-			});
+			const updated = await mcpService.update(server.id, { enabled: !server.enabled });
 			servers = servers.map((s) => (s.id === server.id ? updated : s));
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Failed to toggle server';
 		}
-	}
+	};
 
 	const argsPlaceholder = '["--flag", "value"]';
 
-	async function deleteServer(id: string) {
+	const deleteServer = async (id: string) => {
 		try {
-			await api(`/mcp/servers/${id}`, { method: 'DELETE' });
+			await mcpService.remove(id);
 			servers = servers.filter((s) => s.id !== id);
 			deleteConfirm = null;
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Failed to delete server';
 		}
-	}
+	};
 </script>
 
 <div class="mx-auto max-w-2xl p-6">
@@ -211,7 +213,7 @@
 			>
 				<div class="min-w-0 flex-1">
 					<div class="flex items-center gap-2">
-						<span class="font-medium text-sm text-zinc-900 dark:text-zinc-100">{server.name}</span>
+						<span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{server.name}</span>
 						<span
 							class={[
 								'inline-block h-2 w-2 rounded-full',

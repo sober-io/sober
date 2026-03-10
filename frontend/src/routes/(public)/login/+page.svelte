@@ -1,25 +1,22 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { api, ApiError } from '$lib/utils/api';
+	import { ApiError } from '$lib/utils/api';
+	import { authService } from '$lib/services/auth';
 	import { auth } from '$lib/stores/auth.svelte';
-	import type { User } from '$lib/types';
 
 	let email = $state('');
 	let password = $state('');
 	let error = $state<string | null>(null);
 	let submitting = $state(false);
 
-	async function handleSubmit(e: SubmitEvent) {
+	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
 		error = null;
 		submitting = true;
 
 		try {
-			const result = await api<{ token: string; user: User }>('/auth/login', {
-				method: 'POST',
-				body: JSON.stringify({ email, password })
-			});
+			const result = await authService.login(email, password);
 			auth.setUser(result.user);
 			goto(resolve('/'));
 		} catch (err) {
@@ -31,7 +28,7 @@
 		} finally {
 			submitting = false;
 		}
-	}
+	};
 </script>
 
 <div

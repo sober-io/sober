@@ -1,12 +1,12 @@
-import { api, ApiError } from '$lib/utils/api';
+import { ApiError } from '$lib/utils/api';
+import { authService } from '$lib/services/auth';
 import { auth } from '$lib/stores/auth.svelte';
-import type { User } from '$lib/types';
 
 export const ssr = false;
 
-export async function load() {
+export const load = async () => {
 	try {
-		const user = await api<User>('/auth/me');
+		const user = await authService.me();
 		auth.setUser(user);
 	} catch (e) {
 		if (e instanceof ApiError && e.status === 401) {
@@ -17,4 +17,4 @@ export async function load() {
 	} finally {
 		auth.setLoading(false);
 	}
-}
+};

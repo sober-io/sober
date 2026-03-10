@@ -7,19 +7,19 @@
 	let { onsend, disabled = false }: Props = $props();
 	let value = $state('');
 
-	function handleKeydown(e: KeyboardEvent) {
+	const handleKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			submit();
 		}
-	}
+	};
 
-	function submit() {
+	const submit = () => {
 		const trimmed = value.trim();
 		if (!trimmed || disabled) return;
 		onsend(trimmed);
 		value = '';
-	}
+	};
 </script>
 
 <div class="flex gap-2 border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">

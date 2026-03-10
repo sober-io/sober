@@ -10,7 +10,7 @@ export const websocket = (() => {
 	let error = $state<string | null>(null);
 	const handlers = new SvelteMap<string, MessageHandler>();
 
-	function connect() {
+	const connect = () => {
 		if (ws) return;
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const socket = new WebSocket(`${protocol}//${location.host}/api/v1/ws`);
@@ -36,26 +36,26 @@ export const websocket = (() => {
 		};
 
 		ws = socket;
-	}
+	};
 
-	function disconnect() {
+	const disconnect = () => {
 		ws?.close();
 		ws = null;
 		connected = false;
 		handlers.clear();
-	}
+	};
 
-	function send(msg: ClientWsMessage) {
+	const send = (msg: ClientWsMessage) => {
 		ws?.send(JSON.stringify(msg));
-	}
+	};
 
 	/** Subscribe to messages for a specific conversation. Returns an unsubscribe function. */
-	function subscribe(conversationId: string, handler: MessageHandler): () => void {
+	const subscribe = (conversationId: string, handler: MessageHandler): (() => void) => {
 		handlers.set(conversationId, handler);
 		return () => {
 			handlers.delete(conversationId);
 		};
-	}
+	};
 
 	return {
 		get connected() {

@@ -1,7 +1,6 @@
-import { api } from '$lib/utils/api';
-import type { ConversationWithMessages } from '$lib/types';
+import { conversationService } from '$lib/services/conversations';
 
-export async function load({ params }: { params: { id: string } }) {
-	const conversation = await api<ConversationWithMessages>(`/conversations/${params.id}`);
+export const load = async ({ params }: { params: { id: string } }) => {
+	const conversation = await conversationService.get(params.id);
 	return { conversation };
-}
+};
