@@ -30,6 +30,7 @@ pub fn test_config() -> AppConfig {
             model: "test-model".to_owned(),
             max_tokens: 1024,
             embedding_model: "test-embed".to_owned(),
+            embedding_dim: 1536,
         },
         server: ServerConfig {
             host: "127.0.0.1".to_owned(),

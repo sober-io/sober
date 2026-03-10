@@ -1,4 +1,7 @@
 ARG SERVICE=sober-api
+# BINARY defaults to SERVICE but can be overridden when the binary name
+# differs from the package name (e.g. sober-cli produces the "sober" binary).
+ARG BINARY=${SERVICE}
 
 FROM rust:latest AS builder
 ARG SERVICE
@@ -6,14 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY backend/ backend/
-COPY shared/ shared/
 RUN cd backend && cargo build --release -p "${SERVICE}"
 
 FROM debian:trixie-slim
-ARG SERVICE
+ARG BINARY
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
-COPY --from=builder /build/backend/target/release/${SERVICE} /usr/local/bin/${SERVICE}
+COPY --from=builder /build/backend/target/release/${BINARY} /usr/local/bin/${BINARY}
 USER sober
-ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/${SERVICE}"]
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/${BINARY}"]

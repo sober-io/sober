@@ -52,6 +52,12 @@ impl<M: MessageRepo> ContextLoader<M> {
         request: LoadRequest,
         config: &MemoryConfig,
     ) -> Result<LoadedContext, MemoryError> {
+        // Ensure user + system collections exist before searching.
+        tokio::try_join!(
+            self.store.ensure_collection(request.user_id),
+            self.store.ensure_system_collection(),
+        )?;
+
         // Fetch recent messages and user memories concurrently
         let user_scope = ScopeId::from_uuid(*request.user_id.as_uuid());
 

@@ -23,5 +23,11 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Zed personal settings
+.zed/settings.json
+
+# Keep shared ACP config
+!.zed/acp.json
+
 # sqlx offline query cache — DO commit this
 # !backend/.sqlx/

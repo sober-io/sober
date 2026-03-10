@@ -83,6 +83,8 @@ pub struct LlmConfig {
     pub max_tokens: u32,
     /// Model used for embedding generation.
     pub embedding_model: String,
+    /// Dimensionality of the embedding vectors produced by the embedding model.
+    pub embedding_dim: u64,
 }
 
 /// HTTP server settings.
@@ -221,6 +223,7 @@ impl AppConfig {
                 model: env.or("LLM_MODEL", "anthropic/claude-sonnet-4"),
                 max_tokens: env.parse("LLM_MAX_TOKENS", 4096)?,
                 embedding_model: env.or("EMBEDDING_MODEL", "text-embedding-3-small"),
+                embedding_dim: env.parse("EMBEDDING_DIM", 1536)?,
             },
             server: ServerConfig {
                 host: env.or("HOST", "0.0.0.0"),

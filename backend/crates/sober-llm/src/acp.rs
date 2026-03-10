@@ -284,6 +284,7 @@ impl LlmEngine for AcpEngine {
                 message: Message {
                     role: "assistant".to_owned(),
                     content,
+                    reasoning_content: None,
                     tool_calls: None,
                     tool_call_id: None,
                 },

@@ -47,7 +47,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_tool_iterations: 10,
-            context_token_budget: 4096,
+            context_token_budget: 128_000,
             conversation_history_limit: 50,
             hits_per_scope: 10,
             model: "anthropic/claude-sonnet-4".to_owned(),
@@ -178,32 +178,51 @@ where
             debug!(iteration, "agent loop iteration");
 
             if needs_rebuild {
-                // a. Embed user message for context retrieval
-                let query_vectors = self
-                    .llm
-                    .embed(&[content])
-                    .await
-                    .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
+                // a. Embed user message for context retrieval (soft-fail: proceed
+                //    without memory context if embeddings are unavailable).
+                let query_vector = match self.llm.embed(&[content]).await {
+                    Ok(vecs) => vecs.into_iter().next().unwrap_or_default(),
+                    Err(e) => {
+                        warn!(error = %e, "embedding failed, proceeding without memory context");
+                        vec![]
+                    }
+                };
 
-                let query_vector = query_vectors.into_iter().next().unwrap_or_default();
-
-                // b. Load context
-                let loaded_context = self
-                    .context_loader
-                    .load(
-                        LoadRequest {
-                            query_vector,
-                            query_text: content.to_owned(),
-                            user_id,
-                            conversation_id,
-                            token_budget: self.config.context_token_budget,
-                            recent_message_count: self.config.conversation_history_limit,
-                            hits_per_scope: self.config.hits_per_scope,
-                        },
-                        &self.memory_config,
-                    )
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                // b. Load context (skip memory retrieval when no embedding)
+                let loaded_context = if query_vector.is_empty() {
+                    // Still load recent messages even without embeddings.
+                    self.context_loader
+                        .load(
+                            LoadRequest {
+                                query_vector: vec![],
+                                query_text: content.to_owned(),
+                                user_id,
+                                conversation_id,
+                                token_budget: self.config.context_token_budget,
+                                recent_message_count: self.config.conversation_history_limit,
+                                hits_per_scope: 0,
+                            },
+                            &self.memory_config,
+                        )
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
+                } else {
+                    self.context_loader
+                        .load(
+                            LoadRequest {
+                                query_vector,
+                                query_text: content.to_owned(),
+                                user_id,
+                                conversation_id,
+                                token_budget: self.config.context_token_budget,
+                                recent_message_count: self.config.conversation_history_limit,
+                                hits_per_scope: self.config.hits_per_scope,
+                            },
+                            &self.memory_config,
+                        )
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
+                };
 
                 // c. Assemble prompt via Mind
                 let caller = CallerContext {
@@ -264,10 +283,12 @@ where
             if let Some(ref tool_calls) = choice.message.tool_calls
                 && !tool_calls.is_empty()
             {
-                // Append the assistant's tool-call message to the cached history
+                // Append the assistant's tool-call message to the cached history,
+                // preserving reasoning_content so providers like Kimi don't reject it.
                 llm_messages.push(LlmMessage {
                     role: "assistant".to_owned(),
                     content: choice.message.content.clone(),
+                    reasoning_content: choice.message.reasoning_content.clone(),
                     tool_calls: choice.message.tool_calls.clone(),
                     tool_call_id: None,
                 });
@@ -388,6 +409,7 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
             LlmMessage {
                 role: role.to_owned(),
                 content: Some(m.content.clone()),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
             }
@@ -425,7 +447,7 @@ mod tests {
     fn agent_config_defaults() {
         let config = AgentConfig::default();
         assert_eq!(config.max_tool_iterations, 10);
-        assert_eq!(config.context_token_budget, 4096);
+        assert_eq!(config.context_token_budget, 128_000);
         assert_eq!(config.conversation_history_limit, 50);
         assert_eq!(config.hits_per_scope, 10);
         assert_eq!(config.model, "anthropic/claude-sonnet-4");

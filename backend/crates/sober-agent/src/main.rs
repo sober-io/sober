@@ -54,8 +54,10 @@ async fn main() -> Result<()> {
         Arc::new(OpenAiCompatibleEngine::from_config(&config.llm));
 
     // 6. Create memory store
-    let memory =
-        Arc::new(MemoryStore::new(&config.qdrant, 1536).context("failed to create memory store")?);
+    let memory = Arc::new(
+        MemoryStore::new(&config.qdrant, config.llm.embedding_dim)
+            .context("failed to create memory store")?,
+    );
 
     // 7. Create context loader
     let context_loader = Arc::new(ContextLoader::new(

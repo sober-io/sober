@@ -1,0 +1,9 @@
+# Single builder image that compiles all backend services at once.
+# Individual service images extract their binary from this builder.
+
+FROM rust:latest AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY backend/ backend/
+RUN cd backend && cargo build --release --workspace

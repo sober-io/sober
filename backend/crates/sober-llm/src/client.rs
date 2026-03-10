@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use sober_core::config::LlmConfig;
 use tracing::debug;
@@ -34,6 +34,7 @@ pub struct OpenAiCompatibleEngine {
     embedding_model: String,
     default_max_tokens: u32,
     is_openrouter: bool,
+    is_kimi_coding: bool,
 }
 
 impl std::fmt::Debug for OpenAiCompatibleEngine {
@@ -44,6 +45,7 @@ impl std::fmt::Debug for OpenAiCompatibleEngine {
             .field("embedding_model", &self.embedding_model)
             .field("default_max_tokens", &self.default_max_tokens)
             .field("is_openrouter", &self.is_openrouter)
+            .field("is_kimi_coding", &self.is_kimi_coding)
             .finish()
     }
 }
@@ -59,10 +61,12 @@ impl OpenAiCompatibleEngine {
     ) -> Self {
         let base_url = base_url.into();
         let is_openrouter = base_url.contains("openrouter.ai");
+        let is_kimi_coding = base_url.contains("api.kimi.com/coding");
 
         Self {
             client: Client::new(),
             is_openrouter,
+            is_kimi_coding,
             base_url,
             api_key,
             model: model.into(),
@@ -103,6 +107,11 @@ impl OpenAiCompatibleEngine {
                 HeaderValue::from_static("https://github.com/sober-io/sober"),
             );
             headers.insert("X-Title", HeaderValue::from_static("Sober"));
+        }
+
+        // Kimi Coding API validates User-Agent for subscription auth.
+        if self.is_kimi_coding {
+            headers.insert(USER_AGENT, HeaderValue::from_static("claude-code/0.1.0"));
         }
 
         headers
@@ -319,6 +328,7 @@ mod tests {
             model: "anthropic/claude-sonnet-4".to_owned(),
             max_tokens: 8192,
             embedding_model: "text-embedding-3-small".to_owned(),
+            embedding_dim: 1536,
         };
         let engine = OpenAiCompatibleEngine::from_config(&config);
         assert_eq!(engine.model_id(), "anthropic/claude-sonnet-4");

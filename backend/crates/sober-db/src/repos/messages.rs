@@ -46,11 +46,15 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         conversation_id: ConversationId,
         limit: i64,
     ) -> Result<Vec<Message>, AppError> {
+        // Fetch the most recent N messages, then reverse to chronological order
+        // so older messages appear first in the conversation context.
         let rows = sqlx::query_as::<_, MessageRow>(
-            "SELECT id, conversation_id, role, content, tool_calls, tool_result, token_count, created_at \
-             FROM messages WHERE conversation_id = $1 \
-             ORDER BY created_at ASC \
-             LIMIT $2",
+            "SELECT * FROM (\
+                SELECT id, conversation_id, role, content, tool_calls, tool_result, token_count, created_at \
+                FROM messages WHERE conversation_id = $1 \
+                ORDER BY created_at DESC \
+                LIMIT $2\
+             ) AS recent ORDER BY created_at ASC",
         )
         .bind(conversation_id.as_uuid())
         .bind(limit)
