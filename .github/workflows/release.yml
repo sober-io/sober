@@ -162,15 +162,15 @@ jobs:
         run: pnpm install --frozen-lockfile && pnpm build
 
       - name: Build binaries
-        working-directory: backend
         env:
           BUILD_TARGET: ${{ matrix.target }}
           USE_CROSS: ${{ matrix.cross }}
         run: |
           if [ "$USE_CROSS" = "true" ]; then
-            cross build --release --target "$BUILD_TARGET"
+            # Run from repo root so cross mounts frontend/build/ into the container
+            cross build --release --target "$BUILD_TARGET" --manifest-path backend/Cargo.toml
           else
-            cargo build --release --target "$BUILD_TARGET"
+            cd backend && cargo build --release --target "$BUILD_TARGET"
           fi
 
       - name: Package release archive
