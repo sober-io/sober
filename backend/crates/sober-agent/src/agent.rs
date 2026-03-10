@@ -15,7 +15,7 @@ use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
-use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore};
+use sober_memory::{ChunkType, ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
 use tracing::{debug, warn};
@@ -68,7 +68,6 @@ where
 {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
-    #[allow(dead_code)]
     memory: Arc<MemoryStore>,
     context_loader: Arc<ContextLoader<Msg>>,
     tool_registry: Arc<ToolRegistry>,
@@ -139,7 +138,7 @@ where
         }
 
         // 2. Store user message
-        let _user_msg = self
+        let user_msg = self
             .message_repo
             .create(CreateMessage {
                 conversation_id,
@@ -153,7 +152,9 @@ where
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Run the agentic loop
-        let events = self.run_loop(user_id, conversation_id, content).await?;
+        let events = self
+            .run_loop(user_id, conversation_id, content, user_msg.id)
+            .await?;
 
         Ok(Box::pin(futures::stream::iter(events.into_iter().map(Ok))))
     }
@@ -169,6 +170,7 @@ where
         user_id: UserId,
         conversation_id: ConversationId,
         content: &str,
+        user_msg_id: sober_core::MessageId,
     ) -> Result<Vec<AgentEvent>, AgentError> {
         let mut events = Vec::new();
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
@@ -317,13 +319,23 @@ where
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Assistant,
-                    content: text,
+                    content: text.clone(),
                     tool_calls: None,
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+            // h. Fire-and-forget: embed and store conversation turn in vector memory
+            //    so the agent can recall facts across conversations.
+            self.spawn_memory_ingestion(
+                user_id,
+                content.to_owned(),
+                text,
+                user_msg_id,
+                assistant_msg.id,
+            );
 
             events.push(AgentEvent::Done {
                 message_id: assistant_msg.id,
@@ -393,6 +405,85 @@ where
         }
 
         (events, messages, any_context_modifying)
+    }
+
+    /// Spawns a background task that embeds and stores both the user message and
+    /// the assistant response in vector memory. This allows the agent to recall
+    /// facts and conversation context across separate conversations.
+    fn spawn_memory_ingestion(
+        &self,
+        user_id: UserId,
+        user_content: String,
+        assistant_content: String,
+        user_msg_id: sober_core::MessageId,
+        assistant_msg_id: sober_core::MessageId,
+    ) {
+        let llm = Arc::clone(&self.llm);
+        let memory = Arc::clone(&self.memory);
+        let scope_id = sober_core::ScopeId::from_uuid(*user_id.as_uuid());
+        let half_life_days = self.memory_config.decay_half_life_days;
+
+        tokio::spawn(async move {
+            let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
+
+            // Embed both messages in a single batch call.
+            let texts: Vec<&str> = vec![&user_content, &assistant_content];
+            let vectors = match llm.embed(&texts).await {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, "memory ingestion: embedding failed, skipping");
+                    return;
+                }
+            };
+
+            if vectors.len() < 2 {
+                warn!(
+                    "memory ingestion: expected 2 vectors, got {}",
+                    vectors.len()
+                );
+                return;
+            }
+
+            // Store user message.
+            if let Err(e) = memory
+                .store(
+                    user_id,
+                    StoreChunk {
+                        dense_vector: vectors[0].clone(),
+                        content: user_content,
+                        chunk_type: ChunkType::Conversation,
+                        scope_id,
+                        source_message_id: Some(user_msg_id),
+                        importance: 0.5,
+                        decay_at,
+                    },
+                )
+                .await
+            {
+                warn!(error = %e, "memory ingestion: failed to store user message");
+            }
+
+            // Store assistant response.
+            if let Err(e) = memory
+                .store(
+                    user_id,
+                    StoreChunk {
+                        dense_vector: vectors[1].clone(),
+                        content: assistant_content,
+                        chunk_type: ChunkType::Conversation,
+                        scope_id,
+                        source_message_id: Some(assistant_msg_id),
+                        importance: 0.5,
+                        decay_at,
+                    },
+                )
+                .await
+            {
+                warn!(error = %e, "memory ingestion: failed to store assistant message");
+            }
+
+            debug!("memory ingestion complete for user {user_id}");
+        });
     }
 }
 
