@@ -9,6 +9,8 @@ service AgentService {
   rpc Health(HealthRequest) returns (HealthResponse);
   // Route a user's confirmation response to the agent's ConfirmationBroker.
   rpc SubmitConfirmation(ConfirmResponse) returns (ConfirmAck);
+  // Update the shell tool's permission mode at runtime.
+  rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
 }
 
 message ConfirmAck {}
@@ -80,3 +82,11 @@ message ConfirmResponse {
   string confirm_id = 1;
   bool approved = 2;
 }
+
+// Request to change the shell tool's permission mode.
+message SetPermissionModeRequest {
+  // "interactive", "policy_based", or "autonomous"
+  string mode = 1;
+}
+
+message SetPermissionModeResponse {}

@@ -53,6 +53,12 @@ enum ClientWsMessage {
         confirm_id: String,
         approved: bool,
     },
+    #[serde(rename = "chat.set_permission_mode")]
+    ChatSetPermissionMode {
+        #[expect(dead_code)]
+        conversation_id: String,
+        mode: String,
+    },
 }
 
 /// Server-to-client WebSocket message types.
@@ -196,6 +202,16 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 };
                 if let Err(e) = agent_client.submit_confirmation(resp).await {
                     warn!(error = %e, "failed to submit confirmation");
+                }
+            }
+            ClientWsMessage::ChatSetPermissionMode {
+                conversation_id: _,
+                mode,
+            } => {
+                let mut agent_client = state.agent_client.clone();
+                let req = proto::SetPermissionModeRequest { mode: mode.clone() };
+                if let Err(e) = agent_client.set_permission_mode(req).await {
+                    warn!(error = %e, mode, "failed to set permission mode");
                 }
             }
         }

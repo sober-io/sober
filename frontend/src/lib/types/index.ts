@@ -66,6 +66,11 @@ export type ClientWsMessage =
 			conversation_id: string;
 			confirm_id: string;
 			approved: boolean;
+	  }
+	| {
+			type: 'chat.set_permission_mode';
+			conversation_id: string;
+			mode: PermissionMode;
 	  };
 
 /** Server-to-client messages — routed by conversation_id */

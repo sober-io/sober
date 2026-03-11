@@ -14,5 +14,5 @@ pub mod web_search;
 
 pub use fetch_url::FetchUrlTool;
 pub use registry::ToolRegistry;
-pub use shell::ShellTool;
+pub use shell::{SharedPermissionMode, ShellTool};
 pub use web_search::WebSearchTool;

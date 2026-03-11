@@ -22,6 +22,7 @@ use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
 use sober_sandbox::{CommandPolicy, SandboxProfile};
+use std::sync::RwLock;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -99,9 +100,10 @@ async fn main() -> Result<()> {
         .resolve(&std::collections::HashMap::new())
         .context("failed to resolve sandbox policy")?;
     let command_policy = CommandPolicy::default();
+    let shared_permission_mode = Arc::new(RwLock::new(PermissionMode::default()));
     let shell_tool = ShellTool::new(
         command_policy,
-        PermissionMode::default(),
+        Arc::clone(&shared_permission_mode),
         workspace_home,
         sandbox_policy,
         true, // auto_snapshot
@@ -143,7 +145,7 @@ async fn main() -> Result<()> {
     // 12. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    let grpc_service = AgentGrpcService::new(agent, confirmation_sender);
+    let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
 
     // 13. Bind to Unix domain socket
     let socket_path =

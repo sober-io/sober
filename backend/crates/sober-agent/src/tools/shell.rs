@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 use sober_core::PermissionMode;
@@ -33,9 +34,12 @@ struct ShellInput {
 /// Stateless: classification and sandboxed execution only. When a command
 /// requires confirmation, the tool returns [`ToolError::NeedsConfirmation`]
 /// and the agent loop handles the interactive flow.
+/// Thread-safe handle for reading and updating the permission mode at runtime.
+pub type SharedPermissionMode = Arc<RwLock<PermissionMode>>;
+
 pub struct ShellTool {
     policy: CommandPolicy,
-    permission_mode: PermissionMode,
+    permission_mode: SharedPermissionMode,
     workspace_home: PathBuf,
     sandbox_policy: SandboxPolicy,
     #[allow(dead_code)]
@@ -43,10 +47,10 @@ pub struct ShellTool {
 }
 
 impl ShellTool {
-    /// Create a new ShellTool.
+    /// Create a new ShellTool with a shared permission mode.
     pub fn new(
         policy: CommandPolicy,
-        permission_mode: PermissionMode,
+        permission_mode: SharedPermissionMode,
         workspace_home: PathBuf,
         sandbox_policy: SandboxPolicy,
         auto_snapshot: bool,
@@ -65,7 +69,7 @@ impl ShellTool {
         use sober_sandbox::SandboxProfile;
         Self {
             policy: CommandPolicy::default(),
-            permission_mode: PermissionMode::Autonomous,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
             workspace_home: PathBuf::from("/tmp/test-workspace"),
             sandbox_policy: SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
@@ -128,9 +132,15 @@ impl ShellTool {
         // Classify risk
         let risk = self.policy.classify(&input.command);
 
+        // Read current permission mode (may be updated at runtime via gRPC).
+        let permission_mode = *self
+            .permission_mode
+            .read()
+            .expect("permission mode lock poisoned");
+
         // Check permission mode (skip if already confirmed)
         if !input.confirmed {
-            let needs_confirmation = match (self.permission_mode, risk) {
+            let needs_confirmation = match (permission_mode, risk) {
                 (PermissionMode::Autonomous, _) => false,
                 (PermissionMode::PolicyBased, RiskLevel::Safe | RiskLevel::Moderate) => false,
                 (PermissionMode::Interactive, _)
@@ -288,7 +298,7 @@ mod tests {
     fn shell_tool_denies_blocked_command() {
         let tool = ShellTool {
             policy: CommandPolicy::with_denied(vec!["shutdown".to_string()]),
-            permission_mode: PermissionMode::Autonomous,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
             workspace_home: PathBuf::from("/tmp/test"),
             sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
@@ -307,7 +317,7 @@ mod tests {
     fn shell_tool_returns_needs_confirmation_for_dangerous() {
         let tool = ShellTool {
             policy: CommandPolicy::default(),
-            permission_mode: PermissionMode::PolicyBased,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::PolicyBased)),
             workspace_home: PathBuf::from("/tmp/test"),
             sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
@@ -328,7 +338,7 @@ mod tests {
     fn shell_tool_skips_confirmation_when_confirmed() {
         let tool = ShellTool {
             policy: CommandPolicy::default(),
-            permission_mode: PermissionMode::Interactive,
+            permission_mode: Arc::new(RwLock::new(PermissionMode::Interactive)),
             workspace_home: PathBuf::from("/tmp/test"),
             sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
@@ -347,5 +357,37 @@ mod tests {
             }
             _ => {} // any other result is fine (sandbox may fail in test env)
         }
+    }
+
+    #[test]
+    fn shell_tool_respects_runtime_mode_change() {
+        let shared_mode = Arc::new(RwLock::new(PermissionMode::Autonomous));
+        let tool = ShellTool {
+            policy: CommandPolicy::default(),
+            permission_mode: Arc::clone(&shared_mode),
+            workspace_home: PathBuf::from("/tmp/test"),
+            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
+                .resolve(&std::collections::HashMap::new())
+                .unwrap(),
+            auto_snapshot: false,
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        // In Autonomous mode, dangerous commands should NOT need confirmation.
+        let result = rt.block_on(tool.execute_inner(serde_json::json!({"command": "rm -rf /"})));
+        assert!(
+            !matches!(result, Err(ToolError::NeedsConfirmation { .. })),
+            "Autonomous mode should not require confirmation"
+        );
+
+        // Switch to PolicyBased at runtime.
+        *shared_mode.write().unwrap() = PermissionMode::PolicyBased;
+
+        // Now the same dangerous command SHOULD need confirmation.
+        let result = rt.block_on(tool.execute_inner(serde_json::json!({"command": "rm -rf /"})));
+        assert!(
+            matches!(result, Err(ToolError::NeedsConfirmation { .. })),
+            "PolicyBased mode should require confirmation for dangerous commands"
+        );
     }
 }

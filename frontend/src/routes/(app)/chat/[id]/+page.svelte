@@ -318,6 +318,13 @@
 
 	const handleModeChange = (newMode: PermissionMode) => {
 		permissionMode = newMode;
+		// Update agent's runtime permission mode via WebSocket.
+		websocket.send({
+			type: 'chat.set_permission_mode',
+			conversation_id: conversationId,
+			mode: newMode
+		});
+		// Also persist to workspace settings if linked.
 		const wsId = data.conversation.workspace_id;
 		if (wsId) {
 			workspaceService.updateSettings(wsId, { permission_mode: newMode });

@@ -13,6 +13,7 @@ use tracing::error;
 use crate::agent::Agent;
 use crate::confirm::ConfirmationSender;
 use crate::stream::AgentEvent;
+use crate::tools::SharedPermissionMode;
 
 /// Generated protobuf types for the agent gRPC service.
 pub mod proto {
@@ -28,6 +29,7 @@ where
 {
     agent: Arc<Agent<Msg, Conv, Mcp>>,
     confirmation_sender: ConfirmationSender,
+    permission_mode: SharedPermissionMode,
 }
 
 impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
@@ -37,10 +39,15 @@ where
     Mcp: McpServerRepo,
 {
     /// Creates a new gRPC service backed by the given agent.
-    pub fn new(agent: Arc<Agent<Msg, Conv, Mcp>>, confirmation_sender: ConfirmationSender) -> Self {
+    pub fn new(
+        agent: Arc<Agent<Msg, Conv, Mcp>>,
+        confirmation_sender: ConfirmationSender,
+        permission_mode: SharedPermissionMode,
+    ) -> Self {
         Self {
             agent,
             confirmation_sender,
+            permission_mode,
         }
     }
 }
@@ -132,6 +139,34 @@ where
             .await
             .map_err(|e| Status::internal(format!("failed to forward confirmation: {e}")))?;
         Ok(Response::new(proto::ConfirmAck {}))
+    }
+
+    async fn set_permission_mode(
+        &self,
+        request: Request<proto::SetPermissionModeRequest>,
+    ) -> Result<Response<proto::SetPermissionModeResponse>, Status> {
+        let mode_str = request.into_inner().mode;
+        let mode = match mode_str.as_str() {
+            "interactive" => sober_core::PermissionMode::Interactive,
+            "policy_based" => sober_core::PermissionMode::PolicyBased,
+            "autonomous" => sober_core::PermissionMode::Autonomous,
+            other => {
+                return Err(Status::invalid_argument(format!(
+                    "unknown permission mode: {other}"
+                )));
+            }
+        };
+
+        {
+            let mut current = self
+                .permission_mode
+                .write()
+                .expect("permission mode lock poisoned");
+            *current = mode;
+        }
+
+        tracing::info!(mode = ?mode, "permission mode updated");
+        Ok(Response::new(proto::SetPermissionModeResponse {}))
     }
 
     async fn health(

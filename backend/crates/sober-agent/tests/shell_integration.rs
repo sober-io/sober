@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use sober_agent::tools::ShellTool;
 use sober_core::PermissionMode;
@@ -17,7 +18,7 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
         .expect("failed to resolve sandbox policy");
     ShellTool::new(
         CommandPolicy::default(),
-        PermissionMode::Autonomous,
+        Arc::new(RwLock::new(PermissionMode::Autonomous)),
         workspace_home,
         sandbox_policy,
         false,
@@ -80,7 +81,7 @@ async fn shell_tool_denies_blocked_commands() {
         .expect("failed to resolve sandbox policy");
     let tool = ShellTool::new(
         CommandPolicy::with_denied(vec!["shutdown".to_string()]),
-        PermissionMode::Autonomous,
+        Arc::new(RwLock::new(PermissionMode::Autonomous)),
         dir.path().to_path_buf(),
         sandbox_policy,
         false,
