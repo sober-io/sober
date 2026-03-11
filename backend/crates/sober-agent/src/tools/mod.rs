@@ -5,11 +5,14 @@
 //!
 //! - [`WebSearchTool`](web_search::WebSearchTool) — web search via SearXNG
 //! - [`FetchUrlTool`](fetch_url::FetchUrlTool) — fetch and extract URL content
+//! - [`ShellTool`](shell::ShellTool) — sandboxed shell command execution
 
 pub mod fetch_url;
 pub mod registry;
+pub mod shell;
 pub mod web_search;
 
 pub use fetch_url::FetchUrlTool;
 pub use registry::ToolRegistry;
+pub use shell::ShellTool;
 pub use web_search::WebSearchTool;
