@@ -224,20 +224,25 @@
 				const last = messages[messages.length - 1];
 				if (last && last.role === 'Assistant') {
 					const tc: ToolCall = {
+						id: crypto.randomUUID(),
 						name: msg.tool_call.name,
 						input: msg.tool_call.input
 					};
 					last.toolCalls = [...(last.toolCalls ?? []), tc];
 					last.streaming = true;
 					last.thinking = false;
+					messages = [...messages];
 				}
 				break;
 			}
 			case 'chat.tool_result': {
 				const last = messages[messages.length - 1];
 				if (last?.toolCalls) {
-					const tc = last.toolCalls.find((t) => t.name && !t.output);
-					if (tc) tc.output = msg.output;
+					const tc = last.toolCalls.find((t) => !t.output);
+					if (tc) {
+						tc.output = msg.output;
+						messages = [...messages];
+					}
 				}
 				break;
 			}
