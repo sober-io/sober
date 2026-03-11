@@ -20,7 +20,10 @@ pub use config::AppConfig;
 pub use error::{ApiErrorBody, AppError};
 pub use telemetry::{MetricsEndpoint, TelemetryGuard, init_telemetry};
 pub use types::*;
-pub use workspace_config::{WorkspaceAgentState, WorkspaceConfig};
+pub use workspace_config::{
+    PermissionMode, WorkspaceAgentState, WorkspaceConfig, WorkspaceSandboxConfig,
+    WorkspaceShellConfig,
+};
 
 // Re-export commonly used external types
 pub use chrono::{DateTime, Utc};

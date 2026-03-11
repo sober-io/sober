@@ -12,6 +12,7 @@ pub mod error;
 pub mod policy;
 pub mod proxy;
 pub mod resolve;
+pub mod risk;
 
 pub use audit::{ExecutionOutcome, ExecutionTrigger, SandboxAuditEntry};
 pub use bwrap::{BwrapSandbox, SandboxResult};
@@ -19,6 +20,7 @@ pub use config::SandboxConfig;
 pub use error::SandboxError;
 pub use policy::{NetMode, SandboxPolicy, SandboxProfile};
 pub use resolve::resolve_policy;
+pub use risk::RiskLevel;
 
 /// Check that required runtime dependencies (bwrap, optionally socat) are
 /// available on the system PATH.

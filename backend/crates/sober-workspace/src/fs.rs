@@ -17,6 +17,21 @@ const DEFAULT_CONFIG_TOML: &str = "\
 # [style]
 # tone = \"neutral\"
 # commit_convention = \"conventional\"
+
+# [sandbox]
+# profile = \"standard\"            # locked_down | standard | unrestricted
+# max_execution_seconds = 300
+# network_mode = \"none\"           # none | allowed_domains | full
+# allowed_domains = []
+
+# [shell]
+# permission_mode = \"policy_based\"  # interactive | policy_based | autonomous
+# auto_snapshot = true
+# max_snapshots = 10                 # oldest pruned when exceeded
+#
+# [shell.rules]
+# \"docker compose\" = \"safe\"
+# \"npm publish\" = \"dangerous\"
 ";
 
 const DEFAULT_STATE_JSON: &str = r#"{"observations":[]}"#;
