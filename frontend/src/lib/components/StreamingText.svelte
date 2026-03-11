@@ -12,6 +12,7 @@
 </script>
 
 <div class="chat-prose prose prose-sm max-w-none inline">
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized markdown rendering -->
 	{@html renderedContent}
 </div>
 {#if streaming}<span

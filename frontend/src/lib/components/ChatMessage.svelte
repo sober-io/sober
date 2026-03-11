@@ -43,6 +43,7 @@
 		{:else if streaming}
 			<StreamingText {content} {streaming} />
 		{:else}
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized markdown rendering -->
 			<div class="chat-prose prose prose-sm max-w-none">{@html renderedContent}</div>
 		{/if}
 

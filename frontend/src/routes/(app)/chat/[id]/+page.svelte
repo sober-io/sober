@@ -43,7 +43,6 @@
 	});
 
 	const initialMessages = $derived(data.conversation.messages.map(toChat));
-	// eslint-disable-next-line svelte/prefer-writable-derived -- messages is mutated by WebSocket handlers
 	let messages = $state<ChatMsg[]>([]);
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
@@ -290,7 +289,7 @@
 				bind:value={editTitleValue}
 				onkeydown={(e) => {
 					if (e.key === 'Enter') saveTitle();
-					if (e.key === 'Escape') (editingTitle = false);
+					if (e.key === 'Escape') editingTitle = false;
 				}}
 				onblur={saveTitle}
 				class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
@@ -351,9 +350,7 @@
 									</button>
 								{:else}
 									<div class="flex-1">
-										<div
-											class="mb-1 text-[10px] font-medium uppercase tracking-wide opacity-60"
-										>
+										<div class="mb-1 text-[10px] font-medium uppercase tracking-wide opacity-60">
 											Queued
 										</div>
 										<div class="whitespace-pre-wrap">{qmsg.content}</div>
