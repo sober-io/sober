@@ -86,13 +86,11 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.agent
-    security_opt:
-      - apparmor:unconfined
-    cap_add:
-      - SYS_ADMIN
+    privileged: true
     environment:
       <<: [*common-env, *llm-env, *memory-env, *mcp-env]
       AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SANDBOX_PROFILE: unrestricted
       ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
       SEARXNG_URL: http://searxng:8080
     volumes:

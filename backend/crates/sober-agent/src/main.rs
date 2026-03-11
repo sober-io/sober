@@ -90,7 +90,12 @@ async fn main() -> Result<()> {
         std::env::var("WORKSPACE_ROOT")
             .unwrap_or_else(|_| "/var/lib/sober/workspaces/default".to_owned()),
     );
-    let sandbox_policy = SandboxProfile::Standard
+    let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
+        Ok("unrestricted") => SandboxProfile::Unrestricted,
+        Ok("locked_down") => SandboxProfile::LockedDown,
+        _ => SandboxProfile::Standard,
+    };
+    let sandbox_policy = sandbox_profile
         .resolve(&std::collections::HashMap::new())
         .context("failed to resolve sandbox policy")?;
     let command_policy = CommandPolicy::default();
