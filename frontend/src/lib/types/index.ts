@@ -55,6 +55,7 @@ export type ClientWsMessage =
 /** Server-to-client messages — routed by conversation_id */
 export type ServerWsMessage =
 	| { type: 'chat.delta'; conversation_id: string; content: string }
+	| { type: 'chat.thinking'; conversation_id: string; content: string }
 	| { type: 'chat.tool_use'; conversation_id: string; tool_call: { name: string; input: unknown } }
 	| {
 			type: 'chat.tool_result';
@@ -63,6 +64,7 @@ export type ServerWsMessage =
 			output: string;
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
+	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string };
 
 // API response envelope types

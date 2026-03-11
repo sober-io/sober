@@ -48,6 +48,8 @@ message AgentEvent {
     ToolCallResult tool_call_result = 3;
     Done done = 4;
     Error error = 5;
+    ThinkingDelta thinking_delta = 6;
+    TitleGenerated title_generated = 7;
   }
 }
 
@@ -56,3 +58,5 @@ message ToolCallStart { string name = 1; string input_json = 2; }
 message ToolCallResult { string name = 1; string output = 2; }
 message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; }
 message Error { string message = 1; }
+message ThinkingDelta { string content = 1; }
+message TitleGenerated { string title = 1; }

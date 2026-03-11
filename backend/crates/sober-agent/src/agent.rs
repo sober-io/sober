@@ -72,7 +72,6 @@ where
     context_loader: Arc<ContextLoader<Msg>>,
     tool_registry: Arc<ToolRegistry>,
     message_repo: Arc<Msg>,
-    #[allow(dead_code)]
     conversation_repo: Arc<Conv>,
     #[allow(dead_code)]
     mcp_server_repo: Arc<Mcp>,
@@ -152,11 +151,119 @@ where
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Run the agentic loop
-        let events = self
+        let mut events = self
             .run_loop(user_id, conversation_id, content, user_msg.id)
             .await?;
 
+        // 4. Auto-generate title if conversation has none
+        let conversation = self.conversation_repo.get_by_id(conversation_id).await.ok();
+        let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
+        let needs_title = current_title.is_none() || current_title == Some("");
+        debug!(
+            conversation_id = %conversation_id,
+            current_title = ?current_title,
+            needs_title,
+            "title generation check"
+        );
+        if needs_title {
+            // Extract assistant response text from events
+            let assistant_text: String = events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentEvent::TextDelta(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect();
+
+            debug!(
+                assistant_text_len = assistant_text.len(),
+                "attempting title generation"
+            );
+            if let Some(title) = self.generate_title(content, &assistant_text).await {
+                debug!(title = %title, "title generated successfully");
+                // Save title to DB (best-effort)
+                if let Err(e) = self
+                    .conversation_repo
+                    .update_title(conversation_id, &title)
+                    .await
+                {
+                    warn!(error = %e, "failed to save auto-generated title");
+                } else {
+                    events.push(AgentEvent::TitleGenerated(title));
+                }
+            } else {
+                warn!("title generation returned None");
+            }
+        }
+
         Ok(Box::pin(futures::stream::iter(events.into_iter().map(Ok))))
+    }
+
+    /// Generates a short conversation title from the first user message and assistant reply.
+    async fn generate_title(&self, user_message: &str, assistant_reply: &str) -> Option<String> {
+        let prompt = format!(
+            "Generate a short title (max 6 words) for a conversation that starts with:\n\
+             User: {user_message}\n\
+             Assistant: {}\n\n\
+             Reply with ONLY the title, no quotes or punctuation at the end.",
+            &assistant_reply[..assistant_reply.len().min(200)]
+        );
+
+        let req = CompletionRequest {
+            model: self.config.model.clone(),
+            messages: vec![LlmMessage {
+                role: "user".to_owned(),
+                content: Some(prompt),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            tools: vec![],
+            max_tokens: Some(200),
+            temperature: Some(0.3),
+            stop: vec![],
+            stream: false,
+        };
+
+        match self.llm.complete(req).await {
+            Ok(response) => {
+                let choice = response.choices.into_iter().next();
+                if let Some(ref c) = choice {
+                    debug!(
+                        content = ?c.message.content,
+                        "title LLM response"
+                    );
+                }
+                choice.and_then(|c| {
+                    // Primary: use content field if non-empty
+                    let title = c
+                        .message
+                        .content
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|t| t.trim().trim_matches('"').to_owned());
+
+                    if title.is_some() {
+                        return title;
+                    }
+
+                    // Fallback for thinking models: extract first "- Title" line
+                    // from reasoning content
+                    c.message.reasoning_content.and_then(|r| {
+                        r.lines()
+                            .filter_map(|line| line.strip_prefix(" - ").or(line.strip_prefix("- ")))
+                            .find(|candidate| {
+                                let words = candidate.split_whitespace().count();
+                                (2..=6).contains(&words)
+                            })
+                            .map(|t| t.trim().trim_matches('"').to_owned())
+                    })
+                })
+            }
+            Err(e) => {
+                warn!(error = %e, "title generation failed");
+                None
+            }
+        }
     }
 
     /// Inner agentic loop: embed → load context → assemble → complete → handle tool calls.

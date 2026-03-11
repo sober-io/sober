@@ -73,6 +73,16 @@ enum ServerWsMessage {
         conversation_id: String,
         message_id: String,
     },
+    #[serde(rename = "chat.thinking")]
+    ChatThinking {
+        conversation_id: String,
+        content: String,
+    },
+    #[serde(rename = "chat.title")]
+    ChatTitle {
+        conversation_id: String,
+        title: String,
+    },
     #[serde(rename = "chat.error")]
     ChatError {
         conversation_id: String,
@@ -246,6 +256,18 @@ async fn handle_chat_message(
                         ServerWsMessage::ChatDone {
                             conversation_id: conversation_id.clone(),
                             message_id: done.message_id,
+                        }
+                    }
+                    Some(proto::agent_event::Event::ThinkingDelta(td)) => {
+                        ServerWsMessage::ChatThinking {
+                            conversation_id: conversation_id.clone(),
+                            content: td.content,
+                        }
+                    }
+                    Some(proto::agent_event::Event::TitleGenerated(tg)) => {
+                        ServerWsMessage::ChatTitle {
+                            conversation_id: conversation_id.clone(),
+                            title: tg.title,
                         }
                     }
                     Some(proto::agent_event::Event::Error(e)) => {
