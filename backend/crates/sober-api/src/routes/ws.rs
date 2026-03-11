@@ -37,6 +37,7 @@ async fn ws_upgrade(
 /// Client-to-server WebSocket message types.
 #[derive(serde::Deserialize)]
 #[serde(tag = "type")]
+#[expect(clippy::enum_variant_names)]
 enum ClientWsMessage {
     #[serde(rename = "chat.message")]
     ChatMessage {
@@ -47,6 +48,7 @@ enum ClientWsMessage {
     ChatCancel { conversation_id: String },
     #[serde(rename = "chat.confirm_response")]
     ChatConfirmResponse {
+        #[expect(dead_code)]
         conversation_id: String,
         confirm_id: String,
         approved: bool,
