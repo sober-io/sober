@@ -1,13 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import type { ToolCall, ServerWsMessage, ConversationWithMessages, Message } from '$lib/types';
+	import type {
+		ToolCall,
+		ServerWsMessage,
+		ConversationWithMessages,
+		Message,
+		ConfirmRequest
+	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
+	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -56,6 +63,8 @@
 	let title = $state(data.conversation.title || '');
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
+	let pendingConfirms = $state<ConfirmRequest[]>([]);
+	let resolvedConfirms = $state<Record<string, 'approved' | 'denied'>>({});
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -68,6 +77,8 @@
 		editingQueueId = null;
 		isAtBottom = true;
 		title = data.conversation.title || '';
+		pendingConfirms = [];
+		resolvedConfirms = {};
 	});
 
 	// Scroll to bottom on conversation change
@@ -242,6 +253,19 @@
 				conversations.updateTitle(conversationId, msg.title);
 				break;
 			}
+			case 'chat.confirm': {
+				pendingConfirms = [
+					...pendingConfirms,
+					{
+						confirm_id: msg.confirm_id,
+						command: msg.command,
+						risk_level: msg.risk_level as 'safe' | 'moderate' | 'dangerous',
+						affects: msg.affects,
+						reason: msg.reason
+					}
+				];
+				break;
+			}
 			case 'chat.error': {
 				const last = messages[messages.length - 1];
 				if (last && (last.streaming || last.thinking)) {
@@ -263,6 +287,16 @@
 				break;
 			}
 		}
+	};
+
+	const handleConfirmResponse = (confirmId: string, approved: boolean) => {
+		websocket.send({
+			type: 'chat.confirm_response',
+			conversation_id: conversationId,
+			confirm_id: confirmId,
+			approved
+		});
+		resolvedConfirms = { ...resolvedConfirms, [confirmId]: approved ? 'approved' : 'denied' };
 	};
 
 	const startEditTitle = () => {
@@ -319,6 +353,14 @@
 					toolCalls={msg.toolCalls}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
+				/>
+			{/each}
+
+			{#each pendingConfirms as confirm (confirm.confirm_id)}
+				<ConfirmationCard
+					request={confirm}
+					resolved={resolvedConfirms[confirm.confirm_id]}
+					onRespond={handleConfirmResponse}
 				/>
 			{/each}
 
