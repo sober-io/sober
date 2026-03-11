@@ -157,9 +157,14 @@ where
 
         // 4. Auto-generate title if conversation has none
         let conversation = self.conversation_repo.get_by_id(conversation_id).await.ok();
-        let needs_title = conversation
-            .as_ref()
-            .is_some_and(|c| c.title.as_deref().unwrap_or("").is_empty());
+        let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
+        let needs_title = current_title.is_none() || current_title == Some("");
+        debug!(
+            conversation_id = %conversation_id,
+            current_title = ?current_title,
+            needs_title,
+            "title generation check"
+        );
         if needs_title {
             // Extract assistant response text from events
             let assistant_text: String = events
@@ -170,7 +175,12 @@ where
                 })
                 .collect();
 
+            debug!(
+                assistant_text_len = assistant_text.len(),
+                "attempting title generation"
+            );
             if let Some(title) = self.generate_title(content, &assistant_text).await {
+                debug!(title = %title, "title generated successfully");
                 // Save title to DB (best-effort)
                 if let Err(e) = self
                     .conversation_repo
@@ -181,6 +191,8 @@ where
                 } else {
                     events.push(AgentEvent::TitleGenerated(title));
                 }
+            } else {
+                warn!("title generation returned None");
             }
         }
 
@@ -207,19 +219,46 @@ where
                 tool_call_id: None,
             }],
             tools: vec![],
-            max_tokens: Some(20),
+            max_tokens: Some(200),
             temperature: Some(0.3),
             stop: vec![],
             stream: false,
         };
 
         match self.llm.complete(req).await {
-            Ok(response) => response
-                .choices
-                .into_iter()
-                .next()
-                .and_then(|c| c.message.content)
-                .map(|t| t.trim().trim_matches('"').to_owned()),
+            Ok(response) => {
+                let choice = response.choices.into_iter().next();
+                if let Some(ref c) = choice {
+                    debug!(
+                        content = ?c.message.content,
+                        "title LLM response"
+                    );
+                }
+                choice.and_then(|c| {
+                    // Primary: use content field if non-empty
+                    let title = c
+                        .message
+                        .content
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|t| t.trim().trim_matches('"').to_owned());
+
+                    if title.is_some() {
+                        return title;
+                    }
+
+                    // Fallback for thinking models: extract first "- Title" line
+                    // from reasoning content
+                    c.message.reasoning_content.and_then(|r| {
+                        r.lines()
+                            .filter_map(|line| line.strip_prefix(" - ").or(line.strip_prefix("- ")))
+                            .find(|candidate| {
+                                let words = candidate.split_whitespace().count();
+                                (2..=6).contains(&words)
+                            })
+                            .map(|t| t.trim().trim_matches('"').to_owned())
+                    })
+                })
+            }
             Err(e) => {
                 warn!(error = %e, "title generation failed");
                 None
