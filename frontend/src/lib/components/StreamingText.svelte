@@ -11,7 +11,7 @@
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 </script>
 
-<div class="prose prose-sm dark:prose-invert max-w-none inline">
+<div class="chat-prose prose prose-sm max-w-none inline">
 	{@html renderedContent}
 </div>
 {#if streaming}<span

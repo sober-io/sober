@@ -1,2 +1,26 @@
 @import 'tailwindcss';
 @plugin "@tailwindcss/typography";
+
+/* Force prose inside chat bubbles to inherit bubble text color */
+.chat-prose {
+	--tw-prose-body: currentColor;
+	--tw-prose-headings: currentColor;
+	--tw-prose-bold: currentColor;
+	--tw-prose-links: currentColor;
+	--tw-prose-code: currentColor;
+	--tw-prose-counters: currentColor;
+	--tw-prose-bullets: currentColor;
+	--tw-prose-quotes: currentColor;
+	--tw-prose-captions: currentColor;
+	--tw-prose-th-borders: color-mix(in srgb, currentColor 30%, transparent);
+	--tw-prose-td-borders: color-mix(in srgb, currentColor 20%, transparent);
+	--tw-prose-hr: color-mix(in srgb, currentColor 30%, transparent);
+	--tw-prose-pre-bg: rgb(0 0 0 / 0.08);
+	--tw-prose-pre-code: currentColor;
+}
+
+@media (prefers-color-scheme: dark) {
+	.chat-prose {
+		--tw-prose-pre-bg: rgb(0 0 0 / 0.3);
+	}
+}

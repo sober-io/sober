@@ -43,7 +43,7 @@
 		{:else if streaming}
 			<StreamingText {content} {streaming} />
 		{:else}
-			<div class="prose prose-sm max-w-none text-inherit">{@html renderedContent}</div>
+			<div class="chat-prose prose prose-sm max-w-none">{@html renderedContent}</div>
 		{/if}
 
 		{#if hasThinkingContent}
