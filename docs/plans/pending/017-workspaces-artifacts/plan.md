@@ -296,6 +296,11 @@ Create `backend/crates/sober-core/src/workspace_config.rs`:
 use serde::{Deserialize, Serialize};
 
 /// User-editable workspace configuration (parsed from `.sober/config.toml`).
+///
+/// Additional sections (`[sandbox]`, `[shell]`) are added by plan 022
+/// (shell execution). This struct uses `#[serde(deny_unknown_fields)]`-free
+/// deserialization, so unknown TOML sections are silently ignored until
+/// their config structs are added.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub llm: Option<WorkspaceLlmConfig>,
@@ -580,16 +585,14 @@ impl From<WorkspaceError> for AppError {
 **Step 3: Create lib.rs scaffold**
 
 ```rust
-//! Workspace, worktree, and artifact management for the Sober agent system.
+//! Workspace business logic for the Sober agent system.
 //!
-//! This crate owns workspace CRUD, repo registration, worktree lifecycle,
-//! artifact tracking, and blob storage.
+//! This crate owns filesystem layout, git operations (via git2), blob storage,
+//! workspace config parsing, and worktree management. Database operations
+//! (Pg*Repo) live in `sober-db`, not here.
 
 pub mod error;
-pub mod workspace;
-pub mod repo;
 pub mod worktree;
-pub mod artifact;
 pub mod blob;
 pub mod fs;
 
@@ -597,10 +600,7 @@ pub use error::WorkspaceError;
 ```
 
 Create empty module files for each submodule (each containing just a doc comment):
-- `backend/crates/sober-workspace/src/workspace.rs`
-- `backend/crates/sober-workspace/src/repo.rs`
-- `backend/crates/sober-workspace/src/worktree.rs`
-- `backend/crates/sober-workspace/src/artifact.rs`
+- `backend/crates/sober-workspace/src/worktree.rs` (git2 worktree operations only)
 - `backend/crates/sober-workspace/src/blob.rs`
 - `backend/crates/sober-workspace/src/fs.rs`
 
@@ -646,6 +646,7 @@ mod tests {
         assert!(root.join(".sober/state.json").is_file());
         assert!(root.join(".sober/proposals").is_dir());
         assert!(root.join(".sober/traces").is_dir());
+        assert!(root.join(".sober/snapshots").is_dir());
         assert!(root.join(".sober/worktrees").is_dir());
     }
 
@@ -730,6 +731,9 @@ pub async fn init_workspace_dir(workspace_root: &Path) -> Result<(), WorkspaceEr
         .await
         .map_err(WorkspaceError::Filesystem)?;
     fs::create_dir_all(sober_dir.join("traces"))
+        .await
+        .map_err(WorkspaceError::Filesystem)?;
+    fs::create_dir_all(sober_dir.join("snapshots"))
         .await
         .map_err(WorkspaceError::Filesystem)?;
     fs::create_dir_all(sober_dir.join("worktrees"))
@@ -933,13 +937,18 @@ git commit -m "feat(workspace): add content-addressed blob storage"
 
 ## Task 7: Workspace CRUD (DB Layer)
 
+> **IMPORTANT:** Per CLAUDE.md architecture rules, all PostgreSQL repo implementations
+> (`Pg*Repo`) live in `sober-db`, not in `sober-workspace`. The `sober-workspace` crate
+> contains only business logic (filesystem, git, blob). This task adds DB repos to `sober-db`.
+
 **Files:**
-- Modify: `backend/crates/sober-workspace/src/workspace.rs`
-- Test: `backend/crates/sober-workspace/tests/workspace_db.rs` (integration test, requires DB)
+- Create: `backend/crates/sober-db/src/repos/workspace.rs`
+- Modify: `backend/crates/sober-db/src/repos/mod.rs`
+- Test: `backend/crates/sober-db/tests/workspace_db.rs` (integration test, requires DB)
 
 **Step 1: Write failing integration test**
 
-Create `backend/crates/sober-workspace/tests/workspace_db.rs`:
+Create `backend/crates/sober-db/tests/workspace_db.rs`:
 
 ```rust
 //! Integration tests for workspace DB operations.
@@ -947,7 +956,7 @@ Create `backend/crates/sober-workspace/tests/workspace_db.rs`:
 //! Set DATABASE_URL env var to run.
 
 use sober_core::*;
-use sober_workspace::workspace::WorkspaceRepo as WorkspaceRepository;
+use sober_db::repos::workspace::PgWorkspaceRepo;
 use sqlx::PgPool;
 
 async fn setup_pool() -> PgPool {
@@ -957,7 +966,7 @@ async fn setup_pool() -> PgPool {
 
 #[sqlx::test]
 async fn create_and_get_workspace(pool: PgPool) {
-    let repo = WorkspaceRepository::new(pool);
+    let repo = PgWorkspaceRepo::new(pool);
     let user_id = UserId::new();
 
     // Assumes users table is seeded by test fixtures
@@ -975,7 +984,7 @@ async fn create_and_get_workspace(pool: PgPool) {
 
 #[sqlx::test]
 async fn archive_and_restore_workspace(pool: PgPool) {
-    let repo = WorkspaceRepository::new(pool);
+    let repo = PgWorkspaceRepo::new(pool);
     let user_id = UserId::new();
 
     let ws = repo
@@ -996,7 +1005,7 @@ async fn archive_and_restore_workspace(pool: PgPool) {
 
 #[sqlx::test]
 async fn delete_requires_archived(pool: PgPool) {
-    let repo = WorkspaceRepository::new(pool);
+    let repo = PgWorkspaceRepo::new(pool);
     let user_id = UserId::new();
 
     let ws = repo
@@ -1020,12 +1029,12 @@ async fn delete_requires_archived(pool: PgPool) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p sober-workspace --test workspace_db`
-Expected: FAIL --- `WorkspaceRepository` not defined
+Run: `cargo test -p sober-db --test workspace_db`
+Expected: FAIL --- `PgWorkspaceRepo` not defined
 
 **Step 3: Implement workspace DB operations**
 
-In `backend/crates/sober-workspace/src/workspace.rs`:
+In `backend/crates/sober-db/src/repos/workspace.rs`:
 
 ```rust
 //! Workspace CRUD operations backed by PostgreSQL.
@@ -1051,12 +1060,12 @@ pub struct Workspace {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Repository for workspace DB operations.
-pub struct WorkspaceRepo {
+/// PostgreSQL repository for workspace DB operations.
+pub struct PgWorkspaceRepo {
     pool: PgPool,
 }
 
-impl WorkspaceRepo {
+impl PgWorkspaceRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
@@ -1163,23 +1172,25 @@ impl WorkspaceRepo {
 
 **Step 4: Run integration tests**
 
-Run: `cargo test -p sober-workspace --test workspace_db`
+Run: `cargo test -p sober-db --test workspace_db`
 Expected: PASS (requires DATABASE_URL)
 
 **Step 5: Commit**
 
 ```bash
-git add backend/crates/sober-workspace/src/workspace.rs backend/crates/sober-workspace/tests/
-git commit -m "feat(workspace): add workspace CRUD with lifecycle state machine"
+git add backend/crates/sober-db/src/repos/workspace.rs backend/crates/sober-db/tests/
+git commit -m "feat(db): add PgWorkspaceRepo with lifecycle state machine"
 ```
 
 ---
 
 ## Task 8: Repo Management (DB Layer)
 
+> **Note:** DB repos live in `sober-db`, not `sober-workspace`.
+
 **Files:**
-- Modify: `backend/crates/sober-workspace/src/repo.rs`
-- Test: `backend/crates/sober-workspace/tests/repo_db.rs`
+- Create: `backend/crates/sober-db/src/repos/workspace_repo.rs`
+- Test: `backend/crates/sober-db/tests/repo_db.rs`
 
 **Step 1: Write failing integration test**
 
@@ -1335,17 +1346,20 @@ impl RepoManager {
 **Step 3: Run tests, verify pass, commit**
 
 ```bash
-git add backend/crates/sober-workspace/src/repo.rs backend/crates/sober-workspace/tests/repo_db.rs
-git commit -m "feat(workspace): add repo registration and linked path discovery"
+git add backend/crates/sober-db/src/repos/workspace_repo.rs backend/crates/sober-db/tests/repo_db.rs
+git commit -m "feat(db): add PgWorkspaceRepoRepo for repo registration and discovery"
 ```
 
 ---
 
 ## Task 9: Worktree Lifecycle (DB + Git)
 
+> **Note:** DB repos live in `sober-db`. Git operations live in `sober-workspace`.
+
 **Files:**
-- Modify: `backend/crates/sober-workspace/src/worktree.rs`
-- Test: `backend/crates/sober-workspace/tests/worktree_db.rs` (integration)
+- Create: `backend/crates/sober-db/src/repos/worktree.rs` (DB operations)
+- Modify: `backend/crates/sober-workspace/src/worktree.rs` (git2 operations only)
+- Test: `backend/crates/sober-db/tests/worktree_db.rs` (integration)
 - Test: inline unit tests for git operations
 
 **Step 1: Write failing tests**
@@ -1445,7 +1459,7 @@ The `cleanup` method (called by scheduler):
 **Step 3: Run tests, verify pass, commit**
 
 ```bash
-git add backend/crates/sober-workspace/src/worktree.rs backend/crates/sober-workspace/tests/worktree_db.rs
+git add backend/crates/sober-db/src/repos/worktree.rs backend/crates/sober-workspace/src/worktree.rs backend/crates/sober-db/tests/worktree_db.rs
 git commit -m "feat(workspace): add worktree lifecycle with git integration"
 ```
 
@@ -1453,9 +1467,11 @@ git commit -m "feat(workspace): add worktree lifecycle with git integration"
 
 ## Task 10: Artifact Tracking (DB Layer)
 
+> **Note:** DB repos live in `sober-db`, not `sober-workspace`.
+
 **Files:**
-- Modify: `backend/crates/sober-workspace/src/artifact.rs`
-- Test: `backend/crates/sober-workspace/tests/artifact_db.rs`
+- Create: `backend/crates/sober-db/src/repos/artifact.rs`
+- Test: `backend/crates/sober-db/tests/artifact_db.rs`
 
 **Step 1: Write failing tests**
 
@@ -1563,13 +1579,303 @@ let kind_filter = if is_admin {
 **Step 3: Run tests, verify pass, commit**
 
 ```bash
-git add backend/crates/sober-workspace/src/artifact.rs backend/crates/sober-workspace/tests/artifact_db.rs
+git add backend/crates/sober-db/src/repos/artifact.rs backend/crates/sober-db/tests/artifact_db.rs
 git commit -m "feat(workspace): add artifact tracking with state machine and relations"
 ```
 
 ---
 
-## Task 11: Integration --- Workspace System Defaults in sober-workspace
+## Task 11: Workspace Snapshots
+
+**Files:**
+- Create: `backend/crates/sober-workspace/src/snapshot.rs`
+- Modify: `backend/crates/sober-workspace/src/lib.rs`
+- Test: inline `#[cfg(test)]` module
+
+Snapshots capture the state of a workspace before potentially destructive
+operations. Used by plan 022 (shell execution) to auto-snapshot before
+dangerous commands.
+
+**Step 1: Write failing tests**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn create_snapshot_produces_tar() {
+        let tmp = TempDir::new().unwrap();
+        let ws_root = tmp.path().join("workspace");
+        tokio::fs::create_dir_all(&ws_root).await.unwrap();
+        tokio::fs::write(ws_root.join("file.txt"), b"content").await.unwrap();
+
+        let snap_dir = tmp.path().join("snapshots");
+        let mgr = SnapshotManager::new(snap_dir.clone());
+        let snap = mgr.create(&ws_root, "pre-shell").await.unwrap();
+
+        assert!(snap.path.exists());
+        assert!(snap.path.extension().is_some_and(|e| e == "tar"));
+        assert_eq!(snap.label, "pre-shell");
+    }
+
+    #[tokio::test]
+    async fn restore_snapshot_overwrites_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let ws_root = tmp.path().join("workspace");
+        tokio::fs::create_dir_all(&ws_root).await.unwrap();
+        tokio::fs::write(ws_root.join("file.txt"), b"original").await.unwrap();
+
+        let snap_dir = tmp.path().join("snapshots");
+        let mgr = SnapshotManager::new(snap_dir);
+        let snap = mgr.create(&ws_root, "backup").await.unwrap();
+
+        // Modify workspace
+        tokio::fs::write(ws_root.join("file.txt"), b"modified").await.unwrap();
+
+        mgr.restore(&snap, &ws_root).await.unwrap();
+        let content = tokio::fs::read_to_string(ws_root.join("file.txt")).await.unwrap();
+        assert_eq!(content, "original");
+    }
+
+    #[tokio::test]
+    async fn list_snapshots() {
+        let tmp = TempDir::new().unwrap();
+        let ws_root = tmp.path().join("workspace");
+        tokio::fs::create_dir_all(&ws_root).await.unwrap();
+
+        let snap_dir = tmp.path().join("snapshots");
+        let mgr = SnapshotManager::new(snap_dir);
+        mgr.create(&ws_root, "snap-1").await.unwrap();
+        mgr.create(&ws_root, "snap-2").await.unwrap();
+
+        let snaps = mgr.list().await.unwrap();
+        assert_eq!(snaps.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn prune_removes_oldest_snapshots() {
+        let tmp = TempDir::new().unwrap();
+        let ws_root = tmp.path().join("workspace");
+        tokio::fs::create_dir_all(&ws_root).await.unwrap();
+        tokio::fs::write(ws_root.join("file.txt"), b"data").await.unwrap();
+
+        let snap_dir = tmp.path().join("snapshots");
+        let mgr = SnapshotManager::new(snap_dir);
+
+        // Create 4 snapshots with small delay so filenames differ
+        for i in 0..4 {
+            mgr.create(&ws_root, &format!("snap-{i}")).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(mgr.list().await.unwrap().len(), 4);
+
+        let removed = mgr.prune(2).await.unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(mgr.list().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn prune_noop_when_under_limit() {
+        let tmp = TempDir::new().unwrap();
+        let ws_root = tmp.path().join("workspace");
+        tokio::fs::create_dir_all(&ws_root).await.unwrap();
+
+        let snap_dir = tmp.path().join("snapshots");
+        let mgr = SnapshotManager::new(snap_dir);
+        mgr.create(&ws_root, "only-one").await.unwrap();
+
+        let removed = mgr.prune(10).await.unwrap();
+        assert_eq!(removed, 0);
+        assert_eq!(mgr.list().await.unwrap().len(), 1);
+    }
+}
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `cargo test -p sober-workspace -q -- snapshot`
+Expected: FAIL --- `SnapshotManager` not defined
+
+**Step 3: Implement snapshot manager**
+
+```rust
+//! Workspace snapshot creation and restoration.
+//!
+//! Snapshots are tar archives of the workspace root directory. They provide
+//! a simple rollback mechanism before destructive operations.
+
+use std::path::{Path, PathBuf};
+use chrono::Utc;
+use tokio::fs;
+use tokio::process::Command;
+
+use crate::WorkspaceError;
+
+/// Metadata for a created snapshot.
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    pub path: PathBuf,
+    pub label: String,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+/// Manages workspace snapshots (tar archives).
+pub struct SnapshotManager {
+    snapshot_dir: PathBuf,
+}
+
+impl SnapshotManager {
+    pub fn new(snapshot_dir: PathBuf) -> Self {
+        Self { snapshot_dir }
+    }
+
+    /// Create a tar snapshot of the workspace root.
+    pub async fn create(
+        &self,
+        workspace_root: &Path,
+        label: &str,
+    ) -> Result<Snapshot, WorkspaceError> {
+        fs::create_dir_all(&self.snapshot_dir)
+            .await
+            .map_err(WorkspaceError::Filesystem)?;
+
+        let now = Utc::now();
+        let filename = format!("{}-{}.tar", now.format("%Y%m%d%H%M%S"), label);
+        let snap_path = self.snapshot_dir.join(&filename);
+
+        let output = Command::new("tar")
+            .arg("cf")
+            .arg(&snap_path)
+            .arg("-C")
+            .arg(workspace_root)
+            .arg(".")
+            .output()
+            .await
+            .map_err(|e| WorkspaceError::Snapshot(format!("tar failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(WorkspaceError::Snapshot(
+                format!("tar exited {}: {stderr}", output.status),
+            ));
+        }
+
+        Ok(Snapshot {
+            path: snap_path,
+            label: label.to_string(),
+            created_at: now,
+        })
+    }
+
+    /// Restore a snapshot by extracting it over the workspace root.
+    pub async fn restore(
+        &self,
+        snapshot: &Snapshot,
+        workspace_root: &Path,
+    ) -> Result<(), WorkspaceError> {
+        let output = Command::new("tar")
+            .arg("xf")
+            .arg(&snapshot.path)
+            .arg("-C")
+            .arg(workspace_root)
+            .output()
+            .await
+            .map_err(|e| WorkspaceError::Snapshot(format!("tar restore failed: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(WorkspaceError::Snapshot(
+                format!("tar restore exited {}: {stderr}", output.status),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// List all snapshots in the snapshot directory, sorted oldest first.
+    pub async fn list(&self) -> Result<Vec<Snapshot>, WorkspaceError> {
+        let mut entries = fs::read_dir(&self.snapshot_dir)
+            .await
+            .map_err(WorkspaceError::Filesystem)?;
+
+        let mut snapshots = Vec::new();
+        while let Some(entry) = entries.next_entry().await.map_err(WorkspaceError::Filesystem)? {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "tar") {
+                let name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+                // Parse label from filename: "YYYYMMDDHHMMSS-label"
+                let label = name.get(15..).unwrap_or(name).to_string();
+                snapshots.push(Snapshot {
+                    path,
+                    label,
+                    created_at: Utc::now(), // approximate; could parse from filename
+                });
+            }
+        }
+
+        // Sort by filename (which starts with timestamp) — oldest first
+        snapshots.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(snapshots)
+    }
+
+    /// Prune oldest snapshots exceeding `max_snapshots`. Called after creating
+    /// a new snapshot when the workspace has a configured limit.
+    pub async fn prune(&self, max_snapshots: u32) -> Result<u32, WorkspaceError> {
+        let snapshots = self.list().await?;
+        let to_remove = snapshots.len().saturating_sub(max_snapshots as usize);
+        let mut removed = 0u32;
+
+        for snap in snapshots.iter().take(to_remove) {
+            fs::remove_file(&snap.path)
+                .await
+                .map_err(WorkspaceError::Filesystem)?;
+            removed += 1;
+        }
+
+        Ok(removed)
+    }
+}
+```
+
+**Step 4: Add Snapshot error variant to WorkspaceError**
+
+```rust
+// In sober-workspace/src/error.rs
+#[derive(Debug, thiserror::Error)]
+pub enum WorkspaceError {
+    // ... existing variants ...
+    #[error("Snapshot error: {0}")]
+    Snapshot(String),
+}
+```
+
+**Step 5: Add module to lib.rs**
+
+```rust
+pub mod snapshot;
+pub use snapshot::SnapshotManager;
+```
+
+**Step 6: Run tests to verify they pass**
+
+Run: `cargo test -p sober-workspace -q -- snapshot`
+Expected: PASS
+
+**Step 7: Commit**
+
+```bash
+git add backend/crates/sober-workspace/src/snapshot.rs backend/crates/sober-workspace/src/error.rs backend/crates/sober-workspace/src/lib.rs
+git commit -m "feat(workspace): add snapshot creation and restoration"
+```
+
+---
+
+## Task 12: Integration --- Workspace System Defaults in sober-workspace
 
 **Design decision:** Workspace operational defaults (`data_root`, retention periods,
 stale thresholds) are **not** part of `AppConfig`. `AppConfig` is strictly for
@@ -1634,7 +1940,7 @@ git commit -m "feat(workspace): add workspace system defaults"
 
 ---
 
-## Task 12: Update ARCHITECTURE.md and Existing Designs
+## Task 13: Update ARCHITECTURE.md and Existing Designs
 
 **Files:**
 - Modify: `ARCHITECTURE.md`
@@ -1670,7 +1976,7 @@ git commit -m "docs(arch): update for workspace system, fix sober path naming"
 
 ---
 
-## Task 13: Clippy, Docs, Final Verification
+## Task 14: Clippy, Docs, Final Verification
 
 **Step 1: Run clippy on the new crate**
 
@@ -1717,6 +2023,7 @@ git commit -m "chore(workspace): clippy fixes and documentation"
 - [ ] Artifact state machine validates legal transitions
 - [ ] Artifact visibility filtering excludes traces from non-admins
 - [ ] Linked repo discovery queries work with user_id filtering
+- [ ] Workspace snapshots can be created, listed, and restored
 - [ ] `ARCHITECTURE.md` updated with `~/.sober/` paths and workspace crate
 - [ ] `cargo test --workspace` passes
 - [ ] All public items in `sober-workspace` have doc comments

@@ -69,6 +69,7 @@ blob storage, or inline depending on type.
 |   |   |   |   +-- soul.md             # workspace SOUL.md layer
 |   |   |   |   +-- proposals/          # pending changes awaiting review
 |   |   |   |   +-- traces/             # execution logs (pruned periodically)
+|   |   |   |   +-- snapshots/          # workspace snapshots (tar archives)
 |   |   |   |   +-- worktrees/          # git worktree checkouts
 |   |   |   |       +-- {worktree_id}/
 |   |   |   |       +-- {worktree_id}/
@@ -116,7 +117,35 @@ Split by ownership:
 | `soul.md` | Markdown | User | Workspace-level SOUL.md layer. Agent can propose changes. |
 
 The `config.toml` file includes a `[sandbox]` section for execution sandbox
-policy. See 009-sober-sandbox design for profile and override configuration.
+policy (see 009-sober-sandbox design) and a `[shell]` section for agent shell
+execution settings (see 022-shell-execution design).
+
+### Example `config.toml`
+
+```toml
+# [llm]
+# model = "anthropic/claude-sonnet-4"
+# context_budget = 4096
+
+# [style]
+# tone = "neutral"
+# commit_convention = "conventional"
+
+# [sandbox]                         # Added by plan 022 (shell execution)
+# profile = "standard"              # locked_down | standard | unrestricted
+# max_execution_seconds = 300
+# network_mode = "none"             # none | allowed_domains | full
+# allowed_domains = []
+
+# [shell]                           # Added by plan 022 (shell execution)
+# permission_mode = "policy_based"  # interactive | policy_based | autonomous
+# auto_snapshot = true
+# max_snapshots = 10                # oldest pruned when exceeded
+#
+# [shell.rules]
+# "docker compose" = "safe"
+# "npm publish" = "dangerous"
+```
 
 TOML for human-edited config (supports comments, readable). JSON for
 agent-managed state (trivial to serialize/deserialize programmatically).
