@@ -6,6 +6,7 @@
 
 pub mod audit;
 pub mod bwrap;
+pub mod command_policy;
 pub mod config;
 pub mod detect;
 pub mod error;
@@ -16,6 +17,7 @@ pub mod risk;
 
 pub use audit::{ExecutionOutcome, ExecutionTrigger, SandboxAuditEntry};
 pub use bwrap::{BwrapSandbox, SandboxResult};
+pub use command_policy::CommandPolicy;
 pub use config::SandboxConfig;
 pub use error::SandboxError;
 pub use policy::{NetMode, SandboxPolicy, SandboxProfile};
