@@ -12,19 +12,19 @@ pub fn detect_remote_url(repo_path: &Path) -> Result<Option<String>, WorkspaceEr
     let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
 
     // Try "origin" first
-    if let Ok(remote) = repo.find_remote("origin") {
-        if let Some(url) = remote.url() {
-            return Ok(Some(url.to_string()));
-        }
+    if let Ok(remote) = repo.find_remote("origin")
+        && let Some(url) = remote.url()
+    {
+        return Ok(Some(url.to_string()));
     }
 
     // Fall back to first available remote
     let remotes = repo.remotes().map_err(WorkspaceError::Git)?;
     for name in remotes.iter().flatten() {
-        if let Ok(remote) = repo.find_remote(name) {
-            if let Some(url) = remote.url() {
-                return Ok(Some(url.to_string()));
-            }
+        if let Ok(remote) = repo.find_remote(name)
+            && let Some(url) = remote.url()
+        {
+            return Ok(Some(url.to_string()));
         }
     }
 
