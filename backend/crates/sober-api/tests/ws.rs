@@ -81,8 +81,8 @@ impl proto::agent_service_server::AgentService for MockAgentService {
     async fn submit_confirmation(
         &self,
         _request: tonic::Request<proto::ConfirmResponse>,
-    ) -> Result<tonic::Response<()>, tonic::Status> {
-        Ok(tonic::Response::new(()))
+    ) -> Result<tonic::Response<proto::ConfirmAck>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ConfirmAck {}))
     }
 
     async fn health(

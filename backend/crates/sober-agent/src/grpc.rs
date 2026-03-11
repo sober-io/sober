@@ -125,13 +125,13 @@ where
     async fn submit_confirmation(
         &self,
         request: Request<proto::ConfirmResponse>,
-    ) -> Result<Response<()>, Status> {
+    ) -> Result<Response<proto::ConfirmAck>, Status> {
         let req = request.into_inner();
         self.confirmation_sender
             .respond(req.confirm_id, req.approved)
             .await
             .map_err(|e| Status::internal(format!("failed to forward confirmation: {e}")))?;
-        Ok(Response::new(()))
+        Ok(Response::new(proto::ConfirmAck {}))
     }
 
     async fn health(

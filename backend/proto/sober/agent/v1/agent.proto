@@ -2,16 +2,16 @@ syntax = "proto3";
 
 package sober.agent.v1;
 
-import "google/protobuf/empty.proto";
-
 service AgentService {
   rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
   rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
   rpc WakeAgent(WakeRequest) returns (WakeResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
   // Route a user's confirmation response to the agent's ConfirmationBroker.
-  rpc SubmitConfirmation(ConfirmResponse) returns (google.protobuf.Empty);
+  rpc SubmitConfirmation(ConfirmResponse) returns (ConfirmAck);
 }
+
+message ConfirmAck {}
 
 message HandleMessageRequest {
   string user_id = 1;
