@@ -1,18 +1,16 @@
 //! Shell command execution tool for the agent.
 //!
 //! Executes commands in a sandboxed environment (bwrap) within the user's
-//! workspace. Supports permission modes and confirmation flow for sensitive
-//! commands.
+//! workspace. Returns [`ToolError::NeedsConfirmation`] for dangerous commands
+//! so the agent loop can handle the interactive confirmation flow.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use serde::Deserialize;
 use sober_core::PermissionMode;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
-use tokio::sync::oneshot;
 
 /// Maximum output length returned to the LLM to avoid blowing up context.
 const MAX_OUTPUT_LEN: usize = 16_000;
@@ -25,34 +23,21 @@ struct ShellInput {
     command: String,
     workdir: Option<String>,
     timeout: Option<u32>,
+    /// Set to `true` by the agent loop after user confirmation.
+    #[serde(default)]
+    confirmed: bool,
 }
-
-/// Payload sent to the frontend for confirmation.
-#[derive(Debug, Clone)]
-pub struct ConfirmPayload {
-    /// Unique identifier for this confirmation request.
-    pub confirm_id: String,
-    /// The shell command to confirm.
-    pub command: String,
-    /// Risk classification of the command.
-    pub risk_level: RiskLevel,
-    /// Files/directories affected by the command.
-    pub affects: Vec<String>,
-    /// Human-readable reason why confirmation is needed.
-    pub reason: String,
-}
-
-/// Callback type for requesting user confirmation.
-/// Returns a oneshot receiver that resolves to the user's decision.
-pub type ConfirmFn = Arc<dyn Fn(ConfirmPayload) -> oneshot::Receiver<bool> + Send + Sync>;
 
 /// Shell command execution tool.
+///
+/// Stateless: classification and sandboxed execution only. When a command
+/// requires confirmation, the tool returns [`ToolError::NeedsConfirmation`]
+/// and the agent loop handles the interactive flow.
 pub struct ShellTool {
     policy: CommandPolicy,
     permission_mode: PermissionMode,
     workspace_home: PathBuf,
     sandbox_policy: SandboxPolicy,
-    confirm_fn: Option<ConfirmFn>,
     #[allow(dead_code)]
     auto_snapshot: bool,
 }
@@ -64,7 +49,6 @@ impl ShellTool {
         permission_mode: PermissionMode,
         workspace_home: PathBuf,
         sandbox_policy: SandboxPolicy,
-        confirm_fn: Option<ConfirmFn>,
         auto_snapshot: bool,
     ) -> Self {
         Self {
@@ -72,7 +56,6 @@ impl ShellTool {
             permission_mode,
             workspace_home,
             sandbox_policy,
-            confirm_fn,
             auto_snapshot,
         }
     }
@@ -87,7 +70,6 @@ impl ShellTool {
             sandbox_policy: SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
                 .unwrap(),
-            confirm_fn: None,
             auto_snapshot: false,
         }
     }
@@ -146,56 +128,21 @@ impl ShellTool {
         // Classify risk
         let risk = self.policy.classify(&input.command);
 
-        // Check permission mode
-        let needs_confirmation = match (self.permission_mode, risk) {
-            (PermissionMode::Autonomous, _) => false,
-            (PermissionMode::PolicyBased, RiskLevel::Safe | RiskLevel::Moderate) => false,
-            (PermissionMode::Interactive, _)
-            | (PermissionMode::PolicyBased, RiskLevel::Dangerous) => true,
-        };
+        // Check permission mode (skip if already confirmed)
+        if !input.confirmed {
+            let needs_confirmation = match (self.permission_mode, risk) {
+                (PermissionMode::Autonomous, _) => false,
+                (PermissionMode::PolicyBased, RiskLevel::Safe | RiskLevel::Moderate) => false,
+                (PermissionMode::Interactive, _)
+                | (PermissionMode::PolicyBased, RiskLevel::Dangerous) => true,
+            };
 
-        if needs_confirmation {
-            if let Some(ref confirm_fn) = self.confirm_fn {
-                let payload = ConfirmPayload {
+            if needs_confirmation {
+                return Err(ToolError::NeedsConfirmation {
                     confirm_id: uuid::Uuid::now_v7().to_string(),
-                    command: input.command.clone(),
-                    risk_level: risk,
-                    affects: Vec::new(), // TODO: analyze affected files
+                    command: input.command,
+                    risk_level: format!("{risk:?}"),
                     reason: format!("Command classified as {risk:?}"),
-                };
-                let rx = (confirm_fn)(payload);
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(u64::from(DEFAULT_TIMEOUT_SECS)),
-                    rx,
-                )
-                .await
-                {
-                    Ok(Ok(true)) => {} // approved
-                    Ok(Ok(false)) => {
-                        return Ok(ToolOutput {
-                            content: "Command denied by user.".to_string(),
-                            is_error: false,
-                        });
-                    }
-                    Ok(Err(_)) => {
-                        return Ok(ToolOutput {
-                            content: "Confirmation cancelled.".to_string(),
-                            is_error: true,
-                        });
-                    }
-                    Err(_) => {
-                        return Ok(ToolOutput {
-                            content: "Command timed out waiting for confirmation.".to_string(),
-                            is_error: true,
-                        });
-                    }
-                }
-            } else {
-                return Ok(ToolOutput {
-                    content: format!(
-                        "Command requires confirmation but no confirmation handler is available. Risk level: {risk:?}"
-                    ),
-                    is_error: true,
                 });
             }
         }
@@ -346,7 +293,6 @@ mod tests {
             sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
                 .unwrap(),
-            confirm_fn: None,
             auto_snapshot: false,
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -358,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_tool_requires_confirm_for_dangerous_in_policy_mode() {
+    fn shell_tool_returns_needs_confirmation_for_dangerous() {
         let tool = ShellTool {
             policy: CommandPolicy::default(),
             permission_mode: PermissionMode::PolicyBased,
@@ -366,14 +312,40 @@ mod tests {
             sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
                 .resolve(&std::collections::HashMap::new())
                 .unwrap(),
-            confirm_fn: None, // No confirm handler
             auto_snapshot: false,
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(tool.execute_inner(serde_json::json!({"command": "rm -rf /"})))
-            .unwrap();
-        assert!(result.is_error);
-        assert!(result.content.contains("requires confirmation"));
+        let result = rt.block_on(tool.execute_inner(serde_json::json!({"command": "rm -rf /"})));
+        match result {
+            Err(ToolError::NeedsConfirmation { command, .. }) => {
+                assert_eq!(command, "rm -rf /");
+            }
+            other => panic!("expected NeedsConfirmation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shell_tool_skips_confirmation_when_confirmed() {
+        let tool = ShellTool {
+            policy: CommandPolicy::default(),
+            permission_mode: PermissionMode::Interactive,
+            workspace_home: PathBuf::from("/tmp/test"),
+            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
+                .resolve(&std::collections::HashMap::new())
+                .unwrap(),
+            auto_snapshot: false,
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // With confirmed=true, it should attempt execution (not return NeedsConfirmation)
+        let result = rt.block_on(
+            tool.execute_inner(serde_json::json!({"command": "echo hello", "confirmed": true})),
+        );
+        // It will either succeed or fail at sandbox execution, but NOT return NeedsConfirmation
+        match result {
+            Err(ToolError::NeedsConfirmation { .. }) => {
+                panic!("should not need confirmation when confirmed=true");
+            }
+            _ => {} // any other result is fine (sandbox may fail in test env)
+        }
     }
 }

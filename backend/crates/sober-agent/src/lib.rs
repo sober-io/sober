@@ -7,6 +7,6 @@ pub mod grpc;
 pub mod stream;
 pub mod tools;
 
-pub use confirm::{ConfirmationBroker, ConfirmationSender};
+pub use confirm::{ConfirmationBroker, ConfirmationRegistrar, ConfirmationSender};
 pub use error::AgentError;
 pub use stream::{AgentEvent, AgentResponseStream, Usage};

@@ -20,7 +20,6 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
         PermissionMode::Autonomous,
         workspace_home,
         sandbox_policy,
-        None,
         false,
     )
 }
@@ -84,7 +83,6 @@ async fn shell_tool_denies_blocked_commands() {
         PermissionMode::Autonomous,
         dir.path().to_path_buf(),
         sandbox_policy,
-        None,
         false,
     );
     let result = tool

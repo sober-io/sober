@@ -18,8 +18,10 @@ use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ChunkType, ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
+use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use crate::confirm::ConfirmationRegistrar;
 use crate::error::AgentError;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
 use crate::tools::ToolRegistry;
@@ -77,6 +79,8 @@ where
     mcp_server_repo: Arc<Mcp>,
     config: AgentConfig,
     memory_config: MemoryConfig,
+    /// Registrar for interactive confirmation of dangerous tool calls.
+    registrar: Option<ConfirmationRegistrar>,
 }
 
 impl<Msg, Conv, Mcp> Agent<Msg, Conv, Mcp>
@@ -98,6 +102,7 @@ where
         mcp_server_repo: Arc<Mcp>,
         config: AgentConfig,
         memory_config: MemoryConfig,
+        registrar: Option<ConfirmationRegistrar>,
     ) -> Self {
         Self {
             llm,
@@ -110,14 +115,15 @@ where
             mcp_server_repo,
             config,
             memory_config,
+            registrar,
         }
     }
 
     /// Handles a user message through the full agentic loop.
     ///
-    /// Returns a stream of [`AgentEvent`]s. For v1 this is a non-streaming
-    /// implementation that collects all events and returns them as a vec-backed
-    /// stream.
+    /// Returns a stream of [`AgentEvent`]s that are emitted in real-time
+    /// as the agent processes the message (enabling confirmation flow and
+    /// progressive tool output).
     pub async fn handle_message(
         &self,
         user_id: UserId,
@@ -150,148 +156,88 @@ where
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-        // 3. Run the agentic loop
-        let mut events = self
-            .run_loop(user_id, conversation_id, content, user_msg.id)
-            .await?;
+        // 3. Create event channel and spawn the agentic loop
+        let (event_tx, event_rx) = mpsc::channel::<Result<AgentEvent, AgentError>>(64);
 
-        // 4. Auto-generate title if conversation has none
-        let conversation = self.conversation_repo.get_by_id(conversation_id).await.ok();
-        let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
-        let needs_title = current_title.is_none() || current_title == Some("");
-        debug!(
-            conversation_id = %conversation_id,
-            current_title = ?current_title,
-            needs_title,
-            "title generation check"
-        );
-        if needs_title {
-            // Extract assistant response text from events
-            let assistant_text: String = events
-                .iter()
-                .filter_map(|e| match e {
-                    AgentEvent::TextDelta(t) => Some(t.as_str()),
-                    _ => None,
-                })
-                .collect();
+        // Clone what we need for the spawned task.
+        let llm = Arc::clone(&self.llm);
+        let mind = Arc::clone(&self.mind);
+        let memory = Arc::clone(&self.memory);
+        let context_loader = Arc::clone(&self.context_loader);
+        let tool_registry = Arc::clone(&self.tool_registry);
+        let message_repo = Arc::clone(&self.message_repo);
+        let conversation_repo = Arc::clone(&self.conversation_repo);
+        let config = self.config.clone();
+        let memory_config = self.memory_config.clone();
+        let registrar = self.registrar.clone();
+        let content = content.to_owned();
+        let user_msg_id = user_msg.id;
 
-            debug!(
-                assistant_text_len = assistant_text.len(),
-                "attempting title generation"
-            );
-            if let Some(title) = self.generate_title(content, &assistant_text).await {
-                debug!(title = %title, "title generated successfully");
-                // Save title to DB (best-effort)
-                if let Err(e) = self
-                    .conversation_repo
-                    .update_title(conversation_id, &title)
-                    .await
-                {
-                    warn!(error = %e, "failed to save auto-generated title");
-                } else {
-                    events.push(AgentEvent::TitleGenerated(title));
-                }
-            } else {
-                warn!("title generation returned None");
+        tokio::spawn(async move {
+            let result = Self::run_loop_streaming(
+                &llm,
+                &mind,
+                &memory,
+                &context_loader,
+                &tool_registry,
+                &message_repo,
+                &conversation_repo,
+                &config,
+                &memory_config,
+                user_id,
+                conversation_id,
+                &content,
+                user_msg_id,
+                &event_tx,
+                registrar.as_ref(),
+            )
+            .await;
+
+            if let Err(e) = result {
+                let _ = event_tx.send(Err(e)).await;
             }
-        }
+        });
 
-        Ok(Box::pin(futures::stream::iter(events.into_iter().map(Ok))))
+        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(
+            event_rx,
+        )))
     }
 
-    /// Generates a short conversation title from the first user message and assistant reply.
-    async fn generate_title(&self, user_message: &str, assistant_reply: &str) -> Option<String> {
-        let prompt = format!(
-            "Generate a short title (max 6 words) for a conversation that starts with:\n\
-             User: {user_message}\n\
-             Assistant: {}\n\n\
-             Reply with ONLY the title, no quotes or punctuation at the end.",
-            &assistant_reply[..assistant_reply.len().min(200)]
-        );
-
-        let req = CompletionRequest {
-            model: self.config.model.clone(),
-            messages: vec![LlmMessage {
-                role: "user".to_owned(),
-                content: Some(prompt),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
-            }],
-            tools: vec![],
-            max_tokens: Some(200),
-            temperature: Some(0.3),
-            stop: vec![],
-            stream: false,
-        };
-
-        match self.llm.complete(req).await {
-            Ok(response) => {
-                let choice = response.choices.into_iter().next();
-                if let Some(ref c) = choice {
-                    debug!(
-                        content = ?c.message.content,
-                        "title LLM response"
-                    );
-                }
-                choice.and_then(|c| {
-                    // Primary: use content field if non-empty
-                    let title = c
-                        .message
-                        .content
-                        .filter(|s| !s.trim().is_empty())
-                        .map(|t| t.trim().trim_matches('"').to_owned());
-
-                    if title.is_some() {
-                        return title;
-                    }
-
-                    // Fallback for thinking models: extract first "- Title" line
-                    // from reasoning content
-                    c.message.reasoning_content.and_then(|r| {
-                        r.lines()
-                            .filter_map(|line| line.strip_prefix(" - ").or(line.strip_prefix("- ")))
-                            .find(|candidate| {
-                                let words = candidate.split_whitespace().count();
-                                (2..=6).contains(&words)
-                            })
-                            .map(|t| t.trim().trim_matches('"').to_owned())
-                    })
-                })
-            }
-            Err(e) => {
-                warn!(error = %e, "title generation failed");
-                None
-            }
-        }
-    }
-
-    /// Inner agentic loop: embed → load context → assemble → complete → handle tool calls.
+    /// Streaming agentic loop that sends events through a channel in real-time.
     ///
-    /// On the first iteration (and after any context-modifying tool), the full
-    /// embed → load → assemble pipeline runs. On subsequent non-rebuild iterations
-    /// the cached `llm_messages` are reused with tool results appended, avoiding
-    /// redundant embedding, context loading, and prompt assembly.
-    async fn run_loop(
-        &self,
+    /// This is the core loop: embed → load context → assemble → complete →
+    /// handle tool calls → repeat. Events are sent immediately as they occur,
+    /// enabling confirmation flow and progressive output.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_loop_streaming(
+        llm: &Arc<dyn LlmEngine>,
+        mind: &Arc<Mind>,
+        memory: &Arc<MemoryStore>,
+        context_loader: &Arc<ContextLoader<Msg>>,
+        tool_registry: &Arc<ToolRegistry>,
+        message_repo: &Arc<Msg>,
+        conversation_repo: &Arc<Conv>,
+        config: &AgentConfig,
+        memory_config: &MemoryConfig,
         user_id: UserId,
         conversation_id: ConversationId,
         content: &str,
         user_msg_id: sober_core::MessageId,
-    ) -> Result<Vec<AgentEvent>, AgentError> {
-        let mut events = Vec::new();
+        event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
+        registrar: Option<&ConfirmationRegistrar>,
+    ) -> Result<(), AgentError> {
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
         let mut consecutive_tool_errors: u32 = 0;
+        let mut assistant_text = String::new();
         const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 3;
 
-        for iteration in 0..self.config.max_tool_iterations {
+        for iteration in 0..config.max_tool_iterations {
             debug!(iteration, "agent loop iteration");
 
             if needs_rebuild {
-                // a. Embed user message for context retrieval (soft-fail: proceed
-                //    without memory context if embeddings are unavailable).
-                let query_vector = match self.llm.embed(&[content]).await {
+                // a. Embed user message for context retrieval
+                let query_vector = match llm.embed(&[content]).await {
                     Ok(vecs) => vecs.into_iter().next().unwrap_or_default(),
                     Err(e) => {
                         warn!(error = %e, "embedding failed, proceeding without memory context");
@@ -299,37 +245,36 @@ where
                     }
                 };
 
-                // b. Load context (skip memory retrieval when no embedding)
+                // b. Load context
                 let loaded_context = if query_vector.is_empty() {
-                    // Still load recent messages even without embeddings.
-                    self.context_loader
+                    context_loader
                         .load(
                             LoadRequest {
                                 query_vector: vec![],
                                 query_text: content.to_owned(),
                                 user_id,
                                 conversation_id,
-                                token_budget: self.config.context_token_budget,
-                                recent_message_count: self.config.conversation_history_limit,
+                                token_budget: config.context_token_budget,
+                                recent_message_count: config.conversation_history_limit,
                                 hits_per_scope: 0,
                             },
-                            &self.memory_config,
+                            memory_config,
                         )
                         .await
                         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
                 } else {
-                    self.context_loader
+                    context_loader
                         .load(
                             LoadRequest {
                                 query_vector,
                                 query_text: content.to_owned(),
                                 user_id,
                                 conversation_id,
-                                token_budget: self.config.context_token_budget,
-                                recent_message_count: self.config.conversation_history_limit,
-                                hits_per_scope: self.config.hits_per_scope,
+                                token_budget: config.context_token_budget,
+                                recent_message_count: config.conversation_history_limit,
+                                hits_per_scope: config.hits_per_scope,
                             },
-                            &self.memory_config,
+                            memory_config,
                         )
                         .await
                         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?
@@ -354,32 +299,30 @@ where
                     recent_messages: loaded_context.recent_messages.clone(),
                 };
 
-                let tool_metadata = self.tool_registry.tool_metadata();
-                let assembled = self
-                    .mind
+                let tool_metadata = tool_registry.tool_metadata();
+                let assembled = mind
                     .assemble(&caller, &task_context, &tool_metadata, "")
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-                // d. Convert domain messages to LLM messages (replaces cached messages)
+                // d. Convert domain messages to LLM messages
                 llm_messages = domain_to_llm_messages(&assembled);
                 needs_rebuild = false;
             }
 
-            // e. Call LLM with the (possibly cached) messages
-            let tool_definitions = self.tool_registry.tool_definitions();
+            // e. Call LLM
+            let tool_definitions = tool_registry.tool_definitions();
             let req = CompletionRequest {
-                model: self.config.model.clone(),
+                model: config.model.clone(),
                 messages: llm_messages.clone(),
                 tools: tool_definitions,
-                max_tokens: Some(self.config.max_tokens),
+                max_tokens: Some(config.max_tokens),
                 temperature: None,
                 stop: vec![],
                 stream: false,
             };
 
-            let response = self
-                .llm
+            let response = llm
                 .complete(req)
                 .await
                 .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
@@ -395,8 +338,6 @@ where
             if let Some(ref tool_calls) = choice.message.tool_calls
                 && !tool_calls.is_empty()
             {
-                // Append the assistant's tool-call message to the cached history,
-                // preserving reasoning_content so providers like Kimi don't reject it.
                 llm_messages.push(LlmMessage {
                     role: "assistant".to_owned(),
                     content: choice.message.content.clone(),
@@ -405,18 +346,21 @@ where
                     tool_call_id: None,
                 });
 
-                let (tool_events, tool_msgs, any_context_modifying, had_errors) =
-                    self.execute_tool_calls(tool_calls).await;
-                events.extend(tool_events);
+                let (tool_msgs, any_context_modifying, had_errors) =
+                    Self::execute_tool_calls_streaming(
+                        tool_registry,
+                        tool_calls,
+                        event_tx,
+                        registrar,
+                    )
+                    .await;
 
-                // Append tool result messages to cached history
                 llm_messages.extend(tool_msgs);
 
                 if any_context_modifying {
                     needs_rebuild = true;
                 }
 
-                // Circuit breaker: stop retrying after consecutive tool errors
                 if had_errors {
                     consecutive_tool_errors += 1;
                     if consecutive_tool_errors >= MAX_CONSECUTIVE_TOOL_ERRORS {
@@ -436,14 +380,14 @@ where
                 continue;
             }
 
-            // g. Text response — emit events and store assistant message
+            // g. Text response
             let text = choice.message.content.unwrap_or_default();
             if !text.is_empty() {
-                events.push(AgentEvent::TextDelta(text.clone()));
+                let _ = event_tx.send(Ok(AgentEvent::TextDelta(text.clone()))).await;
+                assistant_text = text.clone();
             }
 
-            let assistant_msg = self
-                .message_repo
+            let assistant_msg = message_repo
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Assistant,
@@ -455,39 +399,96 @@ where
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-            // h. Fire-and-forget: embed and store conversation turn in vector memory
-            //    so the agent can recall facts across conversations.
-            self.spawn_memory_ingestion(
+            // h. Memory ingestion
+            Self::spawn_memory_ingestion_static(
+                llm,
+                memory,
                 user_id,
                 content.to_owned(),
                 text,
                 user_msg_id,
                 assistant_msg.id,
+                memory_config.decay_half_life_days,
             );
 
-            events.push(AgentEvent::Done {
-                message_id: assistant_msg.id,
-                usage: Usage {
-                    prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
-                    completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
-                },
-            });
+            let _ = event_tx
+                .send(Ok(AgentEvent::Done {
+                    message_id: assistant_msg.id,
+                    usage: Usage {
+                        prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
+                        completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
+                    },
+                }))
+                .await;
 
-            return Ok(events);
+            // i. Auto-generate title
+            let conversation = conversation_repo.get_by_id(conversation_id).await.ok();
+            let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
+            let needs_title = current_title.is_none() || current_title == Some("");
+            if needs_title && !assistant_text.is_empty() {
+                let title_prompt = format!(
+                    "Generate a short title (max 6 words) for a conversation that starts with:\n\
+                     User: {content}\n\
+                     Assistant: {}\n\n\
+                     Reply with ONLY the title, no quotes or punctuation at the end.",
+                    &assistant_text[..assistant_text.len().min(200)]
+                );
+
+                let title_req = CompletionRequest {
+                    model: config.model.clone(),
+                    messages: vec![LlmMessage {
+                        role: "user".to_owned(),
+                        content: Some(title_prompt),
+                        reasoning_content: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                    }],
+                    tools: vec![],
+                    max_tokens: Some(200),
+                    temperature: Some(0.3),
+                    stop: vec![],
+                    stream: false,
+                };
+
+                if let Ok(title_resp) = llm.complete(title_req).await
+                    && let Some(title) = title_resp.choices.into_iter().next().and_then(|c| {
+                        c.message
+                            .content
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|t| t.trim().trim_matches('"').to_owned())
+                    })
+                    && conversation_repo
+                        .update_title(conversation_id, &title)
+                        .await
+                        .is_ok()
+                {
+                    let _ = event_tx.send(Ok(AgentEvent::TitleGenerated(title))).await;
+                }
+            }
+
+            return Ok(());
         }
 
         Err(AgentError::MaxIterationsExceeded(
-            self.config.max_tool_iterations,
+            config.max_tool_iterations,
         ))
     }
 
-    /// Executes a set of tool calls and returns (events, LLM messages,
-    /// context_modifying, any_errors).
-    async fn execute_tool_calls(
-        &self,
+    /// Executes tool calls, sending events through the channel in real-time.
+    ///
+    /// Handles [`ToolError::NeedsConfirmation`] by sending a confirmation
+    /// request to the client and waiting for the user's response via the
+    /// broker. If approved, re-executes the tool with `"confirmed": true`.
+    ///
+    /// Returns (LLM messages, context_modifying, any_errors).
+    async fn execute_tool_calls_streaming(
+        tool_registry: &Arc<ToolRegistry>,
         tool_calls: &[LlmToolCall],
-    ) -> (Vec<AgentEvent>, Vec<LlmMessage>, bool, bool) {
-        let mut events = Vec::new();
+        event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
+        registrar: Option<&ConfirmationRegistrar>,
+    ) -> (Vec<LlmMessage>, bool, bool) {
+        use sober_core::types::tool::ToolError;
+
         let mut messages = Vec::new();
         let mut any_context_modifying = false;
         let mut any_errors = false;
@@ -506,18 +507,32 @@ where
                 }
             };
 
-            events.push(AgentEvent::ToolCallStart {
-                name: tool_name.clone(),
-                input: tool_input.clone(),
-            });
+            let _ = event_tx
+                .send(Ok(AgentEvent::ToolCallStart {
+                    name: tool_name.clone(),
+                    input: tool_input.clone(),
+                }))
+                .await;
 
-            let output = match self.tool_registry.get_tool(tool_name) {
+            let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
                     if tool.metadata().context_modifying {
                         any_context_modifying = true;
                     }
-                    match tool.execute(tool_input).await {
+                    match tool.execute(tool_input.clone()).await {
                         Ok(output) => output.content,
+                        Err(ToolError::NeedsConfirmation {
+                            confirm_id,
+                            command,
+                            risk_level,
+                            reason,
+                        }) => {
+                            Self::handle_confirmation(
+                                &tool, tool_input, confirm_id, command, risk_level, reason,
+                                event_tx, registrar,
+                            )
+                            .await
+                        }
                         Err(e) => {
                             any_errors = true;
                             format!("Tool error: {e}")
@@ -530,32 +545,89 @@ where
                 }
             };
 
-            events.push(AgentEvent::ToolCallResult {
-                name: tool_name.clone(),
-                output: output.clone(),
-            });
+            let _ = event_tx
+                .send(Ok(AgentEvent::ToolCallResult {
+                    name: tool_name.clone(),
+                    output: output.clone(),
+                }))
+                .await;
 
             messages.push(LlmMessage::tool(&tc.id, output));
         }
 
-        (events, messages, any_context_modifying, any_errors)
+        (messages, any_context_modifying, any_errors)
+    }
+
+    /// Handles the confirmation flow for a tool that returned `NeedsConfirmation`.
+    ///
+    /// Sends the confirmation event to the client, waits for the user's
+    /// response, and re-executes the tool if approved.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_confirmation(
+        tool: &Arc<dyn sober_core::types::tool::Tool>,
+        mut tool_input: serde_json::Value,
+        confirm_id: String,
+        command: String,
+        risk_level: String,
+        reason: String,
+        event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
+        registrar: Option<&ConfirmationRegistrar>,
+    ) -> String {
+        let Some(registrar) = registrar else {
+            return format!(
+                "Command requires confirmation but no confirmation handler is available. \
+                 Risk level: {risk_level}"
+            );
+        };
+
+        // Register before sending the event so the broker is ready.
+        let rx = registrar.register(confirm_id.clone());
+
+        let _ = event_tx
+            .send(Ok(AgentEvent::ConfirmRequest {
+                confirm_id,
+                command,
+                risk_level,
+                affects: Vec::new(),
+                reason,
+            }))
+            .await;
+
+        // Wait for user response (timeout after 5 minutes).
+        const CONFIRM_TIMEOUT_SECS: u64 = 300;
+        match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
+            Ok(Ok(true)) => {
+                // Approved — re-execute with confirmed flag.
+                if let Some(obj) = tool_input.as_object_mut() {
+                    obj.insert("confirmed".to_string(), serde_json::Value::Bool(true));
+                }
+                match tool.execute(tool_input).await {
+                    Ok(output) => output.content,
+                    Err(e) => format!("Tool error after confirmation: {e}"),
+                }
+            }
+            Ok(Ok(false)) => "Command denied by user.".to_string(),
+            Ok(Err(_)) => "Confirmation cancelled.".to_string(),
+            Err(_) => "Command timed out waiting for confirmation.".to_string(),
+        }
     }
 
     /// Spawns a background task that embeds and stores both the user message and
-    /// the assistant response in vector memory. This allows the agent to recall
-    /// facts and conversation context across separate conversations.
-    fn spawn_memory_ingestion(
-        &self,
+    /// the assistant response in vector memory.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_memory_ingestion_static(
+        llm: &Arc<dyn LlmEngine>,
+        memory: &Arc<MemoryStore>,
         user_id: UserId,
         user_content: String,
         assistant_content: String,
         user_msg_id: sober_core::MessageId,
         assistant_msg_id: sober_core::MessageId,
+        half_life_days: u32,
     ) {
-        let llm = Arc::clone(&self.llm);
-        let memory = Arc::clone(&self.memory);
+        let llm = Arc::clone(llm);
+        let memory = Arc::clone(memory);
         let scope_id = sober_core::ScopeId::from_uuid(*user_id.as_uuid());
-        let half_life_days = self.memory_config.decay_half_life_days;
 
         tokio::spawn(async move {
             let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);

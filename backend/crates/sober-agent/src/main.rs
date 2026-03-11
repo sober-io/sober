@@ -104,7 +104,6 @@ async fn main() -> Result<()> {
         PermissionMode::default(),
         workspace_home,
         sandbox_policy,
-        None, // TODO: wire confirm_fn to ConfirmationBroker event stream
         true, // auto_snapshot
     );
 
@@ -115,7 +114,11 @@ async fn main() -> Result<()> {
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 
-    // 10. Create Agent
+    // 10. Create confirmation broker
+    let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
+    let registrar = confirmation_broker.registrar();
+
+    // 11. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -134,13 +137,15 @@ async fn main() -> Result<()> {
         mcp_server_repo,
         agent_config,
         config.memory.clone(),
+        Some(registrar),
     ));
 
-    // 11. Create confirmation broker and gRPC service
-    let (_confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
+    // 12. Spawn the confirmation broker loop
+    tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
+
     let grpc_service = AgentGrpcService::new(agent, confirmation_sender);
 
-    // 12. Bind to Unix domain socket
+    // 13. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -164,7 +169,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 13. Serve with graceful shutdown
+    // 14. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())

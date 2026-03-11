@@ -76,7 +76,7 @@ where
             .map(ConversationId::from_uuid)
             .map_err(|_| Status::invalid_argument("invalid conversation_id"))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
         let agent = Arc::clone(&self.agent);
         let content = req.content;
 
@@ -164,6 +164,19 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             completion_tokens: usage.completion_tokens,
         }),
         AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
+        AgentEvent::ConfirmRequest {
+            confirm_id,
+            command,
+            risk_level,
+            affects,
+            reason,
+        } => Event::ConfirmRequest(proto::ConfirmRequest {
+            confirm_id,
+            command,
+            risk_level,
+            affects,
+            reason,
+        }),
         AgentEvent::Error(message) => Event::Error(proto::Error { message }),
     };
 

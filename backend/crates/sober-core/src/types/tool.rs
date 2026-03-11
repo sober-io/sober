@@ -51,6 +51,23 @@ pub enum ToolError {
     #[error("Execution failed: {0}")]
     ExecutionFailed(String),
 
+    /// The tool requires user confirmation before proceeding.
+    ///
+    /// Returned by tools (e.g. shell) when a command is classified as
+    /// dangerous. The agent loop should handle the confirmation flow and
+    /// re-execute with `"confirmed": true` in the input if approved.
+    #[error("Needs confirmation: {reason}")]
+    NeedsConfirmation {
+        /// Unique ID for this confirmation request.
+        confirm_id: String,
+        /// The command or action needing approval.
+        command: String,
+        /// Risk classification (e.g. "Dangerous").
+        risk_level: String,
+        /// Human-readable explanation.
+        reason: String,
+    },
+
     /// An unexpected internal error occurred.
     #[error("{0}")]
     Internal(Box<dyn std::error::Error + Send + Sync>),
