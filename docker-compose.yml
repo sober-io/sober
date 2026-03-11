@@ -86,6 +86,10 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.agent
+    security_opt:
+      - apparmor:unconfined
+    cap_add:
+      - SYS_ADMIN
     environment:
       <<: [*common-env, *llm-env, *memory-env, *mcp-env]
       AGENT_SOCKET_PATH: /run/sober/agent.sock
