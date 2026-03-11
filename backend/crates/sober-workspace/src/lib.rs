@@ -8,6 +8,7 @@ pub mod blob;
 pub mod config;
 pub mod error;
 pub mod fs;
+pub mod remote;
 pub mod snapshot;
 pub mod worktree;
 
@@ -15,5 +16,6 @@ pub use blob::BlobStore;
 pub use config::WorkspaceDefaults;
 pub use error::WorkspaceError;
 pub use fs::init_workspace_dir;
+pub use remote::detect_remote_url;
 pub use snapshot::SnapshotManager;
 pub use worktree::{create_git_worktree, list_git_worktrees, remove_git_worktree};
