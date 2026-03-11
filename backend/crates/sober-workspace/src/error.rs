@@ -34,6 +34,14 @@ pub enum WorkspaceError {
     #[error("filesystem error: {0}")]
     Filesystem(#[source] std::io::Error),
 
+    /// Git operation failed.
+    #[error("git error: {0}")]
+    Git(#[from] git2::Error),
+
+    /// Snapshot operation failed.
+    #[error("snapshot error: {0}")]
+    Snapshot(String),
+
     /// Invalid state transition.
     #[error("invalid state transition: {from} -> {to}")]
     InvalidStateTransition {
@@ -57,7 +65,9 @@ impl From<WorkspaceError> for AppError {
             WorkspaceError::InvalidStateTransition { from, to } => {
                 AppError::Validation(format!("invalid state transition: {from} -> {to}"))
             }
-            WorkspaceError::Filesystem(_) => AppError::Internal(err.into()),
+            WorkspaceError::Filesystem(_)
+            | WorkspaceError::Git(_)
+            | WorkspaceError::Snapshot(_) => AppError::Internal(err.into()),
         }
     }
 }
