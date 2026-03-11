@@ -254,7 +254,7 @@ impl Tool for ShellTool {
                 },
                 "required": ["command"]
             }),
-            context_modifying: true,
+            context_modifying: false,
         }
     }
 
@@ -272,7 +272,7 @@ mod tests {
         let tool = ShellTool::new_for_test();
         let meta = tool.metadata();
         assert_eq!(meta.name, "shell");
-        assert!(meta.context_modifying);
+        assert!(!meta.context_modifying);
         let required = meta.input_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v.as_str() == Some("command")));
     }

@@ -282,6 +282,8 @@ where
         let mut events = Vec::new();
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
+        let mut consecutive_tool_errors: u32 = 0;
+        const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 3;
 
         for iteration in 0..self.config.max_tool_iterations {
             debug!(iteration, "agent loop iteration");
@@ -403,7 +405,7 @@ where
                     tool_call_id: None,
                 });
 
-                let (tool_events, tool_msgs, any_context_modifying) =
+                let (tool_events, tool_msgs, any_context_modifying, had_errors) =
                     self.execute_tool_calls(tool_calls).await;
                 events.extend(tool_events);
 
@@ -412,6 +414,24 @@ where
 
                 if any_context_modifying {
                     needs_rebuild = true;
+                }
+
+                // Circuit breaker: stop retrying after consecutive tool errors
+                if had_errors {
+                    consecutive_tool_errors += 1;
+                    if consecutive_tool_errors >= MAX_CONSECUTIVE_TOOL_ERRORS {
+                        warn!(
+                            consecutive_errors = consecutive_tool_errors,
+                            "tool error circuit breaker tripped, forcing text response"
+                        );
+                        llm_messages.push(LlmMessage::user(
+                            "SYSTEM: Tool calls have failed multiple times in a row. \
+                             Stop calling tools and respond to the user with what you know. \
+                             Explain that the tool execution failed and why.",
+                        ));
+                    }
+                } else {
+                    consecutive_tool_errors = 0;
                 }
                 continue;
             }
@@ -461,15 +481,16 @@ where
         ))
     }
 
-    /// Executes a set of tool calls and returns events, LLM messages, and whether
-    /// any tool was context-modifying.
+    /// Executes a set of tool calls and returns (events, LLM messages,
+    /// context_modifying, any_errors).
     async fn execute_tool_calls(
         &self,
         tool_calls: &[LlmToolCall],
-    ) -> (Vec<AgentEvent>, Vec<LlmMessage>, bool) {
+    ) -> (Vec<AgentEvent>, Vec<LlmMessage>, bool, bool) {
         let mut events = Vec::new();
         let mut messages = Vec::new();
         let mut any_context_modifying = false;
+        let mut any_errors = false;
 
         for tc in tool_calls {
             let tool_name = &tc.function.name;
@@ -492,16 +513,21 @@ where
 
             let output = match self.tool_registry.get_tool(tool_name) {
                 Some(tool) => {
-                    // Check if context-modifying
                     if tool.metadata().context_modifying {
                         any_context_modifying = true;
                     }
                     match tool.execute(tool_input).await {
                         Ok(output) => output.content,
-                        Err(e) => format!("Tool error: {e}"),
+                        Err(e) => {
+                            any_errors = true;
+                            format!("Tool error: {e}")
+                        }
                     }
                 }
-                None => format!("Tool not found: {tool_name}"),
+                None => {
+                    any_errors = true;
+                    format!("Tool not found: {tool_name}")
+                }
             };
 
             events.push(AgentEvent::ToolCallResult {
@@ -512,7 +538,7 @@ where
             messages.push(LlmMessage::tool(&tc.id, output));
         }
 
-        (events, messages, any_context_modifying)
+        (events, messages, any_context_modifying, any_errors)
     }
 
     /// Spawns a background task that embeds and stores both the user message and
