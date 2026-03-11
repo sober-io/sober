@@ -92,6 +92,41 @@ impl ShellTool {
         }
     }
 
+    /// Direct execution fallback when bwrap is unavailable (e.g. inside Docker).
+    async fn execute_direct(
+        &self,
+        command: &str,
+        workdir: &std::path::Path,
+        timeout_secs: u32,
+    ) -> Result<sober_sandbox::SandboxResult, ToolError> {
+        use tokio::process::Command;
+
+        let start = std::time::Instant::now();
+        let child = Command::new("sh")
+            .args(["-c", command])
+            .current_dir(workdir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn: {e}")))?;
+
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(u64::from(timeout_secs)),
+            child.wait_with_output(),
+        )
+        .await
+        .map_err(|_| ToolError::ExecutionFailed("command timed out".into()))?
+        .map_err(|e| ToolError::ExecutionFailed(format!("command failed: {e}")))?;
+
+        Ok(sober_sandbox::SandboxResult {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            duration_ms: start.elapsed().as_millis() as u64,
+            denied_network_requests: vec![],
+        })
+    }
+
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let input: ShellInput = serde_json::from_value(input)
             .map_err(|e| ToolError::InvalidInput(format!("invalid input: {e}")))?;
@@ -196,10 +231,19 @@ impl ShellTool {
             format!("cd {} && {}", workdir.display(), input.command),
         ];
 
-        let result = sandbox
-            .execute(&command, &HashMap::new())
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("sandbox error: {e}")))?;
+        let result = match sandbox.execute(&command, &HashMap::new()).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Fallback: run directly without bwrap (e.g. inside Docker where
+                // pivot_root / user namespaces aren't available).
+                tracing::warn!(
+                    error = %e,
+                    "bwrap sandbox failed, falling back to direct execution"
+                );
+                self.execute_direct(&input.command, &workdir, timeout)
+                    .await?
+            }
+        };
 
         // Format output
         let mut output = String::new();
