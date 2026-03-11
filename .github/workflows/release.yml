@@ -4,6 +4,11 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.12)"
+        required: true
 
 permissions:
   contents: write
@@ -14,7 +19,9 @@ env:
 jobs:
   tag:
     name: Determine version and tag
-    if: github.event.pull_request.merged == true
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
@@ -28,7 +35,16 @@ jobs:
         id: bump
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          MANUAL_TAG: ${{ inputs.tag }}
         run: |
+          # Manual dispatch: use the provided tag directly
+          if [ -n "$MANUAL_TAG" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$MANUAL_TAG" >> "$GITHUB_OUTPUT"
+            echo "Manual release: $MANUAL_TAG"
+            exit 0
+          fi
+
           # Get latest tag or default to v0.0.0
           LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           if [ -z "$LATEST_TAG" ]; then
@@ -71,6 +87,11 @@ jobs:
         env:
           NEW_TAG: ${{ steps.bump.outputs.tag }}
         run: |
+          # Skip if tag already exists (manual dispatch with existing tag)
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists, skipping creation"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
@@ -141,15 +162,15 @@ jobs:
         run: pnpm install --frozen-lockfile && pnpm build
 
       - name: Build binaries
-        working-directory: backend
         env:
           BUILD_TARGET: ${{ matrix.target }}
           USE_CROSS: ${{ matrix.cross }}
         run: |
           if [ "$USE_CROSS" = "true" ]; then
-            cross build --release --target "$BUILD_TARGET"
+            # Run from repo root so cross mounts frontend/build/ into the container
+            cross build --release --target "$BUILD_TARGET" --manifest-path backend/Cargo.toml
           else
-            cargo build --release --target "$BUILD_TARGET"
+            cd backend && cargo build --release --target "$BUILD_TARGET"
           fi
 
       - name: Package release archive
