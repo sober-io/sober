@@ -102,7 +102,12 @@ ALTER TABLE artifact_relations
     USING relation::artifact_relation;
 
 -- Now alter the artifacts table
--- First convert existing enum columns to text temporarily
+-- Drop defaults first (they reference the old enum types)
+ALTER TABLE artifacts
+    ALTER COLUMN state DROP DEFAULT,
+    ALTER COLUMN kind DROP DEFAULT;
+
+-- Convert existing enum columns to text temporarily
 ALTER TABLE artifacts
     ALTER COLUMN state TYPE TEXT,
     ALTER COLUMN kind TYPE TEXT;
@@ -116,10 +121,14 @@ UPDATE artifacts SET kind = 'code_change' WHERE kind = 'code';
 UPDATE artifacts SET kind = 'proposal' WHERE kind = 'config';
 UPDATE artifacts SET kind = 'document' WHERE kind = 'generated';
 
--- Convert back to new enum types
+-- Convert back to new enum types and restore defaults
 ALTER TABLE artifacts
     ALTER COLUMN state TYPE artifact_state USING state::artifact_state,
     ALTER COLUMN kind TYPE artifact_kind USING kind::artifact_kind;
+
+ALTER TABLE artifacts
+    ALTER COLUMN state SET DEFAULT 'draft',
+    ALTER COLUMN kind SET DEFAULT 'document';
 
 -- Rename 'name' to 'title', drop 'path', add new columns
 ALTER TABLE artifacts RENAME COLUMN name TO title;
