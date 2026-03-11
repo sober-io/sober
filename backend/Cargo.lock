@@ -3322,7 +3322,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.4.1"
+version = "0.6.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.3.1"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "serde_json",
@@ -3499,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "sober-workspace"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "git2",
