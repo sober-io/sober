@@ -339,6 +339,7 @@ where
                     trigger: TriggerKind::Human,
                     permissions: vec![],
                     scope_grants: vec![],
+                    workspace_id: None,
                 };
 
                 let memory_context_text = format_memory_context(&loaded_context);

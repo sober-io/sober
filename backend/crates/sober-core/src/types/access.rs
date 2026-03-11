@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::ids::{ScopeId, ToolId, UserId};
+use super::ids::{ScopeId, ToolId, UserId, WorkspaceId};
 
 /// What triggered the current operation.
 ///
@@ -67,6 +67,8 @@ pub struct CallerContext {
     pub permissions: Vec<Permission>,
     /// Scopes this caller is authorized to access.
     pub scope_grants: Vec<ScopeId>,
+    /// The workspace this operation is scoped to, if any.
+    pub workspace_id: Option<WorkspaceId>,
 }
 
 #[cfg(test)]
@@ -96,6 +98,7 @@ mod tests {
             trigger: TriggerKind::Human,
             permissions: vec![Permission::ReadKnowledge(scope)],
             scope_grants: vec![scope],
+            workspace_id: None,
         };
         assert_eq!(ctx.trigger, TriggerKind::Human);
         assert_eq!(ctx.user_id, Some(user_id));
@@ -109,8 +112,24 @@ mod tests {
             trigger: TriggerKind::Scheduler,
             permissions: vec![],
             scope_grants: vec![],
+            workspace_id: None,
         };
         assert_eq!(ctx.trigger, TriggerKind::Scheduler);
         assert!(ctx.user_id.is_none());
+    }
+
+    #[test]
+    fn caller_context_with_workspace() {
+        let user_id = UserId::new();
+        let scope = ScopeId::new();
+        let workspace_id = WorkspaceId::new();
+        let ctx = CallerContext {
+            user_id: Some(user_id),
+            trigger: TriggerKind::Human,
+            permissions: vec![Permission::ReadKnowledge(scope)],
+            scope_grants: vec![scope],
+            workspace_id: Some(workspace_id),
+        };
+        assert_eq!(ctx.workspace_id, Some(workspace_id));
     }
 }
