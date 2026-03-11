@@ -1,3 +1,5 @@
+name: sober
+
 x-common-env: &common-env
   SOBER_ENV: development
   DATABASE_URL: postgres://sober:sober@postgres:5432/sober
