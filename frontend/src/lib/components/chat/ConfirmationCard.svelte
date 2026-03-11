@@ -44,9 +44,7 @@
 
 	{#if resolved}
 		<div
-			class="text-sm font-medium {resolved === 'approved'
-				? 'text-emerald-400'
-				: 'text-red-400'}"
+			class="text-sm font-medium {resolved === 'approved' ? 'text-emerald-400' : 'text-red-400'}"
 		>
 			{resolved === 'approved' ? 'Approved' : 'Denied'}
 		</div>
