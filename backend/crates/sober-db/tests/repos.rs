@@ -256,7 +256,10 @@ async fn conversation_crud(pool: PgPool) {
         .await
         .unwrap();
 
-    let conv = conv_repo.create(user.id, Some("Test Chat")).await.unwrap();
+    let conv = conv_repo
+        .create(user.id, Some("Test Chat"), None)
+        .await
+        .unwrap();
     assert_eq!(conv.title.as_deref(), Some("Test Chat"));
 
     let fetched = conv_repo.get_by_id(conv.id).await.unwrap();
@@ -292,7 +295,7 @@ async fn message_create_and_list(pool: PgPool) {
         .await
         .unwrap();
 
-    let conv = conv_repo.create(user.id, None).await.unwrap();
+    let conv = conv_repo.create(user.id, None, None).await.unwrap();
 
     let msg = msg_repo
         .create(CreateMessage {

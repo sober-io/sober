@@ -106,6 +106,7 @@ pub(crate) struct ConversationRow {
     pub id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
+    pub workspace_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -116,6 +117,7 @@ impl From<ConversationRow> for Conversation {
             id: ConversationId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
             title: row.title,
+            workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

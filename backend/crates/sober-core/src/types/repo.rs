@@ -96,6 +96,7 @@ pub trait ConversationRepo: Send + Sync {
         &self,
         user_id: UserId,
         title: Option<&str>,
+        workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
 
     /// Finds a conversation by ID.

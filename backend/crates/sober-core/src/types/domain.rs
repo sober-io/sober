@@ -84,6 +84,8 @@ pub struct Conversation {
     pub user_id: UserId,
     /// Optional conversation title.
     pub title: Option<String>,
+    /// The workspace this conversation is scoped to, if any.
+    pub workspace_id: Option<WorkspaceId>,
     /// When the conversation was created.
     pub created_at: DateTime<Utc>,
     /// When the conversation was last updated.
