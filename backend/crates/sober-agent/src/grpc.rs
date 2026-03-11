@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status};
 use tracing::error;
 
 use crate::agent::Agent;
+use crate::confirm::ConfirmationSender;
 use crate::stream::AgentEvent;
 
 /// Generated protobuf types for the agent gRPC service.
@@ -26,6 +27,7 @@ where
     Mcp: McpServerRepo,
 {
     agent: Arc<Agent<Msg, Conv, Mcp>>,
+    confirmation_sender: ConfirmationSender,
 }
 
 impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
@@ -35,8 +37,11 @@ where
     Mcp: McpServerRepo,
 {
     /// Creates a new gRPC service backed by the given agent.
-    pub fn new(agent: Arc<Agent<Msg, Conv, Mcp>>) -> Self {
-        Self { agent }
+    pub fn new(agent: Arc<Agent<Msg, Conv, Mcp>>, confirmation_sender: ConfirmationSender) -> Self {
+        Self {
+            agent,
+            confirmation_sender,
+        }
     }
 }
 
@@ -115,6 +120,18 @@ where
         _request: Request<proto::WakeRequest>,
     ) -> Result<Response<proto::WakeResponse>, Status> {
         Ok(Response::new(proto::WakeResponse { accepted: true }))
+    }
+
+    async fn submit_confirmation(
+        &self,
+        request: Request<proto::ConfirmResponse>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        self.confirmation_sender
+            .respond(req.confirm_id, req.approved)
+            .await
+            .map_err(|e| Status::internal(format!("failed to forward confirmation: {e}")))?;
+        Ok(Response::new(()))
     }
 
     async fn health(

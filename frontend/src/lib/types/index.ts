@@ -45,12 +45,26 @@ export interface McpServer {
 	updated_at: string;
 }
 
+export interface ConfirmRequest {
+	confirm_id: string;
+	command: string;
+	risk_level: 'safe' | 'moderate' | 'dangerous';
+	affects: string[];
+	reason: string;
+}
+
 // WebSocket message types
 
 /** Client-to-server messages — all include conversation_id */
 export type ClientWsMessage =
 	| { type: 'chat.message'; conversation_id: string; content: string }
-	| { type: 'chat.cancel'; conversation_id: string };
+	| { type: 'chat.cancel'; conversation_id: string }
+	| {
+			type: 'chat.confirm_response';
+			conversation_id: string;
+			confirm_id: string;
+			approved: boolean;
+	  };
 
 /** Server-to-client messages — routed by conversation_id */
 export type ServerWsMessage =
@@ -65,7 +79,16 @@ export type ServerWsMessage =
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
 	| { type: 'chat.title'; conversation_id: string; title: string }
-	| { type: 'chat.error'; conversation_id: string; error: string };
+	| { type: 'chat.error'; conversation_id: string; error: string }
+	| {
+			type: 'chat.confirm';
+			conversation_id: string;
+			confirm_id: string;
+			command: string;
+			risk_level: string;
+			affects: string[];
+			reason: string;
+	  };
 
 // API response envelope types
 

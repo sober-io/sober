@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use sober_agent::ConfirmationBroker;
 use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
@@ -106,8 +107,9 @@ async fn main() -> Result<()> {
         config.memory.clone(),
     ));
 
-    // 11. Create gRPC service
-    let grpc_service = AgentGrpcService::new(agent);
+    // 11. Create confirmation broker and gRPC service
+    let (_confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
+    let grpc_service = AgentGrpcService::new(agent, confirmation_sender);
 
     // 12. Bind to Unix domain socket
     let socket_path =
