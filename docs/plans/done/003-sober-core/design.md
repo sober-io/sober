@@ -81,7 +81,7 @@ Config sections:
 All entity IDs are UUIDv7 (time-ordered) newtypes. A macro generates the boilerplate for
 each type to keep the code DRY.
 
-Types: `UserId`, `ScopeId`, `ConversationId`, `MessageId`, `SessionId`, `RoleId`, `McpServerId`, `WorkspaceId`.
+Types: `UserId`, `ScopeId`, `ConversationId`, `MessageId`, `SessionId`, `RoleId`, `McpServerId`, `WorkspaceId`, `WorkspaceRepoId`, `WorktreeId`, `ArtifactId`.
 
 Each newtype derives:
 - `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`
