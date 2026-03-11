@@ -157,9 +157,10 @@ where
 
         // 4. Auto-generate title if conversation has none
         let conversation = self.conversation_repo.get_by_id(conversation_id).await.ok();
-        if let Some(conv) = conversation
-            && conv.title.is_none()
-        {
+        let needs_title = conversation
+            .as_ref()
+            .is_some_and(|c| c.title.as_deref().unwrap_or("").is_empty());
+        if needs_title {
             // Extract assistant response text from events
             let assistant_text: String = events
                 .iter()
