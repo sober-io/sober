@@ -46,7 +46,7 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            max_tool_iterations: 10,
+            max_tool_iterations: 25,
             context_token_budget: 128_000,
             conversation_history_limit: 50,
             hits_per_scope: 10,
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn agent_config_defaults() {
         let config = AgentConfig::default();
-        assert_eq!(config.max_tool_iterations, 10);
+        assert_eq!(config.max_tool_iterations, 25);
         assert_eq!(config.context_token_budget, 128_000);
         assert_eq!(config.conversation_history_limit, 50);
         assert_eq!(config.hits_per_scope, 10);
