@@ -31,6 +31,41 @@ pub fn detect_remote_url(repo_path: &Path) -> Result<Option<String>, WorkspaceEr
     Ok(None)
 }
 
+/// Push a local branch to a remote.
+///
+/// Defaults to "origin" if no remote name is provided. Uses the
+/// environment's SSH credentials (SSH agent, `~/.ssh/`).
+pub fn push_branch(
+    repo_path: &Path,
+    branch: &str,
+    remote_name: Option<&str>,
+) -> Result<(), WorkspaceError> {
+    let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
+    let name = remote_name.unwrap_or("origin");
+    let mut remote = repo.find_remote(name).map_err(WorkspaceError::Git)?;
+
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, allowed_types| {
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            let username = username_from_url.unwrap_or("git");
+            git2::Cred::ssh_key_from_agent(username)
+        } else {
+            Err(git2::Error::from_str("unsupported credential type"))
+        }
+    });
+
+    let mut push_options = git2::PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+
+    remote
+        .push(&[&refspec], Some(&mut push_options))
+        .map_err(WorkspaceError::Git)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
