@@ -2,11 +2,15 @@ syntax = "proto3";
 
 package sober.agent.v1;
 
+import "google/protobuf/empty.proto";
+
 service AgentService {
   rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
   rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
   rpc WakeAgent(WakeRequest) returns (WakeResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+  // Route a user's confirmation response to the agent's ConfirmationBroker.
+  rpc SubmitConfirmation(ConfirmResponse) returns (google.protobuf.Empty);
 }
 
 message HandleMessageRequest {
@@ -50,6 +54,7 @@ message AgentEvent {
     Error error = 5;
     ThinkingDelta thinking_delta = 6;
     TitleGenerated title_generated = 7;
+    ConfirmRequest confirm_request = 8;
   }
 }
 
@@ -60,3 +65,18 @@ message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completio
 message Error { string message = 1; }
 message ThinkingDelta { string content = 1; }
 message TitleGenerated { string title = 1; }
+
+// Shell command confirmation request sent to the user.
+message ConfirmRequest {
+  string confirm_id = 1;
+  string command = 2;
+  string risk_level = 3;
+  repeated string affects = 4;
+  string reason = 5;
+}
+
+// User's response to a confirmation request.
+message ConfirmResponse {
+  string confirm_id = 1;
+  bool approved = 2;
+}
