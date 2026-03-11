@@ -7,7 +7,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::enums::{ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus};
+use super::enums::{
+    ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus, WorkspaceState, WorktreeState,
+};
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, McpServerId, MessageId, RoleId,
     ScopeId, SecretId, SessionId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
@@ -162,10 +164,18 @@ pub struct Workspace {
     pub user_id: UserId,
     /// Display name.
     pub name: String,
+    /// Optional description.
+    pub description: Option<String>,
     /// Root filesystem path.
     pub root_path: String,
-    /// Whether the workspace is archived.
-    pub archived: bool,
+    /// Lifecycle state.
+    pub state: WorkspaceState,
+    /// Who created this workspace.
+    pub created_by: UserId,
+    /// When the workspace was archived.
+    pub archived_at: Option<DateTime<Utc>>,
+    /// When the workspace was deleted.
+    pub deleted_at: Option<DateTime<Utc>>,
     /// When the workspace was created.
     pub created_at: DateTime<Utc>,
     /// When the workspace was last updated.
@@ -183,6 +193,10 @@ pub struct WorkspaceRepoEntry {
     pub name: String,
     /// Filesystem path to the repository.
     pub path: String,
+    /// Whether this is a linked (external) repo vs managed.
+    pub is_linked: bool,
+    /// Remote URL (e.g., GitHub URL).
+    pub remote_url: Option<String>,
     /// Default branch name.
     pub default_branch: String,
     /// When the repo was registered.
@@ -200,27 +214,61 @@ pub struct Worktree {
     pub branch: String,
     /// Filesystem path to the worktree.
     pub path: String,
-    /// Whether the worktree has been marked stale.
-    pub stale: bool,
+    /// Lifecycle state.
+    pub state: WorktreeState,
+    /// Who created this worktree.
+    pub created_by: Option<UserId>,
+    /// Associated task ID (if any).
+    pub task_id: Option<uuid::Uuid>,
+    /// Associated conversation.
+    pub conversation_id: Option<ConversationId>,
     /// When the worktree was created.
     pub created_at: DateTime<Utc>,
+    /// When the worktree was last active.
+    pub last_active_at: DateTime<Utc>,
 }
 
-/// A workspace artifact (code, document, config, etc.).
+/// A workspace artifact (code change, document, proposal, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
     /// Unique identifier.
     pub id: ArtifactId,
     /// The workspace this artifact belongs to.
     pub workspace_id: WorkspaceId,
-    /// Display name.
-    pub name: String,
+    /// The user who owns this artifact.
+    pub user_id: UserId,
     /// Artifact kind.
     pub kind: ArtifactKind,
     /// Lifecycle state.
     pub state: ArtifactState,
-    /// Filesystem path (relative to workspace root).
-    pub path: String,
+    /// Display title.
+    pub title: String,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Storage type: "git", "blob", or "inline".
+    pub storage_type: String,
+    /// Git repo path (if storage_type is "git").
+    pub git_repo: Option<String>,
+    /// Git ref (if storage_type is "git").
+    pub git_ref: Option<String>,
+    /// Blob key (if storage_type is "blob").
+    pub blob_key: Option<String>,
+    /// Inline content (if storage_type is "inline").
+    pub inline_content: Option<String>,
+    /// Who created this artifact (None = agent).
+    pub created_by: Option<UserId>,
+    /// Associated conversation.
+    pub conversation_id: Option<ConversationId>,
+    /// Associated task.
+    pub task_id: Option<uuid::Uuid>,
+    /// Parent artifact.
+    pub parent_id: Option<ArtifactId>,
+    /// Who reviewed this artifact.
+    pub reviewed_by: Option<UserId>,
+    /// When the artifact was reviewed.
+    pub reviewed_at: Option<DateTime<Utc>>,
+    /// Extensible metadata.
+    pub metadata: serde_json::Value,
     /// When the artifact was created.
     pub created_at: DateTime<Utc>,
     /// When the artifact was last updated.

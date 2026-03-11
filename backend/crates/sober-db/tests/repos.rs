@@ -429,26 +429,26 @@ async fn workspace_lifecycle(pool: PgPool) {
         .unwrap();
 
     let ws = repo
-        .create(user.id, "My Project", "/home/user/project")
+        .create(user.id, "My Project", None, "/home/user/project")
         .await
         .unwrap();
     assert_eq!(ws.name, "My Project");
-    assert!(!ws.archived);
+    assert_eq!(ws.state, WorkspaceState::Active);
 
     let list = repo.list_by_user(user.id).await.unwrap();
     assert_eq!(list.len(), 1);
 
     repo.archive(ws.id).await.unwrap();
     let list_after_archive = repo.list_by_user(user.id).await.unwrap();
-    assert!(list_after_archive.is_empty()); // archived workspaces filtered out
+    assert_eq!(list_after_archive.len(), 1); // archived workspaces still included, only deleted filtered out
 
     repo.restore(ws.id).await.unwrap();
     let list_after_restore = repo.list_by_user(user.id).await.unwrap();
     assert_eq!(list_after_restore.len(), 1);
 
     repo.delete(ws.id).await.unwrap();
-    let err = repo.get_by_id(ws.id).await.unwrap_err();
-    assert!(matches!(err, sober_core::error::AppError::NotFound(_)));
+    let deleted = repo.get_by_id(ws.id).await.unwrap();
+    assert_eq!(deleted.state, WorkspaceState::Deleted);
 }
 
 // ── Workspace Repos & Worktrees ──────────────────────────────────────────────
@@ -469,14 +469,20 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
         .await
         .unwrap();
 
-    let ws = ws_repo.create(user.id, "WS", "/tmp/ws").await.unwrap();
+    let ws = ws_repo
+        .create(user.id, "WS", None, "/tmp/ws")
+        .await
+        .unwrap();
 
+    // Register a linked repo so find_by_linked_path can find it
     let repo = repo_repo
         .register(
             ws.id,
             RegisterRepo {
                 name: "my-repo".into(),
                 path: "/tmp/ws/my-repo".into(),
+                is_linked: true,
+                remote_url: Some("https://github.com/user/my-repo".into()),
                 default_branch: "main".into(),
             },
         )
@@ -485,13 +491,13 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
     assert_eq!(repo.name, "my-repo");
 
     let found = repo_repo
-        .find_by_path("/tmp/ws/my-repo", user.id)
+        .find_by_linked_path("/tmp/ws/my-repo", user.id)
         .await
         .unwrap();
     assert!(found.is_some());
 
     let not_found = repo_repo
-        .find_by_path("/nonexistent", user.id)
+        .find_by_linked_path("/nonexistent", user.id)
         .await
         .unwrap();
     assert!(not_found.is_none());
@@ -501,18 +507,25 @@ async fn workspace_repo_and_worktree(pool: PgPool) {
 
     // Worktrees
     let wt = wt_repo
-        .create(repo.id, "feat/test", "/tmp/ws/.worktrees/test")
+        .create(
+            repo.id,
+            "feat/test",
+            "/tmp/ws/.worktrees/test",
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
-    assert!(!wt.stale);
+    assert_eq!(wt.state, WorktreeState::Active);
 
     let wts = wt_repo.list_by_repo(repo.id).await.unwrap();
     assert_eq!(wts.len(), 1);
 
     wt_repo.mark_stale(wt.id).await.unwrap();
 
-    // list_stale_candidates finds worktrees created before a given time (and not already stale)
-    // Our worktree is now stale=true so it shouldn't appear
+    // list_stale_candidates finds worktrees with state=active and last_active_at older than threshold
+    // Our worktree is now state=stale so it shouldn't appear
     let stale = wt_repo
         .list_stale_candidates(Utc::now() + chrono::Duration::hours(1))
         .await
@@ -541,14 +554,20 @@ async fn artifact_crud_and_relations(pool: PgPool) {
         .await
         .unwrap();
 
-    let ws = ws_repo.create(user.id, "ArtWS", "/tmp/art").await.unwrap();
+    let ws = ws_repo
+        .create(user.id, "ArtWS", None, "/tmp/art")
+        .await
+        .unwrap();
 
     let art1 = art_repo
         .create(CreateArtifact {
             workspace_id: ws.id,
-            name: "main.rs".into(),
-            kind: ArtifactKind::Code,
-            path: "src/main.rs".into(),
+            user_id: user.id,
+            kind: ArtifactKind::CodeChange,
+            title: "main.rs".into(),
+            storage_type: "inline".into(),
+            inline_content: Some("fn main() {}".into()),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -557,9 +576,12 @@ async fn artifact_crud_and_relations(pool: PgPool) {
     let art2 = art_repo
         .create(CreateArtifact {
             workspace_id: ws.id,
-            name: "README.md".into(),
+            user_id: user.id,
             kind: ArtifactKind::Document,
-            path: "README.md".into(),
+            title: "README.md".into(),
+            storage_type: "inline".into(),
+            inline_content: Some("# README".into()),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -569,14 +591,14 @@ async fn artifact_crud_and_relations(pool: PgPool) {
         .list_by_workspace(
             ws.id,
             ArtifactFilter {
-                kind: Some(ArtifactKind::Code),
+                kind: Some(ArtifactKind::CodeChange),
                 state: None,
             },
         )
         .await
         .unwrap();
     assert_eq!(code_only.len(), 1);
-    assert_eq!(code_only[0].name, "main.rs");
+    assert_eq!(code_only[0].title, "main.rs");
 
     // No filter
     let all = art_repo
@@ -587,19 +609,19 @@ async fn artifact_crud_and_relations(pool: PgPool) {
 
     // Update state
     art_repo
-        .update_state(art1.id, ArtifactState::Committed)
+        .update_state(art1.id, ArtifactState::Proposed)
         .await
         .unwrap();
     let updated = art_repo.get_by_id(art1.id).await.unwrap();
-    assert_eq!(updated.state, ArtifactState::Committed);
+    assert_eq!(updated.state, ArtifactState::Proposed);
 
     // Add relation (idempotent)
     art_repo
-        .add_relation(art2.id, art1.id, ArtifactRelation::DerivedFrom)
+        .add_relation(art2.id, art1.id, ArtifactRelation::SpawnedBy)
         .await
         .unwrap();
     art_repo
-        .add_relation(art2.id, art1.id, ArtifactRelation::DerivedFrom)
+        .add_relation(art2.id, art1.id, ArtifactRelation::SpawnedBy)
         .await
         .unwrap(); // no error on duplicate
 }
