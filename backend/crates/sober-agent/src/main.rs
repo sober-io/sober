@@ -12,7 +12,8 @@ use sober_agent::ConfirmationBroker;
 use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
-use sober_agent::tools::{FetchUrlTool, ToolRegistry, WebSearchTool};
+use sober_agent::tools::{FetchUrlTool, ShellTool, ToolRegistry, WebSearchTool};
+use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
 use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, create_pool};
@@ -20,6 +21,7 @@ use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
+use sober_sandbox::{CommandPolicy, SandboxProfile};
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -80,9 +82,31 @@ async fn main() -> Result<()> {
     let mind = Arc::new(Mind::new(soul_resolver));
 
     // 9. Create tool registry with built-in tools
+    //
+    // The ShellTool uses a default workspace path and policy-based permission
+    // mode. In production these will be derived from the workspace config per
+    // conversation; for now we use sensible defaults.
+    let workspace_home = PathBuf::from(
+        std::env::var("WORKSPACE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/sober/workspaces/default".to_owned()),
+    );
+    let sandbox_policy = SandboxProfile::Standard
+        .resolve(&std::collections::HashMap::new())
+        .context("failed to resolve sandbox policy")?;
+    let command_policy = CommandPolicy::default();
+    let shell_tool = ShellTool::new(
+        command_policy,
+        PermissionMode::default(),
+        workspace_home,
+        sandbox_policy,
+        None, // TODO: wire confirm_fn to ConfirmationBroker event stream
+        true, // auto_snapshot
+    );
+
     let builtins: Vec<Arc<dyn Tool>> = vec![
         Arc::new(WebSearchTool::new(config.searxng.url.clone())),
         Arc::new(FetchUrlTool::new()),
+        Arc::new(shell_tool),
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 
