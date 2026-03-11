@@ -519,3 +519,79 @@ Split across four crates following the repo trait pattern (see 005-sober-db):
 This split enables `sober-cli` (`sober workspace list/archive/...`) and
 `sober-scheduler` (stale worktree cleanup, blob pruning) to use workspace
 logic without depending on the agent binary.
+
+---
+
+## 13. Workspace Enforcement (Phase 2)
+
+### CallerContext Extension
+
+Add `workspace_id` to `CallerContext` in `sober-core`:
+
+```rust
+pub struct CallerContext {
+    pub user_id: Option<UserId>,
+    pub trigger: TriggerKind,
+    pub permissions: Vec<Permission>,
+    pub scope_grants: Vec<ScopeId>,
+    pub workspace_id: Option<WorkspaceId>,
+}
+```
+
+Workspace context is **optional** --- casual chat works without one. Enforcement
+activates only when the agent needs to create artifacts, modify files, or use
+git operations. Functions that create artifacts, modify workspace files, or
+interact with git repos take `WorkspaceId` (not `Option<WorkspaceId>`).
+
+### Conversation-Workspace Binding
+
+Workspace context is stored on the **conversation**, not passed per-request.
+
+- `conversations` table gains `workspace_id UUID REFERENCES workspaces(id)` (nullable)
+- `Conversation` domain type gains `workspace_id: Option<WorkspaceId>`
+- `ConversationRepo::create()` gains `workspace_id: Option<WorkspaceId>` parameter
+- Agent resolves workspace from the conversation on `HandleMessage`
+
+Resolution chain:
+1. Look up conversation -> get `workspace_id` if set
+2. If `None` and agent needs to produce artifacts -> ask user to pick/create
+3. Once resolved, bind workspace to the conversation for future messages
+
+---
+
+## 14. Remote Auto-Detection & Push
+
+When a repo is registered with `remote_url: None`, the service layer calls
+`detect_remote_url()` to auto-fill it from git config. User-provided URL
+always takes precedence.
+
+```rust
+/// Detect remote URL. Tries "origin" first, falls back to first remote.
+pub fn detect_remote_url(repo_path: &Path) -> Result<Option<String>, WorkspaceError>
+
+/// Push a local branch to a remote. Defaults to "origin".
+pub fn push_branch(
+    repo_path: &Path,
+    branch: &str,
+    remote: Option<&str>,
+) -> Result<(), WorkspaceError>
+```
+
+Push uses git2's remote API with SSH credential discovery from the environment.
+No password/token auth --- relies on the user's git credential setup.
+
+**Out of scope:** PR creation (GitHub tool/MCP concern), fetch/pull, remote management.
+
+---
+
+## 15. SOUL.md Workspace Rules
+
+Add a "Workspace Discipline" section to `backend/soul/SOUL.md`:
+
+- All file modifications, git operations, and artifact creation must happen
+  within an active workspace context.
+- Never modify files outside the workspace root or linked repo paths.
+- Use git worktrees for code changes --- never modify the user's current branch.
+- Track all meaningful outputs as artifacts with provenance.
+- Before destructive filesystem operations, create a snapshot.
+- Casual conversation does not require a workspace.
