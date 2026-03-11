@@ -15,6 +15,7 @@
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
 	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
+	import StatusBar from '$lib/components/chat/StatusBar.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -65,6 +66,7 @@
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let resolvedConfirms = $state<Record<string, 'approved' | 'denied'>>({});
+	let permissionMode = $state<'interactive' | 'policy_based' | 'autonomous'>('policy_based');
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -289,6 +291,11 @@
 		}
 	};
 
+	const handleModeChange = (newMode: 'interactive' | 'policy_based' | 'autonomous') => {
+		permissionMode = newMode;
+		// TODO: persist to workspace settings via API
+	};
+
 	const handleConfirmResponse = (confirmId: string, approved: boolean) => {
 		websocket.send({
 			type: 'chat.confirm_response',
@@ -429,4 +436,5 @@
 	</div>
 
 	<ChatInput onsend={sendMessage} busy={isBusy} />
+	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
