@@ -228,6 +228,8 @@
 						input: msg.tool_call.input
 					};
 					last.toolCalls = [...(last.toolCalls ?? []), tc];
+					last.streaming = true;
+					last.thinking = false;
 				}
 				break;
 			}
