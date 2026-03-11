@@ -3,11 +3,10 @@
 
 	interface Props {
 		request: ConfirmRequest;
-		resolved?: 'approved' | 'denied';
 		onRespond: (confirmId: string, approved: boolean) => void;
 	}
 
-	let { request, resolved, onRespond }: Props = $props();
+	let { request, onRespond }: Props = $props();
 
 	const riskColors: Record<string, string> = {
 		safe: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
@@ -18,7 +17,9 @@
 	const riskBadge = $derived(riskColors[request.risk_level] ?? riskColors.moderate);
 </script>
 
-<div class="my-2 rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">
+<div
+	class="animate-in slide-in-from-top w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-800 p-4 shadow-2xl shadow-black/40"
+>
 	<div class="mb-3 flex items-center gap-2">
 		<span class="text-sm font-medium text-zinc-300">Command Approval</span>
 		<span class="rounded border px-2 py-0.5 text-xs font-medium {riskBadge}">
@@ -42,26 +43,18 @@
 		<p class="mb-3 text-xs text-zinc-500">{request.reason}</p>
 	{/if}
 
-	{#if resolved}
-		<div
-			class="text-sm font-medium {resolved === 'approved' ? 'text-emerald-400' : 'text-red-400'}"
+	<div class="flex gap-2">
+		<button
+			onclick={() => onRespond(request.confirm_id, true)}
+			class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
 		>
-			{resolved === 'approved' ? 'Approved' : 'Denied'}
-		</div>
-	{:else}
-		<div class="flex gap-2">
-			<button
-				onclick={() => onRespond(request.confirm_id, true)}
-				class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
-			>
-				Approve
-			</button>
-			<button
-				onclick={() => onRespond(request.confirm_id, false)}
-				class="rounded bg-zinc-600 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-500"
-			>
-				Deny
-			</button>
-		</div>
-	{/if}
+			Approve
+		</button>
+		<button
+			onclick={() => onRespond(request.confirm_id, false)}
+			class="rounded bg-zinc-600 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-500"
+		>
+			Deny
+		</button>
+	</div>
 </div>

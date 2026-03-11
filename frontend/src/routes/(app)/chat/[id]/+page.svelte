@@ -67,7 +67,6 @@
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
-	let resolvedConfirms = $state<Record<string, 'approved' | 'denied'>>({});
 	let permissionMode = $state<PermissionMode>('policy_based');
 
 	const conversationId = $derived($page.params.id ?? '');
@@ -82,7 +81,6 @@
 		isAtBottom = true;
 		title = data.conversation.title || '';
 		pendingConfirms = [];
-		resolvedConfirms = {};
 
 		// Load workspace settings if conversation is linked to a workspace.
 		const wsId = data.conversation.workspace_id;
@@ -338,7 +336,8 @@
 			confirm_id: confirmId,
 			approved
 		});
-		resolvedConfirms = { ...resolvedConfirms, [confirmId]: approved ? 'approved' : 'denied' };
+		// Remove from pending — toast disappears on response.
+		pendingConfirms = pendingConfirms.filter((c) => c.confirm_id !== confirmId);
 	};
 
 	const startEditTitle = () => {
@@ -395,14 +394,6 @@
 					toolCalls={msg.toolCalls}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
-				/>
-			{/each}
-
-			{#each pendingConfirms as confirm (confirm.confirm_id)}
-				<ConfirmationCard
-					request={confirm}
-					resolved={resolvedConfirms[confirm.confirm_id]}
-					onRespond={handleConfirmResponse}
 				/>
 			{/each}
 
@@ -468,6 +459,19 @@
 		</div>
 
 		<ScrollToBottom onclick={scrollToBottom} visible={!isAtBottom} />
+
+		{#if pendingConfirms.length > 0}
+			<div class="pointer-events-none absolute inset-x-0 top-16 z-10 flex flex-col items-center gap-2 p-4">
+				{#each pendingConfirms as confirm (confirm.confirm_id)}
+					<div class="pointer-events-auto">
+						<ConfirmationCard
+							request={confirm}
+							onRespond={handleConfirmResponse}
+						/>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
 
 	<ChatInput onsend={sendMessage} busy={isBusy} />
