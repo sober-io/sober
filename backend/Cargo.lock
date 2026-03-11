@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3235,6 +3235,7 @@ dependencies = [
  "sober-memory",
  "sober-mind",
  "sober-sandbox",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -3248,7 +3249,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -3272,6 +3273,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
+ "toml 0.8.23",
  "tonic 0.14.5",
  "tonic-prost",
  "tonic-prost-build",
@@ -3322,7 +3324,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -3444,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "sober-sandbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "http-body-util",
