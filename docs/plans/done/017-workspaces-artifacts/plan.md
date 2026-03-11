@@ -2027,3 +2027,397 @@ git commit -m "chore(workspace): clippy fixes and documentation"
 - [ ] `ARCHITECTURE.md` updated with `~/.sober/` paths and workspace crate
 - [ ] `cargo test --workspace` passes
 - [ ] All public items in `sober-workspace` have doc comments
+
+---
+
+## Phase 2: Workspace Enforcement, Remote Integration & SOUL.md Rules
+
+---
+
+### Task 15: Add workspace_id to CallerContext
+
+**Files:**
+- Modify: `backend/crates/sober-core/src/types/access.rs`
+
+**Step 1: Add workspace_id field to CallerContext**
+
+```rust
+pub struct CallerContext {
+    pub user_id: Option<UserId>,
+    pub trigger: TriggerKind,
+    pub permissions: Vec<Permission>,
+    pub scope_grants: Vec<ScopeId>,
+    /// The workspace this operation is scoped to, if any.
+    pub workspace_id: Option<WorkspaceId>,
+}
+```
+
+Add `WorkspaceId` to the imports from `super::ids`.
+
+**Step 2: Update existing tests**
+
+Update `caller_context_for_human` and `caller_context_for_scheduler` tests to include `workspace_id: None`.
+
+Add a new test:
+
+```rust
+#[test]
+fn caller_context_with_workspace() {
+    let user_id = UserId::new();
+    let scope = ScopeId::new();
+    let workspace_id = WorkspaceId::new();
+    let ctx = CallerContext {
+        user_id: Some(user_id),
+        trigger: TriggerKind::Human,
+        permissions: vec![Permission::ReadKnowledge(scope)],
+        scope_grants: vec![scope],
+        workspace_id: Some(workspace_id),
+    };
+    assert_eq!(ctx.workspace_id, Some(workspace_id));
+}
+```
+
+**Step 3: Verify**
+
+Run: `cargo test -p sober-core -q`
+
+**Step 4: Commit**
+
+```
+feat(core): add workspace_id to CallerContext
+```
+
+---
+
+### Task 16: Add workspace_id to Conversation + Migration
+
+**Files:**
+- Modify: `backend/crates/sober-core/src/types/domain.rs`
+- Modify: `backend/crates/sober-core/src/types/repo.rs`
+- Modify: `backend/crates/sober-db/src/rows.rs`
+- Modify: `backend/crates/sober-db/src/repos/conversations.rs`
+- Create: `backend/migrations/20260311000002_conversation_workspace.sql`
+
+**Step 1: Migration**
+
+```sql
+ALTER TABLE conversations
+    ADD COLUMN workspace_id UUID REFERENCES workspaces(id);
+
+CREATE INDEX idx_conversations_workspace_id ON conversations(workspace_id);
+```
+
+**Step 2: Update Conversation domain type**
+
+In `domain.rs`, add to the `Conversation` struct:
+
+```rust
+/// The workspace this conversation is scoped to, if any.
+pub workspace_id: Option<WorkspaceId>,
+```
+
+Add `WorkspaceId` to the imports.
+
+**Step 3: Update ConversationRow**
+
+In `rows.rs`, add `pub workspace_id: Option<Uuid>` to `ConversationRow` and
+update its `From` impl:
+
+```rust
+workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
+```
+
+**Step 4: Update ConversationRepo trait**
+
+In `repo.rs`, change `create` signature:
+
+```rust
+fn create(
+    &self,
+    user_id: UserId,
+    title: Option<&str>,
+    workspace_id: Option<WorkspaceId>,
+) -> impl Future<Output = Result<Conversation, AppError>> + Send;
+```
+
+**Step 5: Update PgConversationRepo**
+
+In `conversations.rs`, update the `create` impl to accept and bind `workspace_id`.
+Update all SELECT queries to include `workspace_id`.
+
+**Step 6: Update downstream callers**
+
+In `backend/crates/sober-api/src/routes/conversations.rs`:
+- Add `workspace_id: Option<String>` to `CreateConversationRequest`
+- Parse it to `Option<WorkspaceId>` and pass to `repo.create()`
+- Include `workspace_id` in JSON responses
+
+**Step 7: Verify**
+
+Run: `cargo test --workspace -q`
+
+All existing tests should pass (workspace_id is optional/nullable everywhere).
+
+**Step 8: Commit**
+
+```
+feat(core): add workspace_id to conversations
+```
+
+---
+
+### Task 17: Add remote detection to sober-workspace
+
+**Files:**
+- Create: `backend/crates/sober-workspace/src/remote.rs`
+- Modify: `backend/crates/sober-workspace/src/lib.rs`
+
+**Step 1: Write tests**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn init_repo_with_remote(path: &Path, url: &str) -> git2::Repository {
+        let repo = git2::Repository::init(path).unwrap();
+        repo.remote("origin", url).unwrap();
+        // Create initial commit so HEAD exists
+        {
+            let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+            let tree_id = repo.index().unwrap().write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+        }
+        repo
+    }
+
+    #[test]
+    fn detect_remote_url_finds_origin() {
+        let tmp = TempDir::new().unwrap();
+        let repo_path = tmp.path().join("repo");
+        init_repo_with_remote(&repo_path, "git@github.com:user/repo.git");
+
+        let url = detect_remote_url(&repo_path).unwrap();
+        assert_eq!(url.as_deref(), Some("git@github.com:user/repo.git"));
+    }
+
+    #[test]
+    fn detect_remote_url_returns_none_without_remotes() {
+        let tmp = TempDir::new().unwrap();
+        let repo_path = tmp.path().join("repo");
+        git2::Repository::init(&repo_path).unwrap();
+
+        let url = detect_remote_url(&repo_path).unwrap();
+        assert!(url.is_none());
+    }
+
+    #[test]
+    fn detect_remote_url_falls_back_to_first_remote() {
+        let tmp = TempDir::new().unwrap();
+        let repo_path = tmp.path().join("repo");
+        let repo = git2::Repository::init(&repo_path).unwrap();
+        repo.remote("upstream", "https://example.com/repo.git").unwrap();
+
+        let url = detect_remote_url(&repo_path).unwrap();
+        assert_eq!(url.as_deref(), Some("https://example.com/repo.git"));
+    }
+}
+```
+
+**Step 2: Implement detect_remote_url**
+
+```rust
+//! Git remote operations.
+
+use std::path::Path;
+
+use crate::WorkspaceError;
+
+/// Detect the remote URL for a repository.
+///
+/// Tries "origin" first, then falls back to the first available remote.
+/// Returns `None` if no remotes are configured.
+pub fn detect_remote_url(repo_path: &Path) -> Result<Option<String>, WorkspaceError> {
+    let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
+
+    // Try "origin" first
+    if let Ok(remote) = repo.find_remote("origin") {
+        if let Some(url) = remote.url() {
+            return Ok(Some(url.to_string()));
+        }
+    }
+
+    // Fall back to first available remote
+    let remotes = repo.remotes().map_err(WorkspaceError::Git)?;
+    for name in remotes.iter().flatten() {
+        if let Ok(remote) = repo.find_remote(name) {
+            if let Some(url) = remote.url() {
+                return Ok(Some(url.to_string()));
+            }
+        }
+    }
+
+    Ok(None)
+}
+```
+
+**Step 3: Add module to lib.rs**
+
+Add `pub mod remote;` and `pub use remote::detect_remote_url;`
+
+**Step 4: Verify**
+
+Run: `cargo test -p sober-workspace -q`
+
+**Step 5: Commit**
+
+```
+feat(workspace): add git remote URL auto-detection
+```
+
+---
+
+### Task 18: Add push_branch to sober-workspace
+
+**Files:**
+- Modify: `backend/crates/sober-workspace/src/remote.rs`
+- Modify: `backend/crates/sober-workspace/src/lib.rs`
+
+**Step 1: Implement push_branch**
+
+```rust
+/// Push a local branch to a remote.
+///
+/// Defaults to "origin" if no remote name is provided. Uses the
+/// environment's SSH credentials (SSH agent, `~/.ssh/`).
+pub fn push_branch(
+    repo_path: &Path,
+    branch: &str,
+    remote: Option<&str>,
+) -> Result<(), WorkspaceError> {
+    let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
+    let remote_name = remote.unwrap_or("origin");
+    let mut remote = repo
+        .find_remote(remote_name)
+        .map_err(WorkspaceError::Git)?;
+
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, allowed_types| {
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            let username = username_from_url.unwrap_or("git");
+            git2::Cred::ssh_key_from_agent(username)
+        } else {
+            Err(git2::Error::from_str("unsupported credential type"))
+        }
+    });
+
+    let mut push_options = git2::PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+
+    remote
+        .push(&[&refspec], Some(&mut push_options))
+        .map_err(WorkspaceError::Git)?;
+
+    Ok(())
+}
+```
+
+**Step 2: Add re-export to lib.rs**
+
+Update: `pub use remote::{detect_remote_url, push_branch};`
+
+**Step 3: Verify compilation**
+
+Run: `cargo build -p sober-workspace -q`
+
+Note: `push_branch` is difficult to unit test (requires a real remote). We verify
+it compiles and rely on integration testing. The `detect_remote_url` tests
+already validate the git2 remote plumbing.
+
+**Step 4: Commit**
+
+```
+feat(workspace): add git push_branch helper
+```
+
+---
+
+### Task 19: Add SOUL.md workspace discipline rules
+
+**Files:**
+- Modify: `backend/soul/SOUL.md`
+
+**Step 1: Add Workspace Discipline section**
+
+Insert between "Security Rules" and "Safety Guardrails":
+
+```markdown
+## Workspace Discipline
+
+- All file modifications, git operations, and artifact creation must happen
+  within an active workspace context. If no workspace is resolved for the
+  current conversation, ask the user to select or create one before proceeding.
+- Never modify files outside the workspace root or linked repo paths.
+- Use git worktrees for code changes --- never modify the user's current branch
+  directly. Create a worktree, do the work, propose the result.
+- Track all meaningful outputs as artifacts with proper provenance
+  (conversation, task, parent artifact).
+- Before destructive filesystem operations, create a snapshot.
+- Casual conversation (questions, explanations, brainstorming) does not
+  require a workspace. Workspace enforcement activates only when producing
+  persistent artifacts.
+```
+
+**Step 2: Commit**
+
+```
+feat(soul): add workspace discipline rules to SOUL.md
+```
+
+---
+
+### Task 20: Version bumps and final verification
+
+**Files:**
+- Modify: `backend/crates/sober-core/Cargo.toml` (0.5.0 -> 0.6.0)
+- Modify: `backend/crates/sober-db/Cargo.toml` (0.4.0 -> 0.5.0)
+- Modify: `backend/crates/sober-workspace/Cargo.toml` (0.1.0 -> 0.2.0)
+
+**Step 1: Bump versions**
+
+MINOR bumps for feat/ branch (ABSOLUTE RULE).
+
+**Step 2: Run full verification**
+
+```bash
+cargo test --workspace -q
+cargo clippy -q -- -D warnings
+```
+
+**Step 3: Commit**
+
+```
+chore: bump sober-core 0.6.0, sober-db 0.5.0, sober-workspace 0.2.0
+```
+
+---
+
+## Phase 2 Acceptance Criteria
+
+- [ ] `CallerContext` has `workspace_id: Option<WorkspaceId>` field
+- [ ] `Conversation` domain type has `workspace_id: Option<WorkspaceId>`
+- [ ] Migration adds `workspace_id` column to `conversations` table
+- [ ] `ConversationRepo::create()` accepts `workspace_id` parameter
+- [ ] `PgConversationRepo` stores and retrieves `workspace_id`
+- [ ] Conversation API routes pass through `workspace_id`
+- [ ] `detect_remote_url()` auto-discovers origin or first remote
+- [ ] `push_branch()` pushes via SSH credentials from environment
+- [ ] SOUL.md has "Workspace Discipline" section
+- [ ] Version bumps: sober-core 0.6.0, sober-db 0.5.0, sober-workspace 0.2.0
+- [ ] `cargo test --workspace -q` passes
+- [ ] `cargo clippy -q -- -D warnings` clean

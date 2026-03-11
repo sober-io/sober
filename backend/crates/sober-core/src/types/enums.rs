@@ -98,6 +98,44 @@ pub enum JobStatus {
     Cancelled,
 }
 
+/// Lifecycle state of a workspace.
+///
+/// Maps to the `workspace_state` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "workspace_state", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceState {
+    /// Workspace is active and usable.
+    Active,
+    /// Workspace is archived (soft-deleted, read-only).
+    Archived,
+    /// Workspace is deleted (pending cleanup).
+    Deleted,
+}
+
+/// Lifecycle state of a git worktree.
+///
+/// Maps to the `worktree_state` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "worktree_state", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum WorktreeState {
+    /// Worktree is active and in use.
+    Active,
+    /// Worktree has been idle too long, candidate for cleanup.
+    Stale,
+    /// Worktree is being removed.
+    Removing,
+}
+
 /// Lifecycle state of a workspace artifact.
 ///
 /// Maps to the `artifact_state` PostgreSQL enum.
@@ -109,10 +147,14 @@ pub enum JobStatus {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ArtifactState {
-    /// Artifact is a draft, not yet finalized.
+    /// Artifact is a work in progress.
     Draft,
-    /// Artifact has been committed/finalized.
-    Committed,
+    /// Artifact has been proposed for review.
+    Proposed,
+    /// Artifact has been approved.
+    Approved,
+    /// Artifact has been rejected.
+    Rejected,
     /// Artifact has been archived.
     Archived,
 }
@@ -128,33 +170,38 @@ pub enum ArtifactState {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactRelation {
-    /// Target artifact is derived from source.
-    DerivedFrom,
+    /// Target artifact spawned from source.
+    SpawnedBy,
     /// Target artifact supersedes source.
     Supersedes,
     /// Target artifact references source.
     References,
+    /// Target artifact implements source (e.g. code implements a proposal).
+    Implements,
 }
 
 /// Kind of workspace artifact.
 ///
 /// Maps to the `artifact_kind` PostgreSQL enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "postgres", derive(sqlx::Type))]
 #[cfg_attr(
     feature = "postgres",
-    sqlx(type_name = "artifact_kind", rename_all = "lowercase")
+    sqlx(type_name = "artifact_kind", rename_all = "snake_case")
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
-    /// A code file or snippet.
-    Code,
+    /// A code change (commit, diff, PR).
+    CodeChange,
     /// A document (markdown, text, etc.).
+    #[default]
     Document,
-    /// A configuration file.
-    Config,
-    /// A generated output (build artifact, report, etc.).
-    Generated,
+    /// A proposal for changes.
+    Proposal,
+    /// A workspace snapshot (tar archive).
+    Snapshot,
+    /// An execution trace (debugging).
+    Trace,
 }
 
 /// Authorization role kind.
@@ -300,10 +347,38 @@ mod tests {
     }
 
     #[test]
+    fn workspace_state_serde_roundtrip() {
+        for variant in [
+            WorkspaceState::Active,
+            WorkspaceState::Archived,
+            WorkspaceState::Deleted,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: WorkspaceState = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn worktree_state_serde_roundtrip() {
+        for variant in [
+            WorktreeState::Active,
+            WorktreeState::Stale,
+            WorktreeState::Removing,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: WorktreeState = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
     fn artifact_state_serde_roundtrip() {
         for variant in [
             ArtifactState::Draft,
-            ArtifactState::Committed,
+            ArtifactState::Proposed,
+            ArtifactState::Approved,
+            ArtifactState::Rejected,
             ArtifactState::Archived,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
@@ -315,9 +390,10 @@ mod tests {
     #[test]
     fn artifact_relation_serde_roundtrip() {
         for variant in [
-            ArtifactRelation::DerivedFrom,
+            ArtifactRelation::SpawnedBy,
             ArtifactRelation::Supersedes,
             ArtifactRelation::References,
+            ArtifactRelation::Implements,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: ArtifactRelation = serde_json::from_str(&json).unwrap();
@@ -328,10 +404,11 @@ mod tests {
     #[test]
     fn artifact_kind_serde_roundtrip() {
         for variant in [
-            ArtifactKind::Code,
+            ArtifactKind::CodeChange,
             ArtifactKind::Document,
-            ArtifactKind::Config,
-            ArtifactKind::Generated,
+            ArtifactKind::Proposal,
+            ArtifactKind::Snapshot,
+            ArtifactKind::Trace,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: ArtifactKind = serde_json::from_str(&json).unwrap();

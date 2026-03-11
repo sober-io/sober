@@ -147,6 +147,7 @@ mod tests {
             trigger,
             permissions: vec![],
             scope_grants: vec![],
+            workspace_id: None,
         }
     }
 

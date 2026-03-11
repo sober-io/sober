@@ -11,7 +11,7 @@ use sober_core::types::{
 use sober_core::types::{
     ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, EncryptionKeyId, JobId,
     JobStatus, McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId, UserId,
-    UserStatus, WorkspaceId, WorkspaceRepoId, WorktreeId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use uuid::Uuid;
 
@@ -106,6 +106,7 @@ pub(crate) struct ConversationRow {
     pub id: Uuid,
     pub user_id: Uuid,
     pub title: Option<String>,
+    pub workspace_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -116,6 +117,7 @@ impl From<ConversationRow> for Conversation {
             id: ConversationId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
             title: row.title,
+            workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -210,8 +212,12 @@ pub(crate) struct WorkspaceRow {
     pub id: Uuid,
     pub user_id: Uuid,
     pub name: String,
+    pub description: Option<String>,
     pub root_path: String,
-    pub archived: bool,
+    pub state: WorkspaceState,
+    pub created_by: Uuid,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -222,8 +228,12 @@ impl From<WorkspaceRow> for Workspace {
             id: WorkspaceId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
             name: row.name,
+            description: row.description,
             root_path: row.root_path,
-            archived: row.archived,
+            state: row.state,
+            created_by: UserId::from_uuid(row.created_by),
+            archived_at: row.archived_at,
+            deleted_at: row.deleted_at,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -236,6 +246,8 @@ pub(crate) struct WorkspaceRepoRow {
     pub workspace_id: Uuid,
     pub name: String,
     pub path: String,
+    pub is_linked: bool,
+    pub remote_url: Option<String>,
     pub default_branch: String,
     pub created_at: DateTime<Utc>,
 }
@@ -247,6 +259,8 @@ impl From<WorkspaceRepoRow> for WorkspaceRepoEntry {
             workspace_id: WorkspaceId::from_uuid(row.workspace_id),
             name: row.name,
             path: row.path,
+            is_linked: row.is_linked,
+            remote_url: row.remote_url,
             default_branch: row.default_branch,
             created_at: row.created_at,
         }
@@ -259,8 +273,12 @@ pub(crate) struct WorktreeRow {
     pub repo_id: Uuid,
     pub branch: String,
     pub path: String,
-    pub stale: bool,
+    pub state: WorktreeState,
+    pub created_by: Option<Uuid>,
+    pub task_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+    pub last_active_at: DateTime<Utc>,
 }
 
 impl From<WorktreeRow> for Worktree {
@@ -270,8 +288,12 @@ impl From<WorktreeRow> for Worktree {
             repo_id: WorkspaceRepoId::from_uuid(row.repo_id),
             branch: row.branch,
             path: row.path,
-            stale: row.stale,
+            state: row.state,
+            created_by: row.created_by.map(UserId::from_uuid),
+            task_id: row.task_id,
+            conversation_id: row.conversation_id.map(ConversationId::from_uuid),
             created_at: row.created_at,
+            last_active_at: row.last_active_at,
         }
     }
 }
@@ -280,10 +302,23 @@ impl From<WorktreeRow> for Worktree {
 pub(crate) struct ArtifactRow {
     pub id: Uuid,
     pub workspace_id: Uuid,
-    pub name: String,
+    pub user_id: Uuid,
     pub kind: ArtifactKind,
     pub state: ArtifactState,
-    pub path: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub storage_type: String,
+    pub git_repo: Option<String>,
+    pub git_ref: Option<String>,
+    pub blob_key: Option<String>,
+    pub inline_content: Option<String>,
+    pub created_by: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
+    pub task_id: Option<Uuid>,
+    pub parent_id: Option<Uuid>,
+    pub reviewed_by: Option<Uuid>,
+    pub reviewed_at: Option<DateTime<Utc>>,
+    pub metadata: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -293,10 +328,23 @@ impl From<ArtifactRow> for Artifact {
         Artifact {
             id: ArtifactId::from_uuid(row.id),
             workspace_id: WorkspaceId::from_uuid(row.workspace_id),
-            name: row.name,
+            user_id: UserId::from_uuid(row.user_id),
             kind: row.kind,
             state: row.state,
-            path: row.path,
+            title: row.title,
+            description: row.description,
+            storage_type: row.storage_type,
+            git_repo: row.git_repo,
+            git_ref: row.git_ref,
+            blob_key: row.blob_key,
+            inline_content: row.inline_content,
+            created_by: row.created_by.map(UserId::from_uuid),
+            conversation_id: row.conversation_id.map(ConversationId::from_uuid),
+            task_id: row.task_id,
+            parent_id: row.parent_id.map(ArtifactId::from_uuid),
+            reviewed_by: row.reviewed_by.map(UserId::from_uuid),
+            reviewed_at: row.reviewed_at,
+            metadata: row.metadata,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

@@ -9,6 +9,7 @@ pub mod config;
 pub mod error;
 pub mod telemetry;
 pub mod types;
+pub mod workspace_config;
 
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
@@ -19,6 +20,7 @@ pub use config::AppConfig;
 pub use error::{ApiErrorBody, AppError};
 pub use telemetry::{MetricsEndpoint, TelemetryGuard, init_telemetry};
 pub use types::*;
+pub use workspace_config::{WorkspaceAgentState, WorkspaceConfig};
 
 // Re-export commonly used external types
 pub use chrono::{DateTime, Utc};

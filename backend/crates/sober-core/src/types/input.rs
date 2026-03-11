@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::domain::SecretScope;
 use super::enums::{ArtifactKind, ArtifactState};
-use super::ids::{ConversationId, UserId, WorkspaceId};
+use super::ids::{ArtifactId, ConversationId, UserId, WorkspaceId};
 
 /// Input for creating a new user.
 #[derive(Debug, Clone)]
@@ -100,21 +100,45 @@ pub struct RegisterRepo {
     pub name: String,
     /// Filesystem path.
     pub path: String,
+    /// Whether this is a linked (external) repo.
+    pub is_linked: bool,
+    /// Remote URL.
+    pub remote_url: Option<String>,
     /// Default branch name.
     pub default_branch: String,
 }
 
 /// Input for creating a workspace artifact.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CreateArtifact {
     /// The workspace this artifact belongs to.
     pub workspace_id: WorkspaceId,
-    /// Display name.
-    pub name: String,
+    /// The user who owns this artifact.
+    pub user_id: UserId,
     /// Artifact kind.
     pub kind: ArtifactKind,
-    /// Filesystem path (relative to workspace root).
-    pub path: String,
+    /// Display title.
+    pub title: String,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Storage type: "git", "blob", or "inline".
+    pub storage_type: String,
+    /// Git repo path within workspace (if git).
+    pub git_repo: Option<String>,
+    /// Git ref (if git).
+    pub git_ref: Option<String>,
+    /// Blob key (if blob).
+    pub blob_key: Option<String>,
+    /// Inline content (if inline).
+    pub inline_content: Option<String>,
+    /// Who created this artifact (None = agent).
+    pub created_by: Option<UserId>,
+    /// Associated conversation.
+    pub conversation_id: Option<ConversationId>,
+    /// Associated task.
+    pub task_id: Option<uuid::Uuid>,
+    /// Parent artifact.
+    pub parent_id: Option<ArtifactId>,
 }
 
 /// Filter for querying artifacts.

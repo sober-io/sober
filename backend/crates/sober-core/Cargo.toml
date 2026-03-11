@@ -1,6 +1,6 @@
 [package]
 name = "sober-core"
-version = "0.4.1"
+version = "0.6.0"
 edition.workspace = true
 
 [dependencies]
@@ -22,6 +22,7 @@ http = { workspace = true }
 
 # Configuration
 dotenvy = { workspace = true }
+toml = { workspace = true }
 
 # Observability
 tracing = { workspace = true }

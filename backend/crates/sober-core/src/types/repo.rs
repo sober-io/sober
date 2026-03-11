@@ -96,6 +96,7 @@ pub trait ConversationRepo: Send + Sync {
         &self,
         user_id: UserId,
         title: Option<&str>,
+        workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
 
     /// Finds a conversation by ID.
@@ -198,6 +199,7 @@ pub trait WorkspaceRepo: Send + Sync {
         &self,
         user_id: UserId,
         name: &str,
+        description: Option<&str>,
         root_path: &str,
     ) -> impl Future<Output = Result<Workspace, AppError>> + Send;
 
@@ -207,19 +209,19 @@ pub trait WorkspaceRepo: Send + Sync {
         id: WorkspaceId,
     ) -> impl Future<Output = Result<Workspace, AppError>> + Send;
 
-    /// Lists all workspaces for a user.
+    /// Lists non-deleted workspaces for a user.
     fn list_by_user(
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<Workspace>, AppError>> + Send;
 
-    /// Archives a workspace.
+    /// Archives a workspace (active -> archived).
     fn archive(&self, id: WorkspaceId) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Restores an archived workspace.
+    /// Restores an archived workspace (archived -> active).
     fn restore(&self, id: WorkspaceId) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Deletes a workspace.
+    /// Soft-deletes a workspace (archived -> deleted).
     fn delete(&self, id: WorkspaceId) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
@@ -238,8 +240,8 @@ pub trait WorkspaceRepoRepo: Send + Sync {
         workspace_id: WorkspaceId,
     ) -> impl Future<Output = Result<Vec<WorkspaceRepoEntry>, AppError>> + Send;
 
-    /// Finds a repo by filesystem path and user.
-    fn find_by_path(
+    /// Finds a linked repo by filesystem path and user.
+    fn find_by_linked_path(
         &self,
         path: &str,
         user_id: UserId,
@@ -257,7 +259,13 @@ pub trait WorktreeRepo: Send + Sync {
         repo_id: WorkspaceRepoId,
         branch: &str,
         path: &str,
+        created_by: Option<UserId>,
+        task_id: Option<uuid::Uuid>,
+        conversation_id: Option<ConversationId>,
     ) -> impl Future<Output = Result<Worktree, AppError>> + Send;
+
+    /// Finds a worktree by ID.
+    fn get_by_id(&self, id: WorktreeId) -> impl Future<Output = Result<Worktree, AppError>> + Send;
 
     /// Lists worktrees for a repo.
     fn list_by_repo(
@@ -265,15 +273,17 @@ pub trait WorktreeRepo: Send + Sync {
         repo_id: WorkspaceRepoId,
     ) -> impl Future<Output = Result<Vec<Worktree>, AppError>> + Send;
 
-    /// Lists non-stale worktrees created before the given time (candidates
-    /// for marking stale).
+    /// Lists stale worktree candidates (active with last_active_at older than threshold).
     fn list_stale_candidates(
         &self,
         older_than: DateTime<Utc>,
     ) -> impl Future<Output = Result<Vec<Worktree>, AppError>> + Send;
 
-    /// Marks a worktree as stale.
+    /// Marks a worktree as stale (active -> stale).
     fn mark_stale(&self, id: WorktreeId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Marks a worktree as removing (stale -> removing).
+    fn mark_removing(&self, id: WorktreeId) -> impl Future<Output = Result<(), AppError>> + Send;
 
     /// Deletes a worktree record.
     fn delete(&self, id: WorktreeId) -> impl Future<Output = Result<(), AppError>> + Send;
@@ -297,7 +307,14 @@ pub trait ArtifactRepo: Send + Sync {
         filter: ArtifactFilter,
     ) -> impl Future<Output = Result<Vec<Artifact>, AppError>> + Send;
 
-    /// Updates the state of an artifact.
+    /// Lists artifacts visible to a user (filters traces for non-admins).
+    fn list_visible(
+        &self,
+        workspace_id: WorkspaceId,
+        is_admin: bool,
+    ) -> impl Future<Output = Result<Vec<Artifact>, AppError>> + Send;
+
+    /// Updates the state of an artifact (validates legal transitions).
     fn update_state(
         &self,
         id: ArtifactId,

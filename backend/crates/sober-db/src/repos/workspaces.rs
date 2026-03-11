@@ -24,17 +24,21 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
         &self,
         user_id: UserId,
         name: &str,
+        description: Option<&str>,
         root_path: &str,
     ) -> Result<Workspace, AppError> {
         let id = Uuid::now_v7();
+        let uid = user_id.as_uuid();
         let row = sqlx::query_as::<_, WorkspaceRow>(
-            "INSERT INTO workspaces (id, user_id, name, root_path) \
-             VALUES ($1, $2, $3, $4) \
-             RETURNING id, user_id, name, root_path, archived, created_at, updated_at",
+            "INSERT INTO workspaces (id, user_id, name, description, root_path, created_by) \
+             VALUES ($1, $2, $3, $4, $5, $2) \
+             RETURNING id, user_id, name, description, root_path, state, \
+                       created_by, archived_at, deleted_at, created_at, updated_at",
         )
         .bind(id)
-        .bind(user_id.as_uuid())
+        .bind(uid)
         .bind(name)
+        .bind(description)
         .bind(root_path)
         .fetch_one(&self.pool)
         .await
@@ -45,7 +49,8 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
 
     async fn get_by_id(&self, id: WorkspaceId) -> Result<Workspace, AppError> {
         let row = sqlx::query_as::<_, WorkspaceRow>(
-            "SELECT id, user_id, name, root_path, archived, created_at, updated_at \
+            "SELECT id, user_id, name, description, root_path, state, \
+                    created_by, archived_at, deleted_at, created_at, updated_at \
              FROM workspaces WHERE id = $1",
         )
         .bind(id.as_uuid())
@@ -59,8 +64,9 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
 
     async fn list_by_user(&self, user_id: UserId) -> Result<Vec<Workspace>, AppError> {
         let rows = sqlx::query_as::<_, WorkspaceRow>(
-            "SELECT id, user_id, name, root_path, archived, created_at, updated_at \
-             FROM workspaces WHERE user_id = $1 AND archived = false \
+            "SELECT id, user_id, name, description, root_path, state, \
+                    created_by, archived_at, deleted_at, created_at, updated_at \
+             FROM workspaces WHERE user_id = $1 AND state != 'deleted' \
              ORDER BY updated_at DESC",
         )
         .bind(user_id.as_uuid())
@@ -72,12 +78,14 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
     }
 
     async fn archive(&self, id: WorkspaceId) -> Result<(), AppError> {
-        let result =
-            sqlx::query("UPDATE workspaces SET archived = true, updated_at = now() WHERE id = $1")
-                .bind(id.as_uuid())
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query(
+            "UPDATE workspaces SET state = 'archived', archived_at = now(), updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("workspace".into()));
@@ -87,12 +95,14 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
     }
 
     async fn restore(&self, id: WorkspaceId) -> Result<(), AppError> {
-        let result =
-            sqlx::query("UPDATE workspaces SET archived = false, updated_at = now() WHERE id = $1")
-                .bind(id.as_uuid())
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query(
+            "UPDATE workspaces SET state = 'active', archived_at = NULL, updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("workspace".into()));
@@ -102,11 +112,14 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
     }
 
     async fn delete(&self, id: WorkspaceId) -> Result<(), AppError> {
-        let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
-            .bind(id.as_uuid())
-            .execute(&self.pool)
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
+        let result = sqlx::query(
+            "UPDATE workspaces SET state = 'deleted', deleted_at = now(), updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("workspace".into()));

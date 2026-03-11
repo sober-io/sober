@@ -121,8 +121,8 @@ Similar to `.gitconfig` or `.npmrc`, SOUL.md is resolved from multiple layers:
 
 ```
 backend/soul/SOUL.md           (base --- shipped with the system)
-  └── ~/.sõber/SOUL.md          (user-level overrides/extensions)
-       └── ./.sõber/SOUL.md     (workspace/project-level)
+  └── ~/.sober/SOUL.md          (user-level overrides/extensions)
+       └── ./.sober/SOUL.md     (workspace/project-level)
 ```
 
 Each layer extends the previous. Merge rules differ by layer:
@@ -130,8 +130,8 @@ Each layer extends the previous. Merge rules differ by layer:
 | Layer | Location | Override rules |
 |-------|----------|---------------|
 | Base | `backend/soul/SOUL.md` | Foundation --- defines everything |
-| User | `~/.sõber/SOUL.md` | Full override of base. User controls their instance. |
-| Workspace | `./.sõber/SOUL.md` | Additive only. Can override style and domain emphasis. Cannot contradict ethical boundaries or security rules from base/user layers. |
+| User | `~/.sober/SOUL.md` | Full override of base. User controls their instance. |
+| Workspace | `./.sober/SOUL.md` | Additive only. Can override style and domain emphasis. Cannot contradict ethical boundaries or security rules from base/user layers. |
 
 The workspace restriction prevents a project-level SOUL.md from disabling safety
 guardrails while still allowing contextual adjustments like "in this project, be
@@ -233,7 +233,7 @@ stack.
 
 ### New files
 - `backend/soul/SOUL.md` --- base agent identity document
-- Resolution chain reads from `~/.sõber/SOUL.md` and `./.sõber/SOUL.md` at runtime
+- Resolution chain reads from `~/.sober/SOUL.md` and `./.sober/SOUL.md` at runtime
 
 ### Modified crates
 - `sober-agent` --- uses `sober-mind` for prompt assembly instead of hardcoded

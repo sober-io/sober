@@ -222,15 +222,15 @@ The agent's identity is defined by a layered SOUL.md system:
 
 ```
 backend/soul/SOUL.md           (base — shipped with the system)
-  └── ~/.sõber/SOUL.md          (user-level overrides/extensions)
-       └── ./.sõber/SOUL.md     (workspace/project-level)
+  └── ~/.sober/SOUL.md          (user-level overrides/extensions)
+       └── ./.sober/SOUL.md     (workspace/project-level)
 ```
 
 | Layer | Override rules |
 |-------|---------------|
 | Base | Foundation — defines everything |
-| User (`~/.sõber/`) | Full override of base. User controls their instance. |
-| Workspace (`./.sõber/`) | Additive only. Can override style/domain. Cannot contradict ethical boundaries or security rules. |
+| User (`~/.sober/`) | Full override of base. User controls their instance. |
+| Workspace (`./.sober/`) | Additive only. Can override style/domain. Cannot contradict ethical boundaries or security rules. |
 
 ### Dynamic Prompt Assembly
 

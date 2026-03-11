@@ -7,7 +7,7 @@ use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
-use sober_core::types::{ApiResponse, ConversationId, ConversationRepo, MessageRepo};
+use sober_core::types::{ApiResponse, ConversationId, ConversationRepo, MessageRepo, WorkspaceId};
 use sober_db::{PgConversationRepo, PgMessageRepo};
 
 use crate::state::AppState;
@@ -36,6 +36,7 @@ async fn list_conversations(
             serde_json::json!({
                 "id": c.id.to_string(),
                 "title": c.title,
+                "workspace_id": c.workspace_id.map(|w| w.to_string()),
                 "created_at": c.created_at.to_rfc3339(),
                 "updated_at": c.updated_at.to_rfc3339(),
             })
@@ -49,6 +50,7 @@ async fn list_conversations(
 #[derive(serde::Deserialize)]
 struct CreateConversationRequest {
     title: Option<String>,
+    workspace_id: Option<String>,
 }
 
 /// `POST /api/v1/conversations` — create a new conversation.
@@ -58,13 +60,23 @@ async fn create_conversation(
     Json(body): Json<CreateConversationRequest>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
     let repo = PgConversationRepo::new(state.db.clone());
+    let workspace_id = body
+        .workspace_id
+        .as_deref()
+        .map(|s| {
+            s.parse::<uuid::Uuid>()
+                .map(WorkspaceId::from_uuid)
+                .map_err(|_| AppError::Validation("invalid workspace_id".into()))
+        })
+        .transpose()?;
     let conversation = repo
-        .create(auth_user.user_id, body.title.as_deref())
+        .create(auth_user.user_id, body.title.as_deref(), workspace_id)
         .await?;
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": conversation.id.to_string(),
         "title": conversation.title,
+        "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
@@ -106,6 +118,7 @@ async fn get_conversation(
     Ok(ApiResponse::new(serde_json::json!({
         "id": conversation.id.to_string(),
         "title": conversation.title,
+        "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
         "messages": messages,
