@@ -6,11 +6,13 @@
 		ServerWsMessage,
 		ConversationWithMessages,
 		Message,
-		ConfirmRequest
+		ConfirmRequest,
+		PermissionMode
 	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
+	import { workspaceService } from '$lib/services/workspaces';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
@@ -66,7 +68,7 @@
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let resolvedConfirms = $state<Record<string, 'approved' | 'denied'>>({});
-	let permissionMode = $state<'interactive' | 'policy_based' | 'autonomous'>('policy_based');
+	let permissionMode = $state<PermissionMode>('policy_based');
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -81,6 +83,22 @@
 		title = data.conversation.title || '';
 		pendingConfirms = [];
 		resolvedConfirms = {};
+
+		// Load workspace settings if conversation is linked to a workspace.
+		const wsId = data.conversation.workspace_id;
+		if (wsId) {
+			workspaceService
+				.getSettings(wsId)
+				.then((settings) => {
+					permissionMode = settings.permission_mode;
+				})
+				.catch(() => {
+					// Workspace not found or no settings — use default.
+					permissionMode = 'policy_based';
+				});
+		} else {
+			permissionMode = 'policy_based';
+		}
 	});
 
 	// Scroll to bottom on conversation change
@@ -298,9 +316,12 @@
 		}
 	};
 
-	const handleModeChange = (newMode: 'interactive' | 'policy_based' | 'autonomous') => {
+	const handleModeChange = (newMode: PermissionMode) => {
 		permissionMode = newMode;
-		// TODO: persist to workspace settings via API
+		const wsId = data.conversation.workspace_id;
+		if (wsId) {
+			workspaceService.updateSettings(wsId, { permission_mode: newMode });
+		}
 	};
 
 	const handleConfirmResponse = (confirmId: string, approved: boolean) => {

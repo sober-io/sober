@@ -10,6 +10,7 @@ export interface User {
 export interface Conversation {
 	id: string;
 	title: string;
+	workspace_id?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -90,6 +91,13 @@ export type ServerWsMessage =
 			affects: string[];
 			reason: string;
 	  };
+
+export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
+
+export interface WorkspaceSettings {
+	permission_mode: PermissionMode;
+	auto_snapshot: boolean;
+}
 
 // API response envelope types
 
