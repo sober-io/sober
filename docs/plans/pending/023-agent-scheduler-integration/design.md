@@ -434,7 +434,128 @@ Agent: "Paused 'Deploy check'. Say 'resume' when you want it running again."
 
 ---
 
-## 5. System-Level Jobs
+## 5. Job Result Delivery to Conversations
+
+Scheduled jobs must not be silent — users need feedback. When a job completes,
+its results are delivered back to a conversation so the user sees them in their
+chat history.
+
+### Conversation linking
+
+Jobs track which conversation they were created from:
+
+- `conversation_id: Option<Uuid>` — the conversation where the job was created
+  (via agent tool call). NULL for system jobs and jobs created via `soberctl`.
+
+**Resolution strategy** for where to deliver results:
+
+| Scenario | Delivery target |
+|----------|----------------|
+| Job has `conversation_id` and that conversation still exists | Original conversation |
+| Job has `conversation_id` but conversation was deleted | User's most recent conversation in the same workspace |
+| Job has no `conversation_id` (soberctl-created user job) | User's most recent conversation in the job's workspace |
+| System job | No conversation delivery — results in `job_runs` only |
+
+### Delivery mechanism
+
+The existing WebSocket + gRPC streaming infrastructure handles everything.
+When the scheduler calls `Agent.ExecuteTask()`, it passes `conversation_id`
+from the job. The agent streams `AgentEvent`s back, and the API's WebSocket
+handler pushes them to the connected client.
+
+```
+Scheduler tick fires
+  → ExecuteTaskRequest { conversation_id: job.conversation_id, user_id, ... }
+  → Agent executes job, streams AgentEvents
+  → API receives stream on behalf of conversation
+  → If user is connected via WebSocket: real-time push (chat.delta, chat.done)
+  → If user is offline: messages stored in DB, visible when they reconnect
+```
+
+**Offline delivery:** The agent stores the assistant message in the messages
+table (linked to `conversation_id`) regardless of whether the user is connected.
+When the user opens that conversation, they see the job result as a regular
+assistant message — no special UI needed.
+
+### Message format in conversation
+
+Job results appear as normal assistant messages with a job context indicator:
+
+```
+[Scheduled job: "Deploy check" — every 30m]
+
+Deploy status looks healthy:
+- Production: 3 pods running, 0 restarts in last 30m
+- Staging: 2 pods running, 1 restart (recovered)
+- No alerts triggered.
+
+Result stored as artifact: sha256:abc123...
+```
+
+The agent prepends a brief header identifying the scheduled job so users can
+distinguish job results from interactive responses.
+
+### Proto & schema changes
+
+**Jobs table** — add `conversation_id`:
+```sql
+ALTER TABLE jobs ADD COLUMN conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL;
+```
+
+`ON DELETE SET NULL` ensures that deleting a conversation doesn't cascade to the
+job — the job continues running, and results fall back to the user's most recent
+conversation (per resolution strategy above).
+
+**Scheduler proto** — add to `Job` and `CreateJobRequest`:
+```protobuf
+message Job {
+  // ... existing + previously proposed fields ...
+  string conversation_id = 13;  // NEW — optional, conversation to deliver results to
+}
+
+message CreateJobRequest {
+  // ... existing + previously proposed fields ...
+  string conversation_id = 8;   // NEW
+}
+```
+
+**Scheduler engine** — `execute_via_agent()` forwards `conversation_id`:
+```rust
+let request = ExecuteTaskRequest {
+    // ... existing fields ...
+    conversation_id: job.conversation_id.map(|id| id.to_string()).unwrap_or_default(),
+};
+```
+
+### Fallback resolution in agent
+
+When `execute_task()` receives a job with a `conversation_id`, the agent verifies
+the conversation still exists. If not, it resolves a fallback:
+
+```rust
+// sober-agent — resolve delivery conversation (pseudocode)
+async fn resolve_delivery_conversation(
+    &self,
+    job_conversation_id: Option<Uuid>,
+    user_id: Uuid,
+    workspace_id: Option<Uuid>,
+) -> Option<ConversationId> {
+    // Try the original conversation first
+    if let Some(cid) = job_conversation_id {
+        if self.conversation_repo.exists(cid).await? {
+            return Some(cid);
+        }
+    }
+    // Fallback: user's most recent conversation in the same workspace
+    self.conversation_repo
+        .find_latest_by_user_and_workspace(user_id, workspace_id)
+        .await?
+}
+```
+
+---
+
+## 6. System-Level Jobs
 
 Predefined jobs registered idempotently on agent startup. Managed exclusively
 via `soberctl` — never through conversation.
@@ -457,7 +578,7 @@ LLM reasoning to analyze patterns and propose changes.
 
 Uses `ListJobs` with `owner_type: "system"` filter to check for existing jobs,
 since `find_by_name` does not exist. A new `name` filter is added to
-`ListJobsRequest` (see Section 6 proto changes).
+`ListJobsRequest` (see Section 7 proto changes).
 
 ```rust
 async fn register_system_jobs(scheduler: &SchedulerClient) {
@@ -511,7 +632,7 @@ async fn register_system_jobs(scheduler: &SchedulerClient) {
 
 ---
 
-## 6. Proto & Database Changes
+## 7. Proto & Database Changes
 
 ### Proto changes (`scheduler.proto`)
 
@@ -564,9 +685,10 @@ message Done {
 -- Migrate existing 'agent' owner_type rows before changing constraint
 UPDATE jobs SET owner_type = 'system' WHERE owner_type = 'agent';
 
--- Add workspace and creator tracking
+-- Add workspace, creator, and conversation tracking
 ALTER TABLE jobs ADD COLUMN workspace_id UUID REFERENCES workspaces(id);
 ALTER TABLE jobs ADD COLUMN created_by UUID REFERENCES users(id);
+ALTER TABLE jobs ADD COLUMN conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL;
 
 -- Expand owner_type to include 'group', drop unused 'agent'
 ALTER TABLE jobs DROP CONSTRAINT jobs_owner_type_check;
@@ -591,22 +713,21 @@ CREATE INDEX idx_jobs_workspace ON jobs(workspace_id) WHERE workspace_id IS NOT 
 
 ---
 
-## 7. Component Change Summary
+## 8. Component Change Summary
 
 | Component | Changes |
 |-----------|---------|
-| **sober-core** | `JobPayload` enum (Prompt/Artifact/Internal), `ArtifactType` enum, `InternalOp` enum; extended `Job` domain type with `workspace_id` + `created_by`; extended `CreateJob` input type with same fields |
-| **sober-agent** | Full `execute_task()` implementation with payload dispatch (channel+spawn pattern); `SchedulerTools` struct for conversational job management with `AuthorizationService`; system job registration on startup; `AgentEvent::Done` gains `artifact_ref` |
-| **sober-scheduler** | Proto + DB schema updates; `execute_via_agent()` forwards `workspace_id` from Job; new `PauseJob`/`ResumeJob` RPCs; `list_filtered` supports `name_filter`. No other execution logic changes. |
-| **sober-db** | Updated `PgJobRepo::create()` and `PgJobRepo::list_filtered()` for new fields; `PgJobRunRepo::complete()` accepts `result_artifact_ref`; new migration |
+| **sober-core** | `JobPayload` enum (Prompt/Artifact/Internal), `ArtifactType` enum, `InternalOp` enum; extended `Job` domain type with `workspace_id` + `created_by` + `conversation_id`; extended `CreateJob` input type with same fields |
+| **sober-agent** | Full `execute_task()` implementation with payload dispatch (channel+spawn pattern); `SchedulerTools` struct for conversational job management with `AuthorizationService`; system job registration on startup; `AgentEvent::Done` gains `artifact_ref`; conversation resolution for job result delivery (fallback to latest conversation) |
+| **sober-scheduler** | Proto + DB schema updates; `execute_via_agent()` forwards `workspace_id` + `conversation_id` from Job; new `PauseJob`/`ResumeJob` RPCs; `list_filtered` supports `name_filter`. No other execution logic changes. |
+| **sober-db** | Updated `PgJobRepo::create()` and `PgJobRepo::list_filtered()` for new fields; `PgJobRunRepo::complete()` accepts `result_artifact_ref`; new `ConversationRepo::find_latest_by_user_and_workspace()`; new migration |
 | **sober-mind** | New `assemble_autonomous_prompt()` method taking `CallerContext` (not `AccessMask`) for non-conversational execution |
-| **Proto** | `scheduler.proto`: `workspace_id`, `created_by` on Job/CreateJobRequest; `name_filter` on ListJobsRequest; `PauseJob`/`ResumeJob` RPCs. `agent.proto`: `artifact_ref` on Done message. |
+| **Proto** | `scheduler.proto`: `workspace_id`, `created_by`, `conversation_id` on Job/CreateJobRequest; `name_filter` on ListJobsRequest; `PauseJob`/`ResumeJob` RPCs. `agent.proto`: `artifact_ref` on Done message. |
 
-## 8. What's NOT in This Design
+## 9. What's NOT in This Design
 
 - REST API endpoints for job management (future work)
 - Frontend UI for job management (future work)
 - Chat integration beyond tool calls (e.g., natural language job DSL)
 - Job retry policies or exponential backoff
-- Job output notifications (push to user when job completes/fails)
 - Multi-machine distributed scheduling
