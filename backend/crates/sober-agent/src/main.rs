@@ -100,7 +100,9 @@ async fn main() -> Result<()> {
         .context("failed to resolve sandbox policy")?;
     let command_policy = CommandPolicy::default();
     let shared_permission_mode = Arc::new(RwLock::new(PermissionMode::default()));
-    let snapshot_dir = workspace_root.join(".sober").join("snapshots");
+    let snapshot_dir = workspace_root
+        .join(sober_workspace::SOBER_DIR)
+        .join("snapshots");
     let snapshot_manager = sober_workspace::SnapshotManager::new(snapshot_dir);
     let shell_tool = ShellTool::new(
         command_policy,
@@ -108,6 +110,7 @@ async fn main() -> Result<()> {
         workspace_root,
         sandbox_policy,
         true, // auto_snapshot
+        None, // max_snapshots (uses default; overridden by workspace config)
         Some(snapshot_manager),
     );
 

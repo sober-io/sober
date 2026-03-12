@@ -23,6 +23,7 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
         sandbox_policy,
         false,
         None,
+        None,
     )
 }
 
@@ -86,6 +87,7 @@ async fn shell_tool_denies_blocked_commands() {
         dir.path().to_path_buf(),
         sandbox_policy,
         false,
+        None,
         None,
     );
     let result = tool

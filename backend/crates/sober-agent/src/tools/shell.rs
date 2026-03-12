@@ -21,6 +21,7 @@ const MAX_OUTPUT_LEN: usize = 16_000;
 const DEFAULT_TIMEOUT_SECS: u32 = 300;
 
 /// Default maximum number of snapshots retained per workspace.
+/// Used when no workspace config overrides the value.
 const DEFAULT_MAX_SNAPSHOTS: u32 = 10;
 
 #[derive(Debug, Deserialize)]
@@ -47,17 +48,22 @@ pub struct ShellTool {
     workspace_home: PathBuf,
     sandbox_policy: SandboxPolicy,
     auto_snapshot: bool,
+    max_snapshots: u32,
     snapshot_manager: Option<SnapshotManager>,
 }
 
 impl ShellTool {
     /// Create a new ShellTool with a shared permission mode.
+    ///
+    /// `max_snapshots` controls how many snapshots are retained before pruning.
+    /// Pass `None` to use the default (10).
     pub fn new(
         policy: CommandPolicy,
         permission_mode: SharedPermissionMode,
         workspace_home: PathBuf,
         sandbox_policy: SandboxPolicy,
         auto_snapshot: bool,
+        max_snapshots: Option<u32>,
         snapshot_manager: Option<SnapshotManager>,
     ) -> Self {
         Self {
@@ -66,6 +72,7 @@ impl ShellTool {
             workspace_home,
             sandbox_policy,
             auto_snapshot,
+            max_snapshots: max_snapshots.unwrap_or(DEFAULT_MAX_SNAPSHOTS),
             snapshot_manager,
         }
     }
@@ -123,7 +130,7 @@ impl ShellTool {
                 Ok(snap) => {
                     tracing::info!(path = %snap.path.display(), "auto-snapshot created");
                     // Best-effort prune old snapshots.
-                    if let Err(e) = mgr.prune(DEFAULT_MAX_SNAPSHOTS).await {
+                    if let Err(e) = mgr.prune(self.max_snapshots).await {
                         tracing::warn!(error = %e, "snapshot prune failed");
                     }
                 }
@@ -243,6 +250,7 @@ mod tests {
             workspace_home: PathBuf::from("/tmp/test-workspace"),
             sandbox_policy: SandboxProfile::LockedDown.resolve(&HashMap::new()).unwrap(),
             auto_snapshot: false,
+            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             snapshot_manager: None,
         }
     }

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tokio::fs;
 
-use crate::WorkspaceError;
+use crate::{SOBER_DIR, WorkspaceError};
 
 const DEFAULT_CONFIG_TOML: &str = "\
 # Workspace configuration for Sober agent.
@@ -41,7 +41,7 @@ const DEFAULT_STATE_JSON: &str = r#"{"observations":[]}"#;
 /// Creates the root directory and `.sober/` with subdirectories and template
 /// files (`config.toml`, `state.json`) if they do not already exist.
 pub async fn init_workspace_dir(workspace_root: &Path) -> Result<(), WorkspaceError> {
-    let sober_dir = workspace_root.join(".sober");
+    let sober_dir = workspace_root.join(SOBER_DIR);
 
     for subdir in ["proposals", "traces", "snapshots", "worktrees"] {
         fs::create_dir_all(sober_dir.join(subdir))

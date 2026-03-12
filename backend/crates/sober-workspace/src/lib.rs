@@ -12,6 +12,9 @@ pub mod remote;
 pub mod snapshot;
 pub mod worktree;
 
+/// Name of the hidden directory inside each workspace root (`.sober/`).
+pub const SOBER_DIR: &str = ".sober";
+
 pub use blob::BlobStore;
 pub use config::WorkspaceDefaults;
 pub use error::WorkspaceError;
