@@ -12,9 +12,9 @@ use hyper_util::rt::TokioIo;
 use sober_agent::ConfirmationBroker;
 use sober_agent::SharedSchedulerClient;
 use sober_agent::agent::{Agent, AgentConfig};
-use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
+use sober_agent::grpc::{AgentGrpcService, CallerKeyStore};
 use sober_agent::tools::{FetchUrlTool, ShellTool, ToolRegistry, WebSearchTool};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
@@ -162,7 +162,19 @@ async fn main() -> Result<()> {
         connect_to_scheduler(scheduler_client_bg, &scheduler_socket).await;
     });
 
-    let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
+    // 13b. Create caller key store for gRPC authentication
+    //
+    // CallerKeyStore starts empty — verification is skipped until keys are
+    // registered. A future plan will add key exchange so services can
+    // authenticate each other at startup.
+    let caller_keys = Arc::new(CallerKeyStore::new());
+
+    let grpc_service = AgentGrpcService::new(
+        agent,
+        confirmation_sender,
+        shared_permission_mode,
+        caller_keys,
+    );
 
     // 14. Bind to Unix domain socket
     let socket_path =

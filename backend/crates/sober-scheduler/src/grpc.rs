@@ -6,6 +6,7 @@ use chrono::Utc;
 use sober_core::error::AppError;
 use sober_core::types::repo::{JobRepo, JobRunRepo};
 use sober_core::types::{CreateJob, JobId};
+use sober_crypto::service_identity::{ServiceIdentity, ServiceToken, verify_token};
 use tonic::{Request, Response, Status};
 use tracing::error;
 
@@ -22,21 +23,115 @@ pub mod agent_proto {
     tonic::include_proto!("sober.agent.v1");
 }
 
+/// Metadata key for service identity tokens.
+pub const SERVICE_TOKEN_HEADER: &str = "x-service-token";
+
+/// Allowed callers for the scheduler's gRPC service.
+const ALLOWED_CALLERS: &[&str] = &["soberctl", "agent", "api"];
+
 /// gRPC service implementation for the scheduler.
 pub struct SchedulerGrpcService<J: JobRepo, R: JobRunRepo> {
     job_repo: Arc<J>,
     run_repo: Arc<R>,
     engine: Arc<TickEngine<J, R>>,
+    /// Known verifying keys for callers (name → public key).
+    caller_keys: Arc<CallerKeyStore>,
+}
+
+/// Stores verifying keys for known callers.
+pub struct CallerKeyStore {
+    keys: std::collections::HashMap<String, sober_crypto::keys::VerifyingKey>,
+}
+
+impl CallerKeyStore {
+    /// Create an empty key store.
+    pub fn new() -> Self {
+        Self {
+            keys: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Register a caller's verifying key.
+    pub fn add(&mut self, name: impl Into<String>, key: sober_crypto::keys::VerifyingKey) {
+        self.keys.insert(name.into(), key);
+    }
+
+    /// Verify an incoming request's service token.
+    ///
+    /// If no keys are registered, verification is skipped (allows bootstrapping).
+    fn verify_request<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        if self.keys.is_empty() {
+            return Ok(()); // no keys registered — skip verification
+        }
+
+        let token_str = request
+            .metadata()
+            .get(SERVICE_TOKEN_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Status::unauthenticated("missing service token"))?;
+
+        let token = ServiceToken::decode(token_str)
+            .map_err(|e| Status::unauthenticated(format!("invalid service token: {e}")))?;
+
+        // Check the caller is in our allowlist
+        if !ALLOWED_CALLERS.contains(&token.service_name.as_str()) {
+            return Err(Status::permission_denied(format!(
+                "caller '{}' not allowed",
+                token.service_name
+            )));
+        }
+
+        // Find the caller's verifying key
+        let key = self.keys.get(&token.service_name).ok_or_else(|| {
+            Status::unauthenticated(format!(
+                "no verifying key for caller '{}'",
+                token.service_name
+            ))
+        })?;
+
+        verify_token(&token, key, Some(&token.service_name), None)
+            .map_err(|e| Status::unauthenticated(format!("token verification failed: {e}")))
+    }
+}
+
+impl Default for CallerKeyStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<J: JobRepo, R: JobRunRepo> SchedulerGrpcService<J, R> {
     /// Creates a new gRPC service.
-    pub fn new(job_repo: Arc<J>, run_repo: Arc<R>, engine: Arc<TickEngine<J, R>>) -> Self {
+    pub fn new(
+        job_repo: Arc<J>,
+        run_repo: Arc<R>,
+        engine: Arc<TickEngine<J, R>>,
+        caller_keys: Arc<CallerKeyStore>,
+    ) -> Self {
         Self {
             job_repo,
             run_repo,
             engine,
+            caller_keys,
         }
+    }
+}
+
+/// Create a tonic interceptor that injects a signed service token into outgoing
+/// requests.
+pub fn client_auth_interceptor(
+    identity: Arc<ServiceIdentity>,
+) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
+    move |mut request: Request<()>| {
+        let token = identity.sign_token();
+        request.metadata_mut().insert(
+            SERVICE_TOKEN_HEADER,
+            token
+                .encode()
+                .parse()
+                .map_err(|_| Status::internal("failed to encode service token"))?,
+        );
+        Ok(request)
     }
 }
 
@@ -99,6 +194,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::CreateJobRequest>,
     ) -> Result<Response<scheduler_proto::Job>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
 
         // Validate schedule
@@ -146,6 +242,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::CancelJobRequest>,
     ) -> Result<Response<scheduler_proto::CancelJobResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let job_id = parse_job_id(&request.into_inner().job_id)?;
         self.job_repo
             .cancel(job_id)
@@ -158,6 +255,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::ListJobsRequest>,
     ) -> Result<Response<scheduler_proto::ListJobsResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
 
         let owner_id = req
@@ -183,6 +281,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::GetJobRequest>,
     ) -> Result<Response<scheduler_proto::Job>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let job_id = parse_job_id(&request.into_inner().job_id)?;
         let job = self
             .job_repo
@@ -196,6 +295,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::ListJobRunsRequest>,
     ) -> Result<Response<scheduler_proto::ListJobRunsResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
         let job_id = parse_job_id(&req.job_id)?;
         let limit = req.limit.unwrap_or(20);
@@ -213,16 +313,18 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
 
     async fn pause_scheduler(
         &self,
-        _request: Request<scheduler_proto::PauseRequest>,
+        request: Request<scheduler_proto::PauseRequest>,
     ) -> Result<Response<scheduler_proto::PauseResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         self.engine.pause();
         Ok(Response::new(scheduler_proto::PauseResponse {}))
     }
 
     async fn resume_scheduler(
         &self,
-        _request: Request<scheduler_proto::ResumeRequest>,
+        request: Request<scheduler_proto::ResumeRequest>,
     ) -> Result<Response<scheduler_proto::ResumeResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         self.engine.resume();
         Ok(Response::new(scheduler_proto::ResumeResponse {}))
     }
@@ -231,6 +333,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         &self,
         request: Request<scheduler_proto::ForceRunRequest>,
     ) -> Result<Response<scheduler_proto::ForceRunResponse>, Status> {
+        self.caller_keys.verify_request(&request)?;
         let job_id = parse_job_id(&request.into_inner().job_id)?;
 
         // Spawn force-run in background so we don't block the RPC
