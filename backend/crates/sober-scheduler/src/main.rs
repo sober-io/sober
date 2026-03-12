@@ -14,8 +14,8 @@ use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
 use sober_db::{PgJobRepo, PgJobRunRepo, create_pool};
 use sober_scheduler::engine::TickEngine;
+use sober_scheduler::grpc::SchedulerGrpcService;
 use sober_scheduler::grpc::scheduler_proto::scheduler_service_server::SchedulerServiceServer;
-use sober_scheduler::grpc::{CallerKeyStore, SchedulerGrpcService};
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -64,17 +64,11 @@ async fn main() -> Result<()> {
         connect_to_agent(engine_for_agent, &agent_socket).await;
     });
 
-    // 7. Create gRPC service with caller authentication
-    //
-    // CallerKeyStore starts empty — verification is skipped until keys are
-    // registered. A future plan will add key exchange so services can
-    // authenticate each other at startup.
-    let caller_keys = Arc::new(CallerKeyStore::new());
+    // 7. Create gRPC service
     let grpc_service = SchedulerGrpcService::new(
         Arc::clone(&job_repo),
         Arc::clone(&run_repo),
         Arc::clone(&engine),
-        caller_keys,
     );
 
     // 8. Bind to Unix domain socket

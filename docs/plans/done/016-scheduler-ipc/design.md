@@ -124,20 +124,14 @@ service SchedulerService {
 // types and context fields defined there.
 ```
 
-### Security -- Two Layers
+### Security
 
-1. **Unix socket file permissions** (`0660`, `sober:sober`) -- prevents unauthorized
-   processes from connecting.
-2. **Ed25519 service identity tokens** -- each service has a keypair from `sober-crypto`,
-   signs a token passed as gRPC metadata. Receiving service verifies the signature and
-   checks the caller's identity against an allowlist.
+**Unix socket file permissions** (`0660`, `sober:sober`) prevent unauthorized processes
+from connecting. All services run on the same machine in a trusted network, so
+transport-level encryption is unnecessary for local IPC.
 
-Filesystem permissions are the first gate. Signed tokens identify *which* service is
-calling, so the agent knows "this request came from the scheduler" vs. another process
-running as the same user. Defense in depth without certificate management overhead.
-
-For future distributed deployment, upgrade to mTLS -- the gRPC layer supports it
-without protocol changes.
+For future distributed deployment, upgrade to mTLS at the transport layer -- the gRPC
+framework supports it without protocol changes.
 
 ---
 
@@ -182,13 +176,11 @@ sober-scheduler ──► sober-core (types, config, errors, repo traits incl. J
                 ──► sober-workspace (stale worktree cleanup, blob pruning)
                 ──► tonic (gRPC server + client)
                 ──► prost (proto codegen)
-                ──► sober-crypto (service identity)
 
 sober-agent     ──► sober-core
                 ──► sober-mind (prompt assembly, access masks)
                 ──► tonic (gRPC server + client)
                 ──► prost (proto codegen)
-                ──► sober-crypto (service identity)
 
 backend/proto/  ◄── both scheduler and agent generate from these
 ```

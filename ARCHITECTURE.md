@@ -278,15 +278,11 @@ services generate client/server code from shared proto files and communicate at 
 
 ### Security
 
-Two layers of defense:
+**Filesystem permissions** — Socket files owned by `sober:sober` with `0660`
+permissions. Only processes running as the right user can connect. All services
+run on the same machine in a trusted network.
 
-1. **Filesystem permissions** — Socket files owned by `sober:sober` with `0660`
-   permissions. Only processes running as the right user can connect.
-2. **Ed25519 service identity tokens** — Each service holds a keypair from
-   `sober-crypto`, signs a token passed as gRPC metadata. The receiving service
-   verifies the signature and checks the caller against an allowlist.
-
-For distributed deployment, upgrade to mTLS without protocol changes.
+For distributed deployment, upgrade to mTLS at the transport layer.
 
 ---
 

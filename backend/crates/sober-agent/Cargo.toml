@@ -14,7 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 sober-core = { path = "../sober-core" }
 sober-db = { path = "../sober-db" }
-sober-crypto = { path = "../sober-crypto" }
 sober-mind = { path = "../sober-mind" }
 sober-mcp = { path = "../sober-mcp" }
 sober-sandbox = { path = "../sober-sandbox" }

@@ -13,7 +13,6 @@ path = "src/lib.rs"
 
 [dependencies]
 sober-core = { path = "../sober-core" }
-sober-crypto = { path = "../sober-crypto" }
 sober-db = { path = "../sober-db" }
 anyhow = { workspace = true }
 chrono = { workspace = true }

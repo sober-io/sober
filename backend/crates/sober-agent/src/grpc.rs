@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use sober_core::types::ids::{ConversationId, UserId};
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
-use sober_crypto::service_identity::{ServiceIdentity, ServiceToken, verify_token};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::error;
@@ -26,90 +25,6 @@ pub mod scheduler_proto {
     tonic::include_proto!("sober.scheduler.v1");
 }
 
-/// Metadata key for service identity tokens.
-pub const SERVICE_TOKEN_HEADER: &str = "x-service-token";
-
-/// Allowed callers for the agent's gRPC service.
-const ALLOWED_CALLERS: &[&str] = &["scheduler", "api", "soberctl"];
-
-/// Stores verifying keys for known callers.
-pub struct CallerKeyStore {
-    keys: std::collections::HashMap<String, sober_crypto::keys::VerifyingKey>,
-}
-
-impl CallerKeyStore {
-    /// Create an empty key store.
-    pub fn new() -> Self {
-        Self {
-            keys: std::collections::HashMap::new(),
-        }
-    }
-
-    /// Register a caller's verifying key.
-    pub fn add(&mut self, name: impl Into<String>, key: sober_crypto::keys::VerifyingKey) {
-        self.keys.insert(name.into(), key);
-    }
-
-    /// Verify an incoming request's service token.
-    ///
-    /// If no keys are registered, verification is skipped (allows bootstrapping).
-    fn verify_request<T>(&self, request: &Request<T>) -> Result<(), Status> {
-        if self.keys.is_empty() {
-            return Ok(());
-        }
-
-        let token_str = request
-            .metadata()
-            .get(SERVICE_TOKEN_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| Status::unauthenticated("missing service token"))?;
-
-        let token = ServiceToken::decode(token_str)
-            .map_err(|e| Status::unauthenticated(format!("invalid service token: {e}")))?;
-
-        if !ALLOWED_CALLERS.contains(&token.service_name.as_str()) {
-            return Err(Status::permission_denied(format!(
-                "caller '{}' not allowed",
-                token.service_name
-            )));
-        }
-
-        let key = self.keys.get(&token.service_name).ok_or_else(|| {
-            Status::unauthenticated(format!(
-                "no verifying key for caller '{}'",
-                token.service_name
-            ))
-        })?;
-
-        verify_token(&token, key, Some(&token.service_name), None)
-            .map_err(|e| Status::unauthenticated(format!("token verification failed: {e}")))
-    }
-}
-
-impl Default for CallerKeyStore {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Create a tonic interceptor that injects a signed service token into outgoing
-/// requests.
-pub fn client_auth_interceptor(
-    identity: Arc<ServiceIdentity>,
-) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
-    move |mut request: Request<()>| {
-        let token = identity.sign_token();
-        request.metadata_mut().insert(
-            SERVICE_TOKEN_HEADER,
-            token
-                .encode()
-                .parse()
-                .map_err(|_| Status::internal("failed to encode service token"))?,
-        );
-        Ok(request)
-    }
-}
-
 /// gRPC service wrapping an [`Agent`].
 pub struct AgentGrpcService<Msg, Conv, Mcp>
 where
@@ -120,7 +35,6 @@ where
     agent: Arc<Agent<Msg, Conv, Mcp>>,
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
-    caller_keys: Arc<CallerKeyStore>,
 }
 
 impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
@@ -134,13 +48,11 @@ where
         agent: Arc<Agent<Msg, Conv, Mcp>>,
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
-        caller_keys: Arc<CallerKeyStore>,
     ) -> Self {
         Self {
             agent,
             confirmation_sender,
             permission_mode,
-            caller_keys,
         }
     }
 }
@@ -162,7 +74,6 @@ where
         &self,
         request: Request<proto::HandleMessageRequest>,
     ) -> Result<Response<Self::HandleMessageStream>, Status> {
-        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
 
         let user_id = req
@@ -213,7 +124,6 @@ where
         &self,
         request: Request<proto::ExecuteTaskRequest>,
     ) -> Result<Response<Self::ExecuteTaskStream>, Status> {
-        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
 
         let user_id = req
@@ -302,9 +212,8 @@ where
 
     async fn wake_agent(
         &self,
-        request: Request<proto::WakeRequest>,
+        _request: Request<proto::WakeRequest>,
     ) -> Result<Response<proto::WakeResponse>, Status> {
-        self.caller_keys.verify_request(&request)?;
         Ok(Response::new(proto::WakeResponse { accepted: true }))
     }
 
@@ -312,7 +221,6 @@ where
         &self,
         request: Request<proto::ConfirmResponse>,
     ) -> Result<Response<proto::ConfirmAck>, Status> {
-        self.caller_keys.verify_request(&request)?;
         let req = request.into_inner();
         self.confirmation_sender
             .respond(req.confirm_id, req.approved)
@@ -325,7 +233,6 @@ where
         &self,
         request: Request<proto::SetPermissionModeRequest>,
     ) -> Result<Response<proto::SetPermissionModeResponse>, Status> {
-        self.caller_keys.verify_request(&request)?;
         let mode_str = request.into_inner().mode;
         let mode = match mode_str.as_str() {
             "interactive" => sober_core::PermissionMode::Interactive,
