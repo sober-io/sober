@@ -81,7 +81,7 @@ mod tests {
     fn prompt_payload_roundtrip() {
         let payload = JobPayload::Prompt {
             text: "Check deploy status".into(),
-            workspace_id: Some(Uuid::new_v4()),
+            workspace_id: Some(Uuid::now_v7()),
             model_hint: None,
         };
         let bytes = payload.to_bytes().unwrap();
@@ -97,7 +97,7 @@ mod tests {
         let payload = JobPayload::Artifact {
             blob_ref: "sha256:abc123".into(),
             artifact_type: ArtifactType::Wasm,
-            workspace_id: Uuid::new_v4(),
+            workspace_id: Uuid::now_v7(),
             env: HashMap::from([("KEY".into(), "value".into())]),
         };
         let bytes = payload.to_bytes().unwrap();
