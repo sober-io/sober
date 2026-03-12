@@ -49,7 +49,7 @@ pub fn test_config() -> AppConfig {
         scheduler: SchedulerConfig {
             tick_interval_secs: 1,
             agent_socket_path: PathBuf::from("/tmp/sober-test-agent.sock"),
-            admin_socket_path: PathBuf::from("/tmp/sober-test-scheduler.sock"),
+            socket_path: PathBuf::from("/tmp/sober-test-scheduler.sock"),
             max_concurrent_jobs: 2,
         },
         mcp: McpConfig {

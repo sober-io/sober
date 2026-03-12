@@ -20,6 +20,11 @@ pub mod proto {
     tonic::include_proto!("sober.agent.v1");
 }
 
+/// Generated protobuf types for the scheduler gRPC service (client-side).
+pub mod scheduler_proto {
+    tonic::include_proto!("sober.scheduler.v1");
+}
+
 /// gRPC service wrapping an [`Agent`].
 pub struct AgentGrpcService<Msg, Conv, Mcp>
 where
@@ -124,8 +129,15 @@ where
 
     async fn wake_agent(
         &self,
-        _request: Request<proto::WakeRequest>,
+        request: Request<proto::WakeRequest>,
     ) -> Result<Response<proto::WakeResponse>, Status> {
+        let req = request.into_inner();
+        tracing::info!(
+            reason = %req.reason,
+            caller = %req.caller_identity,
+            target_id = ?req.target_id,
+            "agent woken by external service"
+        );
         Ok(Response::new(proto::WakeResponse { accepted: true }))
     }
 

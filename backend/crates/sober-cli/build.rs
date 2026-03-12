@@ -1,6 +1,4 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Scheduler needs its own service (server) and agent service (client)
     tonic_prost_build::compile_protos("../../proto/sober/scheduler/v1/scheduler.proto")?;
-    tonic_prost_build::compile_protos("../../proto/sober/agent/v1/agent.proto")?;
     Ok(())
 }

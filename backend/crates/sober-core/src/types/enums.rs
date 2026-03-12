@@ -96,6 +96,8 @@ pub enum JobStatus {
     Paused,
     /// Job has been cancelled and will not run again.
     Cancelled,
+    /// Job is currently being executed by the scheduler.
+    Running,
 }
 
 /// Lifecycle state of a workspace.

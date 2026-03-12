@@ -116,6 +116,11 @@ define_id!(
 );
 
 define_id!(
+    /// Unique identifier for a single job execution run.
+    JobRunId
+);
+
+define_id!(
     /// Unique identifier for a git repository registered in a workspace.
     WorkspaceRepoId
 );

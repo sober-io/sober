@@ -5,13 +5,14 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::types::{
-    Artifact, AuditLogEntry, Conversation, Job, McpServerConfig, Message, Role, SecretMetadata,
-    SecretRow, Session, StoredDek, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    Artifact, AuditLogEntry, Conversation, Job, JobRun, McpServerConfig, Message, Role,
+    SecretMetadata, SecretRow, Session, StoredDek, User, UserRole, Workspace, WorkspaceRepoEntry,
+    Worktree,
 };
 use sober_core::types::{
     ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, EncryptionKeyId, JobId,
-    JobStatus, McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId, UserId,
-    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    JobRunId, JobStatus, McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId,
+    UserId, UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use uuid::Uuid;
 
@@ -195,7 +196,11 @@ pub(crate) struct JobRow {
     pub schedule: String,
     pub status: JobStatus,
     pub payload: serde_json::Value,
-    pub next_run_at: Option<DateTime<Utc>>,
+    pub payload_bytes: Vec<u8>,
+    pub owner_type: String,
+    pub owner_id: Option<Uuid>,
+    pub notify_agent: bool,
+    pub next_run_at: DateTime<Utc>,
     pub last_run_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
@@ -208,9 +213,38 @@ impl From<JobRow> for Job {
             schedule: row.schedule,
             status: row.status,
             payload: row.payload,
+            payload_bytes: row.payload_bytes,
+            owner_type: row.owner_type,
+            owner_id: row.owner_id,
+            notify_agent: row.notify_agent,
             next_run_at: row.next_run_at,
             last_run_at: row.last_run_at,
             created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct JobRunRow {
+    pub id: Uuid,
+    pub job_id: Uuid,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub result: Vec<u8>,
+    pub error: Option<String>,
+}
+
+impl From<JobRunRow> for JobRun {
+    fn from(row: JobRunRow) -> Self {
+        JobRun {
+            id: JobRunId::from_uuid(row.id),
+            job_id: JobId::from_uuid(row.job_id),
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+            status: row.status,
+            result: row.result,
+            error: row.error,
         }
     }
 }
@@ -492,12 +526,18 @@ mod tests {
             schedule: "0 * * * *".into(),
             status: JobStatus::Active,
             payload: serde_json::json!({}),
-            next_run_at: None,
+            payload_bytes: vec![],
+            owner_type: "system".into(),
+            owner_id: None,
+            notify_agent: false,
+            next_run_at: Utc::now(),
             last_run_at: None,
             created_at: Utc::now(),
         };
         let job: Job = row.into();
         assert_eq!(job.name, "test_job");
         assert_eq!(job.status, JobStatus::Active);
+        assert_eq!(job.owner_type, "system");
+        assert!(!job.notify_agent);
     }
 }

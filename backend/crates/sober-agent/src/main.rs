@@ -4,14 +4,17 @@
 //! This binary starts the agent gRPC service on a Unix domain socket. It is
 //! called by `sober-api` and `sober-scheduler` at runtime.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use hyper_util::rt::TokioIo;
 use sober_agent::ConfirmationBroker;
+use sober_agent::SharedSchedulerClient;
 use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
+use sober_agent::grpc::scheduler_proto;
 use sober_agent::tools::{FetchUrlTool, ShellTool, ToolRegistry, WebSearchTool};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
@@ -26,8 +29,9 @@ use std::sync::RwLock;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::Server;
-use tracing::info;
+use tonic::transport::{Endpoint, Server, Uri};
+use tower::service_fn;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -150,9 +154,17 @@ async fn main() -> Result<()> {
     // 12. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
+    // 13. Connect to scheduler gRPC service (background — retries until available)
+    let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
+    let scheduler_socket = config.scheduler.socket_path.clone();
+    let scheduler_client_bg = Arc::clone(&scheduler_client);
+    tokio::spawn(async move {
+        connect_to_scheduler(scheduler_client_bg, &scheduler_socket).await;
+    });
+
     let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
 
-    // 13. Bind to Unix domain socket
+    // 14. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -176,7 +188,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 14. Serve with graceful shutdown
+    // 15. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
@@ -185,6 +197,52 @@ async fn main() -> Result<()> {
 
     info!("sober-agent shut down");
     Ok(())
+}
+
+/// Attempt to connect to the scheduler gRPC service, retrying on failure.
+async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path) {
+    let socket_path = socket_path.to_path_buf();
+
+    loop {
+        if !socket_path.exists() {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        }
+
+        let path_clone = socket_path.clone();
+        let channel = Endpoint::try_from("http://[::]:50051")
+            .expect("static URI is valid")
+            .connect_with_connector(service_fn(move |_: Uri| {
+                let path = path_clone.clone();
+                async move {
+                    let stream = tokio::net::UnixStream::connect(path).await?;
+                    Ok::<_, std::io::Error>(TokioIo::new(stream))
+                }
+            }))
+            .await;
+
+        match channel {
+            Ok(channel) => {
+                let sched_client =
+                    scheduler_proto::scheduler_service_client::SchedulerServiceClient::new(channel);
+                let mut lock = client.write().await;
+                *lock = Some(sched_client);
+                info!(
+                    socket = %socket_path.display(),
+                    "connected to scheduler gRPC service"
+                );
+                return;
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    socket = %socket_path.display(),
+                    "failed to connect to scheduler, retrying in 5s"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
 }
 
 /// Initialises the tracing subscriber based on the environment.

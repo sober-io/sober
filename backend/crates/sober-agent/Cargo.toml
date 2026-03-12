@@ -1,6 +1,6 @@
 [package]
 name = "sober-agent"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 
 [[bin]]
@@ -22,6 +22,7 @@ sober-workspace = { path = "../sober-workspace" }
 sober-llm = { path = "../sober-llm" }
 sober-memory = { path = "../sober-memory" }
 anyhow = { workspace = true }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -38,6 +39,7 @@ async-trait = "0.1"
 futures = "0.3"
 tokio-stream = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tower = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

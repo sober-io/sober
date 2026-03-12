@@ -130,8 +130,8 @@ pub struct SchedulerConfig {
     pub tick_interval_secs: u64,
     /// Path to the agent gRPC socket.
     pub agent_socket_path: PathBuf,
-    /// Path to the scheduler's own admin socket.
-    pub admin_socket_path: PathBuf,
+    /// Path to the scheduler's own gRPC socket.
+    pub socket_path: PathBuf,
     /// Maximum number of concurrent jobs.
     pub max_concurrent_jobs: u32,
 }
@@ -250,10 +250,9 @@ impl AppConfig {
                 agent_socket_path: PathBuf::from(
                     env.or("SCHEDULER_AGENT_SOCKET_PATH", "/run/sober/agent.sock"),
                 ),
-                admin_socket_path: PathBuf::from(env.or(
-                    "SCHEDULER_ADMIN_SOCKET_PATH",
-                    "/run/sober/scheduler-admin.sock",
-                )),
+                socket_path: PathBuf::from(
+                    env.or("SCHEDULER_SOCKET_PATH", "/run/sober/scheduler.sock"),
+                ),
                 max_concurrent_jobs: env.parse("SCHEDULER_MAX_CONCURRENT_JOBS", 10)?,
             },
             mcp: McpConfig {

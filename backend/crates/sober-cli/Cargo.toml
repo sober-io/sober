@@ -1,6 +1,6 @@
 [package]
 name = "sober-cli"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 
 [[bin]]
@@ -39,5 +39,15 @@ tracing-subscriber = { workspace = true }
 # Domain primitives
 chrono = { workspace = true }
 
+# gRPC (soberctl → scheduler/agent)
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+prost = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tower = { workspace = true }
+
 # Password input
 rpassword = "7.4"
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }

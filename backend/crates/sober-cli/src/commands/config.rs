@@ -78,8 +78,8 @@ pub fn show() -> Result<()> {
         config.scheduler.agent_socket_path.display()
     );
     println!(
-        "  admin_socket_path  = {}",
-        config.scheduler.admin_socket_path.display()
+        "  socket_path        = {}",
+        config.scheduler.socket_path.display()
     );
     println!(
         "  max_concurrent_jobs = {}",

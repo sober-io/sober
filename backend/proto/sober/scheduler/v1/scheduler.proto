@@ -3,7 +3,90 @@ syntax = "proto3";
 package sober.scheduler.v1;
 
 service SchedulerService {
+  rpc CreateJob(CreateJobRequest) returns (Job);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc GetJob(GetJobRequest) returns (Job);
+  rpc ListJobRuns(ListJobRunsRequest) returns (ListJobRunsResponse);
+  rpc PauseScheduler(PauseRequest) returns (PauseResponse);
+  rpc ResumeScheduler(ResumeRequest) returns (ResumeResponse);
+  rpc ForceRun(ForceRunRequest) returns (ForceRunResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message Job {
+  string id = 1;
+  string name = 2;
+  string owner_type = 3;
+  optional string owner_id = 4;
+  string schedule = 5;
+  bytes payload = 6;
+  string status = 7;
+  string next_run_at = 8;
+  optional string last_run_at = 9;
+  string created_at = 10;
+  bool notify_agent = 11;
+}
+
+message CreateJobRequest {
+  string name = 1;
+  string owner_type = 2;
+  optional string owner_id = 3;
+  string schedule = 4;
+  bytes payload = 5;
+  bool notify_agent = 6;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {}
+
+message ListJobsRequest {
+  optional string owner_type = 1;
+  optional string owner_id = 2;
+  optional string status = 3;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message JobRun {
+  string id = 1;
+  string job_id = 2;
+  string started_at = 3;
+  optional string finished_at = 4;
+  string status = 5;
+  bytes result = 6;
+  optional string error = 7;
+}
+
+message ListJobRunsRequest {
+  string job_id = 1;
+  optional uint32 limit = 2;
+}
+
+message ListJobRunsResponse {
+  repeated JobRun runs = 1;
+}
+
+message PauseRequest {}
+message PauseResponse {}
+message ResumeRequest {}
+message ResumeResponse {}
+
+message ForceRunRequest {
+  string job_id = 1;
+}
+
+message ForceRunResponse {
+  bool accepted = 1;
 }
 
 message HealthRequest {}
