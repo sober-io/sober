@@ -119,9 +119,10 @@
 		return unsub;
 	});
 
-	// Auto-scroll when at bottom and messages change
+	// Auto-scroll when at bottom and messages or confirms change
 	$effect(() => {
 		void messages.length;
+		void pendingConfirms.length;
 		const last = messages[messages.length - 1];
 		void last?.content;
 		if (isAtBottom && messagesContainer) {
@@ -459,21 +460,40 @@
 		</div>
 
 		<ScrollToBottom onclick={scrollToBottom} visible={!isAtBottom} />
-
-		{#if pendingConfirms.length > 0}
-			<div class="pointer-events-none absolute inset-x-0 top-16 z-10 flex flex-col items-center gap-2 p-4">
-				{#each pendingConfirms as confirm (confirm.confirm_id)}
-					<div class="pointer-events-auto">
-						<ConfirmationCard
-							request={confirm}
-							onRespond={handleConfirmResponse}
-						/>
-					</div>
-				{/each}
-			</div>
-		{/if}
 	</div>
+
+	{#if pendingConfirms.length > 0}
+		<div
+			class="flex flex-col items-center gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800"
+		>
+			{#each pendingConfirms as confirm (confirm.confirm_id)}
+				<div class="confirm-grow w-full">
+					<ConfirmationCard request={confirm} onRespond={handleConfirmResponse} />
+				</div>
+			{/each}
+		</div>
+	{/if}
 
 	<ChatInput onsend={sendMessage} busy={isBusy} />
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
+
+<style>
+	.confirm-grow {
+		animation: grow-up 0.25s ease-out;
+		transform-origin: bottom center;
+	}
+
+	@keyframes grow-up {
+		from {
+			opacity: 0;
+			transform: scaleY(0);
+			max-height: 0;
+		}
+		to {
+			opacity: 1;
+			transform: scaleY(1);
+			max-height: 300px;
+		}
+	}
+</style>

@@ -18,41 +18,30 @@
 </script>
 
 <div
-	class="animate-in slide-in-from-top w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-800 p-4 shadow-2xl shadow-black/40"
+	class="flex w-full items-center gap-3 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 shadow-lg shadow-black/20"
 >
-	<div class="mb-3 flex items-center gap-2">
-		<span class="text-sm font-medium text-zinc-300">Command Approval</span>
-		<span class="rounded border px-2 py-0.5 text-xs font-medium {riskBadge}">
-			{request.risk_level}
-		</span>
+	<div class="min-w-0 flex-1">
+		<div class="flex items-center gap-2">
+			<span class="rounded border px-1.5 py-0.5 text-[10px] font-medium {riskBadge}">
+				{request.risk_level}
+			</span>
+			<code class="truncate text-sm text-zinc-200">{request.command}</code>
+			{#if request.reason}
+				<span class="hidden truncate text-xs text-zinc-500 sm:inline">{request.reason}</span>
+			{/if}
+		</div>
 	</div>
 
-	<pre
-		class="mb-2 overflow-x-auto rounded bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-200">{request.command}</pre>
-
-	{#if request.affects.length > 0}
-		<div class="mb-2 text-xs text-zinc-400">
-			<span class="font-medium">Affects:</span>
-			{#each request.affects as item}
-				<span class="ml-1">{item}</span>
-			{/each}
-		</div>
-	{/if}
-
-	{#if request.reason}
-		<p class="mb-3 text-xs text-zinc-500">{request.reason}</p>
-	{/if}
-
-	<div class="flex gap-2">
+	<div class="flex shrink-0 gap-1.5">
 		<button
 			onclick={() => onRespond(request.confirm_id, true)}
-			class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
+			class="rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500"
 		>
-			Approve
+			Allow
 		</button>
 		<button
 			onclick={() => onRespond(request.confirm_id, false)}
-			class="rounded bg-zinc-600 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-500"
+			class="rounded bg-zinc-600 px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-500"
 		>
 			Deny
 		</button>

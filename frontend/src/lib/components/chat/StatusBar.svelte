@@ -48,7 +48,7 @@
 	class="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-xs"
 >
 	<div class="flex items-center gap-1 rounded-md bg-zinc-800 p-0.5">
-		{#each modes as m}
+		{#each modes as m (m.value)}
 			<button
 				onclick={() => onModeChange(m.value)}
 				class="rounded px-2 py-1 transition-colors {modeButtonClass(m)}"
