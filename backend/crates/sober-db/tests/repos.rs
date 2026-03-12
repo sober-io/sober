@@ -343,7 +343,6 @@ async fn job_lifecycle(pool: PgPool) {
             payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
-            notify_agent: false,
             next_run_at: Utc::now() + chrono::Duration::hours(1),
         })
         .await

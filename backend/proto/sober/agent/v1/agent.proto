@@ -32,12 +32,8 @@ message ExecuteTaskRequest {
 }
 
 message WakeRequest {
-  // Category of the wake event, e.g. "job_completed", "job_failed".
   string reason = 1;
-  // Which service sent the wake, e.g. "scheduler".
   string caller_identity = 2;
-  // Target entity UUID (e.g. job_id) the agent can look up for details.
-  optional string target_id = 3;
 }
 
 message WakeResponse {

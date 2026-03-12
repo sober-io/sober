@@ -218,8 +218,6 @@ pub struct Job {
     pub last_run_at: Option<DateTime<Utc>>,
     /// When the job was created.
     pub created_at: DateTime<Utc>,
-    /// Whether to wake the agent when this job completes.
-    pub notify_agent: bool,
 }
 
 impl Job {
@@ -397,7 +395,6 @@ mod tests {
             next_run_at: now,
             last_run_at: None,
             created_at: now,
-            notify_agent: false,
         };
         job.advance_next_run(now);
         assert_eq!((job.next_run_at - now).num_seconds(), 30);

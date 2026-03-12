@@ -285,7 +285,6 @@ fn print_job(job: &scheduler_proto::Job) {
     if let Some(ref oid) = job.owner_id {
         println!("  owner_id:     {oid}");
     }
-    println!("  notify_agent: {}", job.notify_agent);
     println!("  next_run_at:  {}", job.next_run_at);
     if let Some(ref last) = job.last_run_at {
         println!("  last_run_at:  {last}");

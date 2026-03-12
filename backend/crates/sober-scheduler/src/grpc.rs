@@ -53,7 +53,6 @@ fn job_to_proto(job: sober_core::types::Job) -> scheduler_proto::Job {
         next_run_at: job.next_run_at.to_rfc3339(),
         last_run_at: job.last_run_at.map(|t| t.to_rfc3339()),
         created_at: job.created_at.to_rfc3339(),
-        notify_agent: job.notify_agent,
     }
 }
 
@@ -126,7 +125,6 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             payload_bytes: req.payload,
             owner_type: req.owner_type,
             owner_id,
-            notify_agent: req.notify_agent,
             next_run_at,
         };
 

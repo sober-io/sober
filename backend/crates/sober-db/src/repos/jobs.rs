@@ -21,7 +21,7 @@ impl PgJobRepo {
 }
 
 const JOB_COLUMNS: &str = "id, name, schedule, status, payload, payload_bytes, \
-                            owner_type, owner_id, notify_agent, next_run_at, \
+                            owner_type, owner_id, next_run_at, \
                             last_run_at, created_at";
 
 impl sober_core::types::JobRepo for PgJobRepo {
@@ -29,8 +29,8 @@ impl sober_core::types::JobRepo for PgJobRepo {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, JobRow>(&format!(
             "INSERT INTO jobs (id, name, schedule, status, payload, payload_bytes, \
-             owner_type, owner_id, notify_agent, next_run_at) \
-             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9) \
+             owner_type, owner_id, next_run_at) \
+             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8) \
              RETURNING {JOB_COLUMNS}"
         ))
         .bind(id)
@@ -40,7 +40,6 @@ impl sober_core::types::JobRepo for PgJobRepo {
         .bind(&input.payload_bytes)
         .bind(&input.owner_type)
         .bind(input.owner_id)
-        .bind(input.notify_agent)
         .bind(input.next_run_at)
         .fetch_one(&self.pool)
         .await

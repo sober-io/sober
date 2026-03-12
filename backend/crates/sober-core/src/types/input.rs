@@ -65,8 +65,6 @@ pub struct CreateJob {
     pub owner_type: String,
     /// Owner UUID (None for system jobs).
     pub owner_id: Option<uuid::Uuid>,
-    /// Whether to wake the agent when this job completes.
-    pub notify_agent: bool,
     /// When the job should first run.
     pub next_run_at: DateTime<Utc>,
 }

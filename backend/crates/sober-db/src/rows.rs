@@ -199,7 +199,6 @@ pub(crate) struct JobRow {
     pub payload_bytes: Vec<u8>,
     pub owner_type: String,
     pub owner_id: Option<Uuid>,
-    pub notify_agent: bool,
     pub next_run_at: DateTime<Utc>,
     pub last_run_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -216,7 +215,6 @@ impl From<JobRow> for Job {
             payload_bytes: row.payload_bytes,
             owner_type: row.owner_type,
             owner_id: row.owner_id,
-            notify_agent: row.notify_agent,
             next_run_at: row.next_run_at,
             last_run_at: row.last_run_at,
             created_at: row.created_at,
@@ -529,7 +527,6 @@ mod tests {
             payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
-            notify_agent: false,
             next_run_at: Utc::now(),
             last_run_at: None,
             created_at: Utc::now(),
@@ -538,6 +535,5 @@ mod tests {
         assert_eq!(job.name, "test_job");
         assert_eq!(job.status, JobStatus::Active);
         assert_eq!(job.owner_type, "system");
-        assert!(!job.notify_agent);
     }
 }

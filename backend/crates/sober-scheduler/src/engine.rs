@@ -260,11 +260,6 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                 // Set back to active
                 let _ = job_repo.update_status(job_id, JobStatus::Active).await;
 
-                // Wake agent if configured
-                if job.notify_agent {
-                    wake_agent(&agent_client, job_id, error_msg.is_some()).await;
-                }
-
                 drop(permit);
             }));
         }
@@ -355,34 +350,6 @@ async fn execute_via_agent(
     }
 }
 
-/// Wake the agent after a job completes (if notify_agent is set).
-async fn wake_agent(agent_client: &SharedAgentClient, job_id: JobId, failed: bool) {
-    let client = agent_client.read().await;
-    let Some(client) = client.as_ref() else {
-        warn!("cannot wake agent: client not connected");
-        return;
-    };
-
-    let reason = if failed {
-        "job_failed"
-    } else {
-        "job_completed"
-    };
-
-    let mut client = client.clone();
-    match client
-        .wake_agent(agent_proto::WakeRequest {
-            reason: reason.into(),
-            caller_identity: "scheduler".into(),
-            target_id: Some(job_id.as_uuid().to_string()),
-        })
-        .await
-    {
-        Ok(_) => info!(job_id = %job_id, "agent woken after job completion"),
-        Err(e) => warn!(job_id = %job_id, error = %e, "failed to wake agent"),
-    }
-}
-
 /// Force-run a specific job immediately by ID.
 pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     job_repo: &Arc<J>,
@@ -399,18 +366,11 @@ pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     let (result_bytes, error_msg) = execute_via_agent(agent_client, &job).await;
 
     // Complete the run
-    run_repo
-        .complete(run.id, result_bytes, error_msg.clone())
-        .await?;
+    run_repo.complete(run.id, result_bytes, error_msg).await?;
 
     // Update last run
     let now = Utc::now();
     job_repo.mark_last_run(job_id, now).await?;
-
-    // Wake agent if configured
-    if job.notify_agent {
-        wake_agent(agent_client, job_id, error_msg.is_some()).await;
-    }
 
     Ok(())
 }

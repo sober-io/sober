@@ -25,7 +25,6 @@ message Job {
   string next_run_at = 8;
   optional string last_run_at = 9;
   string created_at = 10;
-  bool notify_agent = 11;
 }
 
 message CreateJobRequest {
@@ -34,7 +33,6 @@ message CreateJobRequest {
   optional string owner_id = 3;
   string schedule = 4;
   bytes payload = 5;
-  bool notify_agent = 6;
 }
 
 message CancelJobRequest {

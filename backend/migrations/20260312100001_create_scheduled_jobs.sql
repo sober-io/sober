@@ -5,9 +5,6 @@ ALTER TABLE jobs ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'system'
     CHECK (owner_type IN ('system', 'user', 'agent'));
 ALTER TABLE jobs ADD COLUMN owner_id UUID;
 
--- Whether to wake the agent when this job completes.
-ALTER TABLE jobs ADD COLUMN notify_agent BOOLEAN NOT NULL DEFAULT FALSE;
-
 -- Add 'running' to the job_status enum so the scheduler can mark in-flight jobs.
 ALTER TYPE job_status ADD VALUE IF NOT EXISTS 'running';
 

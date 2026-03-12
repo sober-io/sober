@@ -129,15 +129,8 @@ where
 
     async fn wake_agent(
         &self,
-        request: Request<proto::WakeRequest>,
+        _request: Request<proto::WakeRequest>,
     ) -> Result<Response<proto::WakeResponse>, Status> {
-        let req = request.into_inner();
-        tracing::info!(
-            reason = %req.reason,
-            caller = %req.caller_identity,
-            target_id = ?req.target_id,
-            "agent woken by external service"
-        );
         Ok(Response::new(proto::WakeResponse { accepted: true }))
     }
 

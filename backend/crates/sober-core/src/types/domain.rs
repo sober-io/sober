@@ -160,9 +160,6 @@ pub struct Job {
     pub owner_type: String,
     /// Owner UUID (None for system jobs).
     pub owner_id: Option<uuid::Uuid>,
-    /// Whether to wake the agent when this job completes.
-    #[serde(default)]
-    pub notify_agent: bool,
     /// When the job should next run.
     pub next_run_at: DateTime<Utc>,
     /// When the job last ran.
@@ -452,7 +449,6 @@ mod tests {
             payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
-            notify_agent: false,
             next_run_at: Utc::now(),
             last_run_at: None,
             created_at: Utc::now(),
