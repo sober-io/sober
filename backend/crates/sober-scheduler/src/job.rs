@@ -1,15 +1,14 @@
-//! Job types and scheduling logic.
+//! Schedule parsing logic for the scheduler.
 //!
 //! Jobs can be scheduled via fixed intervals (`every: 30s`) or cron expressions
-//! (`0 9 * * MON-FRI`). Each job has an owner (system, user, or agent) and a
-//! payload that gets passed to the agent when executed.
+//! (`0 9 * * MON-FRI`). Domain types for jobs themselves live in `sober-core`;
+//! this module provides only the schedule parsing that the scheduler needs.
 
 use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use crate::error::SchedulerError;
 
@@ -101,187 +100,6 @@ fn parse_duration(s: &str) -> Result<Duration, SchedulerError> {
     Ok(Duration::from_secs(secs))
 }
 
-/// Who owns a scheduled job.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JobOwner {
-    /// Built-in system task (memory pruning, health checks, etc.).
-    System,
-    /// Created by a user.
-    User(Uuid),
-    /// Created by the agent.
-    Agent(Uuid),
-}
-
-impl JobOwner {
-    /// Parse from the `owner_type` and `owner_id` pair stored in the database.
-    pub fn from_parts(owner_type: &str, owner_id: Option<Uuid>) -> Result<Self, SchedulerError> {
-        match owner_type {
-            "system" => Ok(JobOwner::System),
-            "user" => {
-                let id = owner_id.ok_or_else(|| {
-                    SchedulerError::Internal("user owner requires owner_id".into())
-                })?;
-                Ok(JobOwner::User(id))
-            }
-            "agent" => {
-                let id = owner_id.ok_or_else(|| {
-                    SchedulerError::Internal("agent owner requires owner_id".into())
-                })?;
-                Ok(JobOwner::Agent(id))
-            }
-            other => Err(SchedulerError::Internal(format!(
-                "unknown owner_type: {other}"
-            ))),
-        }
-    }
-
-    /// The owner type string for database storage.
-    pub fn owner_type(&self) -> &'static str {
-        match self {
-            JobOwner::System => "system",
-            JobOwner::User(_) => "user",
-            JobOwner::Agent(_) => "agent",
-        }
-    }
-
-    /// The owner ID (None for system jobs).
-    pub fn owner_id(&self) -> Option<Uuid> {
-        match self {
-            JobOwner::System => None,
-            JobOwner::User(id) | JobOwner::Agent(id) => Some(*id),
-        }
-    }
-}
-
-/// Status of a scheduled job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JobStatus {
-    /// Job is active and will run on schedule.
-    Active,
-    /// Job is temporarily paused.
-    Paused,
-    /// Job has been cancelled.
-    Cancelled,
-    /// Job is currently executing.
-    Running,
-}
-
-impl JobStatus {
-    /// Parse from the string stored in the database.
-    pub fn from_str_value(s: &str) -> Result<Self, SchedulerError> {
-        match s {
-            "active" => Ok(Self::Active),
-            "paused" => Ok(Self::Paused),
-            "cancelled" => Ok(Self::Cancelled),
-            "running" => Ok(Self::Running),
-            other => Err(SchedulerError::Internal(format!(
-                "unknown job status: {other}"
-            ))),
-        }
-    }
-
-    /// String representation for database storage.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Paused => "paused",
-            Self::Cancelled => "cancelled",
-            Self::Running => "running",
-        }
-    }
-}
-
-impl fmt::Display for JobStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// A scheduled job.
-#[derive(Debug, Clone)]
-pub struct Job {
-    /// Unique job ID.
-    pub id: Uuid,
-    /// Human-readable job name.
-    pub name: String,
-    /// Who owns this job.
-    pub owner: JobOwner,
-    /// Schedule (interval or cron).
-    pub schedule: JobSchedule,
-    /// Opaque payload passed to the agent when executed.
-    pub payload: Vec<u8>,
-    /// Current status.
-    pub status: JobStatus,
-    /// When the job should next run.
-    pub next_run_at: DateTime<Utc>,
-    /// When the job last ran (if ever).
-    pub last_run_at: Option<DateTime<Utc>>,
-    /// When the job was created.
-    pub created_at: DateTime<Utc>,
-}
-
-impl Job {
-    /// Calculate and update `next_run_at` based on the schedule and current time.
-    pub fn advance_next_run(&mut self, now: DateTime<Utc>) {
-        if let Some(next) = self.schedule.next_run_after(now) {
-            self.next_run_at = next;
-        }
-    }
-}
-
-/// Status of an individual job run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JobRunStatus {
-    /// Currently running.
-    Running,
-    /// Completed successfully.
-    Succeeded,
-    /// Failed with an error.
-    Failed,
-}
-
-impl JobRunStatus {
-    /// Parse from string.
-    pub fn from_str_value(s: &str) -> Result<Self, SchedulerError> {
-        match s {
-            "running" => Ok(Self::Running),
-            "succeeded" => Ok(Self::Succeeded),
-            "failed" => Ok(Self::Failed),
-            other => Err(SchedulerError::Internal(format!(
-                "unknown run status: {other}"
-            ))),
-        }
-    }
-
-    /// String representation for database storage.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-/// A record of a single job execution.
-#[derive(Debug, Clone)]
-pub struct JobRun {
-    /// Unique run ID.
-    pub id: Uuid,
-    /// Which job this run belongs to.
-    pub job_id: Uuid,
-    /// When execution started.
-    pub started_at: DateTime<Utc>,
-    /// When execution finished (None if still running).
-    pub finished_at: Option<DateTime<Utc>>,
-    /// Run status.
-    pub status: JobRunStatus,
-    /// Result payload (empty if not yet finished or no output).
-    pub result: Vec<u8>,
-    /// Error message (None if succeeded or still running).
-    pub error: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,53 +168,5 @@ mod tests {
     fn interval_schedule_string_roundtrip() {
         let schedule = JobSchedule::parse("every: 5m").unwrap();
         assert_eq!(schedule.to_schedule_string(), "every: 5m");
-    }
-
-    #[test]
-    fn job_owner_from_parts() {
-        assert!(matches!(
-            JobOwner::from_parts("system", None).unwrap(),
-            JobOwner::System
-        ));
-
-        let id = Uuid::now_v7();
-        assert!(matches!(
-            JobOwner::from_parts("user", Some(id)).unwrap(),
-            JobOwner::User(uid) if uid == id
-        ));
-
-        assert!(JobOwner::from_parts("user", None).is_err());
-        assert!(JobOwner::from_parts("unknown", None).is_err());
-    }
-
-    #[test]
-    fn job_status_roundtrip() {
-        for status in [
-            JobStatus::Active,
-            JobStatus::Paused,
-            JobStatus::Cancelled,
-            JobStatus::Running,
-        ] {
-            let s = status.as_str();
-            assert_eq!(JobStatus::from_str_value(s).unwrap(), status);
-        }
-    }
-
-    #[test]
-    fn job_advance_next_run() {
-        let now = Utc::now();
-        let mut job = Job {
-            id: Uuid::now_v7(),
-            name: "test".into(),
-            owner: JobOwner::System,
-            schedule: JobSchedule::parse("every: 30s").unwrap(),
-            payload: vec![],
-            status: JobStatus::Active,
-            next_run_at: now,
-            last_run_at: None,
-            created_at: now,
-        };
-        job.advance_next_run(now);
-        assert_eq!((job.next_run_at - now).num_seconds(), 30);
     }
 }
