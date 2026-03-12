@@ -11,6 +11,7 @@ export interface Conversation {
 	id: string;
 	title: string;
 	workspace_id?: string;
+	permission_mode: PermissionMode;
 	created_at: string;
 	updated_at: string;
 }

@@ -12,7 +12,6 @@
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
-	import { workspaceService } from '$lib/services/workspaces';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
@@ -81,22 +80,7 @@
 		isAtBottom = true;
 		title = data.conversation.title || '';
 		pendingConfirms = [];
-
-		// Load workspace settings if conversation is linked to a workspace.
-		const wsId = data.conversation.workspace_id;
-		if (wsId) {
-			workspaceService
-				.getSettings(wsId)
-				.then((settings) => {
-					permissionMode = settings.permission_mode;
-				})
-				.catch(() => {
-					// Workspace not found or no settings — use default.
-					permissionMode = 'policy_based';
-				});
-		} else {
-			permissionMode = 'policy_based';
-		}
+		permissionMode = data.conversation.permission_mode ?? 'policy_based';
 	});
 
 	// Scroll to bottom on conversation change
@@ -323,11 +307,8 @@
 			conversation_id: conversationId,
 			mode: newMode
 		});
-		// Also persist to workspace settings if linked.
-		const wsId = data.conversation.workspace_id;
-		if (wsId) {
-			workspaceService.updateSettings(wsId, { permission_mode: newMode });
-		}
+		// Persist to conversation.
+		conversationService.updatePermissionMode(conversationId, newMode);
 	};
 
 	const handleConfirmResponse = (confirmId: string, approved: boolean) => {
