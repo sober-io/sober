@@ -171,7 +171,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
 
                 // Complete the run
                 if let Err(e) = run_repo
-                    .complete(run.id, result_bytes, error_msg.clone())
+                    .complete(run.id, result_bytes, error_msg.clone(), None)
                     .await
                 {
                     error!(job = %job_name, error = %e, "failed to complete job run");
@@ -218,8 +218,8 @@ async fn execute_via_agent(
         payload: job.payload_bytes.clone(),
         caller_identity: "scheduler".into(),
         user_id: job.owner_id.map(|id| id.to_string()),
-        conversation_id: None,
-        workspace_id: None,
+        conversation_id: job.conversation_id.map(|id| id.to_string()),
+        workspace_id: job.workspace_id.map(|id| id.to_string()),
     };
 
     let mut client = client.clone();
@@ -276,7 +276,9 @@ pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     let (result_bytes, error_msg) = execute_via_agent(agent_client, &job).await;
 
     // Complete the run
-    run_repo.complete(run.id, result_bytes, error_msg).await?;
+    run_repo
+        .complete(run.id, result_bytes, error_msg, None)
+        .await?;
 
     // Update last run
     let now = Utc::now();

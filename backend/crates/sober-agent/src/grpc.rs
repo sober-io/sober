@@ -285,6 +285,7 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             message_id: message_id.to_string(),
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
+            artifact_ref: String::new(),
         }),
         AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
         AgentEvent::ConfirmRequest {

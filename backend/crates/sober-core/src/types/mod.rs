@@ -6,6 +6,7 @@ pub mod domain;
 pub mod enums;
 pub mod ids;
 pub mod input;
+pub mod job_payload;
 pub mod repo;
 pub mod tool;
 
@@ -29,6 +30,7 @@ pub use input::{
     ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMcpServer, CreateMessage,
     CreateSession, CreateUser, NewSecret, RegisterRepo, UpdateMcpServer, UpdateSecret,
 };
+pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, JobRunRepo, McpServerRepo, MessageRepo,
     RoleRepo, SecretRepo, SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,

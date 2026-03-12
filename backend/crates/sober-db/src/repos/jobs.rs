@@ -21,16 +21,16 @@ impl PgJobRepo {
 }
 
 const JOB_COLUMNS: &str = "id, name, schedule, status, payload, payload_bytes, \
-                            owner_type, owner_id, next_run_at, \
-                            last_run_at, created_at";
+                            owner_type, owner_id, workspace_id, created_by, \
+                            conversation_id, next_run_at, last_run_at, created_at";
 
 impl sober_core::types::JobRepo for PgJobRepo {
     async fn create(&self, input: CreateJob) -> Result<Job, AppError> {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, JobRow>(&format!(
             "INSERT INTO jobs (id, name, schedule, status, payload, payload_bytes, \
-             owner_type, owner_id, next_run_at) \
-             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8) \
+             owner_type, owner_id, workspace_id, created_by, conversation_id, next_run_at) \
+             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {JOB_COLUMNS}"
         ))
         .bind(id)
@@ -40,6 +40,9 @@ impl sober_core::types::JobRepo for PgJobRepo {
         .bind(&input.payload_bytes)
         .bind(&input.owner_type)
         .bind(input.owner_id)
+        .bind(input.workspace_id)
+        .bind(input.created_by)
+        .bind(input.conversation_id)
         .bind(input.next_run_at)
         .fetch_one(&self.pool)
         .await
@@ -151,6 +154,8 @@ impl sober_core::types::JobRepo for PgJobRepo {
         owner_type: Option<&str>,
         owner_id: Option<uuid::Uuid>,
         status: Option<&str>,
+        workspace_id: Option<uuid::Uuid>,
+        name_filter: Option<&str>,
     ) -> Result<Vec<Job>, AppError> {
         // Build dynamic WHERE clause with correct parameter numbering
         let mut conditions = Vec::new();
@@ -165,6 +170,14 @@ impl sober_core::types::JobRepo for PgJobRepo {
         }
         if status.is_some() {
             conditions.push(format!("status = ${param_idx}"));
+            param_idx += 1;
+        }
+        if workspace_id.is_some() {
+            conditions.push(format!("workspace_id = ${param_idx}"));
+            param_idx += 1;
+        }
+        if name_filter.is_some() {
+            conditions.push(format!("name = ${param_idx}"));
         }
 
         let where_clause = if conditions.is_empty() {
@@ -185,6 +198,12 @@ impl sober_core::types::JobRepo for PgJobRepo {
         }
         if let Some(s) = status {
             q = q.bind(s.to_owned());
+        }
+        if let Some(ws) = workspace_id {
+            q = q.bind(ws);
+        }
+        if let Some(name) = name_filter {
+            q = q.bind(name.to_owned());
         }
 
         let rows = q
@@ -229,6 +248,7 @@ impl sober_core::types::JobRunRepo for PgJobRunRepo {
         id: JobRunId,
         result: Vec<u8>,
         error: Option<String>,
+        result_artifact_ref: Option<String>,
     ) -> Result<(), AppError> {
         let status = if error.is_some() {
             "failed"
@@ -236,12 +256,13 @@ impl sober_core::types::JobRunRepo for PgJobRunRepo {
             "succeeded"
         };
         let affected = sqlx::query(
-            "UPDATE job_runs SET finished_at = now(), status = $1, result = $2, error = $3 \
-             WHERE id = $4",
+            "UPDATE job_runs SET finished_at = now(), status = $1, result = $2, error = $3, \
+             result_artifact_ref = $4 WHERE id = $5",
         )
         .bind(status)
         .bind(&result)
         .bind(&error)
+        .bind(&result_artifact_ref)
         .bind(id.as_uuid())
         .execute(&self.pool)
         .await

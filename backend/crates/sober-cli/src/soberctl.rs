@@ -176,6 +176,8 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
                     owner_type,
                     owner_id: None,
                     status,
+                    workspace_id: String::new(),
+                    name_filter: String::new(),
                 })
                 .await
                 .context("failed to list jobs")?;

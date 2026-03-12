@@ -10,6 +10,8 @@ service SchedulerService {
   rpc ListJobRuns(ListJobRunsRequest) returns (ListJobRunsResponse);
   rpc PauseScheduler(PauseRequest) returns (PauseResponse);
   rpc ResumeScheduler(ResumeRequest) returns (ResumeResponse);
+  rpc PauseJob(PauseJobRequest) returns (PauseJobResponse);
+  rpc ResumeJob(ResumeJobRequest) returns (ResumeJobResponse);
   rpc ForceRun(ForceRunRequest) returns (ForceRunResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
 }
@@ -25,6 +27,9 @@ message Job {
   string next_run_at = 8;
   optional string last_run_at = 9;
   string created_at = 10;
+  string workspace_id = 11;
+  string created_by = 12;
+  string conversation_id = 13;
 }
 
 message CreateJobRequest {
@@ -33,6 +38,9 @@ message CreateJobRequest {
   optional string owner_id = 3;
   string schedule = 4;
   bytes payload = 5;
+  string workspace_id = 6;
+  string created_by = 7;
+  string conversation_id = 8;
 }
 
 message CancelJobRequest {
@@ -45,6 +53,8 @@ message ListJobsRequest {
   optional string owner_type = 1;
   optional string owner_id = 2;
   optional string status = 3;
+  string workspace_id = 4;
+  string name_filter = 5;
 }
 
 message ListJobsResponse {
@@ -78,6 +88,11 @@ message PauseRequest {}
 message PauseResponse {}
 message ResumeRequest {}
 message ResumeResponse {}
+
+message PauseJobRequest { string job_id = 1; }
+message PauseJobResponse { Job job = 1; }
+message ResumeJobRequest { string job_id = 1; }
+message ResumeJobResponse { Job job = 1; }
 
 message ForceRunRequest {
   string job_id = 1;
