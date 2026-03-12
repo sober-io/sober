@@ -10,7 +10,7 @@ use sober_core::config::MemoryConfig;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::MessageRole;
-use sober_core::types::ids::{ConversationId, UserId};
+use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
@@ -150,6 +150,31 @@ where
             memory_config,
             registrar,
         }
+    }
+
+    /// Resolves which conversation to deliver job results to.
+    ///
+    /// Tries the original `conversation_id` first; falls back to the user's
+    /// most recent conversation in the same workspace.
+    pub async fn resolve_delivery_conversation(
+        &self,
+        conversation_id: Option<ConversationId>,
+        user_id: UserId,
+        workspace_id: Option<WorkspaceId>,
+    ) -> Option<ConversationId> {
+        // Try the original conversation first
+        if let Some(cid) = conversation_id
+            && self.conversation_repo.get_by_id(cid).await.is_ok()
+        {
+            return Some(cid);
+        }
+        // Fallback: user's most recent conversation in the same workspace
+        self.conversation_repo
+            .find_latest_by_user_and_workspace(user_id, workspace_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|c| c.id)
     }
 
     /// Handles a user message through the full agentic loop.
@@ -450,6 +475,7 @@ where
                         prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                         completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
                     },
+                    artifact_ref: None,
                 }))
                 .await;
 

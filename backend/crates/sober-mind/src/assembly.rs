@@ -101,6 +101,49 @@ impl Mind {
         Ok(messages)
     }
 
+    /// Assembles a prompt for autonomous (non-conversational) execution.
+    ///
+    /// Loads SOUL.md chain and builds system prompt — no conversation history.
+    /// The task text becomes the sole user message. Intended for scheduled jobs.
+    pub async fn assemble_autonomous_prompt(
+        &self,
+        task: &str,
+        caller: &CallerContext,
+    ) -> Result<Vec<Message>, MindError> {
+        // 1. Resolve SOUL.md layers
+        let soul = self.soul_resolver.resolve().await?;
+
+        // 2. Apply access mask based on caller trigger
+        let masked = apply_access_mask(&soul, caller);
+
+        // 3. Build system prompt (no tools for autonomous execution)
+        let system_prompt = build_system_prompt(&masked, &[]);
+
+        // 4. Return system message + task as user message
+        Ok(vec![
+            Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::System,
+                content: system_prompt,
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                created_at: chrono::Utc::now(),
+            },
+            Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::User,
+                content: task.to_string(),
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                created_at: chrono::Utc::now(),
+            },
+        ])
+    }
+
     /// Checks user input for injection attempts.
     ///
     /// Convenience wrapper around [`injection::classify_input`].

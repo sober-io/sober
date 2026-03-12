@@ -4,11 +4,12 @@
 
 use std::sync::Arc;
 
-use sober_core::types::ids::{ConversationId, UserId};
+use sober_core::types::JobPayload;
+use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::agent::Agent;
 use crate::confirm::ConfirmationSender;
@@ -144,12 +145,22 @@ where
             })
             .transpose()?;
 
+        let workspace_id = req
+            .workspace_id
+            .map(|s| {
+                s.parse::<uuid::Uuid>()
+                    .map(WorkspaceId::from_uuid)
+                    .map_err(|_| Status::invalid_argument("invalid workspace_id"))
+            })
+            .transpose()?;
+
         tracing::info!(
             task_id = %req.task_id,
             task_type = %req.task_type,
             caller = %req.caller_identity,
             user_id = ?user_id,
             conversation_id = ?conversation_id,
+            workspace_id = ?workspace_id,
             payload_len = req.payload.len(),
             "executing task"
         );
@@ -161,48 +172,36 @@ where
         let payload = req.payload;
 
         tokio::spawn(async move {
-            // Decode the payload as a prompt string for the agent
-            let prompt = match String::from_utf8(payload) {
-                Ok(s) if !s.is_empty() => s,
-                _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
-            };
-
-            // If we have a user_id and conversation_id, delegate to the agent's
-            // message handler. Otherwise, create a system-level execution.
-            let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
-                agent.handle_message(uid, cid, &prompt).await
-            } else {
-                // No conversation context — report that task execution requires
-                // a conversation context for now. Full autonomous execution will
-                // be added when the agent supports system-initiated tasks.
-                let done_event = to_proto_event(AgentEvent::Done {
-                    message_id: sober_core::MessageId::new(),
-                    usage: crate::stream::Usage {
-                        prompt_tokens: 0,
-                        completion_tokens: 0,
-                    },
-                });
-                let _ = tx.send(Ok(done_event)).await;
-                return;
-            };
-
-            match result {
-                Ok(mut stream) => {
-                    use futures::StreamExt;
-                    while let Some(event_result) = stream.next().await {
-                        let proto_event = match event_result {
-                            Ok(event) => to_proto_event(event),
-                            Err(e) => to_proto_event(AgentEvent::Error(e.to_string())),
-                        };
-                        if tx.send(Ok(proto_event)).await.is_err() {
-                            break;
-                        }
-                    }
+            // Try to deserialize as a typed JobPayload; fall back to raw prompt.
+            match JobPayload::from_bytes(&payload) {
+                Ok(job_payload) => {
+                    execute_typed_payload(
+                        &agent,
+                        job_payload,
+                        user_id,
+                        conversation_id,
+                        workspace_id,
+                        &task_id,
+                        &tx,
+                    )
+                    .await;
                 }
-                Err(e) => {
-                    error!(error = %e, task_id = %task_id, "task execution failed");
-                    let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
-                    let _ = tx.send(Ok(proto_event)).await;
+                Err(_) => {
+                    // Legacy path: treat payload as a UTF-8 prompt string.
+                    let prompt = match String::from_utf8(payload) {
+                        Ok(s) if !s.is_empty() => s,
+                        _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
+                    };
+
+                    execute_prompt_fallback(
+                        &agent,
+                        &prompt,
+                        user_id,
+                        conversation_id,
+                        &task_id,
+                        &tx,
+                    )
+                    .await;
                 }
             }
         });
@@ -268,6 +267,140 @@ where
     }
 }
 
+/// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
+async fn execute_typed_payload<Msg, Conv, Mcp>(
+    agent: &Agent<Msg, Conv, Mcp>,
+    payload: JobPayload,
+    user_id: Option<UserId>,
+    conversation_id: Option<ConversationId>,
+    workspace_id: Option<WorkspaceId>,
+    task_id: &str,
+    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
+) where
+    Msg: MessageRepo + 'static,
+    Conv: ConversationRepo + 'static,
+    Mcp: sober_core::types::repo::McpServerRepo + 'static,
+{
+    match payload {
+        JobPayload::Prompt { text, .. } => {
+            // Resolve delivery conversation for the result.
+            let resolved_cid = if let Some(uid) = user_id {
+                agent
+                    .resolve_delivery_conversation(conversation_id, uid, workspace_id)
+                    .await
+            } else {
+                conversation_id
+            };
+
+            // If we have a user + conversation, delegate to the conversational handler.
+            if let (Some(uid), Some(cid)) = (user_id, resolved_cid) {
+                execute_prompt_fallback(agent, &text, Some(uid), Some(cid), task_id, tx).await;
+            } else {
+                // No conversation context available — send Done with no artifact.
+                warn!(task_id = %task_id, "prompt job has no resolvable conversation, skipping");
+                let done = to_proto_event(AgentEvent::Done {
+                    message_id: sober_core::MessageId::new(),
+                    usage: crate::stream::Usage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                    },
+                    artifact_ref: None,
+                });
+                let _ = tx.send(Ok(done)).await;
+            }
+        }
+        JobPayload::Artifact {
+            blob_ref,
+            artifact_type,
+            ..
+        } => {
+            // Artifact execution via sandbox — not yet implemented.
+            warn!(
+                task_id = %task_id,
+                blob_ref = %blob_ref,
+                artifact_type = ?artifact_type,
+                "artifact execution not yet implemented"
+            );
+            let done = to_proto_event(AgentEvent::Done {
+                message_id: sober_core::MessageId::new(),
+                usage: crate::stream::Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                },
+                artifact_ref: None,
+            });
+            let _ = tx.send(Ok(done)).await;
+        }
+        JobPayload::Internal { operation } => {
+            // Internal operations — not yet wired to crate methods.
+            warn!(
+                task_id = %task_id,
+                operation = ?operation,
+                "internal operation not yet implemented"
+            );
+            let done = to_proto_event(AgentEvent::Done {
+                message_id: sober_core::MessageId::new(),
+                usage: crate::stream::Usage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                },
+                artifact_ref: None,
+            });
+            let _ = tx.send(Ok(done)).await;
+        }
+    }
+}
+
+/// Legacy execution path: treat payload as a plain prompt and delegate to `handle_message`.
+async fn execute_prompt_fallback<Msg, Conv, Mcp>(
+    agent: &Agent<Msg, Conv, Mcp>,
+    prompt: &str,
+    user_id: Option<UserId>,
+    conversation_id: Option<ConversationId>,
+    task_id: &str,
+    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
+) where
+    Msg: MessageRepo + 'static,
+    Conv: ConversationRepo + 'static,
+    Mcp: sober_core::types::repo::McpServerRepo + 'static,
+{
+    let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
+        agent.handle_message(uid, cid, prompt).await
+    } else {
+        // No conversation context — emit Done immediately.
+        let done = to_proto_event(AgentEvent::Done {
+            message_id: sober_core::MessageId::new(),
+            usage: crate::stream::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+            },
+            artifact_ref: None,
+        });
+        let _ = tx.send(Ok(done)).await;
+        return;
+    };
+
+    match result {
+        Ok(mut stream) => {
+            use futures::StreamExt;
+            while let Some(event_result) = stream.next().await {
+                let proto_event = match event_result {
+                    Ok(event) => to_proto_event(event),
+                    Err(e) => to_proto_event(AgentEvent::Error(e.to_string())),
+                };
+                if tx.send(Ok(proto_event)).await.is_err() {
+                    break;
+                }
+            }
+        }
+        Err(e) => {
+            error!(error = %e, task_id = %task_id, "task execution failed");
+            let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
+            let _ = tx.send(Ok(proto_event)).await;
+        }
+    }
+}
+
 /// Converts an [`AgentEvent`] to its proto representation.
 fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
     use proto::agent_event::Event;
@@ -281,11 +414,15 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
         AgentEvent::ToolCallResult { name, output } => {
             Event::ToolCallResult(proto::ToolCallResult { name, output })
         }
-        AgentEvent::Done { message_id, usage } => Event::Done(proto::Done {
+        AgentEvent::Done {
+            message_id,
+            usage,
+            artifact_ref,
+        } => Event::Done(proto::Done {
             message_id: message_id.to_string(),
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
-            artifact_ref: String::new(),
+            artifact_ref: artifact_ref.unwrap_or_default(),
         }),
         AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
         AgentEvent::ConfirmRequest {
@@ -348,6 +485,7 @@ mod tests {
                 prompt_tokens: 100,
                 completion_tokens: 50,
             },
+            artifact_ref: None,
         };
         let proto = to_proto_event(event);
         match proto.event {
