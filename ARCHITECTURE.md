@@ -332,7 +332,7 @@ The system runs as multiple independent processes:
 | Process | Role | Socket |
 |---------|------|--------|
 | `sober-api` | HTTP/WS gateway, user-driven entry point | `/run/sober/api-admin.sock` |
-| `sober-scheduler` | Autonomous tick engine, time-driven entry point | `/run/sober/scheduler-admin.sock` |
+| `sober-scheduler` | Autonomous tick engine, time-driven entry point | `/run/sober/scheduler.sock` |
 | `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
 
 Each process can be started, stopped, and scaled independently.

@@ -199,14 +199,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Attempt to connect to the scheduler gRPC service, retrying on failure.
+/// Connect to the scheduler gRPC service and reconnect if the channel breaks.
+///
+/// Runs forever: establishes connection, monitors health, and re-establishes
+/// on failure. This handles scheduler restarts gracefully.
 async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path) {
+    use scheduler_proto::HealthRequest;
+
     let socket_path = socket_path.to_path_buf();
 
     loop {
-        if !socket_path.exists() {
+        // Wait for the socket file to appear
+        while !socket_path.exists() {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            continue;
         }
 
         let path_clone = socket_path.clone();
@@ -225,13 +230,29 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
             Ok(channel) => {
                 let sched_client =
                     scheduler_proto::scheduler_service_client::SchedulerServiceClient::new(channel);
-                let mut lock = client.write().await;
-                *lock = Some(sched_client);
+                {
+                    let mut lock = client.write().await;
+                    *lock = Some(sched_client.clone());
+                }
                 info!(
                     socket = %socket_path.display(),
                     "connected to scheduler gRPC service"
                 );
-                return;
+
+                // Monitor connection health
+                let mut sched_client = sched_client;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    match sched_client.health(HealthRequest {}).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            warn!(error = %e, "scheduler connection lost, reconnecting");
+                            let mut lock = client.write().await;
+                            *lock = None;
+                            break;
+                        }
+                    }
+                }
             }
             Err(e) => {
                 warn!(

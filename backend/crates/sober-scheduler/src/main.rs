@@ -115,16 +115,20 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Attempt to connect to the agent gRPC service, retrying on failure.
+/// Connect to the agent gRPC service and reconnect if the channel breaks.
+///
+/// Runs forever: establishes connection, monitors health, and re-establishes
+/// on failure. This handles agent restarts gracefully.
 async fn connect_to_agent(engine: Arc<TickEngine<PgJobRepo, PgJobRunRepo>>, socket_path: &Path) {
+    use sober_scheduler::grpc::agent_proto::HealthRequest;
     use sober_scheduler::grpc::agent_proto::agent_service_client::AgentServiceClient;
 
     let socket_path = socket_path.to_path_buf();
 
     loop {
-        if !socket_path.exists() {
+        // Wait for the socket file to appear
+        while !socket_path.exists() {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            continue;
         }
 
         let path_clone = socket_path.clone();
@@ -142,12 +146,25 @@ async fn connect_to_agent(engine: Arc<TickEngine<PgJobRepo, PgJobRunRepo>>, sock
         match channel {
             Ok(channel) => {
                 let client = AgentServiceClient::new(channel);
-                engine.set_agent_client(client).await;
+                engine.set_agent_client(client.clone()).await;
                 info!(
                     socket = %socket_path.display(),
                     "connected to agent gRPC service"
                 );
-                return;
+
+                // Monitor connection health
+                let mut client = client;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    match client.health(HealthRequest {}).await {
+                        Ok(_) => {} // still healthy
+                        Err(e) => {
+                            warn!(error = %e, "agent connection lost, reconnecting");
+                            engine.clear_agent_client().await;
+                            break; // re-enter outer loop
+                        }
+                    }
+                }
             }
             Err(e) => {
                 warn!(

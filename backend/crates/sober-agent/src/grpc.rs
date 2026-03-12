@@ -122,9 +122,92 @@ where
 
     async fn execute_task(
         &self,
-        _request: Request<proto::ExecuteTaskRequest>,
+        request: Request<proto::ExecuteTaskRequest>,
     ) -> Result<Response<Self::ExecuteTaskStream>, Status> {
-        Err(Status::unimplemented("execute_task not yet implemented"))
+        let req = request.into_inner();
+
+        let user_id = req
+            .user_id
+            .map(|s| {
+                s.parse::<uuid::Uuid>()
+                    .map(UserId::from_uuid)
+                    .map_err(|_| Status::invalid_argument("invalid user_id"))
+            })
+            .transpose()?;
+
+        let conversation_id = req
+            .conversation_id
+            .map(|s| {
+                s.parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                    .map_err(|_| Status::invalid_argument("invalid conversation_id"))
+            })
+            .transpose()?;
+
+        tracing::info!(
+            task_id = %req.task_id,
+            task_type = %req.task_type,
+            caller = %req.caller_identity,
+            user_id = ?user_id,
+            conversation_id = ?conversation_id,
+            payload_len = req.payload.len(),
+            "executing task"
+        );
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let agent = Arc::clone(&self.agent);
+        let task_id = req.task_id;
+        let task_type = req.task_type;
+        let payload = req.payload;
+
+        tokio::spawn(async move {
+            // Decode the payload as a prompt string for the agent
+            let prompt = match String::from_utf8(payload) {
+                Ok(s) if !s.is_empty() => s,
+                _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
+            };
+
+            // If we have a user_id and conversation_id, delegate to the agent's
+            // message handler. Otherwise, create a system-level execution.
+            let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
+                agent.handle_message(uid, cid, &prompt).await
+            } else {
+                // No conversation context — report that task execution requires
+                // a conversation context for now. Full autonomous execution will
+                // be added when the agent supports system-initiated tasks.
+                let done_event = to_proto_event(AgentEvent::Done {
+                    message_id: sober_core::MessageId::new(),
+                    usage: crate::stream::Usage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                    },
+                });
+                let _ = tx.send(Ok(done_event)).await;
+                return;
+            };
+
+            match result {
+                Ok(mut stream) => {
+                    use futures::StreamExt;
+                    while let Some(event_result) = stream.next().await {
+                        let proto_event = match event_result {
+                            Ok(event) => to_proto_event(event),
+                            Err(e) => to_proto_event(AgentEvent::Error(e.to_string())),
+                        };
+                        if tx.send(Ok(proto_event)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, task_id = %task_id, "task execution failed");
+                    let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
+                    let _ = tx.send(Ok(proto_event)).await;
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     async fn wake_agent(

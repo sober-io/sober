@@ -1,12 +1,8 @@
 //! Tick engine — the scheduler's main loop.
 //!
-//! The engine wakes up on a configurable interval, finds due jobs (both
-//! persistent from the database and ephemeral from an in-memory registry),
-//! and executes them by calling the agent via gRPC or running a local handler.
+//! The engine wakes up on a configurable interval, finds due persistent jobs
+//! from the database, and executes them by calling the agent via gRPC.
 
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,7 +12,7 @@ use sober_core::types::repo::{JobRepo, JobRunRepo};
 use sober_core::types::{JobId, JobStatus};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::grpc::agent_proto;
 use crate::job::JobSchedule;
@@ -28,26 +24,13 @@ pub type SharedAgentClient = Arc<
     >,
 >;
 
-/// A boxed async handler for ephemeral system jobs.
-type SystemJobHandler =
-    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send>> + Send + Sync>;
-
-/// An ephemeral system job registered at startup.
-struct SystemJob {
-    name: String,
-    schedule: JobSchedule,
-    handler: SystemJobHandler,
-    next_run_at: chrono::DateTime<Utc>,
-}
-
 /// The tick engine that drives autonomous job execution.
 pub struct TickEngine<J: JobRepo, R: JobRunRepo> {
     job_repo: Arc<J>,
     run_repo: Arc<R>,
     agent_client: SharedAgentClient,
-    system_jobs: RwLock<HashMap<String, SystemJob>>,
     tick_interval: Duration,
-    max_concurrent: usize,
+    concurrency_semaphore: Arc<tokio::sync::Semaphore>,
     paused: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -63,9 +46,8 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
             job_repo,
             run_repo,
             agent_client: Arc::new(RwLock::new(None)),
-            system_jobs: RwLock::new(HashMap::new()),
             tick_interval,
-            max_concurrent,
+            concurrency_semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
@@ -79,38 +61,15 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
         *lock = Some(client);
     }
 
+    /// Clear the agent gRPC client (called when the connection is lost).
+    pub async fn clear_agent_client(&self) {
+        let mut lock = self.agent_client.write().await;
+        *lock = None;
+    }
+
     /// Get a clone of the shared agent client handle.
     pub fn agent_client(&self) -> SharedAgentClient {
         Arc::clone(&self.agent_client)
-    }
-
-    /// Register an ephemeral system job that runs on a schedule.
-    ///
-    /// System jobs live in memory only — they re-register on startup.
-    pub async fn register_system_job<F, Fut>(
-        &self,
-        name: impl Into<String>,
-        schedule: JobSchedule,
-        handler: F,
-    ) where
-        F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
-    {
-        let name = name.into();
-        let now = Utc::now();
-        let next_run_at = schedule.next_run_after(now).unwrap_or(now);
-        let handler: SystemJobHandler = Arc::new(move || Box::pin(handler()));
-
-        let mut jobs = self.system_jobs.write().await;
-        jobs.insert(
-            name.clone(),
-            SystemJob {
-                name,
-                schedule,
-                handler,
-                next_run_at,
-            },
-        );
     }
 
     /// Whether the engine is paused.
@@ -159,52 +118,24 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     async fn tick(&self) {
         let now = Utc::now();
 
-        // Collect due system jobs
-        let system_tasks = self.collect_due_system_jobs(now).await;
-
-        // Collect due persistent jobs
-        let persistent_tasks = match self.job_repo.list_due(now).await {
+        let due_jobs = match self.job_repo.list_due(now).await {
             Ok(jobs) => jobs,
             Err(e) => {
                 error!(error = %e, "failed to query due jobs");
-                Vec::new()
+                return;
             }
         };
 
-        let total = system_tasks.len() + persistent_tasks.len();
-        if total == 0 {
+        if due_jobs.is_empty() {
             return;
         }
 
-        info!(
-            system = system_tasks.len(),
-            persistent = persistent_tasks.len(),
-            "executing due jobs"
-        );
+        info!(count = due_jobs.len(), "executing due jobs");
 
-        // Limit concurrency
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_concurrent));
         let mut handles = Vec::new();
 
-        // Spawn system jobs
-        for (name, handler) in system_tasks {
-            let permit = semaphore.clone().acquire_owned().await;
-            if permit.is_err() {
-                break;
-            }
-            let permit = permit.unwrap();
-            handles.push(tokio::spawn(async move {
-                let result = (handler)().await;
-                if let Err(e) = &result {
-                    warn!(job = %name, error = %e, "system job failed");
-                }
-                drop(permit);
-            }));
-        }
-
-        // Spawn persistent jobs
-        for job in persistent_tasks {
-            let permit = semaphore.clone().acquire_owned().await;
+        for job in due_jobs {
+            let permit = self.concurrency_semaphore.clone().acquire_owned().await;
             if permit.is_err() {
                 break;
             }
@@ -268,27 +199,6 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
         for handle in handles {
             let _ = handle.await;
         }
-    }
-
-    /// Collect due system jobs and advance their next_run_at.
-    async fn collect_due_system_jobs(
-        &self,
-        now: chrono::DateTime<Utc>,
-    ) -> Vec<(String, SystemJobHandler)> {
-        let mut jobs = self.system_jobs.write().await;
-        let mut due = Vec::new();
-
-        for job in jobs.values_mut() {
-            if job.next_run_at <= now {
-                due.push((job.name.clone(), Arc::clone(&job.handler)));
-                // Advance to next run
-                if let Some(next) = job.schedule.next_run_after(now) {
-                    job.next_run_at = next;
-                }
-            }
-        }
-
-        due
     }
 }
 

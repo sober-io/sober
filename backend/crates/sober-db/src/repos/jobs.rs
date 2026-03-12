@@ -152,16 +152,19 @@ impl sober_core::types::JobRepo for PgJobRepo {
         owner_id: Option<uuid::Uuid>,
         status: Option<&str>,
     ) -> Result<Vec<Job>, AppError> {
-        // Build dynamic WHERE clause
+        // Build dynamic WHERE clause with correct parameter numbering
         let mut conditions = Vec::new();
+        let mut param_idx = 1u32;
         if owner_type.is_some() {
-            conditions.push("owner_type = $1");
+            conditions.push(format!("owner_type = ${param_idx}"));
+            param_idx += 1;
         }
         if owner_id.is_some() {
-            conditions.push("owner_id = $2");
+            conditions.push(format!("owner_id = ${param_idx}"));
+            param_idx += 1;
         }
         if status.is_some() {
-            conditions.push("status = $3");
+            conditions.push(format!("status = ${param_idx}"));
         }
 
         let where_clause = if conditions.is_empty() {

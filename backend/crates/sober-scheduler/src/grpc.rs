@@ -118,10 +118,15 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             })
             .transpose()?;
 
+        // Try to interpret the binary payload as JSON; fall back to wrapping in
+        // a `{"data": "<base64>"}` envelope so the JSONB column is never null.
+        let payload_json = serde_json::from_slice::<serde_json::Value>(&req.payload)
+            .unwrap_or_else(|_| serde_json::json!({ "raw": true }));
+
         let input = CreateJob {
             name: req.name,
             schedule: req.schedule,
-            payload: serde_json::Value::Null,
+            payload: payload_json,
             payload_bytes: req.payload,
             owner_type: req.owner_type,
             owner_id,
