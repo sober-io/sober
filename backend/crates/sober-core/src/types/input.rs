@@ -59,8 +59,14 @@ pub struct CreateJob {
     pub schedule: String,
     /// Job payload (JSON).
     pub payload: serde_json::Value,
+    /// Opaque binary payload for the scheduler.
+    pub payload_bytes: Vec<u8>,
+    /// Who owns this job: "system", "user", or "agent".
+    pub owner_type: String,
+    /// Owner UUID (None for system jobs).
+    pub owner_id: Option<uuid::Uuid>,
     /// When the job should first run.
-    pub next_run_at: Option<DateTime<Utc>>,
+    pub next_run_at: DateTime<Utc>,
 }
 
 /// Input for creating an MCP server configuration.

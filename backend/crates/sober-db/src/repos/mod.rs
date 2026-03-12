@@ -21,7 +21,7 @@ mod worktrees;
 pub use artifacts::PgArtifactRepo;
 pub use audit_log::PgAuditLogRepo;
 pub use conversations::PgConversationRepo;
-pub use jobs::PgJobRepo;
+pub use jobs::{PgJobRepo, PgJobRunRepo};
 pub use mcp_servers::PgMcpServerRepo;
 pub use messages::PgMessageRepo;
 pub use roles::PgRoleRepo;

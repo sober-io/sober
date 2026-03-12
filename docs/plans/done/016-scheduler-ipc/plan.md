@@ -6,10 +6,10 @@
 
 **Architecture:** Independent `sober-scheduler` runtime communicates with `sober-agent`
 via gRPC over Unix domain sockets. Both generate client/server code from proto
-definitions in `backend/proto/`, avoiding circular crate dependencies. Service calls are authenticated with
-filesystem permissions + Ed25519 identity tokens.
+definitions in `backend/proto/`, avoiding circular crate dependencies. Service calls are secured
+by Unix socket filesystem permissions (`0660`, `sober:sober`).
 
-**Tech Stack:** tonic, prost, tonic-build, tokio-cron-scheduler or cron crate, sqlx, sober-crypto
+**Tech Stack:** tonic, prost, tonic-build, cron crate, sqlx
 
 **Design:** [design.md](./design.md)
 
@@ -173,25 +173,16 @@ to both crates.
 - [ ] `cargo build -p sober-scheduler` generates proto Rust code
 - [ ] `cargo build -p sober-agent` generates proto Rust code
 
-### 3. Implement service identity authentication
+### 3. ~~Implement service identity authentication~~ (REMOVED)
 
-Add to `sober-crypto` (or a new module within it):
+**Decision:** Service identity tokens are unnecessary. All services communicate over
+Unix domain sockets on the same machine. Socket filesystem permissions (`0660`,
+`sober:sober`) already prevent unauthorized access. For distributed deployment,
+transport-level security (mTLS, VPN) is the right approach — not application-level
+token signing.
 
-- `ServiceIdentity` struct holding a service name and Ed25519 keypair
-- `ServiceIdentity::generate(service_name)` --- create new identity
-- `ServiceIdentity::sign_token()` --- create a signed token containing service name
-  and timestamp
-- `ServiceIdentity::verify_token(token, expected_service)` --- verify signature and
-  check service name against allowlist
-
-Create a tonic interceptor that:
-- On client side: injects the signed token into gRPC metadata (`x-service-identity`)
-- On server side: extracts and verifies the token, rejects with `UNAUTHENTICATED`
-  if invalid
-
-- [ ] Token sign/verify round-trip test passes
-- [ ] Expired token (if TTL is implemented) is rejected
-- [ ] Wrong service name is rejected
+The `sober-crypto` crate retains `ServiceIdentity` for other uses but it is not
+used for inter-service IPC authentication.
 
 ### 4. Define agent's TaskRequest handling for scheduler context
 
@@ -291,7 +282,6 @@ In `grpc/scheduler_service.rs`:
 - `SchedulerServiceImpl` holding `JobStore` and `TickEngine` handle
 - Implement all RPCs: `CreateJob`, `CancelJob`, `ListJobs`, `GetJob`,
   `PauseScheduler`, `ResumeScheduler`, `ForceRun`
-- Apply service identity interceptor (only accept calls from known services)
 
 In `grpc/mod.rs`:
 
@@ -370,8 +360,6 @@ These connect to the scheduler's admin socket and call the SchedulerService RPCs
   agent back
 - `ForceRun` immediately triggers a job
 - Pause/resume stops and restarts job execution
-- Service identity: unauthenticated caller is rejected
-- Service identity: wrong service name is rejected
 
 - [ ] All integration tests pass
 
@@ -402,8 +390,7 @@ no regressions in other crates.
 - Persistent jobs survive scheduler restarts (stored in PostgreSQL).
 - Interval-based and cron-based scheduling both work correctly.
 - Agent and scheduler communicate via gRPC over Unix domain sockets.
-- Service identity tokens are verified on all gRPC calls.
-- Unauthorized callers are rejected with `UNAUTHENTICATED`.
+- Socket file permissions (`0660`) restrict access to authorized processes.
 - Agent can create/cancel scheduled jobs via gRPC.
 - `soberctl scheduler` commands work for admin management.
 - Graceful shutdown waits for running jobs to complete.

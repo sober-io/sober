@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 
 use super::domain::*;
-use super::enums::{ArtifactRelation, ArtifactState, RoleKind, UserStatus};
+use super::enums::{ArtifactRelation, ArtifactState, JobStatus, RoleKind, UserStatus};
 use super::ids::*;
 use super::input::*;
 use crate::error::AppError;
@@ -172,6 +172,48 @@ pub trait JobRepo: Send + Sync {
 
     /// Cancels a job.
     fn cancel(&self, id: JobId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates a job's status.
+    fn update_status(
+        &self,
+        id: JobId,
+        status: JobStatus,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists jobs that are due for execution (next_run_at <= now, status = active).
+    fn list_due(
+        &self,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<Vec<Job>, AppError>> + Send;
+
+    /// Lists jobs with optional filters.
+    fn list_filtered(
+        &self,
+        owner_type: Option<&str>,
+        owner_id: Option<uuid::Uuid>,
+        status: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<Job>, AppError>> + Send;
+}
+
+/// Job execution run tracking.
+pub trait JobRunRepo: Send + Sync {
+    /// Creates a new run record (status = running).
+    fn create(&self, job_id: JobId) -> impl Future<Output = Result<JobRun, AppError>> + Send;
+
+    /// Marks a run as completed (succeeded or failed).
+    fn complete(
+        &self,
+        id: JobRunId,
+        result: Vec<u8>,
+        error: Option<String>,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists recent runs for a job, ordered by started_at descending.
+    fn list_by_job(
+        &self,
+        job_id: JobId,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<JobRun>, AppError>> + Send;
 }
 
 /// Per-user MCP server configuration operations.

@@ -16,3 +16,4 @@ pub mod envelope;
 pub mod error;
 pub mod keys;
 pub mod password;
+pub mod service_identity;

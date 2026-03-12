@@ -1,21 +1,41 @@
 [package]
 name = "sober-scheduler"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 
 [[bin]]
 name = "sober-scheduler"
 path = "src/main.rs"
 
+[lib]
+name = "sober_scheduler"
+path = "src/lib.rs"
+
 [dependencies]
 sober-core = { path = "../sober-core" }
-sober-crypto = { path = "../sober-crypto" }
+sober-db = { path = "../sober-db" }
 anyhow = { workspace = true }
-tokio = { workspace = true }
-tonic = { workspace = true }
+chrono = { workspace = true }
+cron = "0.15.0"
+dotenvy = { workspace = true }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
 prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tower = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

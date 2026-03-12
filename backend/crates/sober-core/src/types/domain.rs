@@ -11,8 +11,9 @@ use super::enums::{
     ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus, WorkspaceState, WorktreeState,
 };
 use super::ids::{
-    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, McpServerId, MessageId, RoleId,
-    ScopeId, SecretId, SessionId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
+    MessageId, RoleId, ScopeId, SecretId, SessionId, UserId, WorkspaceId, WorkspaceRepoId,
+    WorktreeId,
 };
 
 /// A user account.
@@ -151,12 +152,43 @@ pub struct Job {
     pub status: JobStatus,
     /// The job payload (JSON) — defines what to execute.
     pub payload: serde_json::Value,
+    /// Opaque binary payload for the scheduler.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payload_bytes: Vec<u8>,
+    /// Who owns this job: "system", "user", or "agent".
+    #[serde(default = "default_owner_type")]
+    pub owner_type: String,
+    /// Owner UUID (None for system jobs).
+    pub owner_id: Option<uuid::Uuid>,
     /// When the job should next run.
-    pub next_run_at: Option<DateTime<Utc>>,
+    pub next_run_at: DateTime<Utc>,
     /// When the job last ran.
     pub last_run_at: Option<DateTime<Utc>>,
     /// When the job was created.
     pub created_at: DateTime<Utc>,
+}
+
+fn default_owner_type() -> String {
+    "system".to_owned()
+}
+
+/// A record of a single job execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobRun {
+    /// Unique run identifier.
+    pub id: JobRunId,
+    /// Which job this run belongs to.
+    pub job_id: JobId,
+    /// When execution started.
+    pub started_at: DateTime<Utc>,
+    /// When execution finished (None if still running).
+    pub finished_at: Option<DateTime<Utc>>,
+    /// Run status: "running", "succeeded", or "failed".
+    pub status: String,
+    /// Result payload (empty if not yet finished).
+    pub result: Vec<u8>,
+    /// Error message (None if succeeded or still running).
+    pub error: Option<String>,
 }
 
 /// A workspace containing related projects and artifacts.
@@ -414,7 +446,10 @@ mod tests {
             schedule: "0 */6 * * *".into(),
             status: JobStatus::Active,
             payload: serde_json::json!({"scope": "all"}),
-            next_run_at: Some(Utc::now()),
+            payload_bytes: vec![],
+            owner_type: "system".into(),
+            owner_id: None,
+            next_run_at: Utc::now(),
             last_run_at: None,
             created_at: Utc::now(),
         };

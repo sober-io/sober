@@ -626,6 +626,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cron"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5877d3fbf742507b66bc2a1945106bd30dd8504019d596901ddd012a4dd01740"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "winnow 0.6.26",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3216,13 +3227,14 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "dotenvy",
  "futures",
+ "hyper-util",
  "prost 0.14.3",
  "reqwest 0.12.28",
  "serde",
@@ -3243,6 +3255,7 @@ dependencies = [
  "tonic 0.14.5",
  "tonic-prost",
  "tonic-prost-build",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -3307,25 +3320,31 @@ dependencies = [
 
 [[package]]
 name = "sober-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "dotenvy",
+ "hyper-util",
+ "prost 0.14.3",
  "rpassword",
  "sober-core",
  "sober-crypto",
  "sober-db",
  "sqlx",
  "tokio",
+ "tonic 0.14.5",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "sober-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -3352,7 +3371,7 @@ dependencies = [
 
 [[package]]
 name = "sober-crypto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3369,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "serde_json",
@@ -3467,17 +3486,32 @@ dependencies = [
 
 [[package]]
 name = "sober-scheduler"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "cron",
+ "dotenvy",
+ "hyper-util",
  "prost 0.14.3",
+ "serde",
+ "serde_json",
  "sober-core",
  "sober-crypto",
+ "sober-db",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tonic 0.14.5",
+ "tonic-prost",
  "tonic-prost-build",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -4029,7 +4063,7 @@ dependencies = [
  "toml_datetime 1.0.0+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -4061,7 +4095,7 @@ dependencies = [
  "serde_spanned 0.6.9",
  "toml_datetime 0.6.11",
  "toml_write",
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -4070,7 +4104,7 @@ version = "1.0.9+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
 dependencies = [
- "winnow",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -5069,6 +5103,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.6.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

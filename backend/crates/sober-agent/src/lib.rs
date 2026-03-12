@@ -10,3 +10,17 @@ pub mod tools;
 pub use confirm::{ConfirmationBroker, ConfirmationRegistrar, ConfirmationSender};
 pub use error::AgentError;
 pub use stream::{AgentEvent, AgentResponseStream, Usage};
+
+/// Shared scheduler gRPC client handle.
+///
+/// `None` when the scheduler is not yet connected. The agent can use this to
+/// create jobs, list jobs, cancel jobs, etc.
+pub type SharedSchedulerClient = std::sync::Arc<
+    tokio::sync::RwLock<
+        Option<
+            grpc::scheduler_proto::scheduler_service_client::SchedulerServiceClient<
+                tonic::transport::Channel,
+            >,
+        >,
+    >,
+>;
