@@ -87,9 +87,8 @@ async fn main() -> Result<()> {
     // The ShellTool uses a default workspace path and policy-based permission
     // mode. In production these will be derived from the workspace config per
     // conversation; for now we use sensible defaults.
-    let workspace_home = PathBuf::from(
-        std::env::var("WORKSPACE_ROOT")
-            .unwrap_or_else(|_| "/var/lib/sober/workspaces/default".to_owned()),
+    let workspace_root = PathBuf::from(
+        std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
     );
     let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
         Ok("unrestricted") => SandboxProfile::Unrestricted,
@@ -101,12 +100,15 @@ async fn main() -> Result<()> {
         .context("failed to resolve sandbox policy")?;
     let command_policy = CommandPolicy::default();
     let shared_permission_mode = Arc::new(RwLock::new(PermissionMode::default()));
+    let snapshot_dir = workspace_root.join(".sober").join("snapshots");
+    let snapshot_manager = sober_workspace::SnapshotManager::new(snapshot_dir);
     let shell_tool = ShellTool::new(
         command_policy,
         Arc::clone(&shared_permission_mode),
-        workspace_home,
+        workspace_root,
         sandbox_policy,
         true, // auto_snapshot
+        Some(snapshot_manager),
     );
 
     let builtins: Vec<Arc<dyn Tool>> = vec![

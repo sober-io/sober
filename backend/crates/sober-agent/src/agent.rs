@@ -26,6 +26,12 @@ use crate::error::AgentError;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
 use crate::tools::ToolRegistry;
 
+/// Buffer size for the agent event channel.
+const EVENT_CHANNEL_BUFFER: usize = 64;
+
+/// Timeout in seconds for user confirmation of dangerous commands.
+const CONFIRM_TIMEOUT_SECS: u64 = 300;
+
 /// Configuration for agent behaviour.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -57,6 +63,33 @@ impl Default for AgentConfig {
             max_tokens: 4096,
         }
     }
+}
+
+/// Details of a confirmation request extracted from [`ToolError::NeedsConfirmation`].
+struct ConfirmDetail {
+    confirm_id: String,
+    command: String,
+    risk_level: String,
+    reason: String,
+}
+
+/// Aggregated context passed to the agentic loop, avoiding long parameter lists.
+struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
+    llm: &'a Arc<dyn LlmEngine>,
+    mind: &'a Arc<Mind>,
+    memory: &'a Arc<MemoryStore>,
+    context_loader: &'a Arc<ContextLoader<Msg>>,
+    tool_registry: &'a Arc<ToolRegistry>,
+    message_repo: &'a Arc<Msg>,
+    conversation_repo: &'a Arc<Conv>,
+    config: &'a AgentConfig,
+    memory_config: &'a MemoryConfig,
+    user_id: UserId,
+    conversation_id: ConversationId,
+    content: &'a str,
+    user_msg_id: sober_core::MessageId,
+    event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
+    registrar: Option<&'a ConfirmationRegistrar>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -157,7 +190,8 @@ where
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Create event channel and spawn the agentic loop
-        let (event_tx, event_rx) = mpsc::channel::<Result<AgentEvent, AgentError>>(64);
+        let (event_tx, event_rx) =
+            mpsc::channel::<Result<AgentEvent, AgentError>>(EVENT_CHANNEL_BUFFER);
 
         // Clone what we need for the spawned task.
         let llm = Arc::clone(&self.llm);
@@ -174,24 +208,24 @@ where
         let user_msg_id = user_msg.id;
 
         tokio::spawn(async move {
-            let result = Self::run_loop_streaming(
-                &llm,
-                &mind,
-                &memory,
-                &context_loader,
-                &tool_registry,
-                &message_repo,
-                &conversation_repo,
-                &config,
-                &memory_config,
+            let ctx = LoopContext {
+                llm: &llm,
+                mind: &mind,
+                memory: &memory,
+                context_loader: &context_loader,
+                tool_registry: &tool_registry,
+                message_repo: &message_repo,
+                conversation_repo: &conversation_repo,
+                config: &config,
+                memory_config: &memory_config,
                 user_id,
                 conversation_id,
-                &content,
+                content: &content,
                 user_msg_id,
-                &event_tx,
-                registrar.as_ref(),
-            )
-            .await;
+                event_tx: &event_tx,
+                registrar: registrar.as_ref(),
+            };
+            let result = Self::run_loop_streaming(&ctx).await;
 
             if let Err(e) = result {
                 let _ = event_tx.send(Err(e)).await;
@@ -208,24 +242,22 @@ where
     /// This is the core loop: embed → load context → assemble → complete →
     /// handle tool calls → repeat. Events are sent immediately as they occur,
     /// enabling confirmation flow and progressive output.
-    #[allow(clippy::too_many_arguments)]
-    async fn run_loop_streaming(
-        llm: &Arc<dyn LlmEngine>,
-        mind: &Arc<Mind>,
-        memory: &Arc<MemoryStore>,
-        context_loader: &Arc<ContextLoader<Msg>>,
-        tool_registry: &Arc<ToolRegistry>,
-        message_repo: &Arc<Msg>,
-        conversation_repo: &Arc<Conv>,
-        config: &AgentConfig,
-        memory_config: &MemoryConfig,
-        user_id: UserId,
-        conversation_id: ConversationId,
-        content: &str,
-        user_msg_id: sober_core::MessageId,
-        event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
-        registrar: Option<&ConfirmationRegistrar>,
-    ) -> Result<(), AgentError> {
+    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv>) -> Result<(), AgentError> {
+        let llm = ctx.llm;
+        let mind = ctx.mind;
+        let memory = ctx.memory;
+        let context_loader = ctx.context_loader;
+        let tool_registry = ctx.tool_registry;
+        let message_repo = ctx.message_repo;
+        let conversation_repo = ctx.conversation_repo;
+        let config = ctx.config;
+        let memory_config = ctx.memory_config;
+        let user_id = ctx.user_id;
+        let conversation_id = ctx.conversation_id;
+        let content = ctx.content;
+        let user_msg_id = ctx.user_msg_id;
+        let event_tx = ctx.event_tx;
+        let registrar = ctx.registrar;
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
         let mut consecutive_tool_errors: u32 = 0;
@@ -527,9 +559,14 @@ where
                             risk_level,
                             reason,
                         }) => {
+                            let detail = ConfirmDetail {
+                                confirm_id,
+                                command,
+                                risk_level,
+                                reason,
+                            };
                             Self::handle_confirmation(
-                                &tool, tool_input, confirm_id, command, risk_level, reason,
-                                event_tx, registrar,
+                                &tool, tool_input, detail, event_tx, registrar,
                             )
                             .await
                         }
@@ -562,39 +599,34 @@ where
     ///
     /// Sends the confirmation event to the client, waits for the user's
     /// response, and re-executes the tool if approved.
-    #[allow(clippy::too_many_arguments)]
     async fn handle_confirmation(
         tool: &Arc<dyn sober_core::types::tool::Tool>,
         mut tool_input: serde_json::Value,
-        confirm_id: String,
-        command: String,
-        risk_level: String,
-        reason: String,
+        confirm: ConfirmDetail,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
         registrar: Option<&ConfirmationRegistrar>,
     ) -> String {
         let Some(registrar) = registrar else {
             return format!(
                 "Command requires confirmation but no confirmation handler is available. \
-                 Risk level: {risk_level}"
+                 Risk level: {}",
+                confirm.risk_level
             );
         };
 
         // Register before sending the event so the broker is ready.
-        let rx = registrar.register(confirm_id.clone());
+        let rx = registrar.register(confirm.confirm_id.clone());
 
         let _ = event_tx
             .send(Ok(AgentEvent::ConfirmRequest {
-                confirm_id,
-                command,
-                risk_level,
+                confirm_id: confirm.confirm_id,
+                command: confirm.command,
+                risk_level: confirm.risk_level,
                 affects: Vec::new(),
-                reason,
+                reason: confirm.reason,
             }))
             .await;
 
-        // Wait for user response (timeout after 5 minutes).
-        const CONFIRM_TIMEOUT_SECS: u64 = 300;
         match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
             Ok(Ok(true)) => {
                 // Approved — re-execute with confirmed flag.

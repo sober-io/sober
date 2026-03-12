@@ -12,12 +12,16 @@ use serde::Deserialize;
 use sober_core::PermissionMode;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
+use sober_workspace::SnapshotManager;
 
 /// Maximum output length returned to the LLM to avoid blowing up context.
 const MAX_OUTPUT_LEN: usize = 16_000;
 
 /// Default per-command timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u32 = 300;
+
+/// Default maximum number of snapshots retained per workspace.
+const DEFAULT_MAX_SNAPSHOTS: u32 = 10;
 
 #[derive(Debug, Deserialize)]
 struct ShellInput {
@@ -29,21 +33,21 @@ struct ShellInput {
     confirmed: bool,
 }
 
-/// Shell command execution tool.
-///
-/// Stateless: classification and sandboxed execution only. When a command
-/// requires confirmation, the tool returns [`ToolError::NeedsConfirmation`]
-/// and the agent loop handles the interactive flow.
 /// Thread-safe handle for reading and updating the permission mode at runtime.
 pub type SharedPermissionMode = Arc<RwLock<PermissionMode>>;
 
+/// Shell command execution tool.
+///
+/// Classification and sandboxed execution. When a command requires
+/// confirmation, the tool returns [`ToolError::NeedsConfirmation`]
+/// and the agent loop handles the interactive flow.
 pub struct ShellTool {
     policy: CommandPolicy,
     permission_mode: SharedPermissionMode,
     workspace_home: PathBuf,
     sandbox_policy: SandboxPolicy,
-    #[allow(dead_code)]
     auto_snapshot: bool,
+    snapshot_manager: Option<SnapshotManager>,
 }
 
 impl ShellTool {
@@ -54,6 +58,7 @@ impl ShellTool {
         workspace_home: PathBuf,
         sandbox_policy: SandboxPolicy,
         auto_snapshot: bool,
+        snapshot_manager: Option<SnapshotManager>,
     ) -> Self {
         Self {
             policy,
@@ -61,56 +66,8 @@ impl ShellTool {
             workspace_home,
             sandbox_policy,
             auto_snapshot,
+            snapshot_manager,
         }
-    }
-
-    #[cfg(test)]
-    fn new_for_test() -> Self {
-        use sober_sandbox::SandboxProfile;
-        Self {
-            policy: CommandPolicy::default(),
-            permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
-            workspace_home: PathBuf::from("/tmp/test-workspace"),
-            sandbox_policy: SandboxProfile::LockedDown
-                .resolve(&std::collections::HashMap::new())
-                .unwrap(),
-            auto_snapshot: false,
-        }
-    }
-
-    /// Direct execution fallback when bwrap is unavailable (e.g. inside Docker).
-    async fn execute_direct(
-        &self,
-        command: &str,
-        workdir: &std::path::Path,
-        timeout_secs: u32,
-    ) -> Result<sober_sandbox::SandboxResult, ToolError> {
-        use tokio::process::Command;
-
-        let start = std::time::Instant::now();
-        let child = Command::new("sh")
-            .args(["-c", command])
-            .current_dir(workdir)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| ToolError::ExecutionFailed(format!("failed to spawn: {e}")))?;
-
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(u64::from(timeout_secs)),
-            child.wait_with_output(),
-        )
-        .await
-        .map_err(|_| ToolError::ExecutionFailed("command timed out".into()))?
-        .map_err(|e| ToolError::ExecutionFailed(format!("command failed: {e}")))?;
-
-        Ok(sober_sandbox::SandboxResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            duration_ms: start.elapsed().as_millis() as u64,
-            denied_network_requests: vec![],
-        })
     }
 
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
@@ -157,6 +114,25 @@ impl ShellTool {
             }
         }
 
+        // Snapshot before dangerous commands when auto_snapshot is enabled.
+        if self.auto_snapshot
+            && risk == RiskLevel::Dangerous
+            && let Some(ref mgr) = self.snapshot_manager
+        {
+            match mgr.create(&self.workspace_home, "pre-dangerous").await {
+                Ok(snap) => {
+                    tracing::info!(path = %snap.path.display(), "auto-snapshot created");
+                    // Best-effort prune old snapshots.
+                    if let Err(e) = mgr.prune(DEFAULT_MAX_SNAPSHOTS).await {
+                        tracing::warn!(error = %e, "snapshot prune failed");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "auto-snapshot failed, proceeding anyway");
+                }
+            }
+        }
+
         // Determine working directory
         let workdir = if let Some(ref wd) = input.workdir {
             self.workspace_home.join(wd)
@@ -188,19 +164,10 @@ impl ShellTool {
             format!("cd {} && {}", workdir.display(), input.command),
         ];
 
-        let result = match sandbox.execute(&command, &HashMap::new()).await {
-            Ok(r) => r,
-            Err(e) => {
-                // Fallback: run directly without bwrap (e.g. inside Docker where
-                // pivot_root / user namespaces aren't available).
-                tracing::warn!(
-                    error = %e,
-                    "bwrap sandbox failed, falling back to direct execution"
-                );
-                self.execute_direct(&input.command, &workdir, timeout)
-                    .await?
-            }
-        };
+        let result = sandbox
+            .execute(&command, &HashMap::new())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("sandbox execution failed: {e}")))?;
 
         // Format output
         let mut output = String::new();
@@ -267,10 +234,29 @@ impl Tool for ShellTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sober_sandbox::SandboxProfile;
+
+    fn test_tool() -> ShellTool {
+        ShellTool {
+            policy: CommandPolicy::default(),
+            permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
+            workspace_home: PathBuf::from("/tmp/test-workspace"),
+            sandbox_policy: SandboxProfile::LockedDown.resolve(&HashMap::new()).unwrap(),
+            auto_snapshot: false,
+            snapshot_manager: None,
+        }
+    }
+
+    fn test_tool_with_mode(mode: PermissionMode) -> ShellTool {
+        ShellTool {
+            permission_mode: Arc::new(RwLock::new(mode)),
+            ..test_tool()
+        }
+    }
 
     #[test]
     fn shell_tool_metadata() {
-        let tool = ShellTool::new_for_test();
+        let tool = test_tool();
         let meta = tool.metadata();
         assert_eq!(meta.name, "shell");
         assert!(!meta.context_modifying);
@@ -280,7 +266,7 @@ mod tests {
 
     #[test]
     fn shell_tool_rejects_missing_command() {
-        let tool = ShellTool::new_for_test();
+        let tool = test_tool();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(tool.execute_inner(serde_json::json!({})));
         assert!(result.is_err());
@@ -288,7 +274,7 @@ mod tests {
 
     #[test]
     fn shell_tool_rejects_empty_command() {
-        let tool = ShellTool::new_for_test();
+        let tool = test_tool();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(tool.execute_inner(serde_json::json!({"command": ""})));
         assert!(result.is_err());
@@ -298,12 +284,7 @@ mod tests {
     fn shell_tool_denies_blocked_command() {
         let tool = ShellTool {
             policy: CommandPolicy::with_denied(vec!["shutdown".to_string()]),
-            permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
-            workspace_home: PathBuf::from("/tmp/test"),
-            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
-                .resolve(&std::collections::HashMap::new())
-                .unwrap(),
-            auto_snapshot: false,
+            ..test_tool()
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
@@ -315,15 +296,7 @@ mod tests {
 
     #[test]
     fn shell_tool_returns_needs_confirmation_for_dangerous() {
-        let tool = ShellTool {
-            policy: CommandPolicy::default(),
-            permission_mode: Arc::new(RwLock::new(PermissionMode::PolicyBased)),
-            workspace_home: PathBuf::from("/tmp/test"),
-            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
-                .resolve(&std::collections::HashMap::new())
-                .unwrap(),
-            auto_snapshot: false,
-        };
+        let tool = test_tool_with_mode(PermissionMode::PolicyBased);
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(tool.execute_inner(serde_json::json!({"command": "rm -rf /"})));
         match result {
@@ -336,15 +309,7 @@ mod tests {
 
     #[test]
     fn shell_tool_skips_confirmation_when_confirmed() {
-        let tool = ShellTool {
-            policy: CommandPolicy::default(),
-            permission_mode: Arc::new(RwLock::new(PermissionMode::Interactive)),
-            workspace_home: PathBuf::from("/tmp/test"),
-            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
-                .resolve(&std::collections::HashMap::new())
-                .unwrap(),
-            auto_snapshot: false,
-        };
+        let tool = test_tool_with_mode(PermissionMode::Interactive);
         let rt = tokio::runtime::Runtime::new().unwrap();
         // With confirmed=true, it should attempt execution (not return NeedsConfirmation)
         let result = rt.block_on(
@@ -363,13 +328,8 @@ mod tests {
     fn shell_tool_respects_runtime_mode_change() {
         let shared_mode = Arc::new(RwLock::new(PermissionMode::Autonomous));
         let tool = ShellTool {
-            policy: CommandPolicy::default(),
             permission_mode: Arc::clone(&shared_mode),
-            workspace_home: PathBuf::from("/tmp/test"),
-            sandbox_policy: sober_sandbox::SandboxProfile::LockedDown
-                .resolve(&std::collections::HashMap::new())
-                .unwrap(),
-            auto_snapshot: false,
+            ..test_tool()
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
 

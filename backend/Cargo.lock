@@ -3235,6 +3235,7 @@ dependencies = [
  "sober-memory",
  "sober-mind",
  "sober-sandbox",
+ "sober-workspace",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

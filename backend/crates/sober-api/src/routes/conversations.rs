@@ -23,15 +23,6 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/conversations/{id}", delete(delete_conversation))
 }
 
-/// Serialize a [`PermissionMode`] to its API string.
-fn permission_mode_str(mode: PermissionMode) -> &'static str {
-    match mode {
-        PermissionMode::Interactive => "interactive",
-        PermissionMode::PolicyBased => "policy_based",
-        PermissionMode::Autonomous => "autonomous",
-    }
-}
-
 /// `GET /api/v1/conversations` — list conversations for the authenticated user.
 async fn list_conversations(
     State(state): State<Arc<AppState>>,
@@ -47,7 +38,7 @@ async fn list_conversations(
                 "id": c.id.to_string(),
                 "title": c.title,
                 "workspace_id": c.workspace_id.map(|w| w.to_string()),
-                "permission_mode": permission_mode_str(c.permission_mode),
+                "permission_mode": c.permission_mode.as_str(),
                 "created_at": c.created_at.to_rfc3339(),
                 "updated_at": c.updated_at.to_rfc3339(),
             })
@@ -88,7 +79,7 @@ async fn create_conversation(
         "id": conversation.id.to_string(),
         "title": conversation.title,
         "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
-        "permission_mode": permission_mode_str(conversation.permission_mode),
+        "permission_mode": conversation.permission_mode.as_str(),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
@@ -131,7 +122,7 @@ async fn get_conversation(
         "id": conversation.id.to_string(),
         "title": conversation.title,
         "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
-        "permission_mode": permission_mode_str(conversation.permission_mode),
+        "permission_mode": conversation.permission_mode.as_str(),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
         "messages": messages,
@@ -174,7 +165,7 @@ async fn update_conversation(
     Ok(ApiResponse::new(serde_json::json!({
         "id": updated.id.to_string(),
         "title": updated.title,
-        "permission_mode": permission_mode_str(updated.permission_mode),
+        "permission_mode": updated.permission_mode.as_str(),
     })))
 }
 

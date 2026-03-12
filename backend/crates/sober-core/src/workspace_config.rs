@@ -54,6 +54,17 @@ pub enum PermissionMode {
     Autonomous,
 }
 
+impl PermissionMode {
+    /// Returns the canonical string representation for API serialization.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PermissionMode::Interactive => "interactive",
+            PermissionMode::PolicyBased => "policy_based",
+            PermissionMode::Autonomous => "autonomous",
+        }
+    }
+}
+
 /// Sandbox execution policy for this workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceSandboxConfig {

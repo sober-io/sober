@@ -22,6 +22,7 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
         workspace_home,
         sandbox_policy,
         false,
+        None,
     )
 }
 
@@ -85,6 +86,7 @@ async fn shell_tool_denies_blocked_commands() {
         dir.path().to_path_buf(),
         sandbox_policy,
         false,
+        None,
     );
     let result = tool
         .execute(serde_json::json!({"command": "shutdown -h now"}))
