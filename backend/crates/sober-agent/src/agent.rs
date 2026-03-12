@@ -484,10 +484,29 @@ where
 
                 if let Ok(title_resp) = llm.complete(title_req).await
                     && let Some(title) = title_resp.choices.into_iter().next().and_then(|c| {
-                        c.message
+                        // Primary: use content field if non-empty
+                        let title = c
+                            .message
                             .content
                             .filter(|s| !s.trim().is_empty())
-                            .map(|t| t.trim().trim_matches('"').to_owned())
+                            .map(|t| t.trim().trim_matches('"').to_owned());
+
+                        if title.is_some() {
+                            return title;
+                        }
+
+                        // Fallback for thinking models: extract title from reasoning content
+                        c.message.reasoning_content.and_then(|r| {
+                            r.lines()
+                                .filter_map(|line| {
+                                    line.strip_prefix(" - ").or(line.strip_prefix("- "))
+                                })
+                                .find(|candidate| {
+                                    let words = candidate.split_whitespace().count();
+                                    (2..=6).contains(&words)
+                                })
+                                .map(|t| t.trim().trim_matches('"').to_owned())
+                        })
                     })
                     && conversation_repo
                         .update_title(conversation_id, &title)
