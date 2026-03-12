@@ -6,6 +6,7 @@ use axum::extract::{Path, State};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use sober_auth::AuthUser;
+use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{ApiResponse, ConversationId, ConversationRepo, MessageRepo, WorkspaceId};
 use sober_db::{PgConversationRepo, PgMessageRepo};
@@ -37,6 +38,7 @@ async fn list_conversations(
                 "id": c.id.to_string(),
                 "title": c.title,
                 "workspace_id": c.workspace_id.map(|w| w.to_string()),
+                "permission_mode": c.permission_mode.as_str(),
                 "created_at": c.created_at.to_rfc3339(),
                 "updated_at": c.updated_at.to_rfc3339(),
             })
@@ -77,6 +79,7 @@ async fn create_conversation(
         "id": conversation.id.to_string(),
         "title": conversation.title,
         "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
+        "permission_mode": conversation.permission_mode.as_str(),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
@@ -119,6 +122,7 @@ async fn get_conversation(
         "id": conversation.id.to_string(),
         "title": conversation.title,
         "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
+        "permission_mode": conversation.permission_mode.as_str(),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
         "messages": messages,
@@ -128,10 +132,11 @@ async fn get_conversation(
 /// Request body for `PATCH /conversations/:id`.
 #[derive(serde::Deserialize)]
 struct UpdateConversationRequest {
-    title: String,
+    title: Option<String>,
+    permission_mode: Option<PermissionMode>,
 }
 
-/// `PATCH /api/v1/conversations/:id` — update conversation title.
+/// `PATCH /api/v1/conversations/:id` — update conversation fields.
 async fn update_conversation(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -147,11 +152,20 @@ async fn update_conversation(
         return Err(AppError::NotFound("conversation".into()));
     }
 
-    repo.update_title(conversation_id, &body.title).await?;
+    if let Some(ref title) = body.title {
+        repo.update_title(conversation_id, title).await?;
+    }
+    if let Some(mode) = body.permission_mode {
+        repo.update_permission_mode(conversation_id, mode).await?;
+    }
+
+    // Re-fetch to return current state.
+    let updated = repo.get_by_id(conversation_id).await?;
 
     Ok(ApiResponse::new(serde_json::json!({
-        "id": conversation.id.to_string(),
-        "title": body.title,
+        "id": updated.id.to_string(),
+        "title": updated.title,
+        "permission_mode": updated.permission_mode.as_str(),
     })))
 }
 

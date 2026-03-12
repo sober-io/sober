@@ -3,6 +3,8 @@
 //! `.sober/config.toml` — user-edited, agent reads only.
 //! `.sober/state.json` — agent-managed, user should not edit.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// User-editable workspace configuration (parsed from `.sober/config.toml`).
@@ -15,6 +17,10 @@ pub struct WorkspaceConfig {
     pub llm: Option<WorkspaceLlmConfig>,
     /// Style/convention settings.
     pub style: Option<WorkspaceStyleConfig>,
+    /// Sandbox execution policy.
+    pub sandbox: Option<WorkspaceSandboxConfig>,
+    /// Shell execution settings.
+    pub shell: Option<WorkspaceShellConfig>,
 }
 
 /// LLM configuration for a workspace.
@@ -33,6 +39,58 @@ pub struct WorkspaceStyleConfig {
     pub tone: Option<String>,
     /// Commit message convention (e.g. "conventional").
     pub commit_convention: Option<String>,
+}
+
+/// How much autonomy the agent has when executing shell commands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// Every command requires explicit user approval.
+    Interactive,
+    /// Safe/moderate commands auto-approve; dangerous commands require approval.
+    #[default]
+    PolicyBased,
+    /// All commands auto-approve within sandbox constraints.
+    Autonomous,
+}
+
+impl PermissionMode {
+    /// Returns the canonical string representation for API serialization.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PermissionMode::Interactive => "interactive",
+            PermissionMode::PolicyBased => "policy_based",
+            PermissionMode::Autonomous => "autonomous",
+        }
+    }
+}
+
+/// Sandbox execution policy for this workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceSandboxConfig {
+    /// Sandbox profile name.
+    #[serde(rename = "profile")]
+    pub permission_profile: Option<String>,
+    /// Per-command timeout in seconds.
+    pub max_execution_seconds: Option<u32>,
+    /// Network access mode.
+    pub network_mode: Option<String>,
+    /// Allowed domains when network_mode = "allowed_domains".
+    pub allowed_domains: Option<Vec<String>>,
+}
+
+/// Shell execution settings for agent commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceShellConfig {
+    /// Permission mode for command execution.
+    #[serde(default)]
+    pub permission_mode: PermissionMode,
+    /// Auto-snapshot before dangerous commands.
+    pub auto_snapshot: Option<bool>,
+    /// Maximum snapshots retained.
+    pub max_snapshots: Option<u32>,
+    /// Per-command risk level overrides.
+    pub rules: Option<HashMap<String, String>>,
 }
 
 impl WorkspaceConfig {
@@ -98,6 +156,42 @@ commit_convention = "conventional"
             config.style.as_ref().unwrap().tone.as_deref(),
             Some("formal")
         );
+    }
+
+    #[test]
+    fn permission_mode_serde_roundtrip() {
+        let variants = [
+            PermissionMode::Interactive,
+            PermissionMode::PolicyBased,
+            PermissionMode::Autonomous,
+        ];
+        for v in variants {
+            let json = serde_json::to_string(&v).unwrap();
+            let back: PermissionMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(v, back);
+        }
+    }
+
+    #[test]
+    fn permission_mode_default_is_policy_based() {
+        assert_eq!(PermissionMode::default(), PermissionMode::PolicyBased);
+    }
+
+    #[test]
+    fn parse_config_with_shell_section() {
+        let toml = r#"
+[shell]
+permission_mode = "autonomous"
+auto_snapshot = false
+
+[shell.rules]
+"docker compose" = "safe"
+"#;
+        let config = WorkspaceConfig::from_toml(toml).unwrap();
+        let shell = config.shell.unwrap();
+        assert_eq!(shell.permission_mode, PermissionMode::Autonomous);
+        assert_eq!(shell.auto_snapshot, Some(false));
+        assert_eq!(shell.rules.unwrap().get("docker compose").unwrap(), "safe");
     }
 
     #[test]

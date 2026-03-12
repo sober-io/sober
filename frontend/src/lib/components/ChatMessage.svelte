@@ -66,14 +66,24 @@
 					Thinking...
 				</summary>
 				<div class="mt-1">
-					{#each toolCalls! as tc (tc.name)}
-						<ToolCallDisplay toolName={tc.name} input={tc.input} output={tc.output} />
+					{#each toolCalls! as tc (tc.id)}
+						<ToolCallDisplay
+							toolName={tc.name}
+							input={tc.input}
+							output={tc.output}
+							loading={!tc.output}
+						/>
 					{/each}
 				</div>
 			</details>
 		{:else if hasToolCalls}
-			{#each toolCalls! as tc (tc.name)}
-				<ToolCallDisplay toolName={tc.name} input={tc.input} output={tc.output} />
+			{#each toolCalls! as tc (tc.id)}
+				<ToolCallDisplay
+					toolName={tc.name}
+					input={tc.input}
+					output={tc.output}
+					loading={!tc.output}
+				/>
 			{/each}
 		{/if}
 	</div>

@@ -78,6 +78,20 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         Err(tonic::Status::unimplemented("not used in tests"))
     }
 
+    async fn submit_confirmation(
+        &self,
+        _request: tonic::Request<proto::ConfirmResponse>,
+    ) -> Result<tonic::Response<proto::ConfirmAck>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ConfirmAck {}))
+    }
+
+    async fn set_permission_mode(
+        &self,
+        _request: tonic::Request<proto::SetPermissionModeRequest>,
+    ) -> Result<tonic::Response<proto::SetPermissionModeResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::SetPermissionModeResponse {}))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

@@ -187,6 +187,18 @@ impl BwrapSandbox {
             }
         }
 
+        // Always: DNS and essential /etc files (read-only).
+        for etc_file in &[
+            "/etc/resolv.conf",
+            "/etc/hosts",
+            "/etc/nsswitch.conf",
+            "/etc/ssl",
+        ] {
+            if std::path::Path::new(etc_file).exists() {
+                args.extend(["--ro-bind", etc_file, etc_file].map(String::from));
+            }
+        }
+
         // Always: deny sensitive paths.
         for sensitive in Self::sensitive_paths() {
             if std::path::Path::new(&sensitive).exists() {

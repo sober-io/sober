@@ -8,10 +8,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use sober_agent::ConfirmationBroker;
 use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
-use sober_agent::tools::{FetchUrlTool, ToolRegistry, WebSearchTool};
+use sober_agent::tools::{FetchUrlTool, ShellTool, ToolRegistry, WebSearchTool};
+use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
 use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, create_pool};
@@ -19,6 +21,8 @@ use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
+use sober_sandbox::{CommandPolicy, SandboxProfile};
+use std::sync::RwLock;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -79,13 +83,49 @@ async fn main() -> Result<()> {
     let mind = Arc::new(Mind::new(soul_resolver));
 
     // 9. Create tool registry with built-in tools
+    //
+    // The ShellTool uses a default workspace path and policy-based permission
+    // mode. In production these will be derived from the workspace config per
+    // conversation; for now we use sensible defaults.
+    let workspace_root = PathBuf::from(
+        std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
+    );
+    let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
+        Ok("unrestricted") => SandboxProfile::Unrestricted,
+        Ok("locked_down") => SandboxProfile::LockedDown,
+        _ => SandboxProfile::Standard,
+    };
+    let sandbox_policy = sandbox_profile
+        .resolve(&std::collections::HashMap::new())
+        .context("failed to resolve sandbox policy")?;
+    let command_policy = CommandPolicy::default();
+    let shared_permission_mode = Arc::new(RwLock::new(PermissionMode::default()));
+    let snapshot_dir = workspace_root
+        .join(sober_workspace::SOBER_DIR)
+        .join("snapshots");
+    let snapshot_manager = sober_workspace::SnapshotManager::new(snapshot_dir);
+    let shell_tool = ShellTool::new(
+        command_policy,
+        Arc::clone(&shared_permission_mode),
+        workspace_root,
+        sandbox_policy,
+        true, // auto_snapshot
+        None, // max_snapshots (uses default; overridden by workspace config)
+        Some(snapshot_manager),
+    );
+
     let builtins: Vec<Arc<dyn Tool>> = vec![
         Arc::new(WebSearchTool::new(config.searxng.url.clone())),
         Arc::new(FetchUrlTool::new()),
+        Arc::new(shell_tool),
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 
-    // 10. Create Agent
+    // 10. Create confirmation broker
+    let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
+    let registrar = confirmation_broker.registrar();
+
+    // 11. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -104,12 +144,15 @@ async fn main() -> Result<()> {
         mcp_server_repo,
         agent_config,
         config.memory.clone(),
+        Some(registrar),
     ));
 
-    // 11. Create gRPC service
-    let grpc_service = AgentGrpcService::new(agent);
+    // 12. Spawn the confirmation broker loop
+    tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 12. Bind to Unix domain socket
+    let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
+
+    // 13. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -133,7 +176,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 13. Serve with graceful shutdown
+    // 14. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())

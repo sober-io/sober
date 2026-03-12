@@ -45,6 +45,19 @@ pub enum AgentEvent {
     },
     /// An auto-generated title for the conversation.
     TitleGenerated(String),
+    /// A confirmation request for user approval of a shell command.
+    ConfirmRequest {
+        /// Unique ID for this confirmation request.
+        confirm_id: String,
+        /// The command that needs approval.
+        command: String,
+        /// Risk level: "Safe", "Moderate", or "Dangerous".
+        risk_level: String,
+        /// Resources affected by this command.
+        affects: Vec<String>,
+        /// Human-readable reason for requiring confirmation.
+        reason: String,
+    },
     /// An error occurred during processing.
     Error(String),
 }

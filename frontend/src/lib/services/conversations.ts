@@ -1,5 +1,5 @@
 import { api } from '$lib/utils/api';
-import type { Conversation, ConversationWithMessages } from '$lib/types';
+import type { Conversation, ConversationWithMessages, PermissionMode } from '$lib/types';
 
 export const conversationService = {
 	list: () => api<Conversation[]>('/conversations'),
@@ -16,6 +16,12 @@ export const conversationService = {
 		api<{ id: string; title: string }>(`/conversations/${id}`, {
 			method: 'PATCH',
 			body: JSON.stringify({ title })
+		}),
+
+	updatePermissionMode: (id: string, permission_mode: PermissionMode) =>
+		api<{ id: string; permission_mode: string }>(`/conversations/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ permission_mode })
 		}),
 
 	delete: (id: string) =>

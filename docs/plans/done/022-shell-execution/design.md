@@ -54,8 +54,11 @@ Users can switch modes at any time via:
 - API endpoint (`PUT /api/v1/workspaces/{id}/settings`)
 - CLI (`soberctl workspace configure --mode autonomous`)
 
-The selected mode persists in workspace settings (`.sober/config.toml`)
-and survives page reloads and session restarts.
+The selected mode persists in two places:
+- **Workspace default:** `.sober/config.toml` sets the default for new conversations.
+- **Per-conversation:** The `permission_mode` column in the `conversations` table
+  stores the active mode for each conversation, surviving page reloads and session
+  restarts. Changed at runtime via the `SetPermissionMode` gRPC RPC.
 
 ### Command Risk Classification
 
@@ -135,12 +138,11 @@ hanging indefinitely.
 
 ### Confirmation Card (`ConfirmationCard.svelte`)
 
-Rendered inline in the chat when a `chat.confirm` event arrives:
+Rendered as a thin footer-joined bar between the chat messages and input area.
+Appears with a slide-in animation when a `chat.confirm` event arrives:
 
-- Command text in monospace, syntax-highlighted
-- Risk level badge: green (Safe), yellow (Moderate), red (Dangerous)
-- "Affects" list showing files/directories the command touches
-- Reason text explaining why the command was flagged
+- Command text in monospace
+- Risk level badge: emerald (Safe), amber (Moderate), red (Dangerous)
 - **Approve** and **Deny** buttons
 - After decision: card updates to show resolved state ("Approved" / "Denied")
 - Disabled state after resolution (no double-clicks)
@@ -241,7 +243,7 @@ Users can promote or demote commands within the range the admin allows.
 ## 7. Security Considerations
 
 - All commands execute inside bwrap sandbox --- process isolation, filesystem
-  restrictions, optional network isolation
+  restrictions, optional network isolation. No fallback to unsandboxed execution.
 - Sensitive paths always denied (`.ssh`, `.aws`, `.gnupg`) regardless of config
 - Admin deny list is a hard floor --- users cannot override
 - Pipe-to-shell patterns (`curl | sh`) always classified as Dangerous
@@ -259,23 +261,49 @@ Users can promote or demote commands within the range the admin allows.
 - **sober-agent** --- new `ShellTool` in tools module, confirmation channel in
   agent loop
 - **sober-sandbox** --- new `CommandPolicy` for risk classification
-- **sober-core** --- new `PermissionMode` and `RiskLevel` enums
+- **sober-core** --- new `PermissionMode` enum and workspace shell config structs
+- **sober-db** --- new `permission_mode` column on `conversations` table, updated
+  repository methods
 - **sober-api** --- new WebSocket event types (`chat.confirm`,
-  `chat.confirm_response`), confirmation routing
+  `chat.confirm_response`, `chat.set_permission_mode`), confirmation routing
 
 ### New frontend components
 
-- `ConfirmationCard.svelte` --- inline command approval card
-- `PermissionToggle.svelte` --- status bar permission mode control
+- `ConfirmationCard.svelte` --- footer-joined command approval bar
+- `StatusBar.svelte` --- status bar with permission mode segmented control
 
 ### Proto changes
 
-- New `ConfirmRequest` and `ConfirmResponse` messages in `agent.proto`
+- New `ConfirmRequest`, `ConfirmResponse`, and `ConfirmAck` messages in `agent.proto`
+- New `SetPermissionModeRequest` and `SetPermissionModeResponse` messages
+- New `SubmitConfirmation` and `SetPermissionMode` RPCs on `AgentService`
 - New `confirm` variant in `AgentEvent` oneof
 
 ---
 
-## 9. Out of Scope
+## 9. Implementation Notes (post-implementation)
+
+Deviations from the original design, recorded after implementation:
+
+- **Confirmation Card redesign:** Originally designed as inline chat cards, then
+  redesigned to a thin footer-joined bar between messages and input for a less
+  intrusive UX.
+- **Per-conversation DB persistence:** Permission mode is also stored in the
+  `conversations` table (not just workspace config), enabling per-conversation
+  mode and runtime switching via `SetPermissionMode` gRPC RPC.
+- **No direct execution fallback:** Early implementation included an unsandboxed
+  fallback for Docker environments. Removed during review — commands must always
+  run inside bwrap.
+- **Tool error circuit breaker:** Agent loop includes a circuit breaker that
+  stops after repeated tool errors to prevent infinite retry loops.
+- **Snapshot integration deferred:** Auto-snapshot before dangerous commands has
+  TODO stubs; depends on `SnapshotManager` from plan 017 being wired through.
+- **Affects analysis deferred:** The `affects` field in `ConfirmRequest` is
+  currently empty; command impact analysis is a future enhancement.
+
+---
+
+## 10. Out of Scope
 
 - Direct terminal access (WebSocket PTY) --- future enhancement
 - User's local machine access --- not planned

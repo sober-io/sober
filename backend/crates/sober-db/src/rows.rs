@@ -107,17 +107,25 @@ pub(crate) struct ConversationRow {
     pub user_id: Uuid,
     pub title: Option<String>,
     pub workspace_id: Option<Uuid>,
+    pub permission_mode: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl From<ConversationRow> for Conversation {
     fn from(row: ConversationRow) -> Self {
+        use sober_core::PermissionMode;
+        let permission_mode = match row.permission_mode.as_str() {
+            "interactive" => PermissionMode::Interactive,
+            "autonomous" => PermissionMode::Autonomous,
+            _ => PermissionMode::PolicyBased,
+        };
         Conversation {
             id: ConversationId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
             title: row.title,
             workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
+            permission_mode,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

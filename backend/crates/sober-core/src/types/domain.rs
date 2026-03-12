@@ -86,6 +86,8 @@ pub struct Conversation {
     pub title: Option<String>,
     /// The workspace this conversation is scoped to, if any.
     pub workspace_id: Option<WorkspaceId>,
+    /// Shell execution permission mode for this conversation.
+    pub permission_mode: crate::PermissionMode,
     /// When the conversation was created.
     pub created_at: DateTime<Utc>,
     /// When the conversation was last updated.

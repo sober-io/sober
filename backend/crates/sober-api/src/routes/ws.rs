@@ -37,6 +37,7 @@ async fn ws_upgrade(
 /// Client-to-server WebSocket message types.
 #[derive(serde::Deserialize)]
 #[serde(tag = "type")]
+#[expect(clippy::enum_variant_names)]
 enum ClientWsMessage {
     #[serde(rename = "chat.message")]
     ChatMessage {
@@ -45,6 +46,19 @@ enum ClientWsMessage {
     },
     #[serde(rename = "chat.cancel")]
     ChatCancel { conversation_id: String },
+    #[serde(rename = "chat.confirm_response")]
+    ChatConfirmResponse {
+        #[expect(dead_code)]
+        conversation_id: String,
+        confirm_id: String,
+        approved: bool,
+    },
+    #[serde(rename = "chat.set_permission_mode")]
+    ChatSetPermissionMode {
+        #[expect(dead_code)]
+        conversation_id: String,
+        mode: String,
+    },
 }
 
 /// Server-to-client WebSocket message types.
@@ -87,6 +101,15 @@ enum ServerWsMessage {
     ChatError {
         conversation_id: String,
         error: String,
+    },
+    #[serde(rename = "chat.confirm")]
+    ChatConfirm {
+        conversation_id: String,
+        confirm_id: String,
+        command: String,
+        risk_level: String,
+        affects: Vec<String>,
+        reason: String,
     },
 }
 
@@ -165,6 +188,30 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 if let Some(token) = active_tasks.remove(&conversation_id) {
                     token.cancel();
                     info!(conversation_id, "cancelled active chat task");
+                }
+            }
+            ClientWsMessage::ChatConfirmResponse {
+                conversation_id: _,
+                confirm_id,
+                approved,
+            } => {
+                let mut agent_client = state.agent_client.clone();
+                let resp = proto::ConfirmResponse {
+                    confirm_id,
+                    approved,
+                };
+                if let Err(e) = agent_client.submit_confirmation(resp).await {
+                    warn!(error = %e, "failed to submit confirmation");
+                }
+            }
+            ClientWsMessage::ChatSetPermissionMode {
+                conversation_id: _,
+                mode,
+            } => {
+                let mut agent_client = state.agent_client.clone();
+                let req = proto::SetPermissionModeRequest { mode: mode.clone() };
+                if let Err(e) = agent_client.set_permission_mode(req).await {
+                    warn!(error = %e, mode, "failed to set permission mode");
                 }
             }
         }
@@ -274,6 +321,16 @@ async fn handle_chat_message(
                         ServerWsMessage::ChatError {
                             conversation_id: conversation_id.clone(),
                             error: e.message,
+                        }
+                    }
+                    Some(proto::agent_event::Event::ConfirmRequest(cr)) => {
+                        ServerWsMessage::ChatConfirm {
+                            conversation_id: conversation_id.clone(),
+                            confirm_id: cr.confirm_id,
+                            command: cr.command,
+                            risk_level: cr.risk_level,
+                            affects: cr.affects,
+                            reason: cr.reason,
                         }
                     }
                     None => continue,

@@ -10,6 +10,8 @@ export interface User {
 export interface Conversation {
 	id: string;
 	title: string;
+	workspace_id?: string;
+	permission_mode: PermissionMode;
 	created_at: string;
 	updated_at: string;
 }
@@ -29,6 +31,7 @@ export interface Message {
 }
 
 export interface ToolCall {
+	id: string;
 	name: string;
 	input: unknown;
 	output?: string;
@@ -45,12 +48,31 @@ export interface McpServer {
 	updated_at: string;
 }
 
+export interface ConfirmRequest {
+	confirm_id: string;
+	command: string;
+	risk_level: 'safe' | 'moderate' | 'dangerous';
+	affects: string[];
+	reason: string;
+}
+
 // WebSocket message types
 
 /** Client-to-server messages — all include conversation_id */
 export type ClientWsMessage =
 	| { type: 'chat.message'; conversation_id: string; content: string }
-	| { type: 'chat.cancel'; conversation_id: string };
+	| { type: 'chat.cancel'; conversation_id: string }
+	| {
+			type: 'chat.confirm_response';
+			conversation_id: string;
+			confirm_id: string;
+			approved: boolean;
+	  }
+	| {
+			type: 'chat.set_permission_mode';
+			conversation_id: string;
+			mode: PermissionMode;
+	  };
 
 /** Server-to-client messages — routed by conversation_id */
 export type ServerWsMessage =
@@ -65,7 +87,23 @@ export type ServerWsMessage =
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
 	| { type: 'chat.title'; conversation_id: string; title: string }
-	| { type: 'chat.error'; conversation_id: string; error: string };
+	| { type: 'chat.error'; conversation_id: string; error: string }
+	| {
+			type: 'chat.confirm';
+			conversation_id: string;
+			confirm_id: string;
+			command: string;
+			risk_level: string;
+			affects: string[];
+			reason: string;
+	  };
+
+export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
+
+export interface WorkspaceSettings {
+	permission_mode: PermissionMode;
+	auto_snapshot: boolean;
+}
 
 // API response envelope types
 

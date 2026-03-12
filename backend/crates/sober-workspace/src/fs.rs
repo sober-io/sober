@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tokio::fs;
 
-use crate::WorkspaceError;
+use crate::{SOBER_DIR, WorkspaceError};
 
 const DEFAULT_CONFIG_TOML: &str = "\
 # Workspace configuration for Sober agent.
@@ -17,6 +17,21 @@ const DEFAULT_CONFIG_TOML: &str = "\
 # [style]
 # tone = \"neutral\"
 # commit_convention = \"conventional\"
+
+# [sandbox]
+# profile = \"standard\"            # locked_down | standard | unrestricted
+# max_execution_seconds = 300
+# network_mode = \"none\"           # none | allowed_domains | full
+# allowed_domains = []
+
+# [shell]
+# permission_mode = \"policy_based\"  # interactive | policy_based | autonomous
+# auto_snapshot = true
+# max_snapshots = 10                 # oldest pruned when exceeded
+#
+# [shell.rules]
+# \"docker compose\" = \"safe\"
+# \"npm publish\" = \"dangerous\"
 ";
 
 const DEFAULT_STATE_JSON: &str = r#"{"observations":[]}"#;
@@ -26,7 +41,7 @@ const DEFAULT_STATE_JSON: &str = r#"{"observations":[]}"#;
 /// Creates the root directory and `.sober/` with subdirectories and template
 /// files (`config.toml`, `state.json`) if they do not already exist.
 pub async fn init_workspace_dir(workspace_root: &Path) -> Result<(), WorkspaceError> {
-    let sober_dir = workspace_root.join(".sober");
+    let sober_dir = workspace_root.join(SOBER_DIR);
 
     for subdir in ["proposals", "traces", "snapshots", "worktrees"] {
         fs::create_dir_all(sober_dir.join(subdir))

@@ -1,5 +1,6 @@
 //! PostgreSQL implementation of [`ConversationRepo`].
 
+use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{Conversation, ConversationId, UserId, WorkspaceId};
 use sqlx::PgPool;
@@ -30,7 +31,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         let row = sqlx::query_as::<_, ConversationRow>(
             "INSERT INTO conversations (id, user_id, title, workspace_id) \
              VALUES ($1, $2, $3, $4) \
-             RETURNING id, user_id, title, workspace_id, created_at, updated_at",
+             RETURNING id, user_id, title, workspace_id, permission_mode, created_at, updated_at",
         )
         .bind(id)
         .bind(user_id.as_uuid())
@@ -45,7 +46,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
     async fn get_by_id(&self, id: ConversationId) -> Result<Conversation, AppError> {
         let row = sqlx::query_as::<_, ConversationRow>(
-            "SELECT id, user_id, title, workspace_id, created_at, updated_at \
+            "SELECT id, user_id, title, workspace_id, permission_mode, created_at, updated_at \
              FROM conversations WHERE id = $1",
         )
         .bind(id.as_uuid())
@@ -59,7 +60,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
     async fn list_by_user(&self, user_id: UserId) -> Result<Vec<Conversation>, AppError> {
         let rows = sqlx::query_as::<_, ConversationRow>(
-            "SELECT id, user_id, title, workspace_id, created_at, updated_at \
+            "SELECT id, user_id, title, workspace_id, permission_mode, created_at, updated_at \
              FROM conversations WHERE user_id = $1 \
              ORDER BY updated_at DESC",
         )
@@ -79,6 +80,32 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                 .execute(&self.pool)
                 .await
                 .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn update_permission_mode(
+        &self,
+        id: ConversationId,
+        mode: PermissionMode,
+    ) -> Result<(), AppError> {
+        let mode_str = match mode {
+            PermissionMode::Interactive => "interactive",
+            PermissionMode::PolicyBased => "policy_based",
+            PermissionMode::Autonomous => "autonomous",
+        };
+        let result = sqlx::query(
+            "UPDATE conversations SET permission_mode = $1, updated_at = now() WHERE id = $2",
+        )
+        .bind(mode_str)
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("conversation".into()));

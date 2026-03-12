@@ -1,13 +1,22 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import type { ToolCall, ServerWsMessage, ConversationWithMessages, Message } from '$lib/types';
+	import type {
+		ToolCall,
+		ServerWsMessage,
+		ConversationWithMessages,
+		Message,
+		ConfirmRequest,
+		PermissionMode
+	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
+	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
+	import StatusBar from '$lib/components/chat/StatusBar.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -56,6 +65,8 @@
 	let title = $state(data.conversation.title || '');
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
+	let pendingConfirms = $state<ConfirmRequest[]>([]);
+	let permissionMode = $state<PermissionMode>('policy_based');
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -68,6 +79,8 @@
 		editingQueueId = null;
 		isAtBottom = true;
 		title = data.conversation.title || '';
+		pendingConfirms = [];
+		permissionMode = data.conversation.permission_mode ?? 'policy_based';
 	});
 
 	// Scroll to bottom on conversation change
@@ -90,9 +103,10 @@
 		return unsub;
 	});
 
-	// Auto-scroll when at bottom and messages change
+	// Auto-scroll when at bottom and messages or confirms change
 	$effect(() => {
 		void messages.length;
+		void pendingConfirms.length;
 		const last = messages[messages.length - 1];
 		void last?.content;
 		if (isAtBottom && messagesContainer) {
@@ -211,18 +225,25 @@
 				const last = messages[messages.length - 1];
 				if (last && last.role === 'Assistant') {
 					const tc: ToolCall = {
+						id: crypto.randomUUID(),
 						name: msg.tool_call.name,
 						input: msg.tool_call.input
 					};
 					last.toolCalls = [...(last.toolCalls ?? []), tc];
+					last.streaming = true;
+					last.thinking = false;
+					messages = [...messages];
 				}
 				break;
 			}
 			case 'chat.tool_result': {
 				const last = messages[messages.length - 1];
 				if (last?.toolCalls) {
-					const tc = last.toolCalls.find((t) => t.name && !t.output);
-					if (tc) tc.output = msg.output;
+					const tc = last.toolCalls.find((t) => !t.output);
+					if (tc) {
+						tc.output = msg.output;
+						messages = [...messages];
+					}
 				}
 				break;
 			}
@@ -240,6 +261,19 @@
 			case 'chat.title': {
 				title = msg.title;
 				conversations.updateTitle(conversationId, msg.title);
+				break;
+			}
+			case 'chat.confirm': {
+				pendingConfirms = [
+					...pendingConfirms,
+					{
+						confirm_id: msg.confirm_id,
+						command: msg.command,
+						risk_level: msg.risk_level as 'safe' | 'moderate' | 'dangerous',
+						affects: msg.affects,
+						reason: msg.reason
+					}
+				];
 				break;
 			}
 			case 'chat.error': {
@@ -263,6 +297,29 @@
 				break;
 			}
 		}
+	};
+
+	const handleModeChange = (newMode: PermissionMode) => {
+		permissionMode = newMode;
+		// Update agent's runtime permission mode via WebSocket.
+		websocket.send({
+			type: 'chat.set_permission_mode',
+			conversation_id: conversationId,
+			mode: newMode
+		});
+		// Persist to conversation.
+		conversationService.updatePermissionMode(conversationId, newMode);
+	};
+
+	const handleConfirmResponse = (confirmId: string, approved: boolean) => {
+		websocket.send({
+			type: 'chat.confirm_response',
+			conversation_id: conversationId,
+			confirm_id: confirmId,
+			approved
+		});
+		// Remove from pending — toast disappears on response.
+		pendingConfirms = pendingConfirms.filter((c) => c.confirm_id !== confirmId);
 	};
 
 	const startEditTitle = () => {
@@ -386,5 +443,38 @@
 		<ScrollToBottom onclick={scrollToBottom} visible={!isAtBottom} />
 	</div>
 
+	{#if pendingConfirms.length > 0}
+		<div
+			class="flex flex-col items-center gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800"
+		>
+			{#each pendingConfirms as confirm (confirm.confirm_id)}
+				<div class="confirm-grow w-full">
+					<ConfirmationCard request={confirm} onRespond={handleConfirmResponse} />
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<ChatInput onsend={sendMessage} busy={isBusy} />
+	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
+
+<style>
+	.confirm-grow {
+		animation: grow-up 0.25s ease-out;
+		transform-origin: bottom center;
+	}
+
+	@keyframes grow-up {
+		from {
+			opacity: 0;
+			transform: scaleY(0);
+			max-height: 0;
+		}
+		to {
+			opacity: 1;
+			transform: scaleY(1);
+			max-height: 300px;
+		}
+	}
+</style>

@@ -4,6 +4,7 @@ pub mod auth;
 pub mod conversations;
 pub mod health;
 pub mod mcp;
+pub mod workspaces;
 pub mod ws;
 
 use std::sync::Arc;
@@ -23,6 +24,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(auth::routes())
         .merge(conversations::routes())
         .merge(mcp::routes())
+        .merge(workspaces::routes())
         .merge(ws::routes())
         .layer(auth_layer)
         .with_state(state);

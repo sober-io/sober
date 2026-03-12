@@ -11,7 +11,9 @@ use tonic::{Request, Response, Status};
 use tracing::error;
 
 use crate::agent::Agent;
+use crate::confirm::ConfirmationSender;
 use crate::stream::AgentEvent;
+use crate::tools::SharedPermissionMode;
 
 /// Generated protobuf types for the agent gRPC service.
 pub mod proto {
@@ -26,6 +28,8 @@ where
     Mcp: McpServerRepo,
 {
     agent: Arc<Agent<Msg, Conv, Mcp>>,
+    confirmation_sender: ConfirmationSender,
+    permission_mode: SharedPermissionMode,
 }
 
 impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
@@ -35,8 +39,16 @@ where
     Mcp: McpServerRepo,
 {
     /// Creates a new gRPC service backed by the given agent.
-    pub fn new(agent: Arc<Agent<Msg, Conv, Mcp>>) -> Self {
-        Self { agent }
+    pub fn new(
+        agent: Arc<Agent<Msg, Conv, Mcp>>,
+        confirmation_sender: ConfirmationSender,
+        permission_mode: SharedPermissionMode,
+    ) -> Self {
+        Self {
+            agent,
+            confirmation_sender,
+            permission_mode,
+        }
     }
 }
 
@@ -71,7 +83,7 @@ where
             .map(ConversationId::from_uuid)
             .map_err(|_| Status::invalid_argument("invalid conversation_id"))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
         let agent = Arc::clone(&self.agent);
         let content = req.content;
 
@@ -117,6 +129,46 @@ where
         Ok(Response::new(proto::WakeResponse { accepted: true }))
     }
 
+    async fn submit_confirmation(
+        &self,
+        request: Request<proto::ConfirmResponse>,
+    ) -> Result<Response<proto::ConfirmAck>, Status> {
+        let req = request.into_inner();
+        self.confirmation_sender
+            .respond(req.confirm_id, req.approved)
+            .await
+            .map_err(|e| Status::internal(format!("failed to forward confirmation: {e}")))?;
+        Ok(Response::new(proto::ConfirmAck {}))
+    }
+
+    async fn set_permission_mode(
+        &self,
+        request: Request<proto::SetPermissionModeRequest>,
+    ) -> Result<Response<proto::SetPermissionModeResponse>, Status> {
+        let mode_str = request.into_inner().mode;
+        let mode = match mode_str.as_str() {
+            "interactive" => sober_core::PermissionMode::Interactive,
+            "policy_based" => sober_core::PermissionMode::PolicyBased,
+            "autonomous" => sober_core::PermissionMode::Autonomous,
+            other => {
+                return Err(Status::invalid_argument(format!(
+                    "unknown permission mode: {other}"
+                )));
+            }
+        };
+
+        {
+            let mut current = self
+                .permission_mode
+                .write()
+                .expect("permission mode lock poisoned");
+            *current = mode;
+        }
+
+        tracing::info!(mode = ?mode, "permission mode updated");
+        Ok(Response::new(proto::SetPermissionModeResponse {}))
+    }
+
     async fn health(
         &self,
         _request: Request<proto::HealthRequest>,
@@ -147,6 +199,19 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             completion_tokens: usage.completion_tokens,
         }),
         AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
+        AgentEvent::ConfirmRequest {
+            confirm_id,
+            command,
+            risk_level,
+            affects,
+            reason,
+        } => Event::ConfirmRequest(proto::ConfirmRequest {
+            confirm_id,
+            command,
+            risk_level,
+            affects,
+            reason,
+        }),
         AgentEvent::Error(message) => Event::Error(proto::Error { message }),
     };
 

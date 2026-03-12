@@ -118,6 +118,13 @@ pub trait ConversationRepo: Send + Sync {
         title: &str,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
+    /// Updates the permission mode of a conversation.
+    fn update_permission_mode(
+        &self,
+        id: ConversationId,
+        mode: crate::PermissionMode,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
     /// Deletes a conversation and all its messages.
     fn delete(&self, id: ConversationId) -> impl Future<Output = Result<(), AppError>> + Send;
 }
