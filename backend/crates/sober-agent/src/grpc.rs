@@ -10,7 +10,7 @@ use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::agent::Agent;
 use crate::confirm::ConfirmationSender;
@@ -194,7 +194,7 @@ where
                         _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
                     };
 
-                    execute_prompt_fallback(
+                    execute_prompt_conversational(
                         &agent,
                         &prompt,
                         user_id,
@@ -295,7 +295,8 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
 
             // If we have a user + conversation, delegate to the conversational handler.
             if let (Some(uid), Some(cid)) = (user_id, resolved_cid) {
-                execute_prompt_fallback(agent, &text, Some(uid), Some(cid), task_id, tx).await;
+                execute_prompt_conversational(agent, &text, Some(uid), Some(cid), task_id, tx)
+                    .await;
             } else {
                 // No conversation context — use autonomous prompt assembly.
                 // This validates the SOUL.md chain and prompt construction for
@@ -333,29 +334,34 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
             artifact_type,
             ..
         } => {
-            // Artifact execution via sandbox — not yet implemented.
-            warn!(
+            error!(
                 task_id = %task_id,
                 blob_ref = %blob_ref,
                 artifact_type = ?artifact_type,
-                "artifact execution not yet implemented"
+                "artifact execution not yet implemented — requires BwrapSandbox integration"
             );
-            send_done_stub(tx).await;
+            let proto_event = to_proto_event(AgentEvent::Error(
+                "Artifact execution is not yet implemented".into(),
+            ));
+            let _ = tx.send(Ok(proto_event)).await;
         }
         JobPayload::Internal { operation } => {
-            // Internal operations — not yet wired to crate methods.
-            warn!(
+            error!(
                 task_id = %task_id,
                 operation = ?operation,
-                "internal operation not yet implemented"
+                "internal operation not yet implemented — requires crate-level execution APIs"
             );
-            send_done_stub(tx).await;
+            let proto_event = to_proto_event(AgentEvent::Error(format!(
+                "Internal operation {:?} is not yet implemented",
+                operation
+            )));
+            let _ = tx.send(Ok(proto_event)).await;
         }
     }
 }
 
-/// Legacy execution path: treat payload as a plain prompt and delegate to `handle_message`.
-async fn execute_prompt_fallback<Msg, Conv, Mcp>(
+/// Executes a prompt payload by delegating to `handle_message` with conversation context.
+async fn execute_prompt_conversational<Msg, Conv, Mcp>(
     agent: &Agent<Msg, Conv, Mcp>,
     prompt: &str,
     user_id: Option<UserId>,
