@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use sober_core::types::JobPayload;
+use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use tokio_stream::wrappers::ReceiverStream;
@@ -173,7 +174,7 @@ where
 
         tokio::spawn(async move {
             // Try to deserialize as a typed JobPayload; fall back to raw prompt.
-            match JobPayload::from_bytes(&payload) {
+            match serde_json::from_slice::<JobPayload>(&payload) {
                 Ok(job_payload) => {
                     execute_typed_payload(
                         &agent,
@@ -296,17 +297,35 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
             if let (Some(uid), Some(cid)) = (user_id, resolved_cid) {
                 execute_prompt_fallback(agent, &text, Some(uid), Some(cid), task_id, tx).await;
             } else {
-                // No conversation context available — send Done with no artifact.
-                warn!(task_id = %task_id, "prompt job has no resolvable conversation, skipping");
-                let done = to_proto_event(AgentEvent::Done {
-                    message_id: sober_core::MessageId::new(),
-                    usage: crate::stream::Usage {
-                        prompt_tokens: 0,
-                        completion_tokens: 0,
-                    },
-                    artifact_ref: None,
-                });
-                let _ = tx.send(Ok(done)).await;
+                // No conversation context — use autonomous prompt assembly.
+                // This validates the SOUL.md chain and prompt construction for
+                // system-level scheduled jobs (e.g. trait_evolution_check).
+                let caller = CallerContext {
+                    user_id,
+                    trigger: TriggerKind::Scheduler,
+                    permissions: vec![],
+                    scope_grants: vec![],
+                    workspace_id,
+                };
+                match agent
+                    .mind()
+                    .assemble_autonomous_prompt(&text, &caller)
+                    .await
+                {
+                    Ok(_messages) => {
+                        // TODO: feed messages to LLM engine and stream response
+                        // For now, log that autonomous execution was assembled
+                        tracing::info!(
+                            task_id = %task_id,
+                            "autonomous prompt assembled (LLM execution not yet wired)"
+                        );
+                        send_done_stub(tx).await;
+                    }
+                    Err(e) => {
+                        let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
+                        let _ = tx.send(Ok(proto_event)).await;
+                    }
+                }
             }
         }
         JobPayload::Artifact {
@@ -321,15 +340,7 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
                 artifact_type = ?artifact_type,
                 "artifact execution not yet implemented"
             );
-            let done = to_proto_event(AgentEvent::Done {
-                message_id: sober_core::MessageId::new(),
-                usage: crate::stream::Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                },
-                artifact_ref: None,
-            });
-            let _ = tx.send(Ok(done)).await;
+            send_done_stub(tx).await;
         }
         JobPayload::Internal { operation } => {
             // Internal operations — not yet wired to crate methods.
@@ -338,15 +349,7 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
                 operation = ?operation,
                 "internal operation not yet implemented"
             );
-            let done = to_proto_event(AgentEvent::Done {
-                message_id: sober_core::MessageId::new(),
-                usage: crate::stream::Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                },
-                artifact_ref: None,
-            });
-            let _ = tx.send(Ok(done)).await;
+            send_done_stub(tx).await;
         }
     }
 }
@@ -368,15 +371,7 @@ async fn execute_prompt_fallback<Msg, Conv, Mcp>(
         agent.handle_message(uid, cid, prompt).await
     } else {
         // No conversation context — emit Done immediately.
-        let done = to_proto_event(AgentEvent::Done {
-            message_id: sober_core::MessageId::new(),
-            usage: crate::stream::Usage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-            },
-            artifact_ref: None,
-        });
-        let _ = tx.send(Ok(done)).await;
+        send_done_stub(tx).await;
         return;
     };
 
@@ -399,6 +394,19 @@ async fn execute_prompt_fallback<Msg, Conv, Mcp>(
             let _ = tx.send(Ok(proto_event)).await;
         }
     }
+}
+
+/// Sends a no-op Done event (zero tokens, no artifact).
+async fn send_done_stub(tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>) {
+    let done = to_proto_event(AgentEvent::Done {
+        message_id: sober_core::MessageId::new(),
+        usage: crate::stream::Usage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+        },
+        artifact_ref: None,
+    });
+    let _ = tx.send(Ok(done)).await;
 }
 
 /// Converts an [`AgentEvent`] to its proto representation.

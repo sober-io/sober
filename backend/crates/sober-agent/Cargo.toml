@@ -20,7 +20,6 @@ sober-sandbox = { path = "../sober-sandbox" }
 sober-workspace = { path = "../sober-workspace" }
 sober-llm = { path = "../sober-llm" }
 sober-memory = { path = "../sober-memory" }
-bincode = "1"
 anyhow = { workspace = true }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 serde = { workspace = true }

@@ -340,7 +340,6 @@ async fn job_lifecycle(pool: PgPool) {
             name: "test_job".into(),
             schedule: "0 * * * *".into(),
             payload: serde_json::json!({"task": "prune"}),
-            payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
             workspace_id: None,

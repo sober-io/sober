@@ -152,9 +152,6 @@ pub struct Job {
     pub status: JobStatus,
     /// The job payload (JSON) — defines what to execute.
     pub payload: serde_json::Value,
-    /// Opaque binary payload for the scheduler.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub payload_bytes: Vec<u8>,
     /// Who owns this job: "system", "user", or "group".
     #[serde(default = "default_owner_type")]
     pub owner_type: String,
@@ -452,7 +449,6 @@ mod tests {
             schedule: "0 */6 * * *".into(),
             status: JobStatus::Active,
             payload: serde_json::json!({"scope": "all"}),
-            payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
             workspace_id: None,

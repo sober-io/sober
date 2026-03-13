@@ -59,8 +59,6 @@ pub struct CreateJob {
     pub schedule: String,
     /// Job payload (JSON).
     pub payload: serde_json::Value,
-    /// Opaque binary payload for the scheduler.
-    pub payload_bytes: Vec<u8>,
     /// Who owns this job: "system", "user", or "group".
     pub owner_type: String,
     /// Owner UUID (None for system jobs).

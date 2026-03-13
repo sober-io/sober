@@ -48,7 +48,7 @@ fn job_to_proto(job: sober_core::types::Job) -> scheduler_proto::Job {
         owner_type: job.owner_type,
         owner_id: job.owner_id.map(|id| id.to_string()),
         schedule: job.schedule,
-        payload: job.payload_bytes,
+        payload: serde_json::to_vec(&job.payload).unwrap_or_default(),
         status: job_status_str(job.status).into(),
         next_run_at: job.next_run_at.to_rfc3339(),
         last_run_at: job.last_run_at.map(|t| t.to_rfc3339()),
@@ -138,10 +138,9 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             })
             .transpose()?;
 
-        // Try to interpret the binary payload as JSON; fall back to wrapping in
-        // a `{"data": "<base64>"}` envelope so the JSONB column is never null.
+        // Deserialize the gRPC bytes payload as JSON.
         let payload_json = serde_json::from_slice::<serde_json::Value>(&req.payload)
-            .unwrap_or_else(|_| serde_json::json!({ "raw": true }));
+            .map_err(|e| Status::invalid_argument(format!("payload must be valid JSON: {e}")))?;
 
         let workspace_id = parse_optional_uuid(&req.workspace_id)?;
         let created_by = parse_optional_uuid(&req.created_by)?;
@@ -151,7 +150,6 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             name: req.name,
             schedule: req.schedule,
             payload: payload_json,
-            payload_bytes: req.payload,
             owner_type: req.owner_type,
             owner_id,
             workspace_id,

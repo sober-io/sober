@@ -152,6 +152,11 @@ where
         }
     }
 
+    /// Returns a reference to the agent's [`Mind`] instance.
+    pub fn mind(&self) -> &Arc<Mind> {
+        &self.mind
+    }
+
     /// Resolves which conversation to deliver job results to.
     ///
     /// Tries the original `conversation_id` first; falls back to the user's

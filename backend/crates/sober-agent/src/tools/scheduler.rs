@@ -69,7 +69,7 @@ impl SchedulerTools {
         workspace_id: Option<Uuid>,
         conversation_id: Option<Uuid>,
     ) -> Result<String, String> {
-        let payload_bytes = payload.to_bytes().map_err(|e| e.to_string())?;
+        let payload_bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
 
         // TODO: detect group workspace and set owner_type accordingly
         let owner_type = "user";
@@ -85,8 +85,10 @@ impl SchedulerTools {
             conversation_id: conversation_id.map(|id| id.to_string()).unwrap_or_default(),
         };
 
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let response = client.create_job(req).await.map_err(|e| e.to_string())?;
         let job = response.into_inner();
 
@@ -113,8 +115,10 @@ impl SchedulerTools {
             name_filter: name_filter.unwrap_or_default().into(),
         };
 
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let response = client.list_jobs(req).await.map_err(|e| e.to_string())?;
         let jobs = response.into_inner().jobs;
 
@@ -141,8 +145,10 @@ impl SchedulerTools {
             job_id: job_id.into(),
         };
 
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let response = client.get_job(req).await.map_err(|e| e.to_string())?;
         let job = response.into_inner();
 
@@ -165,8 +171,10 @@ impl SchedulerTools {
         let get_req = scheduler_proto::GetJobRequest {
             job_id: job_id.into(),
         };
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let job = client
             .get_job(get_req)
             .await
@@ -191,8 +199,10 @@ impl SchedulerTools {
         let get_req = scheduler_proto::GetJobRequest {
             job_id: job_id.into(),
         };
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let job = client
             .get_job(get_req)
             .await
@@ -218,8 +228,10 @@ impl SchedulerTools {
         let get_req = scheduler_proto::GetJobRequest {
             job_id: job_id.into(),
         };
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let job = client
             .get_job(get_req)
             .await
@@ -251,8 +263,10 @@ impl SchedulerTools {
         let get_req = scheduler_proto::GetJobRequest {
             job_id: job_id.into(),
         };
-        let mut client = self.scheduler_client.write().await;
-        let client = client.as_mut().ok_or("Scheduler not connected")?;
+        let mut client = {
+            let guard = self.scheduler_client.read().await;
+            guard.as_ref().ok_or("Scheduler not connected")?.clone()
+        };
         let job = client
             .get_job(get_req)
             .await

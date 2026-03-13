@@ -1,6 +1,6 @@
 //! Typed job payload — determines execution path in the agent.
 //!
-//! Serialized with bincode into the `payload_bytes` column.
+//! Serialized as JSON into the `payload` JSONB column.
 
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Discriminated job payload — determines execution path in agent.
-/// Serialized with bincode into the `payload_bytes` column.
+/// Serialized as JSON into the `payload` JSONB column.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JobPayload {
     /// Natural language prompt executed via LLM with workspace context.
@@ -37,18 +37,6 @@ pub enum JobPayload {
         /// Which internal operation to run.
         operation: InternalOp,
     },
-}
-
-impl JobPayload {
-    /// Serialize to bytes for storage in `payload_bytes` column.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
-    }
-
-    /// Deserialize from bytes stored in `payload_bytes` column.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
-    }
 }
 
 /// Type of artifact to execute in sandbox.
@@ -84,8 +72,8 @@ mod tests {
             workspace_id: Some(Uuid::now_v7()),
             model_hint: None,
         };
-        let bytes = payload.to_bytes().unwrap();
-        let decoded = JobPayload::from_bytes(&bytes).unwrap();
+        let value = serde_json::to_value(&payload).unwrap();
+        let decoded: JobPayload = serde_json::from_value(value).unwrap();
         match decoded {
             JobPayload::Prompt { text, .. } => assert_eq!(text, "Check deploy status"),
             _ => panic!("Wrong variant"),
@@ -100,8 +88,8 @@ mod tests {
             workspace_id: Uuid::now_v7(),
             env: HashMap::from([("KEY".into(), "value".into())]),
         };
-        let bytes = payload.to_bytes().unwrap();
-        let decoded = JobPayload::from_bytes(&bytes).unwrap();
+        let value = serde_json::to_value(&payload).unwrap();
+        let decoded: JobPayload = serde_json::from_value(value).unwrap();
         match decoded {
             JobPayload::Artifact { blob_ref, .. } => assert_eq!(blob_ref, "sha256:abc123"),
             _ => panic!("Wrong variant"),
@@ -113,8 +101,8 @@ mod tests {
         let payload = JobPayload::Internal {
             operation: InternalOp::MemoryPruning,
         };
-        let bytes = payload.to_bytes().unwrap();
-        let decoded = JobPayload::from_bytes(&bytes).unwrap();
+        let value = serde_json::to_value(&payload).unwrap();
+        let decoded: JobPayload = serde_json::from_value(value).unwrap();
         assert!(matches!(
             decoded,
             JobPayload::Internal {

@@ -20,8 +20,6 @@ axum-core = { workspace = true }
 axum = { workspace = true }
 http = { workspace = true }
 
-# Binary serialization (for job payloads)
-bincode = "1"
 
 # Configuration
 dotenvy = { workspace = true }

@@ -91,7 +91,7 @@ pub async fn register_system_jobs(scheduler_client: &SharedSchedulerClient) {
             }
         }
 
-        let payload_bytes = match def.payload.to_bytes() {
+        let payload_bytes = match serde_json::to_vec(&def.payload) {
             Ok(b) => b,
             Err(e) => {
                 warn!(name = def.name, error = %e, "failed to serialize system job payload");

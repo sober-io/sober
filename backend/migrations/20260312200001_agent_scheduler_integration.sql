@@ -16,3 +16,6 @@ ALTER TABLE job_runs ADD COLUMN result_artifact_ref TEXT;
 
 -- Index for workspace-scoped queries
 CREATE INDEX idx_jobs_workspace ON jobs(workspace_id) WHERE workspace_id IS NOT NULL;
+
+-- Remove redundant binary payload column (consolidated onto payload JSONB)
+ALTER TABLE jobs DROP COLUMN IF EXISTS payload_bytes;

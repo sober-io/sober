@@ -215,7 +215,7 @@ async fn execute_via_agent(
     let request = agent_proto::ExecuteTaskRequest {
         task_id: job.id.as_uuid().to_string(),
         task_type: "scheduled_job".into(),
-        payload: job.payload_bytes.clone(),
+        payload: serde_json::to_vec(&job.payload).unwrap_or_default(),
         caller_identity: "scheduler".into(),
         user_id: job.owner_id.map(|id| id.to_string()),
         conversation_id: job.conversation_id.map(|id| id.to_string()),

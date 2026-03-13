@@ -20,7 +20,7 @@ impl PgJobRepo {
     }
 }
 
-const JOB_COLUMNS: &str = "id, name, schedule, status, payload, payload_bytes, \
+const JOB_COLUMNS: &str = "id, name, schedule, status, payload, \
                             owner_type, owner_id, workspace_id, created_by, \
                             conversation_id, next_run_at, last_run_at, created_at";
 
@@ -28,16 +28,15 @@ impl sober_core::types::JobRepo for PgJobRepo {
     async fn create(&self, input: CreateJob) -> Result<Job, AppError> {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, JobRow>(&format!(
-            "INSERT INTO jobs (id, name, schedule, status, payload, payload_bytes, \
+            "INSERT INTO jobs (id, name, schedule, status, payload, \
              owner_type, owner_id, workspace_id, created_by, conversation_id, next_run_at) \
-             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10, $11) \
+             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10) \
              RETURNING {JOB_COLUMNS}"
         ))
         .bind(id)
         .bind(&input.name)
         .bind(&input.schedule)
         .bind(&input.payload)
-        .bind(&input.payload_bytes)
         .bind(&input.owner_type)
         .bind(input.owner_id)
         .bind(input.workspace_id)
