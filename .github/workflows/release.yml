@@ -35,6 +35,7 @@ jobs:
         id: bump
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           MANUAL_TAG: ${{ inputs.tag }}
         run: |
           # Manual dispatch: use the provided tag directly
@@ -58,23 +59,35 @@ jobs:
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-          # Skip release for docs: and ci: prefixed PRs
+          # Skip release for docs-only and CI-only PRs
           if echo "$PR_TITLE" | grep -qiE '^(docs|ci)(\(.+\))?:'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Skipping release for docs/ci change"
             exit 0
           fi
 
-          # Determine bump type from PR title (conventional commit format)
+          # Determine bump type from branch prefix (primary) or PR title (fallback).
+          # feat/ branches always bump MINOR. fix/, chore/, refactor/, sec/ bump PATCH.
+          # Breaking changes (in title) always bump MAJOR.
+          echo "Branch: $PR_BRANCH"
+          echo "Title:  $PR_TITLE"
+
           if echo "$PR_TITLE" | grep -qiE '(BREAKING[ -]CHANGE|^[a-z]+(\(.+\))?!:)'; then
             MAJOR=$((MAJOR + 1))
             MINOR=0
             PATCH=0
+            echo "Bump: MAJOR (breaking change)"
+          elif echo "$PR_BRANCH" | grep -qE '^feat/'; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            echo "Bump: MINOR (feat/ branch)"
           elif echo "$PR_TITLE" | grep -qiE '^feat(\(.+\))?:'; then
             MINOR=$((MINOR + 1))
             PATCH=0
+            echo "Bump: MINOR (feat in title)"
           else
             PATCH=$((PATCH + 1))
+            echo "Bump: PATCH (fix/chore/refactor/sec)"
           fi
 
           NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
