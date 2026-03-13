@@ -1,8 +1,8 @@
 //! System job definitions and idempotent registration.
 //!
-//! System jobs are deterministic maintenance tasks (memory pruning, session
-//! cleanup) that the scheduler executes locally. They are registered once at
-//! startup and skip creation if a job with the same name already exists.
+//! System jobs are maintenance tasks that the scheduler registers on startup.
+//! Internal ops (memory pruning, session cleanup) execute locally via the
+//! executor registry. Prompt jobs (trait evolution) are dispatched to the agent.
 
 use chrono::Utc;
 use sober_core::error::AppError;
@@ -16,22 +16,45 @@ use crate::job::JobSchedule;
 struct SystemJobDef {
     name: &'static str,
     schedule: &'static str,
-    op: &'static str,
+    payload: serde_json::Value,
 }
 
 /// All built-in system jobs.
-const SYSTEM_JOBS: &[SystemJobDef] = &[
-    SystemJobDef {
-        name: "system::memory_pruning",
-        schedule: "every: 1h",
-        op: "memory_pruning",
-    },
-    SystemJobDef {
-        name: "system::session_cleanup",
-        schedule: "every: 15m",
-        op: "session_cleanup",
-    },
-];
+///
+/// TODO: add these once their executor implementations exist:
+/// - `plugin_audit` (weekly) — requires `sober-plugin` audit API
+/// - `vector_index_optimize` (weekly) — requires Qdrant collection optimize API
+///
+/// TODO: schedules are hardcoded — make configurable via `AppConfig` or admin API
+fn system_jobs() -> Vec<SystemJobDef> {
+    vec![
+        SystemJobDef {
+            name: "system::memory_pruning",
+            schedule: "every: 1h",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": "memory_pruning",
+            }),
+        },
+        SystemJobDef {
+            name: "system::session_cleanup",
+            schedule: "every: 15m",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": "session_cleanup",
+            }),
+        },
+        SystemJobDef {
+            name: "system::trait_evolution_check",
+            schedule: "0 0 3 * * * *",
+            payload: serde_json::json!({
+                "type": "prompt",
+                "text": "Review interaction patterns across users. Propose SOUL.md \
+                         trait adjustments if high-confidence patterns detected.",
+            }),
+        },
+    ]
+}
 
 /// Register all built-in system jobs, skipping any that already exist.
 ///
@@ -43,7 +66,7 @@ pub async fn register_system_jobs<J: JobRepo>(job_repo: &J) -> Result<(), AppErr
         .list_filtered(Some("system"), None, None, None, None)
         .await?;
 
-    for def in SYSTEM_JOBS {
+    for def in system_jobs() {
         if existing.iter().any(|j| j.name == def.name) {
             info!(name = def.name, "system job already registered, skipping");
             continue;
@@ -62,15 +85,10 @@ pub async fn register_system_jobs<J: JobRepo>(job_repo: &J) -> Result<(), AppErr
             .next_run_after(now)
             .expect("system job schedule always has a next run");
 
-        let payload = serde_json::json!({
-            "type": "internal",
-            "op": def.op,
-        });
-
         let input = CreateJob {
             name: def.name.to_owned(),
             schedule: def.schedule.to_owned(),
-            payload,
+            payload: def.payload,
             owner_type: "system".to_owned(),
             owner_id: None,
             workspace_id: None,
