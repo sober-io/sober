@@ -211,6 +211,7 @@ working on a plan (e.g., `feat/003-feature-name`, `fix/004-bug-description`):
 - `sober-cli` depends on `sober-core` and `sober-crypto`. It does NOT depend on `sober-api`.
 - Never add `sober-api` as a dependency of any other crate.
 - `sober-scheduler` and `sober-agent` must NOT depend on each other as crates. They communicate via gRPC at runtime using shared proto definitions.
+- `sober-scheduler` depends on `sober-memory`, `sober-sandbox`, and `sober-workspace` for local job execution (deterministic jobs that don't need the LLM).
 - Internal service communication uses gRPC over Unix domain sockets (tonic + prost). Proto files live in `backend/proto/`.
 - All async code uses `tokio` runtime.
 - Database queries use `sqlx` with compile-time checked queries where possible.

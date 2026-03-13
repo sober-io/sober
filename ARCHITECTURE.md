@@ -92,7 +92,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
 | `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution, injection detection |
-| `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence |
+| `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
 | `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
@@ -289,9 +289,15 @@ For distributed deployment, upgrade to mTLS at the transport layer.
 ## Scheduler
 
 Independent tick engine peer to `sober-api`. Supports interval-based (`every: 30s`)
-and cron (`"0 9 * * MON-FRI"`) scheduling. Jobs are either ephemeral (in-memory,
-re-register on startup) or persistent (PostgreSQL). Managed via `soberctl` or
-agent gRPC calls.
+and cron (`"0 9 * * MON-FRI"`) scheduling. Jobs are persistent (PostgreSQL).
+Managed via `soberctl` or agent gRPC calls.
+
+Jobs are routed by payload type:
+- **Prompt** → dispatched to `sober-agent` via gRPC (LLM pipeline)
+- **Internal** → executed locally via `JobExecutorRegistry` (memory pruning, session cleanup)
+- **Artifact** → blob resolved from `sober-workspace`, run in `sober-sandbox`
+
+After local execution, the scheduler notifies the agent via `WakeAgent` RPC.
 
 ---
 
