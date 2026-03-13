@@ -5,6 +5,7 @@ pub mod confirm;
 pub mod error;
 pub mod grpc;
 pub mod stream;
+pub mod system_jobs;
 pub mod tools;
 
 pub use confirm::{ConfirmationBroker, ConfirmationRegistrar, ConfirmationSender};

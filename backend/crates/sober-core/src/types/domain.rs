@@ -152,14 +152,17 @@ pub struct Job {
     pub status: JobStatus,
     /// The job payload (JSON) — defines what to execute.
     pub payload: serde_json::Value,
-    /// Opaque binary payload for the scheduler.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub payload_bytes: Vec<u8>,
-    /// Who owns this job: "system", "user", or "agent".
+    /// Who owns this job: "system", "user", or "group".
     #[serde(default = "default_owner_type")]
     pub owner_type: String,
     /// Owner UUID (None for system jobs).
     pub owner_id: Option<uuid::Uuid>,
+    /// Workspace context for execution (None for system jobs).
+    pub workspace_id: Option<uuid::Uuid>,
+    /// User who created the job (None for system jobs).
+    pub created_by: Option<uuid::Uuid>,
+    /// Conversation to deliver results to (None for system/soberctl jobs).
+    pub conversation_id: Option<uuid::Uuid>,
     /// When the job should next run.
     pub next_run_at: DateTime<Utc>,
     /// When the job last ran.
@@ -446,9 +449,11 @@ mod tests {
             schedule: "0 */6 * * *".into(),
             status: JobStatus::Active,
             payload: serde_json::json!({"scope": "all"}),
-            payload_bytes: vec![],
             owner_type: "system".into(),
             owner_id: None,
+            workspace_id: None,
+            created_by: None,
+            conversation_id: None,
             next_run_at: Utc::now(),
             last_run_at: None,
             created_at: Utc::now(),

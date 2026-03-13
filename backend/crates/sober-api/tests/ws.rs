@@ -54,6 +54,7 @@ impl proto::agent_service_server::AgentService for MockAgentService {
                         message_id: format!("msg-{conv_id}"),
                         prompt_tokens: 10,
                         completion_tokens: 5,
+                        artifact_ref: String::new(),
                     })),
                 }))
                 .await;

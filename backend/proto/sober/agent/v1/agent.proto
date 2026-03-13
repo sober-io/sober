@@ -32,8 +32,10 @@ message ExecuteTaskRequest {
 }
 
 message WakeRequest {
-  string reason = 1;
-  string caller_identity = 2;
+  string reason = 1;            // e.g. "job_result", "system_event"
+  string caller_identity = 2;   // "scheduler"
+  optional string target_id = 3;  // generic UUID ref (job_id, user_id, etc.)
+  optional bytes payload = 4;     // structured result data (JSON-encoded)
 }
 
 message WakeResponse {
@@ -63,7 +65,7 @@ message AgentEvent {
 message TextDelta { string content = 1; }
 message ToolCallStart { string name = 1; string input_json = 2; }
 message ToolCallResult { string name = 1; string output = 2; }
-message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; }
+message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; string artifact_ref = 4; }
 message Error { string message = 1; }
 message ThinkingDelta { string content = 1; }
 message TitleGenerated { string title = 1; }

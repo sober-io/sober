@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use sober_core::error::AppError;
 use sober_core::types::repo::{JobRepo, JobRunRepo};
-use sober_core::types::{CreateJob, JobId};
+use sober_core::types::{CreateJob, JobId, JobStatus};
 use tonic::{Request, Response, Status};
 use tracing::error;
 
@@ -48,11 +48,31 @@ fn job_to_proto(job: sober_core::types::Job) -> scheduler_proto::Job {
         owner_type: job.owner_type,
         owner_id: job.owner_id.map(|id| id.to_string()),
         schedule: job.schedule,
-        payload: job.payload_bytes,
+        payload: serde_json::to_vec(&job.payload).unwrap_or_default(),
         status: job_status_str(job.status).into(),
         next_run_at: job.next_run_at.to_rfc3339(),
         last_run_at: job.last_run_at.map(|t| t.to_rfc3339()),
         created_at: job.created_at.to_rfc3339(),
+        workspace_id: job
+            .workspace_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        created_by: job.created_by.map(|id| id.to_string()).unwrap_or_default(),
+        conversation_id: job
+            .conversation_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+    }
+}
+
+/// Parse an optional UUID from a proto string field (empty = None).
+fn parse_optional_uuid(s: &str) -> Result<Option<uuid::Uuid>, Status> {
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        uuid::Uuid::parse_str(s)
+            .map(Some)
+            .map_err(|e| Status::invalid_argument(e.to_string()))
     }
 }
 
@@ -118,18 +138,23 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             })
             .transpose()?;
 
-        // Try to interpret the binary payload as JSON; fall back to wrapping in
-        // a `{"data": "<base64>"}` envelope so the JSONB column is never null.
+        // Deserialize the gRPC bytes payload as JSON.
         let payload_json = serde_json::from_slice::<serde_json::Value>(&req.payload)
-            .unwrap_or_else(|_| serde_json::json!({ "raw": true }));
+            .map_err(|e| Status::invalid_argument(format!("payload must be valid JSON: {e}")))?;
+
+        let workspace_id = parse_optional_uuid(&req.workspace_id)?;
+        let created_by = parse_optional_uuid(&req.created_by)?;
+        let conversation_id = parse_optional_uuid(&req.conversation_id)?;
 
         let input = CreateJob {
             name: req.name,
             schedule: req.schedule,
             payload: payload_json,
-            payload_bytes: req.payload,
             owner_type: req.owner_type,
             owner_id,
+            workspace_id,
+            created_by,
+            conversation_id,
             next_run_at,
         };
 
@@ -168,9 +193,22 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             })
             .transpose()?;
 
+        let workspace_id = parse_optional_uuid(&req.workspace_id)?;
+        let name_filter = if req.name_filter.is_empty() {
+            None
+        } else {
+            Some(req.name_filter.as_str())
+        };
+
         let jobs = self
             .job_repo
-            .list_filtered(req.owner_type.as_deref(), owner_id, req.status.as_deref())
+            .list_filtered(
+                req.owner_type.as_deref(),
+                owner_id,
+                req.status.as_deref(),
+                workspace_id,
+                name_filter,
+            )
             .await
             .map_err(app_error_to_status)?;
 
@@ -237,15 +275,86 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         let job_repo = Arc::clone(&self.job_repo);
         let run_repo = Arc::clone(&self.run_repo);
         let agent_client = self.engine.agent_client();
+        let executor_registry = self.engine.executor_registry();
 
         tokio::spawn(async move {
-            if let Err(e) = force_run_job(&job_repo, &run_repo, &agent_client, job_id).await {
+            if let Err(e) = force_run_job(
+                &job_repo,
+                &run_repo,
+                &agent_client,
+                &executor_registry,
+                job_id,
+            )
+            .await
+            {
                 error!(job_id = %job_id, error = %e, "force run failed");
             }
         });
 
         Ok(Response::new(scheduler_proto::ForceRunResponse {
             accepted: true,
+        }))
+    }
+
+    async fn pause_job(
+        &self,
+        request: Request<scheduler_proto::PauseJobRequest>,
+    ) -> Result<Response<scheduler_proto::PauseJobResponse>, Status> {
+        let job_id = parse_job_id(&request.into_inner().job_id)?;
+
+        self.job_repo
+            .update_status(job_id, JobStatus::Paused)
+            .await
+            .map_err(app_error_to_status)?;
+
+        let job = self
+            .job_repo
+            .get_by_id(job_id)
+            .await
+            .map_err(app_error_to_status)?;
+
+        Ok(Response::new(scheduler_proto::PauseJobResponse {
+            job: Some(job_to_proto(job)),
+        }))
+    }
+
+    async fn resume_job(
+        &self,
+        request: Request<scheduler_proto::ResumeJobRequest>,
+    ) -> Result<Response<scheduler_proto::ResumeJobResponse>, Status> {
+        let job_id = parse_job_id(&request.into_inner().job_id)?;
+
+        self.job_repo
+            .update_status(job_id, JobStatus::Active)
+            .await
+            .map_err(app_error_to_status)?;
+
+        // Recalculate next_run_at from now
+        let job = self
+            .job_repo
+            .get_by_id(job_id)
+            .await
+            .map_err(app_error_to_status)?;
+
+        let schedule =
+            JobSchedule::parse(&job.schedule).map_err(|e| Status::internal(e.to_string()))?;
+        let next_run = schedule
+            .next_run_after(Utc::now())
+            .ok_or_else(|| Status::internal("could not calculate next run"))?;
+
+        self.job_repo
+            .update_next_run(job_id, next_run)
+            .await
+            .map_err(app_error_to_status)?;
+
+        let updated_job = self
+            .job_repo
+            .get_by_id(job_id)
+            .await
+            .map_err(app_error_to_status)?;
+
+        Ok(Response::new(scheduler_proto::ResumeJobResponse {
+            job: Some(job_to_proto(updated_job)),
         }))
     }
 

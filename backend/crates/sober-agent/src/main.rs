@@ -239,6 +239,9 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
                     "connected to scheduler gRPC service"
                 );
 
+                // Register predefined system jobs idempotently
+                sober_agent::system_jobs::register_system_jobs(&client).await;
+
                 // Monitor connection health
                 let mut sched_client = sched_client;
                 loop {

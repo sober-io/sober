@@ -9,6 +9,7 @@
 
 pub mod fetch_url;
 pub mod registry;
+pub mod scheduler;
 pub mod shell;
 pub mod web_search;
 

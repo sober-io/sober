@@ -127,4 +127,35 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(())
     }
+
+    async fn find_latest_by_user_and_workspace(
+        &self,
+        user_id: UserId,
+        workspace_id: Option<WorkspaceId>,
+    ) -> Result<Option<Conversation>, AppError> {
+        let row = if let Some(ws_id) = workspace_id {
+            sqlx::query_as::<_, ConversationRow>(
+                "SELECT id, user_id, title, workspace_id, permission_mode, created_at, updated_at \
+                 FROM conversations WHERE user_id = $1 AND workspace_id = $2 \
+                 ORDER BY updated_at DESC LIMIT 1",
+            )
+            .bind(user_id.as_uuid())
+            .bind(ws_id.as_uuid())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?
+        } else {
+            sqlx::query_as::<_, ConversationRow>(
+                "SELECT id, user_id, title, workspace_id, permission_mode, created_at, updated_at \
+                 FROM conversations WHERE user_id = $1 \
+                 ORDER BY updated_at DESC LIMIT 1",
+            )
+            .bind(user_id.as_uuid())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?
+        };
+
+        Ok(row.map(Into::into))
+    }
 }

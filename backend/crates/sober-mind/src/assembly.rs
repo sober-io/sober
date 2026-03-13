@@ -101,6 +101,49 @@ impl Mind {
         Ok(messages)
     }
 
+    /// Assembles a prompt for autonomous (non-conversational) execution.
+    ///
+    /// Loads SOUL.md chain and builds system prompt — no conversation history.
+    /// The task text becomes the sole user message. Intended for scheduled jobs.
+    pub async fn assemble_autonomous_prompt(
+        &self,
+        task: &str,
+        caller: &CallerContext,
+    ) -> Result<Vec<Message>, MindError> {
+        // 1. Resolve SOUL.md layers
+        let soul = self.soul_resolver.resolve().await?;
+
+        // 2. Apply access mask based on caller trigger
+        let masked = apply_access_mask(&soul, caller);
+
+        // 3. Build system prompt (no tools for autonomous execution)
+        let system_prompt = build_system_prompt(&masked, &[]);
+
+        // 4. Return system message + task as user message
+        Ok(vec![
+            Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::System,
+                content: system_prompt,
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                created_at: chrono::Utc::now(),
+            },
+            Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::User,
+                content: task.to_string(),
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                created_at: chrono::Utc::now(),
+            },
+        ])
+    }
+
     /// Checks user input for injection attempts.
     ///
     /// Convenience wrapper around [`injection::classify_input`].
@@ -260,6 +303,57 @@ mod tests {
             .unwrap();
         assert!(messages[0].content.contains("tone"));
         assert!(messages[0].content.contains("formal"));
+    }
+
+    #[tokio::test]
+    async fn assembles_autonomous_prompt() {
+        let soul_file = write_temp_file("# Sõber\nI am a helpful assistant.");
+        let resolver = SoulResolver::new(
+            soul_file.path(),
+            None::<std::path::PathBuf>,
+            None::<std::path::PathBuf>,
+        );
+        let mind = Mind::new(resolver);
+
+        let caller = make_caller(TriggerKind::Scheduler);
+        let messages = mind
+            .assemble_autonomous_prompt("Run maintenance", &caller)
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 2); // system + user
+        assert_eq!(messages[0].role, MessageRole::System);
+        assert!(messages[0].content.contains("helpful assistant"));
+        assert_eq!(messages[1].role, MessageRole::User);
+        assert_eq!(messages[1].content, "Run maintenance");
+    }
+
+    #[tokio::test]
+    async fn autonomous_prompt_applies_access_mask() {
+        let soul_content = "Public info.\n<!-- INTERNAL:START -->\nSecret state.\n<!-- INTERNAL:END -->\nMore public.";
+        let soul_file = write_temp_file(soul_content);
+        let resolver = SoulResolver::new(
+            soul_file.path(),
+            None::<std::path::PathBuf>,
+            None::<std::path::PathBuf>,
+        );
+        let mind = Mind::new(resolver);
+
+        // Scheduler should see internal content.
+        let sched_caller = make_caller(TriggerKind::Scheduler);
+        let sched_msgs = mind
+            .assemble_autonomous_prompt("check traits", &sched_caller)
+            .await
+            .unwrap();
+        assert!(sched_msgs[0].content.contains("Secret state."));
+
+        // Human should not see internal content.
+        let human_caller = make_caller(TriggerKind::Human);
+        let human_msgs = mind
+            .assemble_autonomous_prompt("check traits", &human_caller)
+            .await
+            .unwrap();
+        assert!(!human_msgs[0].content.contains("Secret state."));
     }
 
     #[test]

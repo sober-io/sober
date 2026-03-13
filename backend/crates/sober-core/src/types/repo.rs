@@ -127,6 +127,13 @@ pub trait ConversationRepo: Send + Sync {
 
     /// Deletes a conversation and all its messages.
     fn delete(&self, id: ConversationId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Finds the most recent conversation for a user, optionally in a workspace.
+    fn find_latest_by_user_and_workspace(
+        &self,
+        user_id: UserId,
+        workspace_id: Option<WorkspaceId>,
+    ) -> impl Future<Output = Result<Option<Conversation>, AppError>> + Send;
 }
 
 /// Message operations.
@@ -192,6 +199,8 @@ pub trait JobRepo: Send + Sync {
         owner_type: Option<&str>,
         owner_id: Option<uuid::Uuid>,
         status: Option<&str>,
+        workspace_id: Option<uuid::Uuid>,
+        name_filter: Option<&str>,
     ) -> impl Future<Output = Result<Vec<Job>, AppError>> + Send;
 }
 
@@ -206,6 +215,7 @@ pub trait JobRunRepo: Send + Sync {
         id: JobRunId,
         result: Vec<u8>,
         error: Option<String>,
+        result_artifact_ref: Option<String>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
     /// Lists recent runs for a job, ordered by started_at descending.

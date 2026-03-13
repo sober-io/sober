@@ -1,7 +1,9 @@
 //! Tick engine — the scheduler's main loop.
 //!
 //! The engine wakes up on a configurable interval, finds due persistent jobs
-//! from the database, and executes them by calling the agent via gRPC.
+//! from the database, and routes them: prompt jobs go to the agent via gRPC,
+//! while artifact and internal jobs execute locally via the
+//! [`JobExecutorRegistry`].
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,11 +11,12 @@ use std::time::Duration;
 use chrono::Utc;
 use sober_core::error::AppError;
 use sober_core::types::repo::{JobRepo, JobRunRepo};
-use sober_core::types::{JobId, JobStatus};
+use sober_core::types::{Job, JobId, JobStatus};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+use crate::executor::JobExecutorRegistry;
 use crate::grpc::agent_proto;
 use crate::job::JobSchedule;
 
@@ -29,6 +32,7 @@ pub struct TickEngine<J: JobRepo, R: JobRunRepo> {
     job_repo: Arc<J>,
     run_repo: Arc<R>,
     agent_client: SharedAgentClient,
+    executor_registry: Arc<JobExecutorRegistry>,
     tick_interval: Duration,
     concurrency_semaphore: Arc<tokio::sync::Semaphore>,
     paused: Arc<std::sync::atomic::AtomicBool>,
@@ -39,6 +43,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     pub fn new(
         job_repo: Arc<J>,
         run_repo: Arc<R>,
+        executor_registry: Arc<JobExecutorRegistry>,
         tick_interval: Duration,
         max_concurrent: usize,
     ) -> Self {
@@ -46,6 +51,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
             job_repo,
             run_repo,
             agent_client: Arc::new(RwLock::new(None)),
+            executor_registry,
             tick_interval,
             concurrency_semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -70,6 +76,11 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     /// Get a clone of the shared agent client handle.
     pub fn agent_client(&self) -> SharedAgentClient {
         Arc::clone(&self.agent_client)
+    }
+
+    /// Get a clone of the executor registry.
+    pub fn executor_registry(&self) -> Arc<JobExecutorRegistry> {
+        Arc::clone(&self.executor_registry)
     }
 
     /// Whether the engine is paused.
@@ -143,6 +154,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
             let job_repo = Arc::clone(&self.job_repo);
             let run_repo = Arc::clone(&self.run_repo);
             let agent_client = Arc::clone(&self.agent_client);
+            let executor_registry = Arc::clone(&self.executor_registry);
 
             handles.push(tokio::spawn(async move {
                 let job_id = job.id;
@@ -166,12 +178,13 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                     }
                 };
 
-                // Execute via agent gRPC
-                let (result_bytes, error_msg) = execute_via_agent(&agent_client, &job).await;
+                // Route by payload type
+                let (result_bytes, error_msg) =
+                    route_job(&agent_client, &executor_registry, &job).await;
 
                 // Complete the run
                 if let Err(e) = run_repo
-                    .complete(run.id, result_bytes, error_msg.clone())
+                    .complete(run.id, result_bytes, error_msg.clone(), None)
                     .await
                 {
                     error!(job = %job_name, error = %e, "failed to complete job run");
@@ -202,6 +215,91 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     }
 }
 
+/// Determine the job type from its JSON payload and route accordingly.
+///
+/// Payload format:
+/// - `{"type": "prompt", ...}` or no `type` field → agent gRPC
+/// - `{"type": "internal", "op": "<op>"}` → local executor
+/// - `{"type": "artifact", "op": "<op>"}` → local executor
+async fn route_job(
+    agent_client: &SharedAgentClient,
+    executor_registry: &JobExecutorRegistry,
+    job: &Job,
+) -> (Vec<u8>, Option<String>) {
+    let payload_type = job.payload["type"].as_str().unwrap_or("prompt");
+
+    match payload_type {
+        "prompt" => execute_via_agent(agent_client, job).await,
+
+        "internal" | "artifact" => {
+            let op = match job.payload["op"].as_str() {
+                Some(op) => op,
+                None => {
+                    return (
+                        vec![],
+                        Some(format!("{payload_type} job missing 'op' field in payload")),
+                    );
+                }
+            };
+
+            match executor_registry.get(op) {
+                Some(executor) => {
+                    match executor.execute(job).await {
+                        Ok(result) => {
+                            // Fire-and-forget wake_agent with result summary
+                            wake_agent(agent_client, job, &result.summary).await;
+
+                            let summary_bytes = result.summary.into_bytes();
+                            (summary_bytes, None)
+                        }
+                        Err(e) => {
+                            let err_msg = format!("{op} executor failed: {e}");
+                            warn!(job = %job.name, op, error = %e, "local executor failed");
+                            (vec![], Some(err_msg))
+                        }
+                    }
+                }
+                None => {
+                    let err_msg = format!("no executor registered for op '{op}'");
+                    warn!(job = %job.name, op, "unknown operation");
+                    (vec![], Some(err_msg))
+                }
+            }
+        }
+
+        other => {
+            let err_msg = format!("unknown job payload type: {other}");
+            warn!(job = %job.name, payload_type = other, "unknown payload type");
+            (vec![], Some(err_msg))
+        }
+    }
+}
+
+/// Notify the agent about a completed local job execution (fire-and-forget).
+async fn wake_agent(agent_client: &SharedAgentClient, job: &Job, summary: &str) {
+    let client = agent_client.read().await;
+    let Some(client) = client.as_ref() else {
+        return; // Agent not connected — skip notification
+    };
+
+    let payload_json = serde_json::json!({
+        "summary": summary,
+        "job_name": job.name,
+    });
+
+    let request = agent_proto::WakeRequest {
+        reason: "job_result".into(),
+        caller_identity: "scheduler".into(),
+        target_id: Some(job.id.as_uuid().to_string()),
+        payload: Some(serde_json::to_vec(&payload_json).unwrap_or_default()),
+    };
+
+    let mut client = client.clone();
+    if let Err(e) = client.wake_agent(request).await {
+        warn!(job = %job.name, error = %e, "failed to wake agent after local execution");
+    }
+}
+
 /// Execute a job via the agent's `ExecuteTask` RPC.
 async fn execute_via_agent(
     agent_client: &SharedAgentClient,
@@ -215,11 +313,11 @@ async fn execute_via_agent(
     let request = agent_proto::ExecuteTaskRequest {
         task_id: job.id.as_uuid().to_string(),
         task_type: "scheduled_job".into(),
-        payload: job.payload_bytes.clone(),
+        payload: serde_json::to_vec(&job.payload).unwrap_or_default(),
         caller_identity: "scheduler".into(),
         user_id: job.owner_id.map(|id| id.to_string()),
-        conversation_id: None,
-        workspace_id: None,
+        conversation_id: job.conversation_id.map(|id| id.to_string()),
+        workspace_id: job.workspace_id.map(|id| id.to_string()),
     };
 
     let mut client = client.clone();
@@ -265,6 +363,7 @@ pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     job_repo: &Arc<J>,
     run_repo: &Arc<R>,
     agent_client: &SharedAgentClient,
+    executor_registry: &Arc<JobExecutorRegistry>,
     job_id: JobId,
 ) -> Result<(), AppError> {
     let job = job_repo.get_by_id(job_id).await?;
@@ -272,11 +371,13 @@ pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     // Create run record
     let run = run_repo.create(job_id).await?;
 
-    // Execute
-    let (result_bytes, error_msg) = execute_via_agent(agent_client, &job).await;
+    // Execute (route by payload type)
+    let (result_bytes, error_msg) = route_job(agent_client, executor_registry, &job).await;
 
     // Complete the run
-    run_repo.complete(run.id, result_bytes, error_msg).await?;
+    run_repo
+        .complete(run.id, result_bytes, error_msg, None)
+        .await?;
 
     // Update last run
     let now = Utc::now();

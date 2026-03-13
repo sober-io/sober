@@ -42,6 +42,8 @@ pub enum AgentEvent {
         message_id: MessageId,
         /// Token usage statistics.
         usage: Usage,
+        /// Optional reference to a stored artifact (e.g. workspace blob path).
+        artifact_ref: Option<String>,
     },
     /// An auto-generated title for the conversation.
     TitleGenerated(String),
