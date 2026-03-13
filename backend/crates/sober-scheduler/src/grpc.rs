@@ -275,9 +275,18 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
         let job_repo = Arc::clone(&self.job_repo);
         let run_repo = Arc::clone(&self.run_repo);
         let agent_client = self.engine.agent_client();
+        let executor_registry = self.engine.executor_registry();
 
         tokio::spawn(async move {
-            if let Err(e) = force_run_job(&job_repo, &run_repo, &agent_client, job_id).await {
+            if let Err(e) = force_run_job(
+                &job_repo,
+                &run_repo,
+                &agent_client,
+                &executor_registry,
+                job_id,
+            )
+            .await
+            {
                 error!(job_id = %job_id, error = %e, "force run failed");
             }
         });

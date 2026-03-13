@@ -67,7 +67,8 @@ impl BlobStore {
         Ok(())
     }
 
-    fn blob_path(&self, key: &str) -> PathBuf {
+    /// Returns the filesystem path for a given content-addressed key.
+    pub fn blob_path(&self, key: &str) -> PathBuf {
         let prefix = &key[..2];
         self.root.join(prefix).join(key)
     }

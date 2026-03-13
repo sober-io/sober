@@ -5,17 +5,25 @@
 //! domain socket. It connects to the agent via gRPC/UDS to dispatch job
 //! executions and wake notifications.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
-use sober_db::{PgJobRepo, PgJobRunRepo, create_pool};
+use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool};
+use sober_memory::MemoryStore;
+use sober_sandbox::SandboxProfile;
 use sober_scheduler::engine::TickEngine;
+use sober_scheduler::executor::JobExecutorRegistry;
+use sober_scheduler::executors::artifact::ArtifactExecutor;
+use sober_scheduler::executors::memory_pruning::MemoryPruningExecutor;
+use sober_scheduler::executors::session_cleanup::SessionCleanupExecutor;
 use sober_scheduler::grpc::SchedulerGrpcService;
 use sober_scheduler::grpc::scheduler_proto::scheduler_service_server::SchedulerServiceServer;
+use sober_scheduler::system_jobs::register_system_jobs;
+use sober_workspace::BlobStore;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -45,33 +53,44 @@ async fn main() -> Result<()> {
 
     // 4. Create repository instances
     let job_repo = Arc::new(PgJobRepo::new(pool.clone()));
-    let run_repo = Arc::new(PgJobRunRepo::new(pool));
+    let run_repo = Arc::new(PgJobRunRepo::new(pool.clone()));
+    let session_repo = PgSessionRepo::new(pool);
 
-    // 5. Create tick engine
+    // 5. Build job executor registry
+    let executor_registry = build_executor_registry(&config, session_repo)?;
+    let executor_registry = Arc::new(executor_registry);
+
+    // 6. Register system maintenance jobs
+    if let Err(e) = register_system_jobs(job_repo.as_ref()).await {
+        warn!(error = %e, "failed to register system jobs (will retry next startup)");
+    }
+
+    // 7. Create tick engine
     let tick_interval = Duration::from_secs(config.scheduler.tick_interval_secs);
     let max_concurrent = config.scheduler.max_concurrent_jobs as usize;
     let engine = Arc::new(TickEngine::new(
         Arc::clone(&job_repo),
         Arc::clone(&run_repo),
+        Arc::clone(&executor_registry),
         tick_interval,
         max_concurrent,
     ));
 
-    // 6. Connect to agent gRPC service (background — retries until available)
+    // 8. Connect to agent gRPC service (background — retries until available)
     let agent_socket = config.scheduler.agent_socket_path.clone();
     let engine_for_agent = Arc::clone(&engine);
     tokio::spawn(async move {
         connect_to_agent(engine_for_agent, &agent_socket).await;
     });
 
-    // 7. Create gRPC service
+    // 9. Create gRPC service
     let grpc_service = SchedulerGrpcService::new(
         Arc::clone(&job_repo),
         Arc::clone(&run_repo),
         Arc::clone(&engine),
     );
 
-    // 8. Bind to Unix domain socket
+    // 10. Bind to Unix domain socket
     let socket_path = config.scheduler.socket_path.clone();
 
     // Remove stale socket file if it exists
@@ -93,7 +112,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 9. Start tick engine in background
+    // 11. Start tick engine in background
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     let engine_for_tick = Arc::clone(&engine);
@@ -101,7 +120,7 @@ async fn main() -> Result<()> {
         engine_for_tick.run(cancel_clone).await;
     });
 
-    // 10. Serve gRPC with graceful shutdown
+    // 12. Serve gRPC with graceful shutdown
     Server::builder()
         .add_service(SchedulerServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
@@ -113,6 +132,58 @@ async fn main() -> Result<()> {
 
     info!("sober-scheduler shut down");
     Ok(())
+}
+
+/// Build the job executor registry with all concrete executors.
+fn build_executor_registry(
+    config: &AppConfig,
+    session_repo: PgSessionRepo,
+) -> Result<JobExecutorRegistry> {
+    let mut registry = JobExecutorRegistry::new();
+
+    // Memory pruning executor
+    let memory_store = Arc::new(
+        MemoryStore::new(&config.qdrant, config.llm.embedding_dim)
+            .context("failed to create memory store for scheduler")?,
+    );
+    registry.register(
+        "memory_pruning",
+        Arc::new(MemoryPruningExecutor::new(
+            memory_store,
+            config.memory.clone(),
+        )),
+    );
+
+    // Session cleanup executor
+    registry.register(
+        "session_cleanup",
+        Arc::new(SessionCleanupExecutor::new(session_repo)),
+    );
+
+    // Artifact executor
+    let workspace_root = PathBuf::from(
+        std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
+    );
+    let blob_root = workspace_root
+        .join(sober_workspace::SOBER_DIR)
+        .join("blobs");
+    let blob_store = Arc::new(BlobStore::new(blob_root));
+
+    let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
+        Ok("unrestricted") => SandboxProfile::Unrestricted,
+        Ok("locked_down") => SandboxProfile::LockedDown,
+        _ => SandboxProfile::Standard,
+    };
+    let sandbox_policy = sandbox_profile
+        .resolve(&std::collections::HashMap::new())
+        .context("failed to resolve sandbox policy")?;
+
+    registry.register(
+        "artifact",
+        Arc::new(ArtifactExecutor::new(blob_store, sandbox_policy)),
+    );
+
+    Ok(registry)
 }
 
 /// Connect to the agent gRPC service and reconnect if the channel breaks.

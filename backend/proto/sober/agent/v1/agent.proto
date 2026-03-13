@@ -32,8 +32,10 @@ message ExecuteTaskRequest {
 }
 
 message WakeRequest {
-  string reason = 1;
-  string caller_identity = 2;
+  string reason = 1;            // e.g. "job_result", "system_event"
+  string caller_identity = 2;   // "scheduler"
+  optional string target_id = 3;  // generic UUID ref (job_id, user_id, etc.)
+  optional bytes payload = 4;     // structured result data (JSON-encoded)
 }
 
 message WakeResponse {
