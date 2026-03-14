@@ -52,7 +52,7 @@ message CancelJobResponse {}
 message ListJobsRequest {
   optional string owner_type = 1;
   optional string owner_id = 2;
-  optional string status = 3;
+  repeated string statuses = 3;
   string workspace_id = 4;
   string name_filter = 5;
 }

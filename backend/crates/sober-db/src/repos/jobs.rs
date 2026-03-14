@@ -162,7 +162,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         &self,
         owner_type: Option<&str>,
         owner_id: Option<uuid::Uuid>,
-        status: Option<&str>,
+        statuses: &[String],
         workspace_id: Option<uuid::Uuid>,
         name_filter: Option<&str>,
     ) -> Result<Vec<Job>, AppError> {
@@ -177,9 +177,17 @@ impl sober_core::types::JobRepo for PgJobRepo {
             conditions.push(format!("owner_id = ${param_idx}"));
             param_idx += 1;
         }
-        if status.is_some() {
-            conditions.push(format!("status = ${param_idx}"));
-            param_idx += 1;
+        if !statuses.is_empty() {
+            let placeholders: Vec<String> = statuses
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("${}", param_idx + i as u32))
+                .collect();
+            conditions.push(format!(
+                "status::text = ANY(ARRAY[{}])",
+                placeholders.join(",")
+            ));
+            param_idx += statuses.len() as u32;
         }
         if workspace_id.is_some() {
             conditions.push(format!("workspace_id = ${param_idx}"));
@@ -205,7 +213,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         if let Some(oi) = owner_id {
             q = q.bind(oi);
         }
-        if let Some(s) = status {
+        for s in statuses {
             q = q.bind(s.to_owned());
         }
         if let Some(ws) = workspace_id {

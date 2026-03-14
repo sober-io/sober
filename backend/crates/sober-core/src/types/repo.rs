@@ -198,7 +198,7 @@ pub trait JobRepo: Send + Sync {
         &self,
         owner_type: Option<&str>,
         owner_id: Option<uuid::Uuid>,
-        status: Option<&str>,
+        statuses: &[String],
         workspace_id: Option<uuid::Uuid>,
         name_filter: Option<&str>,
     ) -> impl Future<Output = Result<Vec<Job>, AppError>> + Send;

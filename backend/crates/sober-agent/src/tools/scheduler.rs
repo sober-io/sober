@@ -108,7 +108,7 @@ impl SchedulerTools {
                 } else {
                     None
                 },
-                status: Some("active".into()),
+                statuses: vec!["active".into(), "running".into()],
                 workspace_id: String::new(),
                 name_filter: name.into(),
             };
@@ -170,7 +170,7 @@ impl SchedulerTools {
         &self,
         owner_type: Option<&str>,
         owner_id: Option<Uuid>,
-        status: Option<&str>,
+        statuses: Vec<String>,
         workspace_id: Option<Uuid>,
         name_filter: Option<&str>,
         is_admin: bool,
@@ -178,7 +178,7 @@ impl SchedulerTools {
         let req = scheduler_proto::ListJobsRequest {
             owner_type: owner_type.map(|s| s.into()),
             owner_id: owner_id.map(|id| id.to_string()),
-            status: status.map(|s| s.into()),
+            statuses,
             workspace_id: workspace_id.map(|id| id.to_string()).unwrap_or_default(),
             name_filter: name_filter.unwrap_or_default().into(),
         };
@@ -423,7 +423,16 @@ impl SchedulerTools {
         let result = match action {
             "list" => {
                 let owner_type = input.get("owner_type").and_then(|v| v.as_str());
-                let status = input.get("status").and_then(|v| v.as_str());
+                let statuses: Vec<String> =
+                    if let Some(s) = input.get("status").and_then(|v| v.as_str()) {
+                        vec![s.to_owned()]
+                    } else if let Some(arr) = input.get("statuses").and_then(|v| v.as_array()) {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                            .collect()
+                    } else {
+                        vec![]
+                    };
                 let name_filter = input.get("name_filter").and_then(|v| v.as_str());
                 // Admins can list all jobs; non-admins are scoped to their own.
                 let owner_id = if is_admin { None } else { caller_user_id };
@@ -434,7 +443,7 @@ impl SchedulerTools {
                 self.list_jobs(
                     owner_type,
                     owner_id,
-                    status,
+                    statuses,
                     workspace_id,
                     name_filter,
                     is_admin,
@@ -725,7 +734,12 @@ impl Tool for SchedulerTools {
                     },
                     "status": {
                         "type": "string",
-                        "description": "Filter by status: 'active', 'paused', 'cancelled' (optional for list)."
+                        "description": "Filter by a single status: 'active', 'paused', 'cancelled' (optional for list)."
+                    },
+                    "statuses": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Filter by multiple statuses, e.g. ['active', 'running'] (optional for list)."
                     },
                     "name_filter": {
                         "type": "string",
