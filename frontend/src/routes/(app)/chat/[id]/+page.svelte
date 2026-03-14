@@ -27,6 +27,7 @@
 		streaming: boolean;
 		thinking: boolean;
 		timestamp: string;
+		source?: string;
 	}
 
 	interface QueuedMessage {
@@ -280,7 +281,8 @@
 					thinkingContent: '',
 					streaming: false,
 					thinking: false,
-					timestamp: fmtTime()
+					timestamp: fmtTime(),
+					source: msg.source
 				});
 				break;
 			}
@@ -415,6 +417,7 @@
 					streaming={msg.streaming}
 					thinking={msg.thinking}
 					timestamp={msg.timestamp}
+					source={msg.source}
 				/>
 			{/each}
 
