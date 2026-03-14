@@ -155,8 +155,8 @@ pub enum ServerWsMessage {
         role: String,
         /// Message content.
         content: String,
-        /// What produced this message: "human", "scheduler", "replica", "admin".
-        source: String,
+        /// What produced this message.
+        source: sober_core::types::access::TriggerKind,
     },
     /// Keepalive response.
     #[serde(rename = "pong")]

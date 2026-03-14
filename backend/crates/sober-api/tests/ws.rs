@@ -53,7 +53,7 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         &self,
         _request: tonic::Request<proto::SubscribeRequest>,
     ) -> Result<tonic::Response<Self::SubscribeConversationUpdatesStream>, tonic::Status> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(16);
+        let (_tx, rx) = tokio::sync::mpsc::channel(64);
         // Return an open stream that never sends anything.
         // In integration tests we'd push events here.
         Ok(tonic::Response::new(

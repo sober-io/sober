@@ -124,12 +124,16 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             })
         }
         proto::conversation_update::Event::NewMessage(nm) => {
+            let source = serde_json::from_value::<sober_core::types::access::TriggerKind>(
+                serde_json::Value::String(nm.source),
+            )
+            .unwrap_or(sober_core::types::access::TriggerKind::Human);
             Some(ServerWsMessage::ChatNewMessage {
                 conversation_id: cid,
                 message_id: nm.message_id,
                 role: nm.role,
                 content: nm.content,
-                source: nm.source,
+                source,
             })
         }
     }
@@ -188,7 +192,7 @@ mod tests {
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
                 assert_eq!(content, "hi");
-                assert_eq!(source, "scheduler");
+                assert_eq!(source, sober_core::types::access::TriggerKind::Scheduler);
             }
             _ => panic!("unexpected message type"),
         }

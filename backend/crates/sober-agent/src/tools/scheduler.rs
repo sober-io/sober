@@ -96,36 +96,33 @@ impl SchedulerTools {
         // Check for existing active job with the same name + owner.
         let has_user = !caller_user_id.is_nil();
         {
-            // Check both active and running — a job in "running" state will
-            // return to "active" after execution completes.
+            // Check for existing active/running job with the same name.
             let mut client = {
                 let guard = self.scheduler_client.read().await;
                 guard.as_ref().ok_or("Scheduler not connected")?.clone()
             };
-            for status in &["active", "running"] {
-                let req = scheduler_proto::ListJobsRequest {
-                    owner_type: None,
-                    owner_id: if has_user {
-                        Some(caller_user_id.to_string())
-                    } else {
-                        None
-                    },
-                    status: Some((*status).into()),
-                    workspace_id: String::new(),
-                    name_filter: name.into(),
-                };
-                if let Ok(response) = client.list_jobs(req.clone()).await
-                    && let Some(job) = response
-                        .into_inner()
-                        .jobs
-                        .into_iter()
-                        .find(|j| j.name == name)
-                {
-                    return Ok(format!(
-                        "Job '{}' already exists ({}, status: {}). Next run: {}",
-                        job.name, job.id, job.status, job.next_run_at
-                    ));
-                }
+            let req = scheduler_proto::ListJobsRequest {
+                owner_type: None,
+                owner_id: if has_user {
+                    Some(caller_user_id.to_string())
+                } else {
+                    None
+                },
+                status: None, // fetch all, filter client-side
+                workspace_id: String::new(),
+                name_filter: name.into(),
+            };
+            if let Ok(response) = client.list_jobs(req).await
+                && let Some(job) = response
+                    .into_inner()
+                    .jobs
+                    .into_iter()
+                    .find(|j| j.name == name && (j.status == "active" || j.status == "running"))
+            {
+                return Ok(format!(
+                    "Job '{}' already exists ({}, status: {}). Next run: {}",
+                    job.name, job.id, job.status, job.next_run_at
+                ));
             }
         }
 
