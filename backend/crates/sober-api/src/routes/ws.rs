@@ -64,7 +64,6 @@ enum ClientWsMessage {
 /// Server-to-client WebSocket message types.
 #[derive(serde::Serialize)]
 #[serde(tag = "type")]
-#[expect(clippy::enum_variant_names)]
 enum ServerWsMessage {
     #[serde(rename = "chat.delta")]
     ChatDelta {
@@ -111,6 +110,8 @@ enum ServerWsMessage {
         affects: Vec<String>,
         reason: String,
     },
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 /// Handles a single WebSocket connection.
@@ -153,6 +154,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 break;
             }
         };
+
+        // Handle keepalive pings from the client.
+        if msg.as_str() == "ping" {
+            let _ = out_tx.send(ServerWsMessage::Pong).await;
+            continue;
+        }
 
         let client_msg: ClientWsMessage = match serde_json::from_str(&msg) {
             Ok(m) => m,

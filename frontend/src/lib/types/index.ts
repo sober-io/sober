@@ -96,7 +96,8 @@ export type ServerWsMessage =
 			risk_level: string;
 			affects: string[];
 			reason: string;
-	  };
+	  }
+	| { type: 'pong' };
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
 

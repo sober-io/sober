@@ -93,21 +93,26 @@ impl<M: MessageRepo> ContextLoader<M> {
         let mut remaining = request.token_budget;
 
         // 1. Recent messages (highest priority)
+        //
+        // Iterate newest-first so the current user message is always included.
+        // Older messages are dropped first when the budget is tight.
         let mut recent_messages = Vec::new();
-        for msg in &all_messages {
+        for msg in all_messages.iter().rev() {
             let tokens = message_tokens(msg);
             if tokens <= remaining {
                 recent_messages.push(msg.clone());
                 remaining -= tokens;
             } else {
-                tracing::warn!(
+                tracing::debug!(
                     budget_remaining = remaining,
                     message_tokens = tokens,
-                    "token budget exhausted during message inclusion"
+                    "skipping older message that exceeds remaining budget"
                 );
                 break;
             }
         }
+        // Restore chronological order (oldest first) for the LLM.
+        recent_messages.reverse();
 
         // 2. User memories (sorted by score, descending — already sorted by Qdrant)
         let mut user_memories = Vec::new();

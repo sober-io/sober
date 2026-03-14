@@ -290,6 +290,7 @@ where
         let registrar = ctx.registrar;
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
+        let mut base_message_count: usize = 0;
         let mut consecutive_tool_errors: u32 = 0;
         let mut assistant_text = String::new();
         const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 3;
@@ -367,8 +368,19 @@ where
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-                // d. Convert domain messages to LLM messages
-                llm_messages = domain_to_llm_messages(&assembled);
+                // d. Convert domain messages to LLM messages, preserving tool
+                //    call history from previous iterations so the LLM doesn't
+                //    repeat already-executed tool calls after a context rebuild.
+                let new_base = domain_to_llm_messages(&assembled);
+                let tool_history: Vec<LlmMessage> =
+                    if base_message_count > 0 && llm_messages.len() > base_message_count {
+                        llm_messages.split_off(base_message_count)
+                    } else {
+                        Vec::new()
+                    };
+                base_message_count = new_base.len();
+                llm_messages = new_base;
+                llm_messages.extend(tool_history);
                 needs_rebuild = false;
             }
 
@@ -414,6 +426,8 @@ where
                         tool_calls,
                         event_tx,
                         registrar,
+                        user_id,
+                        conversation_id,
                     )
                     .await;
 
@@ -568,6 +582,8 @@ where
         tool_calls: &[LlmToolCall],
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
         registrar: Option<&ConfirmationRegistrar>,
+        user_id: UserId,
+        conversation_id: ConversationId,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -577,17 +593,30 @@ where
 
         for tc in tool_calls {
             let tool_name = &tc.function.name;
-            let tool_input: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!(
-                        tool = %tool_name,
-                        error = %e,
-                        "failed to parse tool call arguments from LLM, using null"
-                    );
-                    serde_json::Value::Null
-                }
-            };
+            let mut tool_input: serde_json::Value =
+                match serde_json::from_str(&tc.function.arguments) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!(
+                            tool = %tool_name,
+                            error = %e,
+                            "failed to parse tool call arguments from LLM, using null"
+                        );
+                        serde_json::Value::Null
+                    }
+                };
+
+            // Inject caller context into tool input so tools can authorize
+            // and associate results with the originating conversation.
+            if let serde_json::Value::Object(ref mut map) = tool_input {
+                map.entry("owner_id")
+                    .or_insert_with(|| serde_json::Value::String(user_id.to_string()));
+                map.entry("conversation_id")
+                    .or_insert_with(|| serde_json::Value::String(conversation_id.to_string()));
+                // TODO: resolve from RoleRepo when RBAC is wired into the agent
+                map.entry("is_admin")
+                    .or_insert(serde_json::Value::Bool(false));
+            }
 
             let _ = event_tx
                 .send(Ok(AgentEvent::ToolCallStart {

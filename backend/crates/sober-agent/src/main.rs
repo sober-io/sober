@@ -15,7 +15,7 @@ use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
-use sober_agent::tools::{FetchUrlTool, ShellTool, ToolRegistry, WebSearchTool};
+use sober_agent::tools::{FetchUrlTool, SchedulerTools, ShellTool, ToolRegistry, WebSearchTool};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
@@ -118,18 +118,22 @@ async fn main() -> Result<()> {
         Some(snapshot_manager),
     );
 
+    // 10. Create shared scheduler client handle (connected in background later)
+    let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
+
     let builtins: Vec<Arc<dyn Tool>> = vec![
         Arc::new(WebSearchTool::new(config.searxng.url.clone())),
         Arc::new(FetchUrlTool::new()),
         Arc::new(shell_tool),
+        Arc::new(SchedulerTools::new(Arc::clone(&scheduler_client))),
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 
-    // 10. Create confirmation broker
+    // 11. Create confirmation broker
     let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
     let registrar = confirmation_broker.registrar();
 
-    // 11. Create Agent
+    // 12. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -151,11 +155,10 @@ async fn main() -> Result<()> {
         Some(registrar),
     ));
 
-    // 12. Spawn the confirmation broker loop
+    // 13. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 13. Connect to scheduler gRPC service (background — retries until available)
-    let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
+    // 14. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     tokio::spawn(async move {
@@ -164,7 +167,7 @@ async fn main() -> Result<()> {
 
     let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
 
-    // 14. Bind to Unix domain socket
+    // 15. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -188,7 +191,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 15. Serve with graceful shutdown
+    // 16. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
