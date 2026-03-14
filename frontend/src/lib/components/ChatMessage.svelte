@@ -91,7 +91,7 @@
 			{/if}
 		</div>
 		{#if timestamp}
-			<span class="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-500">{timestamp}</span>
+			<span class="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-400">{timestamp}</span>
 		{/if}
 	</div>
 </div>
