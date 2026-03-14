@@ -1,6 +1,7 @@
 //! Sober Agent — gRPC server for agent orchestration.
 
 pub mod agent;
+pub mod broadcast;
 pub mod confirm;
 pub mod error;
 pub mod grpc;
@@ -8,6 +9,7 @@ pub mod stream;
 pub mod system_jobs;
 pub mod tools;
 
+pub use broadcast::{ConversationUpdateReceiver, ConversationUpdateSender};
 pub use confirm::{ConfirmationBroker, ConfirmationRegistrar, ConfirmationSender};
 pub use error::AgentError;
 pub use stream::{AgentEvent, AgentResponseStream, Usage};

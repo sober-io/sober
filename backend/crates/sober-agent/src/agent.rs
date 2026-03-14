@@ -21,8 +21,10 @@ use sober_mind::injection::InjectionVerdict;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationRegistrar;
 use crate::error::AgentError;
+use crate::grpc::proto;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
 use crate::tools::ToolRegistry;
 
@@ -89,6 +91,7 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     content: &'a str,
     user_msg_id: sober_core::MessageId,
     event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
+    broadcast_tx: &'a ConversationUpdateSender,
     registrar: Option<&'a ConfirmationRegistrar>,
 }
 
@@ -114,6 +117,8 @@ where
     memory_config: MemoryConfig,
     /// Registrar for interactive confirmation of dangerous tool calls.
     registrar: Option<ConfirmationRegistrar>,
+    /// Broadcast sender for conversation update events.
+    broadcast_tx: ConversationUpdateSender,
 }
 
 impl<Msg, Conv, Mcp> Agent<Msg, Conv, Mcp>
@@ -136,6 +141,7 @@ where
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
+        broadcast_tx: ConversationUpdateSender,
     ) -> Self {
         Self {
             llm,
@@ -149,6 +155,7 @@ where
             config,
             memory_config,
             registrar,
+            broadcast_tx,
         }
     }
 
@@ -234,6 +241,7 @@ where
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();
         let registrar = self.registrar.clone();
+        let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
         let user_msg_id = user_msg.id;
 
@@ -253,6 +261,7 @@ where
                 content: &content,
                 user_msg_id,
                 event_tx: &event_tx,
+                broadcast_tx: &broadcast_tx,
                 registrar: registrar.as_ref(),
             };
             let result = Self::run_loop_streaming(&ctx).await;
@@ -287,7 +296,9 @@ where
         let content = ctx.content;
         let user_msg_id = ctx.user_msg_id;
         let event_tx = ctx.event_tx;
+        let broadcast_tx = ctx.broadcast_tx;
         let registrar = ctx.registrar;
+        let conv_id_str = conversation_id.to_string();
         let mut llm_messages: Vec<LlmMessage> = Vec::new();
         let mut needs_rebuild = true;
         let mut base_message_count: usize = 0;
@@ -425,6 +436,8 @@ where
                         tool_registry,
                         tool_calls,
                         event_tx,
+                        broadcast_tx,
+                        &conv_id_str,
                         registrar,
                         user_id,
                         conversation_id,
@@ -460,6 +473,14 @@ where
             let text = choice.message.content.unwrap_or_default();
             if !text.is_empty() {
                 let _ = event_tx.send(Ok(AgentEvent::TextDelta(text.clone()))).await;
+                let _ = broadcast_tx.send(proto::ConversationUpdate {
+                    conversation_id: conv_id_str.clone(),
+                    event: Some(proto::conversation_update::Event::TextDelta(
+                        proto::TextDelta {
+                            content: text.clone(),
+                        },
+                    )),
+                });
                 assistant_text = text.clone();
             }
 
@@ -481,11 +502,23 @@ where
                 memory,
                 user_id,
                 content.to_owned(),
-                text,
+                text.clone(),
                 user_msg_id,
                 assistant_msg.id,
                 memory_config.decay_half_life_days,
             );
+
+            // Broadcast NewMessage for the stored assistant message.
+            let _ = broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.clone(),
+                event: Some(proto::conversation_update::Event::NewMessage(
+                    proto::NewMessage {
+                        message_id: assistant_msg.id.to_string(),
+                        role: "Assistant".to_owned(),
+                        content: text.clone(),
+                    },
+                )),
+            });
 
             let _ = event_tx
                 .send(Ok(AgentEvent::Done {
@@ -497,6 +530,15 @@ where
                     artifact_ref: None,
                 }))
                 .await;
+            let _ = broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.clone(),
+                event: Some(proto::conversation_update::Event::Done(proto::Done {
+                    message_id: assistant_msg.id.to_string(),
+                    prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
+                    completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
+                    artifact_ref: String::new(),
+                })),
+            });
 
             // i. Auto-generate title
             let conversation = conversation_repo.get_by_id(conversation_id).await.ok();
@@ -558,7 +600,15 @@ where
                         .await
                         .is_ok()
                 {
-                    let _ = event_tx.send(Ok(AgentEvent::TitleGenerated(title))).await;
+                    let _ = event_tx
+                        .send(Ok(AgentEvent::TitleGenerated(title.clone())))
+                        .await;
+                    let _ = broadcast_tx.send(proto::ConversationUpdate {
+                        conversation_id: conv_id_str.clone(),
+                        event: Some(proto::conversation_update::Event::TitleChanged(
+                            proto::TitleChanged { title },
+                        )),
+                    });
                 }
             }
 
@@ -577,10 +627,13 @@ where
     /// broker. If approved, re-executes the tool with `"confirmed": true`.
     ///
     /// Returns (LLM messages, context_modifying, any_errors).
+    #[allow(clippy::too_many_arguments)]
     async fn execute_tool_calls_streaming(
         tool_registry: &Arc<ToolRegistry>,
         tool_calls: &[LlmToolCall],
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
+        broadcast_tx: &ConversationUpdateSender,
+        conv_id_str: &str,
         registrar: Option<&ConfirmationRegistrar>,
         user_id: UserId,
         conversation_id: ConversationId,
@@ -624,6 +677,15 @@ where
                     input: tool_input.clone(),
                 }))
                 .await;
+            let _ = broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.to_owned(),
+                event: Some(proto::conversation_update::Event::ToolCallStart(
+                    proto::ToolCallStart {
+                        name: tool_name.clone(),
+                        input_json: tool_input.to_string(),
+                    },
+                )),
+            });
 
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
@@ -645,7 +707,13 @@ where
                                 reason,
                             };
                             Self::handle_confirmation(
-                                &tool, tool_input, detail, event_tx, registrar,
+                                &tool,
+                                tool_input,
+                                detail,
+                                event_tx,
+                                broadcast_tx,
+                                conv_id_str,
+                                registrar,
                             )
                             .await
                         }
@@ -667,6 +735,15 @@ where
                     output: output.clone(),
                 }))
                 .await;
+            let _ = broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.to_owned(),
+                event: Some(proto::conversation_update::Event::ToolCallResult(
+                    proto::ToolCallResult {
+                        name: tool_name.clone(),
+                        output: output.clone(),
+                    },
+                )),
+            });
 
             messages.push(LlmMessage::tool(&tc.id, output));
         }
@@ -683,6 +760,8 @@ where
         mut tool_input: serde_json::Value,
         confirm: ConfirmDetail,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
+        broadcast_tx: &ConversationUpdateSender,
+        conv_id_str: &str,
         registrar: Option<&ConfirmationRegistrar>,
     ) -> String {
         let Some(registrar) = registrar else {
@@ -698,13 +777,25 @@ where
 
         let _ = event_tx
             .send(Ok(AgentEvent::ConfirmRequest {
-                confirm_id: confirm.confirm_id,
-                command: confirm.command,
-                risk_level: confirm.risk_level,
+                confirm_id: confirm.confirm_id.clone(),
+                command: confirm.command.clone(),
+                risk_level: confirm.risk_level.clone(),
                 affects: Vec::new(),
-                reason: confirm.reason,
+                reason: confirm.reason.clone(),
             }))
             .await;
+        let _ = broadcast_tx.send(proto::ConversationUpdate {
+            conversation_id: conv_id_str.to_owned(),
+            event: Some(proto::conversation_update::Event::ConfirmRequest(
+                proto::ConfirmRequest {
+                    confirm_id: confirm.confirm_id,
+                    command: confirm.command,
+                    risk_level: confirm.risk_level,
+                    affects: Vec::new(),
+                    reason: confirm.reason,
+                },
+            )),
+        });
 
         match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
             Ok(Ok(true)) => {

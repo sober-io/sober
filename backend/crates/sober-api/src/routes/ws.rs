@@ -2,8 +2,12 @@
 //!
 //! Single endpoint at `/api/v1/ws`. All messages include `conversation_id`
 //! in the payload for multiplexing across conversations on one connection.
+//!
+//! Events are delivered via the background subscription task that routes
+//! `ConversationUpdate` events from the agent through the
+//! [`ConnectionRegistry`](crate::connections::ConnectionRegistry).
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
@@ -14,11 +18,10 @@ use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::proto;
-use crate::state::{AgentClient, AppState};
+use crate::state::AppState;
 
 /// Returns the WebSocket route.
 pub fn routes() -> Router<Arc<AppState>> {
@@ -62,54 +65,96 @@ enum ClientWsMessage {
 }
 
 /// Server-to-client WebSocket message types.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 #[serde(tag = "type")]
-enum ServerWsMessage {
+pub enum ServerWsMessage {
+    /// Incremental text from the assistant.
     #[serde(rename = "chat.delta")]
     ChatDelta {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Text fragment.
         content: String,
     },
+    /// A tool call has started.
     #[serde(rename = "chat.tool_use")]
     ChatToolUse {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Tool call details.
         tool_call: serde_json::Value,
     },
+    /// A tool call has completed.
     #[serde(rename = "chat.tool_result")]
     ChatToolResult {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Name of the tool.
         tool_call_id: String,
+        /// Output from the tool.
         output: String,
     },
+    /// The agent has finished processing.
     #[serde(rename = "chat.done")]
     ChatDone {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// ID of the stored assistant message.
         message_id: String,
     },
+    /// Thinking/reasoning content from the model.
     #[serde(rename = "chat.thinking")]
     ChatThinking {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Thinking text fragment.
         content: String,
     },
+    /// The conversation title was generated or changed.
     #[serde(rename = "chat.title")]
     ChatTitle {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// The new title.
         title: String,
     },
+    /// An error occurred.
     #[serde(rename = "chat.error")]
     ChatError {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Error description.
         error: String,
     },
+    /// A shell command confirmation request.
     #[serde(rename = "chat.confirm")]
     ChatConfirm {
+        /// Conversation this event belongs to.
         conversation_id: String,
+        /// Unique ID for this confirmation request.
         confirm_id: String,
+        /// The command that needs approval.
         command: String,
+        /// Risk level assessment.
         risk_level: String,
+        /// Resources affected.
         affects: Vec<String>,
+        /// Reason for requiring confirmation.
         reason: String,
     },
+    /// A new message was stored in the conversation.
+    #[serde(rename = "chat.new_message")]
+    ChatNewMessage {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// ID of the stored message.
+        message_id: String,
+        /// Role of the message author.
+        role: String,
+        /// Message content.
+        content: String,
+    },
+    /// Keepalive response.
     #[serde(rename = "pong")]
     Pong,
 }
@@ -121,11 +166,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Channel for sending messages back to the client from spawned tasks.
+    // Channel for sending messages back to the client from the connection registry.
     let (out_tx, mut out_rx) = mpsc::channel::<ServerWsMessage>(64);
 
-    // Track active conversation tasks for cancellation.
-    let mut active_tasks: HashMap<String, CancellationToken> = HashMap::new();
+    // Track which conversations this connection is registered for.
+    let mut registered_conversations: HashSet<String> = HashSet::new();
 
     // Spawn a task that forwards outbound messages to the WebSocket.
     let send_task = tokio::spawn(async move {
@@ -178,24 +223,41 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 conversation_id,
                 content,
             } => {
-                let cancel_token = CancellationToken::new();
-                active_tasks.insert(conversation_id.clone(), cancel_token.clone());
-
-                let out_tx = out_tx.clone();
-                let agent_client = state.agent_client.clone();
-                let conv_id = conversation_id.clone();
-                let uid = user_id.to_string();
-
-                tokio::spawn(async move {
-                    handle_chat_message(agent_client, uid, conv_id, content, out_tx, cancel_token)
+                // Register this connection for the conversation so events
+                // from the subscription task are routed here.
+                if registered_conversations.insert(conversation_id.clone()) {
+                    state
+                        .connections
+                        .register(conversation_id.clone(), out_tx.clone())
                         .await;
+                }
+
+                // Call unary HandleMessage RPC — fire and forget.
+                let mut agent_client = state.agent_client.clone();
+                let request = proto::HandleMessageRequest {
+                    user_id: user_id.to_string(),
+                    conversation_id: conversation_id.clone(),
+                    content,
+                };
+
+                let conv_id = conversation_id.clone();
+                let error_tx = out_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = agent_client.handle_message(request).await {
+                        let _ = error_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id: conv_id,
+                                error: e.message().to_owned(),
+                            })
+                            .await;
+                    }
                 });
             }
             ClientWsMessage::ChatCancel { conversation_id } => {
-                if let Some(token) = active_tasks.remove(&conversation_id) {
-                    token.cancel();
-                    info!(conversation_id, "cancelled active chat task");
-                }
+                // Cancellation is best-effort in the new model.
+                // The agent loop will continue, but we can unregister
+                // the connection from the conversation.
+                info!(conversation_id, "chat cancel requested (best-effort)");
             }
             ClientWsMessage::ChatConfirmResponse {
                 conversation_id: _,
@@ -224,129 +286,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
         }
     }
 
-    // Cancel all active tasks on disconnect.
-    for token in active_tasks.values() {
-        token.cancel();
+    // Unregister all conversations on disconnect.
+    for conv_id in &registered_conversations {
+        state.connections.unregister(conv_id).await;
     }
 
     send_task.abort();
     info!(user_id = %user_id, "WebSocket disconnected");
-}
-
-/// Handles a single chat message by calling the agent via gRPC streaming.
-async fn handle_chat_message(
-    mut agent_client: AgentClient,
-    user_id: String,
-    conversation_id: String,
-    content: String,
-    out_tx: mpsc::Sender<ServerWsMessage>,
-    cancel_token: CancellationToken,
-) {
-    let request = proto::HandleMessageRequest {
-        user_id,
-        conversation_id: conversation_id.clone(),
-        content,
-    };
-
-    let response = match agent_client.handle_message(request).await {
-        Ok(response) => response,
-        Err(e) => {
-            let _ = out_tx
-                .send(ServerWsMessage::ChatError {
-                    conversation_id,
-                    error: e.message().to_owned(),
-                })
-                .await;
-            return;
-        }
-    };
-
-    let mut stream = response.into_inner();
-
-    loop {
-        tokio::select! {
-            () = cancel_token.cancelled() => {
-                break;
-            }
-            event = stream.next() => {
-                let event: proto::AgentEvent = match event {
-                    Some(Ok(e)) => e,
-                    Some(Err(e)) => {
-                        let _ = out_tx
-                            .send(ServerWsMessage::ChatError {
-                                conversation_id: conversation_id.clone(),
-                                error: e.message().to_owned(),
-                            })
-                            .await;
-                        break;
-                    }
-                    None => break,
-                };
-
-                let ws_msg = match event.event {
-                    Some(proto::agent_event::Event::TextDelta(td)) => {
-                        ServerWsMessage::ChatDelta {
-                            conversation_id: conversation_id.clone(),
-                            content: td.content,
-                        }
-                    }
-                    Some(proto::agent_event::Event::ToolCallStart(tcs)) => {
-                        ServerWsMessage::ChatToolUse {
-                            conversation_id: conversation_id.clone(),
-                            tool_call: serde_json::json!({
-                                "name": tcs.name,
-                                "input": tcs.input_json,
-                            }),
-                        }
-                    }
-                    Some(proto::agent_event::Event::ToolCallResult(tcr)) => {
-                        ServerWsMessage::ChatToolResult {
-                            conversation_id: conversation_id.clone(),
-                            tool_call_id: tcr.name.clone(),
-                            output: tcr.output,
-                        }
-                    }
-                    Some(proto::agent_event::Event::Done(done)) => {
-                        ServerWsMessage::ChatDone {
-                            conversation_id: conversation_id.clone(),
-                            message_id: done.message_id,
-                        }
-                    }
-                    Some(proto::agent_event::Event::ThinkingDelta(td)) => {
-                        ServerWsMessage::ChatThinking {
-                            conversation_id: conversation_id.clone(),
-                            content: td.content,
-                        }
-                    }
-                    Some(proto::agent_event::Event::TitleGenerated(tg)) => {
-                        ServerWsMessage::ChatTitle {
-                            conversation_id: conversation_id.clone(),
-                            title: tg.title,
-                        }
-                    }
-                    Some(proto::agent_event::Event::Error(e)) => {
-                        ServerWsMessage::ChatError {
-                            conversation_id: conversation_id.clone(),
-                            error: e.message,
-                        }
-                    }
-                    Some(proto::agent_event::Event::ConfirmRequest(cr)) => {
-                        ServerWsMessage::ChatConfirm {
-                            conversation_id: conversation_id.clone(),
-                            confirm_id: cr.confirm_id,
-                            command: cr.command,
-                            risk_level: cr.risk_level,
-                            affects: cr.affects,
-                            reason: cr.reason,
-                        }
-                    }
-                    None => continue,
-                };
-
-                if out_tx.send(ws_msg).await.is_err() {
-                    break;
-                }
-            }
-        }
-    }
 }

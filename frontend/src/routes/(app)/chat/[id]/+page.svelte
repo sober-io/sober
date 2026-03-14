@@ -247,6 +247,12 @@
 				}
 				break;
 			}
+			case 'chat.new_message': {
+				// A stored message notification — currently used to update the
+				// assistant message ID after the agent finishes. The actual
+				// content is already streamed via chat.delta events.
+				break;
+			}
 			case 'chat.done': {
 				const last = messages[messages.length - 1];
 				if (last) {

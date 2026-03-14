@@ -15,6 +15,7 @@ use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 use tracing::info;
 
+use crate::connections::ConnectionRegistry;
 use crate::proto;
 
 /// gRPC client for the agent service, connected via Unix domain socket.
@@ -30,6 +31,8 @@ pub struct AppState {
     pub auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
     /// Application configuration.
     pub config: AppConfig,
+    /// Registry of active WebSocket connections per conversation.
+    pub connections: ConnectionRegistry,
 }
 
 impl AppState {
@@ -49,6 +52,7 @@ impl AppState {
             agent_client,
             auth,
             config,
+            connections: ConnectionRegistry::new(),
         })
     }
 
@@ -80,6 +84,7 @@ impl AppState {
             agent_client,
             auth,
             config,
+            connections: ConnectionRegistry::new(),
         }))
     }
 }

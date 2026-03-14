@@ -3,7 +3,9 @@ syntax = "proto3";
 package sober.agent.v1;
 
 service AgentService {
-  rpc HandleMessage(HandleMessageRequest) returns (stream AgentEvent);
+  // Handle a user message. Returns immediately with an ack; the agent loop
+  // publishes events to the broadcast channel consumed via SubscribeConversationUpdates.
+  rpc HandleMessage(HandleMessageRequest) returns (HandleMessageResponse);
   rpc ExecuteTask(ExecuteTaskRequest) returns (stream AgentEvent);
   rpc WakeAgent(WakeRequest) returns (WakeResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
@@ -11,6 +13,8 @@ service AgentService {
   rpc SubmitConfirmation(ConfirmResponse) returns (ConfirmAck);
   // Update the shell tool's permission mode at runtime.
   rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
+  // Subscribe to real-time conversation events from all conversations.
+  rpc SubscribeConversationUpdates(SubscribeRequest) returns (stream ConversationUpdate);
 }
 
 message ConfirmAck {}
@@ -19,6 +23,11 @@ message HandleMessageRequest {
   string user_id = 1;
   string conversation_id = 2;
   string content = 3;
+}
+
+// Returned immediately by HandleMessage after storing the user message.
+message HandleMessageResponse {
+  string message_id = 1;
 }
 
 message ExecuteTaskRequest {
@@ -92,3 +101,36 @@ message SetPermissionModeRequest {
 }
 
 message SetPermissionModeResponse {}
+
+// --- Conversation subscription types ---
+
+// Empty request for subscribing to all conversation updates.
+message SubscribeRequest {}
+
+// A new message stored in the conversation.
+message NewMessage {
+  string message_id = 1;
+  string role = 2;
+  string content = 3;
+}
+
+// The conversation title was changed.
+message TitleChanged {
+  string title = 1;
+}
+
+// Wraps an event with its conversation_id for routing.
+message ConversationUpdate {
+  string conversation_id = 1;
+  oneof event {
+    NewMessage new_message = 2;
+    TitleChanged title_changed = 3;
+    TextDelta text_delta = 4;
+    ToolCallStart tool_call_start = 5;
+    ToolCallResult tool_call_result = 6;
+    ThinkingDelta thinking_delta = 7;
+    ConfirmRequest confirm_request = 8;
+    Done done = 9;
+    Error error = 10;
+  }
+}

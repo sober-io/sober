@@ -129,11 +129,14 @@ async fn main() -> Result<()> {
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 
-    // 11. Create confirmation broker
+    // 11. Create broadcast channel for conversation update events
+    let (broadcast_tx, _broadcast_rx) = sober_agent::broadcast::create_broadcast_channel();
+
+    // 12. Create confirmation broker
     let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
     let registrar = confirmation_broker.registrar();
 
-    // 12. Create Agent
+    // 13. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -153,21 +156,27 @@ async fn main() -> Result<()> {
         agent_config,
         config.memory.clone(),
         Some(registrar),
+        broadcast_tx.clone(),
     ));
 
-    // 13. Spawn the confirmation broker loop
+    // 14. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 14. Connect to scheduler gRPC service (background — retries until available)
+    // 15. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     tokio::spawn(async move {
         connect_to_scheduler(scheduler_client_bg, &scheduler_socket).await;
     });
 
-    let grpc_service = AgentGrpcService::new(agent, confirmation_sender, shared_permission_mode);
+    let grpc_service = AgentGrpcService::new(
+        agent,
+        confirmation_sender,
+        shared_permission_mode,
+        broadcast_tx,
+    );
 
-    // 15. Bind to Unix domain socket
+    // 16. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -191,7 +200,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 16. Serve with graceful shutdown
+    // 17. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())

@@ -86,6 +86,13 @@ export type ServerWsMessage =
 			output: string;
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
+	| {
+			type: 'chat.new_message';
+			conversation_id: string;
+			message_id: string;
+			role: string;
+			content: string;
+	  }
 	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string }
 	| {
