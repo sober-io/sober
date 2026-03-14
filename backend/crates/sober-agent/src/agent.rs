@@ -267,7 +267,14 @@ where
             let result = Self::run_loop_streaming(&ctx).await;
 
             if let Err(e) = result {
+                let error_msg = e.to_string();
                 let _ = event_tx.send(Err(e)).await;
+                let _ = broadcast_tx.send(crate::grpc::proto::ConversationUpdate {
+                    conversation_id: conversation_id.to_string(),
+                    event: Some(crate::grpc::proto::conversation_update::Event::Error(
+                        crate::grpc::proto::Error { message: error_msg },
+                    )),
+                });
             }
         });
 

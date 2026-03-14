@@ -243,13 +243,28 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 let conv_id = conversation_id.clone();
                 let error_tx = out_tx.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = agent_client.handle_message(request).await {
-                        let _ = error_tx
-                            .send(ServerWsMessage::ChatError {
-                                conversation_id: conv_id,
-                                error: e.message().to_owned(),
-                            })
-                            .await;
+                    info!(conversation_id = %conv_id, "sending HandleMessage to agent");
+                    match agent_client.handle_message(request).await {
+                        Ok(resp) => {
+                            info!(
+                                conversation_id = %conv_id,
+                                message_id = %resp.into_inner().message_id,
+                                "HandleMessage accepted"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                conversation_id = %conv_id,
+                                error = %e,
+                                "HandleMessage failed"
+                            );
+                            let _ = error_tx
+                                .send(ServerWsMessage::ChatError {
+                                    conversation_id: conv_id,
+                                    error: e.message().to_owned(),
+                                })
+                                .await;
+                        }
                     }
                 });
             }
