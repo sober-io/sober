@@ -93,8 +93,6 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
     broadcast_tx: &'a ConversationUpdateSender,
     registrar: Option<&'a ConfirmationRegistrar>,
-    /// When false, skip DB persistence and memory ingestion (scheduler-driven).
-    persist: bool,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -196,17 +194,11 @@ where
     /// Returns a stream of [`AgentEvent`]s that are emitted in real-time
     /// as the agent processes the message (enabling confirmation flow and
     /// progressive tool output).
-    ///
-    /// When `persist` is false (scheduler-driven calls), the user and
-    /// assistant messages are **not** stored in the database and memory
-    /// ingestion is skipped. Events are still broadcast for real-time
-    /// delivery.
     pub async fn handle_message(
         &self,
         user_id: UserId,
         conversation_id: ConversationId,
         content: &str,
-        persist: bool,
     ) -> Result<AgentResponseStream, AgentError> {
         // 1. Check injection
         let verdict = Mind::check_injection(content);
@@ -220,24 +212,19 @@ where
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Store user message (skipped for scheduler-driven calls)
-        let user_msg_id = if persist {
-            let user_msg = self
-                .message_repo
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::User,
-                    content: content.to_owned(),
-                    tool_calls: None,
-                    tool_result: None,
-                    token_count: None,
-                })
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-            user_msg.id
-        } else {
-            sober_core::MessageId::new()
-        };
+        // 2. Store user message
+        let user_msg = self
+            .message_repo
+            .create(CreateMessage {
+                conversation_id,
+                role: MessageRole::User,
+                content: content.to_owned(),
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+            })
+            .await
+            .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // 3. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
@@ -256,6 +243,7 @@ where
         let registrar = self.registrar.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
+        let user_msg_id = user_msg.id;
 
         tokio::spawn(async move {
             let ctx = LoopContext {
@@ -275,7 +263,6 @@ where
                 event_tx: &event_tx,
                 broadcast_tx: &broadcast_tx,
                 registrar: registrar.as_ref(),
-                persist,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -509,41 +496,36 @@ where
                 assistant_text = text.clone();
             }
 
-            let assistant_msg_id = if ctx.persist {
-                let assistant_msg = message_repo
-                    .create(CreateMessage {
-                        conversation_id,
-                        role: MessageRole::Assistant,
-                        content: text.clone(),
-                        tool_calls: None,
-                        tool_result: None,
-                        token_count: usage_stats.map(|u| u.total_tokens as i32),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            let assistant_msg = message_repo
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::Assistant,
+                    content: text.clone(),
+                    tool_calls: None,
+                    tool_result: None,
+                    token_count: usage_stats.map(|u| u.total_tokens as i32),
+                })
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-                // Memory ingestion only for persisted messages.
-                Self::spawn_memory_ingestion_static(
-                    llm,
-                    memory,
-                    user_id,
-                    content.to_owned(),
-                    text.clone(),
-                    user_msg_id,
-                    assistant_msg.id,
-                    memory_config.decay_half_life_days,
-                );
-                assistant_msg.id
-            } else {
-                sober_core::MessageId::new()
-            };
+            // h. Memory ingestion
+            Self::spawn_memory_ingestion_static(
+                llm,
+                memory,
+                user_id,
+                content.to_owned(),
+                text.clone(),
+                user_msg_id,
+                assistant_msg.id,
+                memory_config.decay_half_life_days,
+            );
 
-            // Broadcast NewMessage for the assistant message.
+            // Broadcast NewMessage for the stored assistant message.
             let _ = broadcast_tx.send(proto::ConversationUpdate {
                 conversation_id: conv_id_str.clone(),
                 event: Some(proto::conversation_update::Event::NewMessage(
                     proto::NewMessage {
-                        message_id: assistant_msg_id.to_string(),
+                        message_id: assistant_msg.id.to_string(),
                         role: "Assistant".to_owned(),
                         content: text.clone(),
                     },
@@ -552,7 +534,7 @@ where
 
             let _ = event_tx
                 .send(Ok(AgentEvent::Done {
-                    message_id: assistant_msg_id,
+                    message_id: assistant_msg.id,
                     usage: Usage {
                         prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                         completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
@@ -563,7 +545,7 @@ where
             let _ = broadcast_tx.send(proto::ConversationUpdate {
                 conversation_id: conv_id_str.clone(),
                 event: Some(proto::conversation_update::Event::Done(proto::Done {
-                    message_id: assistant_msg_id.to_string(),
+                    message_id: assistant_msg.id.to_string(),
                     prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                     completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
                     artifact_ref: String::new(),
