@@ -114,18 +114,17 @@ impl SchedulerTools {
                     workspace_id: String::new(),
                     name_filter: name.into(),
                 };
-                if let Ok(response) = client.list_jobs(req.clone()).await {
-                    if let Some(job) = response
+                if let Ok(response) = client.list_jobs(req.clone()).await
+                    && let Some(job) = response
                         .into_inner()
                         .jobs
                         .into_iter()
                         .find(|j| j.name == name)
-                    {
-                        return Ok(format!(
-                            "Job '{}' already exists ({}, status: {}). Next run: {}",
-                            job.name, job.id, job.status, job.next_run_at
-                        ));
-                    }
+                {
+                    return Ok(format!(
+                        "Job '{}' already exists ({}, status: {}). Next run: {}",
+                        job.name, job.id, job.status, job.next_run_at
+                    ));
                 }
             }
         }

@@ -1,4 +1,4 @@
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { ClientWsMessage, ServerWsMessage } from '$lib/types';
 
 type MessageHandler = (data: ServerWsMessage) => void;
@@ -21,7 +21,7 @@ export const websocket = (() => {
 	const handlers = new SvelteMap<string, MessageHandler>();
 
 	/** Conversation IDs with active subscriptions — re-sent on reconnect. */
-	const subscribedConversations = new Set<string>();
+	const subscribedConversations = new SvelteSet<string>();
 
 	/** Messages queued while the WebSocket is not yet open. */
 	let pendingQueue: ClientWsMessage[] = [];
