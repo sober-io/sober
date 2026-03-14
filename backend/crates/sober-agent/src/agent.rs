@@ -344,7 +344,11 @@ where
                                 user_id,
                                 conversation_id,
                                 token_budget: config.context_token_budget,
-                                recent_message_count: config.conversation_history_limit,
+                                recent_message_count: if ctx.trigger == TriggerKind::Human {
+                                    config.conversation_history_limit
+                                } else {
+                                    0
+                                },
                                 hits_per_scope: 0,
                             },
                             memory_config,
@@ -360,7 +364,11 @@ where
                                 user_id,
                                 conversation_id,
                                 token_budget: config.context_token_budget,
-                                recent_message_count: config.conversation_history_limit,
+                                recent_message_count: if ctx.trigger == TriggerKind::Human {
+                                    config.conversation_history_limit
+                                } else {
+                                    0
+                                },
                                 hits_per_scope: config.hits_per_scope,
                             },
                             memory_config,
