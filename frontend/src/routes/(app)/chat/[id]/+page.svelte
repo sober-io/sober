@@ -208,49 +208,59 @@
 		editingQueueId = null;
 	};
 
+	/** Returns the last message if it's an active (streaming/thinking) assistant message. */
+	const activeAssistant = (): ChatMsg | undefined => {
+		const last = messages[messages.length - 1];
+		if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) return last;
+		return undefined;
+	};
+
+	/** Ensures there's an active assistant message to append to, creating one if needed. */
+	const ensureActiveAssistant = (): ChatMsg => {
+		const existing = activeAssistant();
+		if (existing) return existing;
+		const fresh: ChatMsg = {
+			id: crypto.randomUUID(),
+			role: 'Assistant',
+			content: '',
+			thinkingContent: '',
+			streaming: true,
+			thinking: false,
+			timestamp: fmtTime()
+		};
+		messages.push(fresh);
+		assistantPhase = 'streaming';
+		return fresh;
+	};
+
 	const handleWsMessage = (msg: ServerWsMessage) => {
 		switch (msg.type) {
 			case 'chat.thinking': {
-				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
-					last.thinkingContent += msg.content;
+				const active = activeAssistant();
+				if (active) {
+					active.thinkingContent += msg.content;
 				}
 				break;
 			}
 			case 'chat.delta': {
-				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
-					last.thinking = false;
-					last.streaming = true;
-					last.content += msg.content;
-					assistantPhase = 'streaming';
-				} else {
-					messages.push({
-						id: crypto.randomUUID(),
-						role: 'Assistant',
-						content: msg.content,
-						thinkingContent: '',
-						streaming: true,
-						thinking: false,
-						timestamp: fmtTime()
-					});
-					assistantPhase = 'streaming';
-				}
+				const target = ensureActiveAssistant();
+				target.thinking = false;
+				target.streaming = true;
+				target.content += msg.content;
+				assistantPhase = 'streaming';
 				break;
 			}
 			case 'chat.tool_use': {
-				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant') {
-					const tc: ToolCall = {
-						id: crypto.randomUUID(),
-						name: msg.tool_call.name,
-						input: msg.tool_call.input
-					};
-					last.toolCalls = [...(last.toolCalls ?? []), tc];
-					last.streaming = true;
-					last.thinking = false;
-					messages = [...messages];
-				}
+				const target = ensureActiveAssistant();
+				const tc: ToolCall = {
+					id: crypto.randomUUID(),
+					name: msg.tool_call.name,
+					input: msg.tool_call.input
+				};
+				target.toolCalls = [...(target.toolCalls ?? []), tc];
+				target.streaming = true;
+				target.thinking = false;
+				messages = [...messages];
 				break;
 			}
 			case 'chat.tool_result': {
@@ -265,9 +275,23 @@
 				break;
 			}
 			case 'chat.new_message': {
-				// A stored message notification — currently used to update the
-				// assistant message ID after the agent finishes. The actual
-				// content is already streamed via chat.delta events.
+				// Show messages injected by other sources (scheduler prompts,
+				// external triggers). Skip if we already streamed this content
+				// via chat.delta (same assistant response).
+				const active = activeAssistant();
+				if (active && msg.role === 'Assistant') {
+					// Already being streamed — just update the ID.
+					break;
+				}
+				messages.push({
+					id: msg.message_id,
+					role: msg.role as ChatMsg['role'],
+					content: msg.content,
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime()
+				});
 				break;
 			}
 			case 'chat.done': {
