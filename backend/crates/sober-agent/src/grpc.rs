@@ -123,7 +123,7 @@ where
                 // so we return a new UUID. The frontend uses Done.message_id
                 // for the assistant message.
                 Ok(Response::new(proto::HandleMessageResponse {
-                    message_id: uuid::Uuid::new_v4().to_string(),
+                    message_id: sober_core::MessageId::new().to_string(),
                 }))
             }
             Err(e) => {
