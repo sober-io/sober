@@ -240,17 +240,29 @@
 			}
 			case 'chat.tool_use': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant') {
-					const tc: ToolCall = {
-						id: crypto.randomUUID(),
-						name: msg.tool_call.name,
-						input: msg.tool_call.input
-					};
+				const tc: ToolCall = {
+					id: crypto.randomUUID(),
+					name: msg.tool_call.name,
+					input: msg.tool_call.input
+				};
+				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
 					last.toolCalls = [...(last.toolCalls ?? []), tc];
 					last.streaming = true;
 					last.thinking = false;
-					messages = [...messages];
+				} else {
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'Assistant',
+						content: '',
+						thinkingContent: '',
+						toolCalls: [tc],
+						streaming: true,
+						thinking: false,
+						timestamp: fmtTime()
+					});
+					assistantPhase = 'streaming';
 				}
+				messages = [...messages];
 				break;
 			}
 			case 'chat.tool_result': {
