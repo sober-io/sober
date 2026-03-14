@@ -60,6 +60,7 @@ export interface ConfirmRequest {
 
 /** Client-to-server messages — all include conversation_id */
 export type ClientWsMessage =
+	| { type: 'chat.subscribe'; conversation_id: string }
 	| { type: 'chat.message'; conversation_id: string; content: string }
 	| { type: 'chat.cancel'; conversation_id: string }
 	| {

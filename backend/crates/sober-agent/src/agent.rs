@@ -480,6 +480,8 @@ where
             let text = choice.message.content.unwrap_or_default();
             if !text.is_empty() {
                 let _ = event_tx.send(Ok(AgentEvent::TextDelta(text.clone()))).await;
+                let receivers = broadcast_tx.receiver_count();
+                tracing::info!(receivers, conversation_id = %conv_id_str, "publishing TextDelta to broadcast");
                 let _ = broadcast_tx.send(proto::ConversationUpdate {
                     conversation_id: conv_id_str.clone(),
                     event: Some(proto::conversation_update::Event::TextDelta(

@@ -45,6 +45,15 @@ async fn subscription_loop(mut agent_client: AgentClient, registry: ConnectionRe
                     match result {
                         Ok(update) => {
                             let conversation_id = update.conversation_id.clone();
+                            let event_type = update
+                                .event
+                                .as_ref()
+                                .map(|e| format!("{:?}", std::mem::discriminant(e)));
+                            info!(
+                                conversation_id = %conversation_id,
+                                event_type = ?event_type,
+                                "received conversation update from agent"
+                            );
                             if let Some(ws_msg) = conversation_update_to_ws(update) {
                                 registry.send(&conversation_id, ws_msg).await;
                             }

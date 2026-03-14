@@ -100,6 +100,9 @@
 	$effect(() => {
 		const id = conversationId;
 		const unsub = websocket.subscribe(id, handleWsMessage);
+		// Register interest in this conversation so the API routes
+		// subscription events (e.g. scheduler job results) to this WS.
+		websocket.send({ type: 'chat.subscribe', conversation_id: id });
 		return unsub;
 	});
 

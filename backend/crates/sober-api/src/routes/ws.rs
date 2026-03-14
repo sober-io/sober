@@ -42,6 +42,8 @@ async fn ws_upgrade(
 #[serde(tag = "type")]
 #[expect(clippy::enum_variant_names)]
 enum ClientWsMessage {
+    #[serde(rename = "chat.subscribe")]
+    ChatSubscribe { conversation_id: String },
     #[serde(rename = "chat.message")]
     ChatMessage {
         conversation_id: String,
@@ -219,12 +221,21 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
         };
 
         match client_msg {
+            ClientWsMessage::ChatSubscribe { conversation_id } => {
+                // Register this connection for the conversation so events
+                // from the subscription task are routed here (e.g. scheduler results).
+                if registered_conversations.insert(conversation_id.clone()) {
+                    state
+                        .connections
+                        .register(conversation_id.clone(), out_tx.clone())
+                        .await;
+                }
+            }
             ClientWsMessage::ChatMessage {
                 conversation_id,
                 content,
             } => {
-                // Register this connection for the conversation so events
-                // from the subscription task are routed here.
+                // Ensure registration (in case chat.subscribe wasn't sent first).
                 if registered_conversations.insert(conversation_id.clone()) {
                     state
                         .connections
