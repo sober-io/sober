@@ -265,9 +265,23 @@
 				break;
 			}
 			case 'chat.new_message': {
-				// A stored message notification — currently used to update the
-				// assistant message ID after the agent finishes. The actual
-				// content is already streamed via chat.delta events.
+				// If an assistant message is actively streaming, this is just
+				// the stored-message notification — update its ID.
+				const active = messages[messages.length - 1];
+				if (active?.role === 'Assistant' && (active.streaming || active.thinking)) {
+					active.id = msg.message_id;
+					break;
+				}
+				// Otherwise this is a new message from another source (scheduler).
+				messages.push({
+					id: msg.message_id,
+					role: msg.role as ChatMsg['role'],
+					content: msg.content,
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime()
+				});
 				break;
 			}
 			case 'chat.done': {

@@ -105,7 +105,12 @@ where
         // We consume the stream to drive the loop but don't forward it — events
         // go through the broadcast channel to SubscribeConversationUpdates.
         match agent
-            .handle_message(user_id, conversation_id, &content, true)
+            .handle_message(
+                user_id,
+                conversation_id,
+                &content,
+                sober_core::types::access::TriggerKind::Human,
+            )
             .await
         {
             Ok(stream) => {
@@ -415,7 +420,14 @@ async fn execute_prompt_conversational<Msg, Conv, Mcp>(
     Mcp: sober_core::types::repo::McpServerRepo + 'static,
 {
     let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
-        agent.handle_message(uid, cid, prompt, false).await
+        agent
+            .handle_message(
+                uid,
+                cid,
+                prompt,
+                sober_core::types::access::TriggerKind::Scheduler,
+            )
+            .await
     } else {
         // No conversation context — emit Done immediately.
         send_done_stub(tx).await;

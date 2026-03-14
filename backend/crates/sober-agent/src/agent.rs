@@ -93,8 +93,8 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
     broadcast_tx: &'a ConversationUpdateSender,
     registrar: Option<&'a ConfirmationRegistrar>,
-    /// When false, skip DB writes and memory ingestion (scheduler-driven).
-    persist: bool,
+    /// What triggered this interaction — controls storage and tool behavior.
+    trigger: TriggerKind,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -201,7 +201,7 @@ where
         user_id: UserId,
         conversation_id: ConversationId,
         content: &str,
-        persist: bool,
+        trigger: TriggerKind,
     ) -> Result<AgentResponseStream, AgentError> {
         // 1. Check injection
         let verdict = Mind::check_injection(content);
@@ -215,8 +215,8 @@ where
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Store user message (skipped for scheduler-driven calls)
-        let user_msg_id = if persist {
+        // 2. Store user message (only for human-driven calls)
+        let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
                 .message_repo
                 .create(CreateMessage {
@@ -270,7 +270,7 @@ where
                 event_tx: &event_tx,
                 broadcast_tx: &broadcast_tx,
                 registrar: registrar.as_ref(),
-                persist,
+                trigger,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -406,9 +406,9 @@ where
                     };
                 base_message_count = new_base.len();
                 llm_messages = new_base;
-                // When persist=false the prompt wasn't stored in the DB,
+                // For non-human triggers the prompt wasn't stored in the DB,
                 // so the context loader didn't include it. Add it explicitly.
-                if !ctx.persist {
+                if ctx.trigger != TriggerKind::Human {
                     llm_messages.push(LlmMessage::user(content));
                 }
                 llm_messages.extend(tool_history);
@@ -517,8 +517,8 @@ where
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-            // Memory ingestion only for user-driven messages.
-            if ctx.persist {
+            // Memory ingestion only for human-driven messages.
+            if ctx.trigger == TriggerKind::Human {
                 Self::spawn_memory_ingestion_static(
                     llm,
                     memory,

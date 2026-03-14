@@ -27,10 +27,14 @@ const JOB_COLUMNS: &str = "id, name, schedule, status, payload, \
 impl sober_core::types::JobRepo for PgJobRepo {
     async fn create(&self, input: CreateJob) -> Result<Job, AppError> {
         let id = Uuid::now_v7();
+        // Atomic insert — the partial unique index on (name, owner_id) WHERE
+        // status IN ('active','running') prevents duplicates. ON CONFLICT
+        // returns nothing, so we detect the duplicate and return Conflict.
         let row = sqlx::query_as::<_, JobRow>(&format!(
             "INSERT INTO jobs (id, name, schedule, status, payload, \
              owner_type, owner_id, workspace_id, created_by, conversation_id, next_run_at) \
              VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10) \
+             ON CONFLICT (name, owner_id) WHERE status IN ('active', 'running') DO NOTHING \
              RETURNING {JOB_COLUMNS}"
         ))
         .bind(id)
@@ -43,16 +47,17 @@ impl sober_core::types::JobRepo for PgJobRepo {
         .bind(input.created_by)
         .bind(input.conversation_id)
         .bind(input.next_run_at)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e| match &e {
-            sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
-                AppError::Conflict(format!("active job '{}' already exists", input.name))
-            }
-            _ => AppError::Internal(e.into()),
-        })?;
+        .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.into())
+        match row {
+            Some(row) => Ok(row.into()),
+            None => Err(AppError::Conflict(format!(
+                "active job '{}' already exists for this owner",
+                input.name
+            ))),
+        }
     }
 
     async fn get_by_id(&self, id: JobId) -> Result<Job, AppError> {
