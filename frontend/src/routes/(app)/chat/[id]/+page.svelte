@@ -99,11 +99,9 @@
 
 	$effect(() => {
 		const id = conversationId;
-		const unsub = websocket.subscribe(id, handleWsMessage);
-		// Register interest in this conversation so the API routes
-		// subscription events (e.g. scheduler job results) to this WS.
-		websocket.send({ type: 'chat.subscribe', conversation_id: id });
-		return unsub;
+		// subscribe() sends chat.subscribe to the backend (queued if not yet
+		// connected) and re-sends it automatically on reconnect.
+		return websocket.subscribe(id, handleWsMessage);
 	});
 
 	// Auto-scroll when at bottom and messages or confirms change

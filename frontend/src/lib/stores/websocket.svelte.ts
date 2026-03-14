@@ -20,6 +20,12 @@ export const websocket = (() => {
 	let pingTimer: ReturnType<typeof setInterval> | null = null;
 	const handlers = new SvelteMap<string, MessageHandler>();
 
+	/** Conversation IDs with active subscriptions — re-sent on reconnect. */
+	const subscribedConversations = new Set<string>();
+
+	/** Messages queued while the WebSocket is not yet open. */
+	let pendingQueue: ClientWsMessage[] = [];
+
 	const stopPing = () => {
 		if (pingTimer) {
 			clearInterval(pingTimer);
@@ -34,6 +40,26 @@ export const websocket = (() => {
 				socket.send('ping');
 			}
 		}, PING_INTERVAL);
+	};
+
+	/** Sends raw message on the socket. Only call when socket is OPEN. */
+	const sendRaw = (socket: WebSocket, msg: ClientWsMessage) => {
+		socket.send(JSON.stringify(msg));
+	};
+
+	/** Flushes queued messages and re-subscribes active conversations. */
+	const flushOnOpen = (socket: WebSocket) => {
+		// Re-register all active conversation subscriptions with the backend.
+		for (const conversationId of subscribedConversations) {
+			sendRaw(socket, { type: 'chat.subscribe', conversation_id: conversationId });
+		}
+
+		// Flush any messages queued while disconnected.
+		const queue = pendingQueue;
+		pendingQueue = [];
+		for (const msg of queue) {
+			sendRaw(socket, msg);
+		}
 	};
 
 	const scheduleReconnect = () => {
@@ -57,6 +83,7 @@ export const websocket = (() => {
 			error = null;
 			reconnectAttempt = 0;
 			startPing(socket);
+			flushOnOpen(socket);
 		};
 
 		socket.onclose = () => {
@@ -97,17 +124,30 @@ export const websocket = (() => {
 		ws = null;
 		connected = false;
 		handlers.clear();
+		subscribedConversations.clear();
+		pendingQueue = [];
 	};
 
 	const send = (msg: ClientWsMessage) => {
-		ws?.send(JSON.stringify(msg));
+		if (ws && ws.readyState === WebSocket.OPEN) {
+			ws.send(JSON.stringify(msg));
+		} else {
+			pendingQueue.push(msg);
+		}
 	};
 
 	/** Subscribe to messages for a specific conversation. Returns an unsubscribe function. */
 	const subscribe = (conversationId: string, handler: MessageHandler): (() => void) => {
 		handlers.set(conversationId, handler);
+		subscribedConversations.add(conversationId);
+
+		// Send chat.subscribe immediately if connected, otherwise it will
+		// be sent when the connection opens (via flushOnOpen).
+		send({ type: 'chat.subscribe', conversation_id: conversationId });
+
 		return () => {
 			handlers.delete(conversationId);
+			subscribedConversations.delete(conversationId);
 		};
 	};
 
