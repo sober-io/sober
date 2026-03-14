@@ -415,12 +415,8 @@ where
                 needs_rebuild = false;
             }
 
-            // e. Call LLM (no tools for non-persisted/scheduler calls)
-            let tool_definitions = if ctx.persist {
-                tool_registry.tool_definitions()
-            } else {
-                vec![]
-            };
+            // e. Call LLM
+            let tool_definitions = tool_registry.tool_definitions();
             let req = CompletionRequest {
                 model: config.model.clone(),
                 messages: llm_messages.clone(),

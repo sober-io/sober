@@ -45,7 +45,12 @@ impl sober_core::types::JobRepo for PgJobRepo {
         .bind(input.next_run_at)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        .map_err(|e| match &e {
+            sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+                AppError::Conflict(format!("active job '{}' already exists", input.name))
+            }
+            _ => AppError::Internal(e.into()),
+        })?;
 
         Ok(row.into())
     }

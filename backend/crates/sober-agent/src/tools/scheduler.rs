@@ -81,6 +81,9 @@ impl SchedulerTools {
     }
 
     /// Creates a new scheduled job.
+    ///
+    /// Checks for an existing active job with the same name and owner before
+    /// creating. Returns the existing job info if a duplicate is found.
     pub async fn create_job(
         &self,
         name: &str,
@@ -90,12 +93,45 @@ impl SchedulerTools {
         workspace_id: Option<Uuid>,
         conversation_id: Option<Uuid>,
     ) -> Result<String, String> {
+        // Check for existing active job with the same name + owner.
+        let has_user = !caller_user_id.is_nil();
+        {
+            let req = scheduler_proto::ListJobsRequest {
+                owner_type: None,
+                owner_id: if has_user {
+                    Some(caller_user_id.to_string())
+                } else {
+                    None
+                },
+                status: Some("active".into()),
+                workspace_id: String::new(),
+                name_filter: name.into(),
+            };
+            let mut client = {
+                let guard = self.scheduler_client.read().await;
+                guard.as_ref().ok_or("Scheduler not connected")?.clone()
+            };
+            if let Ok(response) = client.list_jobs(req).await {
+                let existing: Vec<_> = response
+                    .into_inner()
+                    .jobs
+                    .into_iter()
+                    .filter(|j| j.name == name && j.status == "active")
+                    .collect();
+                if let Some(job) = existing.first() {
+                    return Ok(format!(
+                        "Active job '{}' already exists ({}). Next run: {}",
+                        job.name, job.id, job.next_run_at
+                    ));
+                }
+            }
+        }
+
         let payload_bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
 
         // TODO: detect group workspace and set owner_type accordingly
         let owner_type = "user";
 
-        let has_user = !caller_user_id.is_nil();
         let req = scheduler_proto::CreateJobRequest {
             name: name.into(),
             owner_type: owner_type.into(),
