@@ -431,7 +431,8 @@ impl SchedulerTools {
                             .filter_map(|v| v.as_str().map(|s| s.to_owned()))
                             .collect()
                     } else {
-                        vec![]
+                        // Default: show active and running jobs (skip cancelled).
+                        vec!["active".into(), "paused".into(), "running".into()]
                     };
                 let name_filter = input.get("name_filter").and_then(|v| v.as_str());
                 // Admins can list all jobs; non-admins are scoped to their own.
