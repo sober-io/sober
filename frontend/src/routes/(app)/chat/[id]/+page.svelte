@@ -44,7 +44,12 @@
 
 	const fmtTime = (iso?: string) => {
 		const d = iso ? new Date(iso) : new Date();
-		return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+		return d.toLocaleTimeString([], {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			hour12: false
+		});
 	};
 
 	const toChat = (m: Message): ChatMsg => ({
