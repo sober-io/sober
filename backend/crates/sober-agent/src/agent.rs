@@ -922,6 +922,8 @@ where
 /// Converts domain [`DomainMessage`] values to LLM [`LlmMessage`] values.
 pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
     msgs.iter()
+        // Skip empty assistant messages — the API rejects them.
+        .filter(|m| !(m.role == MessageRole::Assistant && m.content.is_empty()))
         .map(|m| {
             let role = match m.role {
                 MessageRole::System => "system",
