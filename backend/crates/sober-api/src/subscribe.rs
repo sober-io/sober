@@ -129,6 +129,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 message_id: nm.message_id,
                 role: nm.role,
                 content: nm.content,
+                source: nm.source,
             })
         }
     }
@@ -170,6 +171,7 @@ mod tests {
                     message_id: "msg-1".to_owned(),
                     role: "Assistant".to_owned(),
                     content: "hi".to_owned(),
+                    source: "scheduler".to_owned(),
                 },
             )),
         };
@@ -180,11 +182,13 @@ mod tests {
                 message_id,
                 role,
                 content,
+                source,
             } => {
                 assert_eq!(conversation_id, "conv-1");
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
                 assert_eq!(content, "hi");
+                assert_eq!(source, "scheduler");
             }
             _ => panic!("unexpected message type"),
         }

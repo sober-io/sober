@@ -112,6 +112,8 @@ message NewMessage {
   string message_id = 1;
   string role = 2;
   string content = 3;
+  // What produced this message: "human", "scheduler", "replica", "admin", "system".
+  string source = 4;
 }
 
 // The conversation title was changed.

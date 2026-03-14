@@ -540,6 +540,7 @@ where
                         message_id: assistant_msg_id.to_string(),
                         role: "Assistant".to_owned(),
                         content: text.clone(),
+                        source: format!("{:?}", ctx.trigger).to_lowercase(),
                     },
                 )),
             });

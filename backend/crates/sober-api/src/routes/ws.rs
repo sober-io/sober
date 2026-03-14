@@ -155,6 +155,8 @@ pub enum ServerWsMessage {
         role: String,
         /// Message content.
         content: String,
+        /// What produced this message: "human", "scheduler", "replica", "admin".
+        source: String,
     },
     /// Keepalive response.
     #[serde(rename = "pong")]

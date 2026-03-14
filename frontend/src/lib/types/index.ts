@@ -93,6 +93,7 @@ export type ServerWsMessage =
 			message_id: string;
 			role: string;
 			content: string;
+			source: string;
 	  }
 	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string }
