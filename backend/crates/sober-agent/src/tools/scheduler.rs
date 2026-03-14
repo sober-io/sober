@@ -108,7 +108,7 @@ impl SchedulerTools {
                 } else {
                     None
                 },
-                status: None, // fetch all, filter client-side
+                status: Some("active".into()),
                 workspace_id: String::new(),
                 name_filter: name.into(),
             };
@@ -117,7 +117,7 @@ impl SchedulerTools {
                     .into_inner()
                     .jobs
                     .into_iter()
-                    .find(|j| j.name == name && (j.status == "active" || j.status == "running"))
+                    .find(|j| j.name == name)
             {
                 return Ok(format!(
                     "Job '{}' already exists ({}, status: {}). Next run: {}",
