@@ -504,19 +504,21 @@ where
                 assistant_text = text.clone();
             }
 
-            let assistant_msg_id = if ctx.persist {
-                let assistant_msg = message_repo
-                    .create(CreateMessage {
-                        conversation_id,
-                        role: MessageRole::Assistant,
-                        content: text.clone(),
-                        tool_calls: None,
-                        tool_result: None,
-                        token_count: usage_stats.map(|u| u.total_tokens as i32),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            // Always store the assistant response.
+            let assistant_msg = message_repo
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::Assistant,
+                    content: text.clone(),
+                    tool_calls: None,
+                    tool_result: None,
+                    token_count: usage_stats.map(|u| u.total_tokens as i32),
+                })
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
+            // Memory ingestion only for user-driven messages.
+            if ctx.persist {
                 Self::spawn_memory_ingestion_static(
                     llm,
                     memory,
@@ -527,10 +529,8 @@ where
                     assistant_msg.id,
                     memory_config.decay_half_life_days,
                 );
-                assistant_msg.id
-            } else {
-                sober_core::MessageId::new()
-            };
+            }
+            let assistant_msg_id = assistant_msg.id;
 
             // Broadcast NewMessage for the assistant message.
             let _ = broadcast_tx.send(proto::ConversationUpdate {
