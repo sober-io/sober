@@ -266,11 +266,19 @@
 				break;
 			}
 			case 'chat.new_message': {
-				// If an assistant message is actively streaming, this is just
-				// the stored-message notification — update its ID.
+				// If an assistant message is actively streaming, update its
+				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
 				if (active?.role === 'Assistant' && (active.streaming || active.thinking)) {
 					active.id = msg.message_id;
+					if (msg.source && msg.source !== 'human') active.source = msg.source;
+					break;
+				}
+				// Also check the last completed assistant message (done
+				// already fired before new_message arrived).
+				const prev = messages[messages.length - 1];
+				if (prev?.role === 'Assistant' && !prev.streaming && !prev.thinking) {
+					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
 				// Otherwise this is a new message from another source (scheduler).
