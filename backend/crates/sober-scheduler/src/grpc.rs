@@ -205,7 +205,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
             .list_filtered(
                 req.owner_type.as_deref(),
                 owner_id,
-                req.status.as_deref(),
+                &req.statuses,
                 workspace_id,
                 name_filter,
             )

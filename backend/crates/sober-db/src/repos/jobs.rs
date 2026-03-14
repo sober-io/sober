@@ -27,10 +27,14 @@ const JOB_COLUMNS: &str = "id, name, schedule, status, payload, \
 impl sober_core::types::JobRepo for PgJobRepo {
     async fn create(&self, input: CreateJob) -> Result<Job, AppError> {
         let id = Uuid::now_v7();
+        // Atomic insert — the partial unique index on (name, owner_id) WHERE
+        // status IN ('active','running') prevents duplicates. ON CONFLICT
+        // returns nothing, so we detect the duplicate and return Conflict.
         let row = sqlx::query_as::<_, JobRow>(&format!(
             "INSERT INTO jobs (id, name, schedule, status, payload, \
              owner_type, owner_id, workspace_id, created_by, conversation_id, next_run_at) \
              VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10) \
+             ON CONFLICT (name, owner_id) WHERE status IN ('active', 'running') DO NOTHING \
              RETURNING {JOB_COLUMNS}"
         ))
         .bind(id)
@@ -43,11 +47,17 @@ impl sober_core::types::JobRepo for PgJobRepo {
         .bind(input.created_by)
         .bind(input.conversation_id)
         .bind(input.next_run_at)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.into())
+        match row {
+            Some(row) => Ok(row.into()),
+            None => Err(AppError::Conflict(format!(
+                "active job '{}' already exists for this owner",
+                input.name
+            ))),
+        }
     }
 
     async fn get_by_id(&self, id: JobId) -> Result<Job, AppError> {
@@ -152,7 +162,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         &self,
         owner_type: Option<&str>,
         owner_id: Option<uuid::Uuid>,
-        status: Option<&str>,
+        statuses: &[String],
         workspace_id: Option<uuid::Uuid>,
         name_filter: Option<&str>,
     ) -> Result<Vec<Job>, AppError> {
@@ -167,9 +177,17 @@ impl sober_core::types::JobRepo for PgJobRepo {
             conditions.push(format!("owner_id = ${param_idx}"));
             param_idx += 1;
         }
-        if status.is_some() {
-            conditions.push(format!("status = ${param_idx}"));
-            param_idx += 1;
+        if !statuses.is_empty() {
+            let placeholders: Vec<String> = statuses
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("${}", param_idx + i as u32))
+                .collect();
+            conditions.push(format!(
+                "status::text = ANY(ARRAY[{}])",
+                placeholders.join(",")
+            ));
+            param_idx += statuses.len() as u32;
         }
         if workspace_id.is_some() {
             conditions.push(format!("workspace_id = ${param_idx}"));
@@ -195,7 +213,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         if let Some(oi) = owner_id {
             q = q.bind(oi);
         }
-        if let Some(s) = status {
+        for s in statuses {
             q = q.bind(s.to_owned());
         }
         if let Some(ws) = workspace_id {

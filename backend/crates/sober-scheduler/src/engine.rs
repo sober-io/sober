@@ -201,8 +201,13 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                     let _ = job_repo.update_next_run(job_id, next).await;
                 }
 
-                // Set back to active
-                let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                // Only restore to active if the job wasn't cancelled during execution.
+                let current = job_repo.get_by_id(job_id).await;
+                if let Ok(j) = current
+                    && j.status == JobStatus::Running
+                {
+                    let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                }
 
                 drop(permit);
             }));

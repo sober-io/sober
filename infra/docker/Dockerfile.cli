@@ -3,14 +3,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY backend/ backend/
-RUN cd backend && cargo build --release -p sober-cli
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/build/backend/target,id=sober-cli-target \
+    cd backend && cargo build --release -p sober-cli \
+    && cp target/release/sober /usr/local/bin/sober \
+    && cp target/release/soberctl /usr/local/bin/soberctl
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
-COPY --from=builder /build/backend/target/release/sober /usr/local/bin/sober
-COPY --from=builder /build/backend/target/release/soberctl /usr/local/bin/soberctl
+COPY --from=builder /usr/local/bin/sober /usr/local/bin/sober
+COPY --from=builder /usr/local/bin/soberctl /usr/local/bin/soberctl
 RUN mkdir -p /run/sober && chown sober:sober /run/sober
 USER sober
 ENTRYPOINT ["sober"]

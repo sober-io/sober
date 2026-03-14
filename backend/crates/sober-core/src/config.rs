@@ -246,7 +246,7 @@ impl AppConfig {
                 socket_path: PathBuf::from(env.or("ADMIN_SOCKET_PATH", "/run/sober/admin.sock")),
             },
             scheduler: SchedulerConfig {
-                tick_interval_secs: env.parse("SCHEDULER_TICK_INTERVAL_SECS", 60)?,
+                tick_interval_secs: env.parse("SCHEDULER_TICK_INTERVAL_SECS", 1)?,
                 agent_socket_path: PathBuf::from(
                     env.or("SCHEDULER_AGENT_SOCKET_PATH", "/run/sober/agent.sock"),
                 ),
@@ -380,7 +380,7 @@ mod tests {
             "postgres://test:test@localhost/test",
         )]))
         .unwrap();
-        assert_eq!(config.scheduler.tick_interval_secs, 60);
+        assert_eq!(config.scheduler.tick_interval_secs, 1);
         assert_eq!(config.scheduler.max_concurrent_jobs, 10);
         assert_eq!(config.mcp.request_timeout_secs, 30);
         assert_eq!(config.mcp.max_consecutive_failures, 3);

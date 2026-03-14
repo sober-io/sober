@@ -139,7 +139,7 @@ services:
       dockerfile: infra/docker/Dockerfile.scheduler
     environment:
       <<: *common-env
-      SCHEDULER_TICK_INTERVAL_SECS: "60"
+      SCHEDULER_TICK_INTERVAL_SECS: "1"
       SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
       SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
       SCHEDULER_MAX_CONCURRENT_JOBS: "10"

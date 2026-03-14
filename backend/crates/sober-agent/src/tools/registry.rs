@@ -42,8 +42,14 @@ impl ToolRegistry {
 
     /// Returns OpenAI-format tool definitions for all registered tools.
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tool_definitions_except(&[])
+    }
+
+    /// Returns tool definitions excluding tools with the given names.
+    pub fn tool_definitions_except(&self, exclude: &[&str]) -> Vec<ToolDefinition> {
         self.tools
             .iter()
+            .filter(|t| !exclude.contains(&t.metadata().name.as_str()))
             .map(|t| {
                 let meta = t.metadata();
                 ToolDefinition {

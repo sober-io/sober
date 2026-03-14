@@ -10,9 +10,10 @@ use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::agent::Agent;
+use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationSender;
 use crate::stream::AgentEvent;
 use crate::tools::SharedPermissionMode;
@@ -37,6 +38,7 @@ where
     agent: Arc<Agent<Msg, Conv, Mcp>>,
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
+    broadcast_tx: ConversationUpdateSender,
 }
 
 impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
@@ -50,17 +52,22 @@ where
         agent: Arc<Agent<Msg, Conv, Mcp>>,
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
+        broadcast_tx: ConversationUpdateSender,
     ) -> Self {
         Self {
             agent,
             confirmation_sender,
             permission_mode,
+            broadcast_tx,
         }
     }
 }
 
-/// Streaming response type for `handle_message` and `execute_task`.
-type HandleMessageStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
+/// Streaming response type for `execute_task`.
+type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
+
+/// Streaming response type for `subscribe_conversation_updates`.
+type SubscribeConversationUpdatesStream = ReceiverStream<Result<proto::ConversationUpdate, Status>>;
 
 #[tonic::async_trait]
 impl<Msg, Conv, Mcp> proto::agent_service_server::AgentService for AgentGrpcService<Msg, Conv, Mcp>
@@ -69,13 +76,13 @@ where
     Conv: ConversationRepo + 'static,
     Mcp: McpServerRepo + 'static,
 {
-    type HandleMessageStream = HandleMessageStream;
-    type ExecuteTaskStream = HandleMessageStream;
+    type ExecuteTaskStream = ExecuteTaskStream;
+    type SubscribeConversationUpdatesStream = SubscribeConversationUpdatesStream;
 
     async fn handle_message(
         &self,
         request: Request<proto::HandleMessageRequest>,
-    ) -> Result<Response<Self::HandleMessageStream>, Status> {
+    ) -> Result<Response<proto::HandleMessageResponse>, Status> {
         let req = request.into_inner();
 
         let user_id = req
@@ -90,36 +97,45 @@ where
             .map(ConversationId::from_uuid)
             .map_err(|_| Status::invalid_argument("invalid conversation_id"))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(64);
         let agent = Arc::clone(&self.agent);
         let content = req.content;
 
-        tokio::spawn(async move {
-            match agent
-                .handle_message(user_id, conversation_id, &content)
-                .await
-            {
-                Ok(mut stream) => {
+        // handle_message stores the user message, spawns the agentic loop
+        // (which publishes to the broadcast channel), and returns the stream.
+        // We consume the stream to drive the loop but don't forward it — events
+        // go through the broadcast channel to SubscribeConversationUpdates.
+        match agent
+            .handle_message(
+                user_id,
+                conversation_id,
+                &content,
+                sober_core::types::access::TriggerKind::Human,
+            )
+            .await
+        {
+            Ok(stream) => {
+                // The stream must be consumed to drive the spawned task, but
+                // we don't need its output — the broadcast channel delivers
+                // events. Spawn a drainer task.
+                tokio::spawn(async move {
                     use futures::StreamExt;
-                    while let Some(event_result) = stream.next().await {
-                        let proto_event = match event_result {
-                            Ok(event) => to_proto_event(event),
-                            Err(e) => to_proto_event(AgentEvent::Error(e.to_string())),
-                        };
-                        if tx.send(Ok(proto_event)).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(error = %e, "agent handle_message failed");
-                    let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
-                    let _ = tx.send(Ok(proto_event)).await;
-                }
-            }
-        });
+                    let mut stream = stream;
+                    while stream.next().await.is_some() {}
+                });
 
-        Ok(Response::new(ReceiverStream::new(rx)))
+                // Return a placeholder message_id. The actual user message ID
+                // is not directly available from handle_message's current API,
+                // so we return a new UUID. The frontend uses Done.message_id
+                // for the assistant message.
+                Ok(Response::new(proto::HandleMessageResponse {
+                    message_id: sober_core::MessageId::new().to_string(),
+                }))
+            }
+            Err(e) => {
+                error!(error = %e, "agent handle_message failed");
+                Err(Status::internal(e.to_string()))
+            }
+        }
     }
 
     async fn execute_task(
@@ -208,6 +224,36 @@ where
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn subscribe_conversation_updates(
+        &self,
+        _request: Request<proto::SubscribeRequest>,
+    ) -> Result<Response<Self::SubscribeConversationUpdatesStream>, Status> {
+        let mut rx = self.broadcast_tx.subscribe();
+        let (tx, out_rx) = tokio::sync::mpsc::channel(64);
+
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(update) => {
+                        if tx.send(Ok(update)).await.is_err() {
+                            // Client disconnected.
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "subscription lagged, some events were dropped");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(out_rx)))
     }
 
     async fn wake_agent(
@@ -374,7 +420,14 @@ async fn execute_prompt_conversational<Msg, Conv, Mcp>(
     Mcp: sober_core::types::repo::McpServerRepo + 'static,
 {
     let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
-        agent.handle_message(uid, cid, prompt).await
+        agent
+            .handle_message(
+                uid,
+                cid,
+                prompt,
+                sober_core::types::access::TriggerKind::Scheduler,
+            )
+            .await
     } else {
         // No conversation context — emit Done immediately.
         send_done_stub(tx).await;

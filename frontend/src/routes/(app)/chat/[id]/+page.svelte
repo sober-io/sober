@@ -26,6 +26,8 @@
 		toolCalls?: ToolCall[];
 		streaming: boolean;
 		thinking: boolean;
+		timestamp: string;
+		source?: string;
 	}
 
 	interface QueuedMessage {
@@ -41,6 +43,16 @@
 
 	let { data }: { data: PageData } = $props();
 
+	const fmtTime = (iso?: string) => {
+		const d = iso ? new Date(iso) : new Date();
+		return d.toLocaleTimeString([], {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			hour12: false
+		});
+	};
+
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
 		role: m.role,
@@ -48,7 +60,8 @@
 		thinkingContent: '',
 		toolCalls: undefined,
 		streaming: false,
-		thinking: false
+		thinking: false,
+		timestamp: fmtTime(m.created_at)
 	});
 
 	const initialMessages = $derived(data.conversation.messages.map(toChat));
@@ -99,8 +112,9 @@
 
 	$effect(() => {
 		const id = conversationId;
-		const unsub = websocket.subscribe(id, handleWsMessage);
-		return unsub;
+		// subscribe() sends chat.subscribe to the backend (queued if not yet
+		// connected) and re-sends it automatically on reconnect.
+		return websocket.subscribe(id, handleWsMessage);
 	});
 
 	// Auto-scroll when at bottom and messages or confirms change
@@ -129,13 +143,15 @@
 	};
 
 	const dispatchMessage = (content: string) => {
+		const now = fmtTime();
 		messages.push({
 			id: crypto.randomUUID(),
 			role: 'User',
 			content,
 			thinkingContent: '',
 			streaming: false,
-			thinking: false
+			thinking: false,
+			timestamp: now
 		});
 		messages.push({
 			id: crypto.randomUUID(),
@@ -143,7 +159,8 @@
 			content: '',
 			thinkingContent: '',
 			streaming: false,
-			thinking: true
+			thinking: true,
+			timestamp: now
 		});
 		assistantPhase = 'thinking';
 		websocket.send({
@@ -215,7 +232,8 @@
 						content: msg.content,
 						thinkingContent: '',
 						streaming: true,
-						thinking: false
+						thinking: false,
+						timestamp: fmtTime()
 					});
 					assistantPhase = 'streaming';
 				}
@@ -245,6 +263,35 @@
 						messages = [...messages];
 					}
 				}
+				break;
+			}
+			case 'chat.new_message': {
+				// If an assistant message is actively streaming, update its
+				// ID and source from the stored-message notification.
+				const active = messages[messages.length - 1];
+				if (active?.role === 'Assistant' && (active.streaming || active.thinking)) {
+					active.id = msg.message_id;
+					if (msg.source && msg.source !== 'human') active.source = msg.source;
+					break;
+				}
+				// Also check the last completed assistant message (done
+				// already fired before new_message arrived).
+				const prev = messages[messages.length - 1];
+				if (prev?.role === 'Assistant' && !prev.streaming && !prev.thinking) {
+					if (msg.source && msg.source !== 'human') prev.source = msg.source;
+					break;
+				}
+				// Otherwise this is a new message from another source (scheduler).
+				messages.push({
+					id: msg.message_id,
+					role: msg.role as ChatMsg['role'],
+					content: msg.content,
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime(),
+					source: msg.source
+				});
 				break;
 			}
 			case 'chat.done': {
@@ -289,7 +336,8 @@
 						content: `Error: ${msg.error}`,
 						thinkingContent: '',
 						streaming: false,
-						thinking: false
+						thinking: false,
+						timestamp: fmtTime()
 					});
 				}
 				assistantPhase = 'idle';
@@ -376,6 +424,8 @@
 					toolCalls={msg.toolCalls}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
+					timestamp={msg.timestamp}
+					source={msg.source}
 				/>
 			{/each}
 

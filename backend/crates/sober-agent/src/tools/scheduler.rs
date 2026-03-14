@@ -81,6 +81,9 @@ impl SchedulerTools {
     }
 
     /// Creates a new scheduled job.
+    ///
+    /// Checks for an existing active job with the same name and owner before
+    /// creating. Returns the existing job info if a duplicate is found.
     pub async fn create_job(
         &self,
         name: &str,
@@ -90,12 +93,44 @@ impl SchedulerTools {
         workspace_id: Option<Uuid>,
         conversation_id: Option<Uuid>,
     ) -> Result<String, String> {
+        // Check for existing active job with the same name + owner.
+        let has_user = !caller_user_id.is_nil();
+        {
+            // Check for existing active/running job with the same name.
+            let mut client = {
+                let guard = self.scheduler_client.read().await;
+                guard.as_ref().ok_or("Scheduler not connected")?.clone()
+            };
+            let req = scheduler_proto::ListJobsRequest {
+                owner_type: None,
+                owner_id: if has_user {
+                    Some(caller_user_id.to_string())
+                } else {
+                    None
+                },
+                statuses: vec!["active".into(), "running".into()],
+                workspace_id: String::new(),
+                name_filter: name.into(),
+            };
+            if let Ok(response) = client.list_jobs(req).await
+                && let Some(job) = response
+                    .into_inner()
+                    .jobs
+                    .into_iter()
+                    .find(|j| j.name == name)
+            {
+                return Ok(format!(
+                    "Job '{}' already exists ({}, status: {}). Next run: {}",
+                    job.name, job.id, job.status, job.next_run_at
+                ));
+            }
+        }
+
         let payload_bytes = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
 
         // TODO: detect group workspace and set owner_type accordingly
         let owner_type = "user";
 
-        let has_user = !caller_user_id.is_nil();
         let req = scheduler_proto::CreateJobRequest {
             name: name.into(),
             owner_type: owner_type.into(),
@@ -135,7 +170,7 @@ impl SchedulerTools {
         &self,
         owner_type: Option<&str>,
         owner_id: Option<Uuid>,
-        status: Option<&str>,
+        statuses: Vec<String>,
         workspace_id: Option<Uuid>,
         name_filter: Option<&str>,
         is_admin: bool,
@@ -143,7 +178,7 @@ impl SchedulerTools {
         let req = scheduler_proto::ListJobsRequest {
             owner_type: owner_type.map(|s| s.into()),
             owner_id: owner_id.map(|id| id.to_string()),
-            status: status.map(|s| s.into()),
+            statuses,
             workspace_id: workspace_id.map(|id| id.to_string()).unwrap_or_default(),
             name_filter: name_filter.unwrap_or_default().into(),
         };
@@ -388,7 +423,17 @@ impl SchedulerTools {
         let result = match action {
             "list" => {
                 let owner_type = input.get("owner_type").and_then(|v| v.as_str());
-                let status = input.get("status").and_then(|v| v.as_str());
+                let statuses: Vec<String> =
+                    if let Some(s) = input.get("status").and_then(|v| v.as_str()) {
+                        vec![s.to_owned()]
+                    } else if let Some(arr) = input.get("statuses").and_then(|v| v.as_array()) {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                            .collect()
+                    } else {
+                        // Default: show active and running jobs (skip cancelled).
+                        vec!["active".into(), "paused".into(), "running".into()]
+                    };
                 let name_filter = input.get("name_filter").and_then(|v| v.as_str());
                 // Admins can list all jobs; non-admins are scoped to their own.
                 let owner_id = if is_admin { None } else { caller_user_id };
@@ -399,7 +444,7 @@ impl SchedulerTools {
                 self.list_jobs(
                     owner_type,
                     owner_id,
-                    status,
+                    statuses,
                     workspace_id,
                     name_filter,
                     is_admin,
@@ -690,7 +735,12 @@ impl Tool for SchedulerTools {
                     },
                     "status": {
                         "type": "string",
-                        "description": "Filter by status: 'active', 'paused', 'cancelled' (optional for list)."
+                        "description": "Filter by a single status: 'active', 'paused', 'cancelled' (optional for list)."
+                    },
+                    "statuses": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Filter by multiple statuses, e.g. ['active', 'running'] (optional for list)."
                     },
                     "name_filter": {
                         "type": "string",

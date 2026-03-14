@@ -12,13 +12,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
 WORKDIR /build
 COPY backend/ backend/
 COPY --from=frontend-builder /build/frontend/build/ frontend/build/
-RUN cd backend && cargo build --release -p sober-web
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/build/backend/target,id=sober-web-target \
+    cd backend && cargo build --release -p sober-web \
+    && cp target/release/sober-web /usr/local/bin/sober-web
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
-COPY --from=backend-builder /build/backend/target/release/sober-web /usr/local/bin/sober-web
+COPY --from=backend-builder /usr/local/bin/sober-web /usr/local/bin/sober-web
 COPY --from=frontend-builder /build/frontend/build/ /opt/sober/data/static/
 USER sober
 ENTRYPOINT ["sober-web"]

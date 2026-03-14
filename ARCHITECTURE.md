@@ -276,6 +276,33 @@ All inter-service communication uses gRPC (tonic + prost) over Unix domain socke
 Proto definitions live in `backend/proto/`. This avoids circular crate dependencies —
 services generate client/server code from shared proto files and communicate at runtime.
 
+### Event Delivery: SubscribeConversationUpdates
+
+Conversation events (text deltas, tool calls, new messages, title changes) are
+delivered through a **subscription model** that decouples event production from
+the caller:
+
+```
+API ──SubscribeConversationUpdates──▶ Agent
+                                        │
+     ◀── stream of ConversationUpdate ──┘
+```
+
+- `HandleMessage` is a **unary RPC** — accepts a user message, returns an ack
+  with the stored message ID. The agent processes asynchronously.
+- The agent publishes all conversation events to an internal broadcast channel.
+- `SubscribeConversationUpdates` is a **server-streaming RPC** — the API calls
+  it once on startup and receives events for all conversations.
+- The API routes events to the correct WebSocket(s) via a `ConnectionRegistry`
+  keyed by `conversation_id`.
+
+This means any trigger (user via WebSocket, scheduler job, future channels)
+produces events that reach the frontend without the caller needing to relay them.
+
+`ConversationUpdate` carries a typed `oneof event`: `NewMessage`, `TitleChanged`,
+`TextDelta`, `ToolCallStart`, `ToolCallResult`, `ThinkingDelta`, `ConfirmRequest`,
+`Done`, `Error`.
+
 ### Security
 
 **Filesystem permissions** — Socket files owned by `sober:sober` with `0660`
@@ -298,14 +325,18 @@ Jobs are routed by payload type:
 - **Artifact** → blob resolved from `sober-workspace`, run in `sober-sandbox`
 
 After local execution, the scheduler notifies the agent via `WakeAgent` RPC.
+Prompt job results are delivered to conversations via the `SubscribeConversationUpdates`
+stream — the API receives them and pushes to the user's WebSocket.
 
 ---
 
 ## Communication Channels
 
-Phase 1: SvelteKit PWA with WebSocket for real-time agent communication.
-All channels route through the API gateway with channel-specific adapters
-that normalize messages into internal `AgentMessage` format.
+SvelteKit PWA with WebSocket for real-time agent communication.
+All channels route through the API gateway. The WebSocket connection
+multiplexes conversations on a single socket. Events arrive via the
+agent subscription stream (`SubscribeConversationUpdates`) and are
+routed to the correct WebSocket by `conversation_id`.
 
 ---
 

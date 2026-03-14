@@ -175,7 +175,7 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
                 .list_jobs(scheduler_proto::ListJobsRequest {
                     owner_type,
                     owner_id: None,
-                    status,
+                    statuses: status.map(|s| vec![s]).unwrap_or_default(),
                     workspace_id: String::new(),
                     name_filter: String::new(),
                 })
