@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
 WORKDIR /build
 COPY backend/ backend/
 COPY --from=frontend-builder /build/frontend/build/ frontend/build/
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/backend/target \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/build/backend/target,id=sober-web-target \
     cd backend && cargo build --release -p sober-web \
     && cp target/release/sober-web /usr/local/bin/sober-web
 
