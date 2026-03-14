@@ -415,12 +415,12 @@ where
                 needs_rebuild = false;
             }
 
-            // e. Call LLM — exclude scheduler tool for scheduler-driven calls
-            //    to prevent feedback loops (job creating more jobs).
+            // e. Call LLM — no tools for scheduler-driven calls, just execute
+            //    the prompt and return the text response.
             let tool_definitions = if ctx.persist {
                 tool_registry.tool_definitions()
             } else {
-                tool_registry.tool_definitions_except(&["scheduler"])
+                vec![]
             };
             let req = CompletionRequest {
                 model: config.model.clone(),
