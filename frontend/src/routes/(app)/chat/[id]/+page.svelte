@@ -26,6 +26,7 @@
 		toolCalls?: ToolCall[];
 		streaming: boolean;
 		thinking: boolean;
+		timestamp: string;
 	}
 
 	interface QueuedMessage {
@@ -41,6 +42,11 @@
 
 	let { data }: { data: PageData } = $props();
 
+	const fmtTime = (iso?: string) => {
+		const d = iso ? new Date(iso) : new Date();
+		return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	};
+
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
 		role: m.role,
@@ -48,7 +54,8 @@
 		thinkingContent: '',
 		toolCalls: undefined,
 		streaming: false,
-		thinking: false
+		thinking: false,
+		timestamp: fmtTime(m.created_at)
 	});
 
 	const initialMessages = $derived(data.conversation.messages.map(toChat));
@@ -130,13 +137,15 @@
 	};
 
 	const dispatchMessage = (content: string) => {
+		const now = fmtTime();
 		messages.push({
 			id: crypto.randomUUID(),
 			role: 'User',
 			content,
 			thinkingContent: '',
 			streaming: false,
-			thinking: false
+			thinking: false,
+			timestamp: now
 		});
 		messages.push({
 			id: crypto.randomUUID(),
@@ -144,7 +153,8 @@
 			content: '',
 			thinkingContent: '',
 			streaming: false,
-			thinking: true
+			thinking: true,
+			timestamp: now
 		});
 		assistantPhase = 'thinking';
 		websocket.send({
@@ -216,7 +226,8 @@
 						content: msg.content,
 						thinkingContent: '',
 						streaming: true,
-						thinking: false
+						thinking: false,
+						timestamp: fmtTime()
 					});
 					assistantPhase = 'streaming';
 				}
@@ -296,7 +307,8 @@
 						content: `Error: ${msg.error}`,
 						thinkingContent: '',
 						streaming: false,
-						thinking: false
+						thinking: false,
+						timestamp: fmtTime()
 					});
 				}
 				assistantPhase = 'idle';
@@ -383,6 +395,7 @@
 					toolCalls={msg.toolCalls}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
+					timestamp={msg.timestamp}
 				/>
 			{/each}
 

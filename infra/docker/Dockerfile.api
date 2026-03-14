@@ -3,13 +3,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY backend/ backend/
-RUN cd backend && cargo build --release -p sober-api
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/backend/target \
+    cd backend && cargo build --release -p sober-api \
+    && cp target/release/sober-api /usr/local/bin/sober-api
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
-COPY --from=builder /build/backend/target/release/sober-api /usr/local/bin/sober-api
+COPY --from=builder /usr/local/bin/sober-api /usr/local/bin/sober-api
 RUN mkdir -p /run/sober && chown sober:sober /run/sober
 USER sober
 ENTRYPOINT ["sober-api"]

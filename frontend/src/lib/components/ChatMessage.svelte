@@ -12,6 +12,7 @@
 		toolCalls?: ToolCall[];
 		streaming?: boolean;
 		thinking?: boolean;
+		timestamp?: string;
 	}
 
 	let {
@@ -20,7 +21,8 @@
 		thinkingContent = '',
 		toolCalls,
 		streaming = false,
-		thinking = false
+		thinking = false,
+		timestamp
 	}: Props = $props();
 
 	const isUser = $derived(role === 'User');
@@ -87,4 +89,12 @@
 			{/each}
 		{/if}
 	</div>
+	{#if timestamp}
+		<span
+			class={[
+				'mt-0.5 block text-[10px] text-zinc-400 dark:text-zinc-500',
+				isUser ? 'text-right' : 'text-left'
+			]}>{timestamp}</span
+		>
+	{/if}
 </div>
