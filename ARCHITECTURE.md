@@ -137,15 +137,7 @@ least privilege — only the minimal required scopes are loaded for any operatio
 
 ---
 
-## Internal Service Communication
-
-### Protocol: gRPC over Unix Domain Sockets
-
-All inter-service communication uses gRPC (tonic + prost) over Unix domain sockets.
-Proto definitions live in `backend/proto/`. This avoids circular crate dependencies —
-services generate client/server code from shared proto files and communicate at runtime.
-
-### Event Delivery: SubscribeConversationUpdates
+## Event Delivery: SubscribeConversationUpdates
 
 Conversation events (text deltas, tool calls, new messages, title changes) are
 delivered through a **subscription model** that decouples event production from
@@ -172,21 +164,7 @@ produces events that reach the frontend without the caller needing to relay them
 `TextDelta`, `ToolCallStart`, `ToolCallResult`, `ThinkingDelta`, `ConfirmRequest`,
 `Done`, `Error`.
 
-### Security
-
-**Filesystem permissions** — Socket files owned by `sober:sober` with `0660`
-permissions. Only processes running as the right user can connect. All services
-run on the same machine in a trusted network.
-
-For distributed deployment, upgrade to mTLS at the transport layer.
-
----
-
-## Scheduler
-
-Independent tick engine peer to `sober-api`. Supports interval-based (`every: 30s`)
-and cron (`"0 9 * * MON-FRI"`) scheduling. Jobs are persistent (PostgreSQL).
-Managed via `soberctl` or agent gRPC calls.
+### Scheduler Job Routing
 
 Jobs are routed by payload type:
 - **Prompt** → dispatched to `sober-agent` via gRPC (LLM pipeline)
@@ -194,14 +172,12 @@ Jobs are routed by payload type:
 - **Artifact** → blob resolved from `sober-workspace`, run in `sober-sandbox`
 
 After local execution, the scheduler notifies the agent via `WakeAgent` RPC.
-Prompt job results are delivered to conversations via the `SubscribeConversationUpdates`
-stream — the API receives them and pushes to the user's WebSocket.
 
 ---
 
 ## Security Model
 
-### Prompt Injection Defense
+### Prompt Injection Defense (design intent)
 
 1. **Input Sanitization** — All user input passes through injection classifier (owned by `sober-mind`)
 2. **Canary Tokens** — Hidden markers in system prompts detect leakage
@@ -212,13 +188,7 @@ stream — the API receives them and pushes to the user's WebSocket.
 
 ### Authentication Stack
 
-| Method | Use Case |
-|--------|----------|
-| Password + Argon2id | Primary local auth |
-| OIDC (Google, GitHub, etc.) | Federated identity |
-| WebAuthn/Passkeys | Passwordless primary |
-| FIDO2 Hardware Tokens | High-security access |
-| API Keys (HMAC-signed) | Programmatic access |
+Password (Argon2id), OIDC, WebAuthn/Passkeys, FIDO2 hardware tokens, HMAC-signed API keys.
 
 ### Authorization: RBAC + ABAC Hybrid
 
@@ -303,37 +273,15 @@ Plugins implement the `SoberPlugin` trait (metadata, capabilities, sandboxed exe
 
 ---
 
-## LLM Engine Abstraction
-
-`LlmEngine` trait with `complete()`, `embed()`, `capabilities()`, `model_id()`.
-
-Two transports: `OpenAiCompatibleEngine` (HTTP to OpenRouter/OpenAI/Ollama) and
-`AcpEngine` (JSON-RPC/stdio to local coding agents like Claude Code via
-[Agent Client Protocol](https://agentclientprotocol.com/)).
-
-Router selects engine based on task type, cost, latency, and user preferences.
-
----
-
-## Communication Channels
-
-SvelteKit PWA with WebSocket for real-time agent communication.
-All channels route through the API gateway. The WebSocket connection
-multiplexes conversations on a single socket. Events arrive via the
-agent subscription stream (`SubscribeConversationUpdates`) and are
-routed to the correct WebSocket by `conversation_id`.
-
----
-
 ## Data Storage
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
 | Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
-| Blob Store | S3-compatible (MinIO) | Large artifacts, code snapshots, binary contexts |
-| Cache | In-memory (moka) / Redis | v1: in-memory cache (moka) with PostgreSQL-backed sessions. Redis added when horizontal scaling requires shared cache across instances. |
+| Cache | In-memory (moka) | Route/session caching with PostgreSQL-backed sessions |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |
+| Search | SearXNG | Meta-search aggregation for web queries |
 
 ---
 
@@ -349,8 +297,3 @@ Docker Compose (dev) → Kubernetes (prod). Four independent processes:
 | `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
 
 Each process can be started, stopped, and scaled independently.
-
-### CLI Administration
-
-`sober` (offline, direct PostgreSQL) and `soberctl` (runtime, via Unix admin sockets).
-Admin sockets secured by filesystem permissions (`0660`, `sober:sober`).
