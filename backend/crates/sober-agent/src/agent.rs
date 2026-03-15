@@ -15,7 +15,7 @@ use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
-use sober_memory::{ChunkType, ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
+use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
 use tokio::sync::mpsc;
@@ -309,7 +309,7 @@ where
         let user_id = ctx.user_id;
         let conversation_id = ctx.conversation_id;
         let content = ctx.content;
-        let user_msg_id = ctx.user_msg_id;
+        let _user_msg_id = ctx.user_msg_id;
         let event_tx = ctx.event_tx;
         let broadcast_tx = ctx.broadcast_tx;
         let registrar = ctx.registrar;
@@ -502,8 +502,11 @@ where
                 continue;
             }
 
-            // g. Text response
-            let text = choice.message.content.unwrap_or_default();
+            // g. Text response — strip memory extractions before storing/broadcasting.
+            let raw_text = choice.message.content.unwrap_or_default();
+            let extraction_result = crate::extraction::strip_extractions(&raw_text);
+            let text = extraction_result.cleaned_text;
+
             if !text.is_empty() {
                 let _ = event_tx.send(Ok(AgentEvent::TextDelta(text.clone()))).await;
                 let _ = broadcast_tx.send(proto::ConversationUpdate {
@@ -517,7 +520,7 @@ where
                 assistant_text = text.clone();
             }
 
-            // Always store the assistant response.
+            // Always store the assistant response (cleaned, without extraction block).
             let assistant_msg = message_repo
                 .create(CreateMessage {
                     conversation_id,
@@ -530,16 +533,13 @@ where
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-            // Memory ingestion only for human-driven messages.
-            if ctx.trigger == TriggerKind::Human {
-                Self::spawn_memory_ingestion_static(
+            // Store inline memory extractions (replaces raw conversation ingestion).
+            if !extraction_result.extractions.is_empty() {
+                Self::spawn_extraction_ingestion(
                     llm,
                     memory,
                     user_id,
-                    content.to_owned(),
-                    text.clone(),
-                    user_msg_id,
-                    assistant_msg.id,
+                    extraction_result.extractions,
                     memory_config.decay_half_life_days,
                 );
             }
@@ -852,17 +852,15 @@ where
         }
     }
 
-    /// Spawns a background task that embeds and stores both the user message and
-    /// the assistant response in vector memory.
-    #[allow(clippy::too_many_arguments)]
-    fn spawn_memory_ingestion_static(
+    /// Spawns a background task that embeds and stores inline memory extractions.
+    ///
+    /// Extractions are concise facts/preferences parsed from the LLM's
+    /// `<memory_extractions>` block, replacing the old raw conversation ingestion.
+    fn spawn_extraction_ingestion(
         llm: &Arc<dyn LlmEngine>,
         memory: &Arc<MemoryStore>,
         user_id: UserId,
-        user_content: String,
-        assistant_content: String,
-        user_msg_id: sober_core::MessageId,
-        assistant_msg_id: sober_core::MessageId,
+        extractions: Vec<crate::extraction::MemoryExtraction>,
         half_life_days: u32,
     ) {
         let llm = Arc::clone(llm);
@@ -872,63 +870,58 @@ where
         tokio::spawn(async move {
             let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
 
-            // Embed both messages in a single batch call.
-            let texts: Vec<&str> = vec![&user_content, &assistant_content];
+            // Batch embed all extraction contents.
+            let texts: Vec<&str> = extractions.iter().map(|e| e.content.as_str()).collect();
             let vectors = match llm.embed(&texts).await {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!(error = %e, "memory ingestion: embedding failed, skipping");
+                    warn!(error = %e, "extraction ingestion: embedding failed, skipping");
                     return;
                 }
             };
 
-            if vectors.len() < 2 {
+            if vectors.len() != extractions.len() {
                 warn!(
-                    "memory ingestion: expected 2 vectors, got {}",
+                    "extraction ingestion: expected {} vectors, got {}",
+                    extractions.len(),
                     vectors.len()
                 );
                 return;
             }
 
-            // Store user message.
-            if let Err(e) = memory
-                .store(
-                    user_id,
-                    StoreChunk {
-                        dense_vector: vectors[0].clone(),
-                        content: user_content,
-                        chunk_type: ChunkType::Conversation,
-                        scope_id,
-                        source_message_id: Some(user_msg_id),
-                        importance: 0.5,
-                        decay_at,
-                    },
-                )
-                .await
-            {
-                warn!(error = %e, "memory ingestion: failed to store user message");
+            for (extraction, dense_vector) in extractions.into_iter().zip(vectors) {
+                let Some(chunk_type) =
+                    crate::extraction::parse_extraction_type(&extraction.chunk_type)
+                else {
+                    debug!(
+                        chunk_type = extraction.chunk_type,
+                        "extraction ingestion: unknown chunk type, skipping"
+                    );
+                    continue;
+                };
+
+                let importance = crate::extraction::extraction_importance(chunk_type);
+
+                if let Err(e) = memory
+                    .store(
+                        user_id,
+                        StoreChunk {
+                            dense_vector,
+                            content: extraction.content,
+                            chunk_type,
+                            scope_id,
+                            source_message_id: None,
+                            importance,
+                            decay_at,
+                        },
+                    )
+                    .await
+                {
+                    warn!(error = %e, "extraction ingestion: failed to store");
+                }
             }
 
-            // Store assistant response.
-            if let Err(e) = memory
-                .store(
-                    user_id,
-                    StoreChunk {
-                        dense_vector: vectors[1].clone(),
-                        content: assistant_content,
-                        chunk_type: ChunkType::Conversation,
-                        scope_id,
-                        source_message_id: Some(assistant_msg_id),
-                        importance: 0.5,
-                        decay_at,
-                    },
-                )
-                .await
-            {
-                warn!(error = %e, "memory ingestion: failed to store assistant message");
-            }
-
-            debug!("memory ingestion complete for user {user_id}");
+            debug!("extraction ingestion complete for user {user_id}");
         });
     }
 }

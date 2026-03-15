@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3432,7 +3432,7 @@ dependencies = [
 
 [[package]]
 name = "sober-memory"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "qdrant-client",

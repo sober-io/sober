@@ -153,18 +153,37 @@ impl Mind {
     }
 }
 
+/// Memory extraction instructions appended to every system prompt.
+const MEMORY_EXTRACTION_INSTRUCTIONS: &str = "\
+\n\n## Memory Extraction\n\n\
+After your response, if the conversation contained any facts, preferences, \
+decisions, skills, or other information worth remembering for future conversations, \
+append a memory extraction block. If nothing is worth remembering, omit the block entirely.\n\n\
+Format:\n\
+```\n\
+<memory_extractions>\n\
+[{\"content\": \"concise fact or preference\", \"type\": \"fact|preference|skill|code\"}]\n\
+</memory_extractions>\n\
+```\n\n\
+Rules:\n\
+- Each extraction must be a single concise sentence — not a raw copy of the message\n\
+- Type must be one of: fact, preference, skill, code\n\
+- Only extract genuinely useful information for future recall\n\
+- Do NOT extract trivial greetings, acknowledgments, or transient conversation\n\
+- The extraction block is stripped before the user sees your response";
+
 /// Builds the system prompt string from the masked soul and tool definitions.
 fn build_system_prompt(soul: &str, tools: &[ToolMetadata]) -> String {
-    if tools.is_empty() {
-        return soul.to_owned();
-    }
-
     let mut prompt = String::from(soul);
-    prompt.push_str("\n\n## Available Tools\n\n");
 
-    for tool in tools {
-        prompt.push_str(&format!("### {}\n\n{}\n\n", tool.name, tool.description));
+    if !tools.is_empty() {
+        prompt.push_str("\n\n## Available Tools\n\n");
+        for tool in tools {
+            prompt.push_str(&format!("### {}\n\n{}\n\n", tool.name, tool.description));
+        }
     }
+
+    prompt.push_str(MEMORY_EXTRACTION_INSTRUCTIONS);
 
     prompt
 }
