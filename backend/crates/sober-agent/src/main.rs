@@ -15,7 +15,9 @@ use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
-use sober_agent::tools::{FetchUrlTool, SchedulerTools, ShellTool, ToolRegistry, WebSearchTool};
+use sober_agent::tools::{
+    FetchUrlTool, RecallTool, RememberTool, SchedulerTools, ShellTool, ToolRegistry, WebSearchTool,
+};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
@@ -126,6 +128,16 @@ async fn main() -> Result<()> {
         Arc::new(FetchUrlTool::new()),
         Arc::new(shell_tool),
         Arc::new(SchedulerTools::new(Arc::clone(&scheduler_client))),
+        Arc::new(RecallTool::new(
+            Arc::clone(&memory),
+            Arc::clone(&llm),
+            config.memory.clone(),
+        )),
+        Arc::new(RememberTool::new(
+            Arc::clone(&memory),
+            Arc::clone(&llm),
+            config.memory.clone(),
+        )),
     ];
     let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
 

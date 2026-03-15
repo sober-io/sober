@@ -62,6 +62,7 @@ async fn store_and_search_roundtrip() {
         scope_id,
         limit: 10,
         score_threshold: None,
+        chunk_type_filter: None,
     };
     let results = store.search(user_id, query).await.unwrap();
 
@@ -93,6 +94,7 @@ async fn delete_removes_point() {
         scope_id,
         limit: 10,
         score_threshold: None,
+        chunk_type_filter: None,
     };
     let results = store.search(user_id, query).await.unwrap();
     assert!(
@@ -156,6 +158,7 @@ async fn retrieval_boost_increases_importance() {
         scope_id,
         limit: 10,
         score_threshold: None,
+        chunk_type_filter: None,
     };
     let results = store.search(user_id, query).await.unwrap();
     let hit = results.iter().find(|h| h.point_id == point_id).unwrap();

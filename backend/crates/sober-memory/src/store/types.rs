@@ -37,6 +37,8 @@ pub struct StoreQuery {
     pub limit: u64,
     /// Minimum score threshold (optional).
     pub score_threshold: Option<f32>,
+    /// Optional chunk type filter (as u8 discriminant).
+    pub chunk_type_filter: Option<u8>,
 }
 
 /// A single result from a hybrid search.

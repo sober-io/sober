@@ -71,6 +71,7 @@ impl<M: MessageRepo> ContextLoader<M> {
             scope_id: user_scope,
             limit: request.hits_per_scope,
             score_threshold: None,
+            chunk_type_filter: None,
         };
         let user_search_fut = self.store.search(request.user_id, user_query);
 
@@ -86,6 +87,7 @@ impl<M: MessageRepo> ContextLoader<M> {
             scope_id: ScopeId::GLOBAL,
             limit: request.hits_per_scope,
             score_threshold: None,
+            chunk_type_filter: None,
         };
         let all_system_memories = self.store.search(request.user_id, system_query).await?;
 

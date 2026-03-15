@@ -66,6 +66,7 @@ pub async fn load_soul_layers(
         scope_id,
         limit: 10,
         score_threshold: None,
+        chunk_type_filter: None,
     };
 
     let hits = memory
