@@ -176,7 +176,7 @@ CI workflows are the exception — use normal verbosity for debugging.
 
 ### Authentication
 
-- Passkeys (WebAuthn) primary. Sessions in `HttpOnly` cookies.
+- Cookie-based sessions (`HttpOnly`) and bearer token auth.
 - Backend middleware validates. Frontend checks in root layout `load`.
 
 ### Environment & Config
