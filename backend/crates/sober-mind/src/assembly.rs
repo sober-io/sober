@@ -156,21 +156,14 @@ impl Mind {
 /// Memory extraction instructions appended to every system prompt.
 const MEMORY_EXTRACTION_INSTRUCTIONS: &str = "\
 \n\n## Memory Extraction\n\n\
-After your response, if the conversation contained any facts, preferences, \
-decisions, skills, or other information worth remembering for future conversations, \
-append a memory extraction block. If nothing is worth remembering, omit the block entirely.\n\n\
-Format:\n\
+If the user shared facts, preferences, or useful information, append after your response:\n\
 ```\n\
 <memory_extractions>\n\
-[{\"content\": \"concise fact or preference\", \"type\": \"fact|preference|skill|code\"}]\n\
+[{\"content\": \"one concise sentence\", \"type\": \"fact|preference|skill|code\"}]\n\
 </memory_extractions>\n\
-```\n\n\
-Rules:\n\
-- Each extraction must be a single concise sentence — not a raw copy of the message\n\
-- Type must be one of: fact, preference, skill, code. Never use 'conversation' or 'soul'.\n\
-- Only extract genuinely useful information for future recall\n\
-- Do NOT extract trivial greetings, acknowledgments, or transient conversation\n\
-- The extraction block is stripped before the user sees your response";
+```\n\
+Omit the block if nothing is worth remembering. Only allowed types: fact, preference, skill, code. \
+The block is stripped before the user sees your response.";
 
 /// Builds the system prompt string from the masked soul and tool definitions.
 fn build_system_prompt(soul: &str, tools: &[ToolMetadata]) -> String {
