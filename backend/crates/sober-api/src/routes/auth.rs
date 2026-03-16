@@ -11,7 +11,10 @@ use http::HeaderValue;
 use http::header::SET_COOKIE;
 use sober_auth::{AuthUser, cookie_name};
 use sober_core::error::AppError;
-use sober_core::types::ApiResponse;
+use sober_core::types::{
+    ApiResponse, ConversationRepo, ConversationUserRepo, ConversationUserRole,
+};
+use sober_db::{PgConversationRepo, PgConversationUserRepo};
 
 use crate::state::AppState;
 
@@ -40,6 +43,14 @@ async fn register(
     let user = state
         .auth
         .register(&body.email, &body.username, &body.password)
+        .await?;
+
+    // Create inbox conversation for the new user.
+    let conv_repo = PgConversationRepo::new(state.db.clone());
+    let cu_repo = PgConversationUserRepo::new(state.db.clone());
+    let inbox = conv_repo.create_inbox(user.id).await?;
+    cu_repo
+        .create(inbox.id, user.id, ConversationUserRole::Owner)
         .await?;
 
     Ok(ApiResponse::new(serde_json::json!({
