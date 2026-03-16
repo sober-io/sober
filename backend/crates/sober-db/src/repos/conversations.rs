@@ -247,23 +247,8 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         qb.push(" ORDER BY c.updated_at DESC");
 
-        // We need a custom row type for this joined query.
-        #[derive(sqlx::FromRow)]
-        struct ConversationWithUnread {
-            id: Uuid,
-            user_id: Uuid,
-            title: Option<String>,
-            workspace_id: Option<Uuid>,
-            kind: ConversationKind,
-            is_archived: bool,
-            permission_mode: String,
-            created_at: chrono::DateTime<chrono::Utc>,
-            updated_at: chrono::DateTime<chrono::Utc>,
-            unread_count: i32,
-        }
-
         let rows = qb
-            .build_query_as::<ConversationWithUnread>()
+            .build_query_as::<crate::rows::ConversationWithUnreadRow>()
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;

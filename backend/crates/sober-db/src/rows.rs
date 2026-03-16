@@ -552,6 +552,21 @@ impl From<TagRow> for Tag {
     }
 }
 
+/// Row type for the conversation + unread_count join used by `list_with_details`.
+#[derive(sqlx::FromRow)]
+pub(crate) struct ConversationWithUnreadRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub title: Option<String>,
+    pub workspace_id: Option<Uuid>,
+    pub kind: ConversationKind,
+    pub is_archived: bool,
+    pub permission_mode: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub unread_count: i32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

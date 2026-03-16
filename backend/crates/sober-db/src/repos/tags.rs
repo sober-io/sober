@@ -9,6 +9,19 @@ use uuid::Uuid;
 
 use crate::rows::TagRow;
 
+/// Curated palette — all have good contrast on both light and dark backgrounds.
+const TAG_COLORS: &[&str] = &[
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+];
+
+/// Deterministic color assignment based on tag name.
+fn color_for_name(name: &str) -> &'static str {
+    let hash = name.bytes().fold(0u32, |acc, b| {
+        acc.wrapping_mul(31).wrapping_add(u32::from(b))
+    });
+    TAG_COLORS[(hash as usize) % TAG_COLORS.len()]
+}
+
 /// PostgreSQL-backed tag repository.
 pub struct PgTagRepo {
     pool: PgPool,
@@ -32,7 +45,7 @@ impl TagRepo for PgTagRepo {
         .bind(Uuid::now_v7())
         .bind(input.user_id.as_uuid())
         .bind(&input.name)
-        .bind(&input.color)
+        .bind(color_for_name(&input.name))
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

@@ -16,11 +16,6 @@ use sober_db::{PgConversationRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
-/// Hex color palette for auto-assigning tag colors.
-const TAG_COLORS: &[&str] = &[
-    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
-];
-
 /// Returns the message routes.
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -106,15 +101,10 @@ async fn add_message_tag(
         return Err(AppError::NotFound("message not found".into()));
     }
 
-    // Pick a color based on how many tags the user already has.
-    let existing = tag_repo.list_by_user(auth_user.user_id).await?;
-    let color = TAG_COLORS[existing.len() % TAG_COLORS.len()];
-
     let tag = tag_repo
         .create_or_get(CreateTag {
             user_id: auth_user.user_id,
             name: body.name,
-            color: color.to_string(),
         })
         .await?;
 

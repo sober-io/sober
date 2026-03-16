@@ -107,15 +107,6 @@
 		const days = Math.floor(hours / 24);
 		return `${days}d ago`;
 	};
-
-	// Tag colors — cycle through a fixed palette based on tag index
-	const TAG_COLORS = [
-		'bg-emerald-400',
-		'bg-amber-400',
-		'bg-sky-400',
-		'bg-violet-400',
-		'bg-rose-400'
-	];
 </script>
 
 <!-- Close context menu on outside click -->
@@ -266,13 +257,10 @@
 									</span>
 									{#if conv.tags.length > 0}
 										<span class="ml-1 flex items-center gap-1">
-											{#each conv.tags.slice(0, 3) as tag, i (tag.id)}
+											{#each conv.tags.slice(0, 3) as tag (tag.id)}
 												<span
-													class={[
-														'h-2 w-2 rounded-full',
-														tag.color ? '' : TAG_COLORS[i % TAG_COLORS.length]
-													]}
-													style={tag.color ? `background-color: ${tag.color}` : ''}
+													class="h-2 w-2 rounded-full"
+													style="background-color: {tag.color}"
 													title={tag.name}
 												></span>
 											{/each}

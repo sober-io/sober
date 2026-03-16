@@ -51,6 +51,8 @@
 
 	let { data }: { data: PageData } = $props();
 
+	const PAGE_SIZE = 50;
+
 	const fmtTime = (iso?: string) => {
 		const d = iso ? new Date(iso) : new Date();
 		return d.toLocaleTimeString([], {
@@ -74,7 +76,7 @@
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
-	let allLoaded = $state(data.messages.length < 50);
+	let allLoaded = $state(data.messages.length < PAGE_SIZE);
 	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
@@ -101,7 +103,7 @@
 	$effect(() => {
 		void conversationId;
 		messages = data.messages.map(toChat);
-		allLoaded = data.messages.length < 50;
+		allLoaded = data.messages.length < PAGE_SIZE;
 		assistantPhase = 'idle';
 		messageQueue = [];
 		editingQueueId = null;
@@ -169,7 +171,7 @@
 		}
 		const container = messagesContainer;
 		const older = await conversationService.listMessages(data.conversation.id, oldest.id);
-		if (older.length < 50) allLoaded = true;
+		if (older.length < PAGE_SIZE) allLoaded = true;
 		if (older.length > 0 && container) {
 			const prevHeight = container.scrollHeight;
 			messages = [...older.map(toChat), ...messages];

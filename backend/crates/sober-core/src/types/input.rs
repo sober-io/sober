@@ -208,14 +208,14 @@ pub struct ListConversationsFilter {
 }
 
 /// Input for creating a new tag (idempotent).
+///
+/// Color is assigned deterministically by the repository based on the tag name.
 #[derive(Debug, Clone)]
 pub struct CreateTag {
     /// The user who owns the tag.
     pub user_id: UserId,
     /// Tag name.
     pub name: String,
-    /// Hex color code.
-    pub color: String,
 }
 
 /// Input for updating an existing secret.
