@@ -13,6 +13,7 @@
 	import { workspaceService } from '$lib/services/workspaces';
 	import { conversationService } from '$lib/services/conversations';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
 	import MemberList from './MemberList.svelte';
 	import TagInput from './TagInput.svelte';
@@ -189,6 +190,7 @@
 			const title = conversation.title || 'Group conversation';
 			await conversationService.convertToGroup(conversation.id, title);
 			conversation = { ...conversation, kind: 'group', title };
+			conversations.update(conversation.id, { kind: 'group', title });
 
 			const member = await conversationService.addMember(conversation.id, username);
 			members = [...members, member];

@@ -68,6 +68,10 @@ export const conversations = (() => {
 
 		updateTags(id: string, tags: Tag[]) {
 			items = items.map((c) => (c.id === id ? { ...c, tags } : c));
+		},
+
+		update(id: string, fields: Partial<Conversation>) {
+			items = items.map((c) => (c.id === id ? { ...c, ...fields } : c));
 		}
 	};
 })();

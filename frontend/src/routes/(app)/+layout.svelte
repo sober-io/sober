@@ -8,6 +8,8 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { formatRelativeTime } from '$lib/utils/time';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+
 	interface Props {
 		children: Snippet;
 	}
@@ -18,6 +20,7 @@
 
 	// Per-conversation context menu state: stores the id of the open menu
 	let openMenuId = $state<string | null>(null);
+	let deleteConfirmId = $state<string | null>(null);
 
 	const activeId = $derived($page.params.id ?? '');
 
@@ -82,10 +85,15 @@
 		}
 	};
 
-	const handleDelete = async (id: string) => {
+	const handleDelete = (id: string) => {
 		openMenuId = null;
-		const confirmed = confirm('Delete this conversation? This cannot be undone.');
-		if (!confirmed) return;
+		deleteConfirmId = id;
+	};
+
+	const confirmDelete = async () => {
+		if (!deleteConfirmId) return;
+		const id = deleteConfirmId;
+		deleteConfirmId = null;
 		try {
 			await conversationService.delete(id);
 			conversations.remove(id);
@@ -420,3 +428,13 @@
 		{@render children()}
 	</main>
 </div>
+
+<ConfirmDialog
+	open={deleteConfirmId !== null}
+	title="Delete conversation"
+	message="This will permanently delete this conversation and all messages. This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={confirmDelete}
+	onCancel={() => (deleteConfirmId = null)}
+/>
