@@ -14,6 +14,7 @@
 	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import { tagService } from '$lib/services/tags';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
@@ -27,7 +28,7 @@
 
 	interface ChatMsg {
 		id: string;
-		role: 'user' | 'assistant' | 'system';
+		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
 		thinkingContent: string;
 		toolCalls?: ToolCall[];
@@ -36,6 +37,7 @@
 		timestamp: string;
 		source?: string;
 		ephemeral?: boolean;
+		userId?: string;
 	}
 
 	interface QueuedMessage {
@@ -66,13 +68,14 @@
 
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role === 'tool' || m.role === 'event' ? 'system' : m.role,
+		role: m.role === 'tool' ? 'system' : m.role,
 		content: m.content,
 		thinkingContent: '',
 		toolCalls: undefined,
 		streaming: false,
 		thinking: false,
-		timestamp: fmtTime(m.created_at)
+		timestamp: fmtTime(m.created_at),
+		userId: m.user_id
 	});
 
 	let messages = $state<ChatMsg[]>([]);
@@ -101,6 +104,24 @@
 	let messageTags = $state<Record<string, Tag[]>>({});
 
 	const conversationId = $derived($page.params.id ?? '');
+	const isGroup = $derived(data.conversation.kind === 'group');
+	let memberMap = $state<Record<string, string>>({});
+
+	// Load members for group conversations
+	$effect(() => {
+		if (data.conversation.kind === 'group') {
+			const convId = data.conversation.id;
+			untrack(() => {
+				conversationService.listMembers(convId).then((members) => {
+					const map: Record<string, string> = {};
+					for (const m of members) map[m.user_id] = m.username;
+					memberMap = map;
+				});
+			});
+		} else {
+			memberMap = {};
+		}
+	});
 
 	// Reset state when conversation changes
 	$effect(() => {
@@ -116,6 +137,7 @@
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
 		messageTags = {};
+		memberMap = {};
 		untrack(() => conversations.markRead(data.conversation.id));
 	});
 
@@ -379,6 +401,25 @@
 				];
 				break;
 			}
+			case 'chat.member_added': {
+				memberMap = { ...memberMap, [msg.user.id]: msg.user.username };
+				break;
+			}
+			case 'chat.member_removed': {
+				// If the current user was removed (kicked), navigate away.
+				if (msg.user_id === auth.user?.id) {
+					conversations.remove(conversationId);
+					goto(resolve('/'));
+					return;
+				}
+				const updated = { ...memberMap };
+				delete updated[msg.user_id];
+				memberMap = updated;
+				break;
+			}
+			case 'chat.role_changed': {
+				break;
+			}
 			case 'chat.error': {
 				const last = messages[messages.length - 1];
 				if (last && (last.streaming || last.thinking)) {
@@ -597,6 +638,7 @@
 					source={msg.source}
 					ephemeral={msg.ephemeral}
 					messageId={msg.id}
+					senderUsername={isGroup ? (memberMap[msg.userId ?? ''] ?? undefined) : undefined}
 					tags={messageTags[msg.id] ?? []}
 					onTagsChange={(newTags) => {
 						messageTags[msg.id] = newTags;

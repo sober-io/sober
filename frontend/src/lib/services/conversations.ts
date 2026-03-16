@@ -1,5 +1,11 @@
 import { api } from '$lib/utils/api';
-import type { AgentMode, Conversation, ConversationMember, Message, PermissionMode } from '$lib/types';
+import type {
+	AgentMode,
+	Conversation,
+	ConversationMember,
+	Message,
+	PermissionMode
+} from '$lib/types';
 
 export const conversationService = {
 	list: (params?: { archived?: boolean; kind?: string; tag?: string; search?: string }) => {
