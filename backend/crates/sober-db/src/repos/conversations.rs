@@ -3,7 +3,7 @@
 use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
-    Conversation, ConversationId, ConversationKind, ConversationWithDetails,
+    AgentMode, Conversation, ConversationId, ConversationKind, ConversationWithDetails,
     ListConversationsFilter, Tag, UserId, WorkspaceId,
 };
 use sqlx::PgPool;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::rows::ConversationRow;
 
 /// Column list for conversation queries.
-const CONV_COLUMNS: &str = "id, user_id, title, workspace_id, kind, is_archived, \
+const CONV_COLUMNS: &str = "id, user_id, title, workspace_id, kind, agent_mode, is_archived, \
                              permission_mode, created_at, updated_at";
 
 /// PostgreSQL-backed conversation repository.
@@ -402,6 +402,27 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
             .execute(&self.pool)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn update_agent_mode(
+        &self,
+        id: ConversationId,
+        agent_mode: AgentMode,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET agent_mode = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .bind(agent_mode)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("conversation".into()));

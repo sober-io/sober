@@ -2,12 +2,15 @@
 
 use sober_core::{
     error::AppError,
-    types::{ConversationId, ConversationUser, ConversationUserRepo, ConversationUserRole, UserId},
+    types::{
+        ConversationId, ConversationUser, ConversationUserRepo, ConversationUserRole,
+        ConversationUserWithUsername, UserId,
+    },
 };
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::rows::ConversationUserRow;
+use crate::rows::{ConversationUserRow, ConversationUserWithUsernameRow};
 
 /// PostgreSQL-backed conversation user membership repository.
 pub struct PgConversationUserRepo {
@@ -134,6 +137,72 @@ impl ConversationUserRepo for PgConversationUserRepo {
             .execute(&self.pool)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
+    async fn list_members(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<Vec<ConversationUserWithUsername>, AppError> {
+        let rows = sqlx::query_as::<_, ConversationUserWithUsernameRow>(
+            "SELECT cu.conversation_id, cu.user_id, u.username, \
+             cu.unread_count, cu.last_read_at, cu.role, cu.joined_at \
+             FROM conversation_users cu \
+             JOIN users u ON cu.user_id = u.id \
+             WHERE cu.conversation_id = $1 \
+             ORDER BY cu.joined_at",
+        )
+        .bind(conversation_id.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn update_role(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversation_users SET role = $3 \
+             WHERE conversation_id = $1 AND user_id = $2",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .bind(role)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation_user".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn remove_member(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "DELETE FROM conversation_users \
+             WHERE conversation_id = $1 AND user_id = $2",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation_user".into()));
+        }
 
         Ok(())
     }

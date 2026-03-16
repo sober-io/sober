@@ -10,7 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::domain::*;
 use super::enums::{
-    ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind, UserStatus,
+    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind,
+    UserStatus,
 };
 use super::ids::*;
 use super::input::*;
@@ -169,6 +170,13 @@ pub trait ConversationRepo: Send + Sync {
         id: ConversationId,
         workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates the agent mode for a conversation.
+    fn update_agent_mode(
+        &self,
+        id: ConversationId,
+        agent_mode: AgentMode,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
@@ -248,6 +256,27 @@ pub trait ConversationUserRepo: Send + Sync {
     fn reset_all_unread(
         &self,
         conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all members with usernames (joins users table).
+    fn list_members(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ConversationUserWithUsername>, AppError>> + Send;
+
+    /// Updates a member's role.
+    fn update_role(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Removes a member from a conversation.
+    fn remove_member(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 

@@ -11,9 +11,9 @@ use sober_core::types::{
     UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
-    Artifact, AuditLogEntry, Conversation, ConversationUser, Job, JobRun, McpServerConfig, Message,
-    Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace,
-    WorkspaceRepoEntry, Worktree,
+    Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
+    JobRun, McpServerConfig, Message, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag,
+    User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 use uuid::Uuid;
 
@@ -526,6 +526,32 @@ impl From<ConversationUserRow> for ConversationUser {
         ConversationUser {
             conversation_id: ConversationId::from_uuid(row.conversation_id),
             user_id: UserId::from_uuid(row.user_id),
+            unread_count: row.unread_count,
+            last_read_at: row.last_read_at,
+            role: row.role,
+            joined_at: row.joined_at,
+        }
+    }
+}
+
+/// Row type for conversation_users joined with users (for member lists).
+#[derive(sqlx::FromRow)]
+pub(crate) struct ConversationUserWithUsernameRow {
+    pub conversation_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub unread_count: i32,
+    pub last_read_at: Option<DateTime<Utc>>,
+    pub role: ConversationUserRole,
+    pub joined_at: DateTime<Utc>,
+}
+
+impl From<ConversationUserWithUsernameRow> for ConversationUserWithUsername {
+    fn from(row: ConversationUserWithUsernameRow) -> Self {
+        ConversationUserWithUsername {
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            user_id: UserId::from_uuid(row.user_id),
+            username: row.username,
             unread_count: row.unread_count,
             last_read_at: row.last_read_at,
             role: row.role,

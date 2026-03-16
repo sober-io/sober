@@ -144,6 +144,25 @@ pub struct ConversationUser {
     pub joined_at: DateTime<Utc>,
 }
 
+/// A conversation member with their username (for display in member lists).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationUserWithUsername {
+    /// The conversation.
+    pub conversation_id: ConversationId,
+    /// The user.
+    pub user_id: UserId,
+    /// The user's display username.
+    pub username: String,
+    /// Number of unread messages.
+    pub unread_count: i32,
+    /// When the user last read this conversation.
+    pub last_read_at: Option<DateTime<Utc>>,
+    /// The user's role in this conversation.
+    pub role: ConversationUserRole,
+    /// When the user joined.
+    pub joined_at: DateTime<Utc>,
+}
+
 /// A user-created tag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
