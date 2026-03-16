@@ -31,15 +31,13 @@ export const conversationService = {
 	archive: (id: string, archived: boolean) =>
 		api(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) }),
 
-	delete: (id: string) =>
-		api<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
+	delete: (id: string) => api<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
 
 	getInbox: () => api<Conversation>('/conversations/inbox'),
 
 	markRead: (id: string) => api('/conversations/' + id + '/read', { method: 'POST' }),
 
-	clearMessages: (id: string) =>
-		api(`/conversations/${id}/messages`, { method: 'DELETE' }),
+	clearMessages: (id: string) => api(`/conversations/${id}/messages`, { method: 'DELETE' }),
 
 	listMessages: (id: string, before?: string, limit = 50) => {
 		const params = new URLSearchParams({ limit: String(limit) });
@@ -47,6 +45,5 @@ export const conversationService = {
 		return api<Message[]>(`/conversations/${id}/messages?${params}`);
 	},
 
-	deleteMessage: (id: string) =>
-		api<{ deleted: boolean }>(`/messages/${id}`, { method: 'DELETE' })
+	deleteMessage: (id: string) => api<{ deleted: boolean }>(`/messages/${id}`, { method: 'DELETE' })
 };

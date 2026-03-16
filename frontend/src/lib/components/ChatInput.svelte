@@ -44,11 +44,7 @@
 
 <div class="relative border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 	{#if showSlashCommands}
-		<SlashCommandPalette
-			query={value}
-			onExecute={handleSlashExecute}
-			onClose={handleSlashClose}
-		/>
+		<SlashCommandPalette query={value} onExecute={handleSlashExecute} onClose={handleSlashClose} />
 	{/if}
 	<div class="flex gap-2 p-4">
 		<textarea
