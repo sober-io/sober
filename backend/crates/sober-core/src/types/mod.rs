@@ -18,13 +18,13 @@ pub use domain::{
     WorkspaceRepoEntry, Worktree,
 };
 pub use enums::{
-    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, RoleKind, ScopeKind,
-    UserStatus, WorkspaceState, WorktreeState,
+    ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind, ConversationUserRole,
+    JobStatus, MessageRole, RoleKind, ScopeKind, UserStatus, WorkspaceState, WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
-    MessageId, RoleId, ScopeId, SecretId, SessionId, ToolId, UserId, WorkspaceId, WorkspaceRepoId,
-    WorktreeId,
+    MessageId, RoleId, ScopeId, SecretId, SessionId, TagId, ToolId, UserId, WorkspaceId,
+    WorkspaceRepoId, WorktreeId,
 };
 pub use input::{
     ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMcpServer, CreateMessage,

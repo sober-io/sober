@@ -150,6 +150,11 @@ define_id!(
     EncryptionKeyId
 );
 
+define_id!(
+    /// Unique identifier for a user-created tag.
+    TagId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);
