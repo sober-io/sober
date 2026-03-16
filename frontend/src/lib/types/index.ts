@@ -40,7 +40,7 @@ export interface Conversation {
 
 export interface Message {
 	id: string;
-	role: 'User' | 'Assistant' | 'System' | 'Tool';
+	role: 'user' | 'assistant' | 'system' | 'tool';
 	content: string;
 	tool_calls?: unknown;
 	tool_result?: unknown;

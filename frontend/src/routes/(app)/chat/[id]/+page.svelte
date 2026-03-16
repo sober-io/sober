@@ -26,7 +26,7 @@
 
 	interface ChatMsg {
 		id: string;
-		role: 'User' | 'Assistant' | 'System';
+		role: 'user' | 'assistant' | 'system';
 		content: string;
 		thinkingContent: string;
 		toolCalls?: ToolCall[];
@@ -65,7 +65,7 @@
 
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role === 'Tool' ? 'System' : m.role,
+		role: m.role === 'tool' ? 'system' : m.role,
 		content: m.content,
 		thinkingContent: '',
 		toolCalls: undefined,
@@ -198,7 +198,7 @@
 		const now = fmtTime();
 		messages.push({
 			id: crypto.randomUUID(),
-			role: 'User',
+			role: 'user',
 			content,
 			thinkingContent: '',
 			streaming: false,
@@ -207,7 +207,7 @@
 		});
 		messages.push({
 			id: crypto.randomUUID(),
-			role: 'Assistant',
+			role: 'assistant',
 			content: '',
 			thinkingContent: '',
 			streaming: false,
@@ -265,14 +265,14 @@
 		switch (msg.type) {
 			case 'chat.thinking': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
+				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinkingContent += msg.content;
 				}
 				break;
 			}
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
+				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinking = false;
 					last.streaming = true;
 					last.content += msg.content;
@@ -280,7 +280,7 @@
 				} else {
 					messages.push({
 						id: crypto.randomUUID(),
-						role: 'Assistant',
+						role: 'assistant',
 						content: msg.content,
 						thinkingContent: '',
 						streaming: true,
@@ -293,7 +293,7 @@
 			}
 			case 'chat.tool_use': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant') {
+				if (last && last.role === 'assistant') {
 					const tc: ToolCall = {
 						id: crypto.randomUUID(),
 						name: msg.tool_call.name,
@@ -321,7 +321,7 @@
 				// If an assistant message is actively streaming, update its
 				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
-				if (active?.role === 'Assistant' && (active.streaming || active.thinking)) {
+				if (active?.role === 'assistant' && (active.streaming || active.thinking)) {
 					active.id = msg.message_id;
 					if (msg.source && msg.source !== 'human') active.source = msg.source;
 					break;
@@ -329,7 +329,7 @@
 				// Also check the last completed assistant message (done
 				// already fired before new_message arrived).
 				const prev = messages[messages.length - 1];
-				if (prev?.role === 'Assistant' && !prev.streaming && !prev.thinking) {
+				if (prev?.role === 'assistant' && !prev.streaming && !prev.thinking) {
 					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
@@ -384,7 +384,7 @@
 				} else {
 					messages.push({
 						id: crypto.randomUUID(),
-						role: 'System',
+						role: 'system',
 						content: `Error: ${msg.error}`,
 						thinkingContent: '',
 						streaming: false,
@@ -455,7 +455,7 @@
 			case '/help':
 				messages.push({
 					id: crypto.randomUUID(),
-					role: 'System',
+					role: 'system',
 					content:
 						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages',
 					thinkingContent: '',
@@ -468,7 +468,7 @@
 			case '/info':
 				messages.push({
 					id: crypto.randomUUID(),
-					role: 'System',
+					role: 'system',
 					content: `**Conversation info:**\n- ID: \`${conversationId}\`\n- Title: ${title || 'Untitled'}\n- Messages: ${messages.length}`,
 					thinkingContent: '',
 					streaming: false,
@@ -592,7 +592,7 @@
 					timestamp={msg.timestamp}
 					source={msg.source}
 					ephemeral={msg.ephemeral}
-					onDelete={msg.role === 'User' && !msg.ephemeral
+					onDelete={msg.role === 'user' && !msg.ephemeral
 						? () => {
 								deleteTarget = msg.id;
 							}

@@ -6,7 +6,7 @@
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 
 	interface Props {
-		role: 'User' | 'Assistant' | 'System';
+		role: 'user' | 'assistant' | 'system';
 		content: string;
 		thinkingContent?: string;
 		toolCalls?: ToolCall[];
@@ -31,7 +31,7 @@
 		onDelete
 	}: Props = $props();
 
-	const isUser = $derived(role === 'User');
+	const isUser = $derived(role === 'user');
 	const hasToolCalls = $derived(toolCalls && toolCalls.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
