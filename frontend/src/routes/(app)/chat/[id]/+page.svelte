@@ -20,6 +20,7 @@
 	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
 	import StatusBar from '$lib/components/chat/StatusBar.svelte';
 	import TagInput from '$lib/components/TagInput.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -31,6 +32,7 @@
 		thinking: boolean;
 		timestamp: string;
 		source?: string;
+		ephemeral?: boolean;
 	}
 
 	interface QueuedMessage {
@@ -87,6 +89,8 @@
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let permissionMode = $state<PermissionMode>('policy_based');
+	let deleteTarget = $state<string | null>(null);
+	let showClearConfirm = $state(false);
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -426,6 +430,53 @@
 		await tagService.removeFromConversation(data.conversation.id, tagId);
 	};
 
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		const id = deleteTarget;
+		deleteTarget = null;
+		await conversationService.deleteMessage(id);
+		messages = messages.filter((m) => m.id !== id);
+	};
+
+	const confirmClear = async () => {
+		showClearConfirm = false;
+		await conversationService.clearMessages(conversationId);
+		messages = [];
+	};
+
+	const handleSlashCommand = (command: string) => {
+		switch (command) {
+			case '/help':
+				messages.push({
+					id: crypto.randomUUID(),
+					role: 'System',
+					content:
+						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages',
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime(),
+					ephemeral: true
+				});
+				break;
+			case '/info':
+				messages.push({
+					id: crypto.randomUUID(),
+					role: 'System',
+					content: `**Conversation info:**\n- ID: \`${conversationId}\`\n- Title: ${title || 'Untitled'}\n- Messages: ${messages.length}`,
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime(),
+					ephemeral: true
+				});
+				break;
+			case '/clear':
+				showClearConfirm = true;
+				break;
+		}
+	};
+
 	const startEditTitle = () => {
 		editTitleValue = title || '';
 		editingTitle = true;
@@ -497,6 +548,12 @@
 					thinking={msg.thinking}
 					timestamp={msg.timestamp}
 					source={msg.source}
+					ephemeral={msg.ephemeral}
+					onDelete={msg.role === 'User' && !msg.ephemeral
+						? () => {
+								deleteTarget = msg.id;
+							}
+						: undefined}
 				/>
 			{/each}
 
@@ -576,9 +633,33 @@
 		</div>
 	{/if}
 
-	<ChatInput onsend={sendMessage} busy={isBusy} />
+	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} />
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
+
+<ConfirmDialog
+	open={!!deleteTarget}
+	title="Delete message"
+	message="Are you sure you want to delete this message? This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={confirmDelete}
+	onCancel={() => {
+		deleteTarget = null;
+	}}
+/>
+
+<ConfirmDialog
+	open={showClearConfirm}
+	title="Clear all messages"
+	message="Are you sure you want to clear all messages in this conversation? This cannot be undone."
+	confirmText="Clear"
+	destructive
+	onConfirm={confirmClear}
+	onCancel={() => {
+		showClearConfirm = false;
+	}}
+/>
 
 <style>
 	.confirm-grow {
