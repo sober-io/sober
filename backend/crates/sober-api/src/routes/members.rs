@@ -15,6 +15,7 @@ use sober_core::types::{
 };
 use sober_db::{PgConversationUserRepo, PgMessageRepo, PgUserRepo};
 
+use crate::routes::ws::{MemberInfo, ServerWsMessage};
 use crate::state::AppState;
 
 /// Returns the member management routes.
@@ -112,11 +113,26 @@ async fn add_member(
     // Return the new member with username.
     let members = cu_repo.list_members(conversation_id).await?;
     let new_member = members
-        .into_iter()
+        .iter()
         .find(|m| m.user_id == target_user.id)
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!("member not found after create").into())
-        })?;
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("member not found after create").into()))?
+        .clone();
+
+    // Broadcast the member_added event to all current members.
+    let ws_msg = ServerWsMessage::ChatMemberAdded {
+        conversation_id: conversation_id.to_string(),
+        user: MemberInfo {
+            id: target_user.id.to_string(),
+            username: target_user.username.clone(),
+        },
+        role: "member".to_string(),
+    };
+    for member in &members {
+        state
+            .user_connections
+            .send(&member.user_id.to_string(), ws_msg.clone())
+            .await;
+    }
 
     Ok(ApiResponse::new(new_member))
 }
@@ -185,6 +201,20 @@ async fn update_role(
     });
     insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
 
+    // Broadcast the role_changed event to all members.
+    let members = cu_repo.list_by_conversation(conversation_id).await?;
+    let ws_msg = ServerWsMessage::ChatRoleChanged {
+        conversation_id: conversation_id.to_string(),
+        user_id: target_id.to_string(),
+        role: role_str.to_string(),
+    };
+    for member in &members {
+        state
+            .user_connections
+            .send(&member.user_id.to_string(), ws_msg.clone())
+            .await;
+    }
+
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }
 
@@ -224,6 +254,9 @@ async fn remove_member(
         }
     }
 
+    // Collect remaining members before removal for broadcasting.
+    let remaining_members = cu_repo.list_by_conversation(conversation_id).await?;
+
     cu_repo.remove_member(conversation_id, target_id).await?;
 
     // Insert event message.
@@ -237,6 +270,23 @@ async fn remove_member(
         "target_username": target_user.username
     });
     insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+
+    // Broadcast the member_removed event to all remaining members.
+    let ws_msg = ServerWsMessage::ChatMemberRemoved {
+        conversation_id: conversation_id.to_string(),
+        user_id: target_id.to_string(),
+    };
+    for member in &remaining_members {
+        state
+            .user_connections
+            .send(&member.user_id.to_string(), ws_msg.clone())
+            .await;
+    }
+    // Also notify the kicked user (they are no longer in remaining_members).
+    state
+        .user_connections
+        .send(&target_id.to_string(), ws_msg)
+        .await;
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }
@@ -259,6 +309,9 @@ async fn leave(
         return Err(AppError::Forbidden);
     }
 
+    // Collect remaining members before removal for broadcasting.
+    let remaining_members = cu_repo.list_by_conversation(conversation_id).await?;
+
     cu_repo
         .remove_member(conversation_id, auth_user.user_id)
         .await?;
@@ -271,6 +324,23 @@ async fn leave(
         "actor_id": auth_user.user_id.to_string()
     });
     insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+
+    // Broadcast the member_removed event to all remaining members.
+    let ws_msg = ServerWsMessage::ChatMemberRemoved {
+        conversation_id: conversation_id.to_string(),
+        user_id: auth_user.user_id.to_string(),
+    };
+    for member in &remaining_members {
+        state
+            .user_connections
+            .send(&member.user_id.to_string(), ws_msg.clone())
+            .await;
+    }
+    // Also notify the leaving user themselves.
+    state
+        .user_connections
+        .send(&auth_user.user_id.to_string(), ws_msg)
+        .await;
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }

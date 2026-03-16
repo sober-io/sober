@@ -25,6 +25,15 @@ use tracing::{error, info, warn};
 use crate::proto;
 use crate::state::AppState;
 
+/// Basic user info included in member change WebSocket events.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct MemberInfo {
+    /// User ID.
+    pub id: String,
+    /// Username.
+    pub username: String,
+}
+
 /// Returns the WebSocket route.
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/ws", get(ws_upgrade))
@@ -167,6 +176,34 @@ pub enum ServerWsMessage {
         conversation_id: String,
         /// New unread count.
         unread_count: i32,
+    },
+    /// A member was added to the conversation.
+    #[serde(rename = "chat.member_added")]
+    ChatMemberAdded {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The added user.
+        user: MemberInfo,
+        /// The role assigned.
+        role: String,
+    },
+    /// A member was removed from the conversation.
+    #[serde(rename = "chat.member_removed")]
+    ChatMemberRemoved {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The removed user's ID.
+        user_id: String,
+    },
+    /// A member's role was changed.
+    #[serde(rename = "chat.role_changed")]
+    ChatRoleChanged {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The user whose role changed.
+        user_id: String,
+        /// The new role.
+        role: String,
     },
     /// Keepalive response.
     #[serde(rename = "pong")]

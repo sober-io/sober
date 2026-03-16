@@ -126,6 +126,14 @@ export type ServerWsMessage =
 			reason: string;
 	  }
 	| { type: 'chat.unread'; conversation_id: string; unread_count: number }
+	| {
+			type: 'chat.member_added';
+			conversation_id: string;
+			user: { id: string; username: string };
+			role: string;
+	  }
+	| { type: 'chat.member_removed'; conversation_id: string; user_id: string }
+	| { type: 'chat.role_changed'; conversation_id: string; user_id: string; role: string }
 	| { type: 'pong' };
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
