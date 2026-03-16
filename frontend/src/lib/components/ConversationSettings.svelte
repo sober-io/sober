@@ -2,7 +2,7 @@
 	import type { Conversation, Tag, Job, PermissionMode, Workspace } from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
 	import { workspaceService } from '$lib/services/workspaces';
-	import { PERMISSION_MODES } from '$lib/constants/permission-modes';
+	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
 	import TagInput from './TagInput.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -200,22 +200,7 @@
 
 			<!-- Permission mode -->
 			<SettingsSection title="Permission mode" description="Controls agent autonomy level">
-				<div class="flex gap-1">
-					{#each PERMISSION_MODES as mode (mode.value)}
-						<button
-							onclick={() => onUpdatePermissionMode(mode.value)}
-							class={[
-								'flex-1 rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors',
-								permissionMode === mode.value
-									? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-									: 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'
-							]}
-							title={mode.description}
-						>
-							{mode.label}
-						</button>
-					{/each}
-				</div>
+				<PermissionModeSelector mode={permissionMode} onModeChange={onUpdatePermissionMode} />
 			</SettingsSection>
 
 			<!-- Workspace -->
