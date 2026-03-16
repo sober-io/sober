@@ -7,16 +7,19 @@
 		Conversation,
 		Message,
 		ConfirmRequest,
-		PermissionMode
+		PermissionMode,
+		Tag
 	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
+	import { tagService } from '$lib/services/tags';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
 	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
 	import StatusBar from '$lib/components/chat/StatusBar.svelte';
+	import TagInput from '$lib/components/TagInput.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -79,6 +82,7 @@
 	let isAtBottom = $state(true);
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let title = $state(data.conversation.title || '');
+	let tags = $state<Tag[]>(data.conversation.tags ?? []);
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
@@ -96,6 +100,7 @@
 		editingQueueId = null;
 		isAtBottom = true;
 		title = data.conversation.title || '';
+		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
 		conversations.markRead(data.conversation.id);
@@ -408,6 +413,19 @@
 		pendingConfirms = pendingConfirms.filter((c) => c.confirm_id !== confirmId);
 	};
 
+	const handleAddTag = async (name: string) => {
+		const tag = await tagService.addToConversation(data.conversation.id, name);
+		// Optimistic: avoid duplicates
+		if (!tags.some((t) => t.id === tag.id)) {
+			tags = [...tags, tag];
+		}
+	};
+
+	const handleRemoveTag = async (tagId: string) => {
+		tags = tags.filter((t) => t.id !== tagId);
+		await tagService.removeFromConversation(data.conversation.id, tagId);
+	};
+
 	const startEditTitle = () => {
 		editTitleValue = title || '';
 		editingTitle = true;
@@ -425,27 +443,32 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<header class="flex h-14 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
-		{#if editingTitle}
-			<input
-				type="text"
-				bind:value={editTitleValue}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') saveTitle();
-					if (e.key === 'Escape') editingTitle = false;
-				}}
-				onblur={saveTitle}
-				class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
-			/>
-		{:else}
-			<button
-				onclick={startEditTitle}
-				class="text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
-				title="Click to rename"
-			>
-				{title || 'New conversation'}
-			</button>
-		{/if}
+	<header
+		class="flex flex-col justify-center gap-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800"
+	>
+		<div class="flex items-center">
+			{#if editingTitle}
+				<input
+					type="text"
+					bind:value={editTitleValue}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') saveTitle();
+						if (e.key === 'Escape') editingTitle = false;
+					}}
+					onblur={saveTitle}
+					class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
+				/>
+			{:else}
+				<button
+					onclick={startEditTitle}
+					class="text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
+					title="Click to rename"
+				>
+					{title || 'New conversation'}
+				</button>
+			{/if}
+		</div>
+		<TagInput {tags} onAdd={handleAddTag} onRemove={handleRemoveTag} />
 	</header>
 
 	<div class="relative flex-1 overflow-hidden">
