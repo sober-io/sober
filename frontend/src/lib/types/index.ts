@@ -8,7 +8,8 @@ export interface User {
 }
 
 export type ConversationKind = 'direct' | 'group' | 'inbox';
-export type ConversationUserRole = 'owner' | 'member';
+export type ConversationUserRole = 'owner' | 'admin' | 'member';
+export type AgentMode = 'always' | 'mention' | 'silent';
 
 export interface Tag {
 	id: string;
@@ -25,6 +26,15 @@ export interface ConversationUser {
 	joined_at: string;
 }
 
+export interface ConversationMember {
+	conversation_id: string;
+	user_id: string;
+	username: string;
+	unread_count: number;
+	role: ConversationUserRole;
+	joined_at: string;
+}
+
 export interface Conversation {
 	id: string;
 	title: string | null;
@@ -32,6 +42,7 @@ export interface Conversation {
 	kind: ConversationKind;
 	is_archived: boolean;
 	permission_mode: PermissionMode;
+	agent_mode: AgentMode;
 	unread_count: number;
 	tags: Tag[];
 	created_at: string;
@@ -40,12 +51,13 @@ export interface Conversation {
 
 export interface Message {
 	id: string;
-	role: 'user' | 'assistant' | 'system' | 'tool';
+	role: 'user' | 'assistant' | 'system' | 'tool' | 'event';
 	content: string;
 	tool_calls?: unknown;
 	tool_result?: unknown;
 	token_count: number;
 	user_id?: string;
+	metadata?: Record<string, unknown>;
 	created_at: string;
 }
 

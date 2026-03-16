@@ -66,7 +66,7 @@
 
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role === 'tool' ? 'system' : m.role,
+		role: m.role === 'tool' || m.role === 'event' ? 'system' : m.role,
 		content: m.content,
 		thinkingContent: '',
 		toolCalls: undefined,
