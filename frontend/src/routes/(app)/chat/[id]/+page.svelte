@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import type {
 		ToolCall,
 		ServerWsMessage,
@@ -508,7 +509,7 @@
 		showDeleteConversationConfirm = false;
 		await conversationService.delete(data.conversation.id);
 		conversations.remove(data.conversation.id);
-		goto('/');
+		goto(resolve('/'));
 	};
 </script>
 

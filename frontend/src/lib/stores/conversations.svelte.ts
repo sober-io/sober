@@ -45,21 +45,17 @@ export const conversations = (() => {
 		},
 
 		updateUnread(conversationId: string, unreadCount: number) {
-			items = items.map((c) =>
-				c.id === conversationId ? { ...c, unread_count: unreadCount } : c
-			);
+			items = items.map((c) => (c.id === conversationId ? { ...c, unread_count: unreadCount } : c));
 			// Re-sort: unread first, then by updated_at
 			items.sort((a, b) => {
 				if (a.unread_count > 0 && b.unread_count === 0) return -1;
 				if (a.unread_count === 0 && b.unread_count > 0) return 1;
-				return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+				return Date.parse(b.updated_at) - Date.parse(a.updated_at);
 			});
 		},
 
 		markRead(conversationId: string) {
-			items = items.map((c) =>
-				c.id === conversationId ? { ...c, unread_count: 0 } : c
-			);
+			items = items.map((c) => (c.id === conversationId ? { ...c, unread_count: 0 } : c));
 		},
 
 		archive(id: string) {

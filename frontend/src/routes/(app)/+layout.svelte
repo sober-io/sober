@@ -72,7 +72,7 @@
 				conversations.archive(id);
 				// If we archived the active conversation, navigate away
 				if (activeId === id) {
-					goto(resolve('/(app)/chat/[id]', { id: '' }).replace('/chat/', '/'));
+					goto(resolve('/(app)'));
 				}
 			} else {
 				conversations.unarchive(id);
@@ -90,7 +90,7 @@
 			await conversationService.delete(id);
 			conversations.remove(id);
 			if (activeId === id) {
-				goto(resolve('/(app)/chat/[id]', { id: '' }).replace('/chat/', '/'));
+				goto(resolve('/(app)'));
 			}
 		} catch {
 			// Silently ignore errors for now

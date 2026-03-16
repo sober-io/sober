@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Conversation } from '$lib/types';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 
 	interface Props {
 		data: { conversations: Conversation[]; inbox: Conversation };
@@ -18,9 +19,7 @@
 	let recent = $derived(
 		data.conversations
 			.filter((c) => !c.is_archived && c.kind !== 'inbox')
-			.filter(
-				(c) => !search || (c.title?.toLowerCase().includes(search.toLowerCase()) ?? false)
-			)
+			.filter((c) => !search || (c.title?.toLowerCase().includes(search.toLowerCase()) ?? false))
 			.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 			.slice(0, 20)
 	);
@@ -43,7 +42,7 @@
 	async function createConversation() {
 		const { conversationService } = await import('$lib/services/conversations');
 		const conv = await conversationService.create();
-		goto(`/chat/${conv.id}`);
+		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
 	}
 </script>
 
@@ -54,7 +53,7 @@
 			<h1 class="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Conversations</h1>
 			<div class="flex items-center gap-3">
 				<a
-					href="/chat/{data.inbox.id}"
+					href={resolve('/(app)/chat/[id]', { id: data.inbox.id })}
 					class="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 				>
 					<svg
@@ -129,7 +128,9 @@
 		<!-- Unread section -->
 		{#if !search}
 			<section>
-				<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+				<h2
+					class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+				>
 					Unread
 				</h2>
 				{#if unread.length === 0}
@@ -139,7 +140,7 @@
 						{#each unread as conv (conv.id)}
 							<li>
 								<a
-									href="/chat/{conv.id}"
+									href={resolve('/(app)/chat/[id]', { id: conv.id })}
 									class="flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
 								>
 									<div class="min-w-0 flex-1">
@@ -165,7 +166,9 @@
 
 		<!-- Recent conversations -->
 		<section>
-			<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+			<h2
+				class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+			>
 				{search ? 'Results' : 'Recent'}
 			</h2>
 			{#if recent.length === 0}
@@ -177,7 +180,7 @@
 					{#each recent as conv (conv.id)}
 						<li>
 							<a
-								href="/chat/{conv.id}"
+								href={resolve('/(app)/chat/[id]', { id: conv.id })}
 								class="flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
 							>
 								<div class="min-w-0 flex-1">
