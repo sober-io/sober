@@ -5,15 +5,15 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::types::{
+    AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
+    ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus,
+    McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId, TagId, UserId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+};
+use sober_core::types::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, Job, JobRun, McpServerConfig, Message,
     Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace,
     WorkspaceRepoEntry, Worktree,
-};
-use sober_core::types::{
-    ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, ConversationKind,
-    ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, McpServerId, MessageId,
-    MessageRole, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId,
-    WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use uuid::Uuid;
 
@@ -110,6 +110,7 @@ pub(crate) struct ConversationRow {
     pub title: Option<String>,
     pub workspace_id: Option<Uuid>,
     pub kind: ConversationKind,
+    pub agent_mode: AgentMode,
     pub is_archived: bool,
     pub permission_mode: String,
     pub created_at: DateTime<Utc>,
@@ -130,6 +131,7 @@ impl From<ConversationRow> for Conversation {
             title: row.title,
             workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
             kind: row.kind,
+            agent_mode: row.agent_mode,
             is_archived: row.is_archived,
             permission_mode,
             created_at: row.created_at,
@@ -148,6 +150,7 @@ pub(crate) struct MessageRow {
     pub tool_result: Option<serde_json::Value>,
     pub token_count: Option<i32>,
     pub user_id: Option<Uuid>,
+    pub metadata: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -162,6 +165,7 @@ impl From<MessageRow> for Message {
             tool_result: row.tool_result,
             token_count: row.token_count,
             user_id: row.user_id.map(UserId::from_uuid),
+            metadata: row.metadata,
             created_at: row.created_at,
         }
     }
@@ -560,6 +564,7 @@ pub(crate) struct ConversationWithUnreadRow {
     pub title: Option<String>,
     pub workspace_id: Option<Uuid>,
     pub kind: ConversationKind,
+    pub agent_mode: AgentMode,
     pub is_archived: bool,
     pub permission_mode: String,
     pub created_at: DateTime<Utc>,

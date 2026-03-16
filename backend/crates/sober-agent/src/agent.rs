@@ -932,12 +932,15 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
     msgs.iter()
         // Skip empty assistant messages — the API rejects them.
         .filter(|m| !(m.role == MessageRole::Assistant && m.content.is_empty()))
+        // Skip event messages — they are not forwarded to the LLM.
+        .filter(|m| m.role != MessageRole::Event)
         .map(|m| {
             let role = match m.role {
                 MessageRole::System => "system",
                 MessageRole::User => "user",
                 MessageRole::Assistant => "assistant",
                 MessageRole::Tool => "tool",
+                MessageRole::Event => unreachable!("event messages filtered above"),
             };
             LlmMessage {
                 role: role.to_owned(),
@@ -1000,6 +1003,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1011,6 +1015,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1022,6 +1027,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1033,6 +1039,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
         ];

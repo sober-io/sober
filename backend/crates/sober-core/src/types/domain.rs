@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus, MessageRole,
-    UserStatus, WorkspaceState, WorktreeState,
+    AgentMode, ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus,
+    MessageRole, UserStatus, WorkspaceState, WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
@@ -90,6 +90,8 @@ pub struct Conversation {
     pub workspace_id: Option<WorkspaceId>,
     /// The kind of conversation.
     pub kind: ConversationKind,
+    /// Agent response mode for this conversation.
+    pub agent_mode: AgentMode,
     /// Whether the conversation is archived.
     pub is_archived: bool,
     /// Shell execution permission mode for this conversation.
@@ -119,6 +121,8 @@ pub struct Message {
     pub token_count: Option<i32>,
     /// The user who sent this message (None for assistant/system/tool messages).
     pub user_id: Option<UserId>,
+    /// Extensible metadata (e.g. event details for event-role messages).
+    pub metadata: Option<serde_json::Value>,
     /// When the message was created.
     pub created_at: DateTime<Utc>,
 }
@@ -488,6 +492,7 @@ mod tests {
             tool_result: None,
             token_count: Some(42),
             user_id: None,
+            metadata: None,
             created_at: Utc::now(),
         };
         let json = serde_json::to_value(&msg).unwrap();

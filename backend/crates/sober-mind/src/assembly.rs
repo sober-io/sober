@@ -79,6 +79,7 @@ impl Mind {
             tool_result: None,
             token_count: None,
             user_id: None,
+            metadata: None,
             created_at: chrono::Utc::now(),
         });
 
@@ -93,6 +94,7 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             });
         }
@@ -132,6 +134,7 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             Message {
@@ -143,6 +146,7 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
         ])

@@ -308,6 +308,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                             .workspace_id
                             .map(sober_core::types::WorkspaceId::from_uuid),
                         kind: r.kind,
+                        agent_mode: r.agent_mode,
                         is_archived: r.is_archived,
                         permission_mode,
                         created_at: r.created_at,

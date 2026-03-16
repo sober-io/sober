@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -3343,7 +3343,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "serde_json",
@@ -3485,7 +3485,7 @@ dependencies = [
 
 [[package]]
 name = "sober-scheduler"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",
