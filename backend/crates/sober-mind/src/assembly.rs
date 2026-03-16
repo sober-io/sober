@@ -156,13 +156,19 @@ impl Mind {
 /// Memory extraction instructions appended to every system prompt.
 const MEMORY_EXTRACTION_INSTRUCTIONS: &str = "\
 \n\n## Memory Extraction\n\n\
+Extract useful information from each conversation turn into your long-term memory. \
+Stored extractions are embedded in a vector database and used to personalize future \
+conversations — preferences shape every response, facts are recalled on demand via \
+the `recall` tool.\n\n\
 If the user shared facts, preferences, or useful information, append after your response:\n\
 ```\n\
 <memory_extractions>\n\
 [{\"content\": \"one concise sentence\", \"type\": \"fact|preference|skill|code\"}]\n\
 </memory_extractions>\n\
 ```\n\
-Omit the block if nothing is worth remembering. Only allowed types: fact, preference, skill, code. \
+Types: `fact` (knowledge about the user or world), `preference` (likes, dislikes, \
+style choices — loaded automatically every conversation), `skill` (learned capabilities), \
+`code` (technical snippets). Omit the block if nothing is worth remembering. \
 The block is stripped before the user sees your response.";
 
 /// Builds the system prompt string from the masked soul and tool definitions.
