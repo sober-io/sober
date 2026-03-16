@@ -4,6 +4,7 @@
 //! injection detection → context loading → prompt assembly → LLM completion
 //! → tool execution → response streaming.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sober_core::config::MemoryConfig;
@@ -12,7 +13,7 @@ use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
+use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
@@ -76,7 +77,7 @@ struct ConfirmDetail {
 }
 
 /// Aggregated context passed to the agentic loop, avoiding long parameter lists.
-struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
+struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo> {
     llm: &'a Arc<dyn LlmEngine>,
     mind: &'a Arc<Mind>,
     memory: &'a Arc<MemoryStore>,
@@ -84,6 +85,7 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     tool_registry: &'a Arc<ToolRegistry>,
     message_repo: &'a Arc<Msg>,
     conversation_repo: &'a Arc<Conv>,
+    user_repo: &'a Arc<User>,
     config: &'a AgentConfig,
     memory_config: &'a MemoryConfig,
     user_id: UserId,
@@ -102,11 +104,12 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
 /// The core agent that handles messages through an agentic loop.
 ///
 /// Generic over repository types so it can be tested without a real database.
-pub struct Agent<Msg, Conv, Mcp>
+pub struct Agent<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo,
     Conv: ConversationRepo,
     Mcp: McpServerRepo,
+    User: UserRepo,
 {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
@@ -117,6 +120,7 @@ where
     conversation_repo: Arc<Conv>,
     #[allow(dead_code)]
     mcp_server_repo: Arc<Mcp>,
+    user_repo: Arc<User>,
     config: AgentConfig,
     memory_config: MemoryConfig,
     /// Registrar for interactive confirmation of dangerous tool calls.
@@ -125,11 +129,12 @@ where
     broadcast_tx: ConversationUpdateSender,
 }
 
-impl<Msg, Conv, Mcp> Agent<Msg, Conv, Mcp>
+impl<Msg, Conv, Mcp, User> Agent<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo + 'static,
     Conv: ConversationRepo + 'static,
     Mcp: McpServerRepo + 'static,
+    User: UserRepo + 'static,
 {
     /// Creates a new agent with all required dependencies.
     #[allow(clippy::too_many_arguments)]
@@ -142,6 +147,7 @@ where
         message_repo: Arc<Msg>,
         conversation_repo: Arc<Conv>,
         mcp_server_repo: Arc<Mcp>,
+        user_repo: Arc<User>,
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
@@ -156,6 +162,7 @@ where
             message_repo,
             conversation_repo,
             mcp_server_repo,
+            user_repo,
             config,
             memory_config,
             registrar,
@@ -285,6 +292,7 @@ where
         let tool_registry = Arc::clone(&self.tool_registry);
         let message_repo = Arc::clone(&self.message_repo);
         let conversation_repo = Arc::clone(&self.conversation_repo);
+        let user_repo = Arc::clone(&self.user_repo);
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();
         let registrar = self.registrar.clone();
@@ -301,6 +309,7 @@ where
                 tool_registry: &tool_registry,
                 message_repo: &message_repo,
                 conversation_repo: &conversation_repo,
+                user_repo: &user_repo,
                 config: &config,
                 memory_config: &memory_config,
                 user_id,
@@ -337,7 +346,7 @@ where
     /// This is the core loop: embed → load context → assemble → complete →
     /// handle tool calls → repeat. Events are sent immediately as they occur,
     /// enabling confirmation flow and progressive output.
-    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv>) -> Result<(), AgentError> {
+    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv, User>) -> Result<(), AgentError> {
         let llm = ctx.llm;
         let mind = ctx.mind;
         let memory = ctx.memory;
@@ -427,6 +436,25 @@ where
                     workspace_id: None,
                 };
 
+                // Build user display names for group conversations so the
+                // mind can prefix messages with `[username]:`.
+                let user_display_names = if ctx.conversation_kind == ConversationKind::Group {
+                    let user_ids: HashSet<UserId> = loaded_context
+                        .recent_messages
+                        .iter()
+                        .filter_map(|m| m.user_id)
+                        .collect();
+                    let mut names = HashMap::new();
+                    for uid in user_ids {
+                        if let Ok(user) = ctx.user_repo.get_by_id(uid).await {
+                            names.insert(uid, user.username);
+                        }
+                    }
+                    names
+                } else {
+                    HashMap::new()
+                };
+
                 let memory_context_text = format_memory_context(&loaded_context);
                 let task_context = TaskContext {
                     description: if memory_context_text.is_empty() {
@@ -436,7 +464,7 @@ where
                     },
                     recent_messages: loaded_context.recent_messages.clone(),
                     conversation_kind: ctx.conversation_kind,
-                    user_display_names: std::collections::HashMap::new(),
+                    user_display_names,
                 };
 
                 let tool_metadata = tool_registry.tool_metadata();

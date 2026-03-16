@@ -104,12 +104,15 @@
 	let messageTags = $state<Record<string, Tag[]>>({});
 
 	const conversationId = $derived($page.params.id ?? '');
-	const isGroup = $derived(data.conversation.kind === 'group');
+	const isGroup = $derived.by(() => {
+		const storeConv = conversations.items.find((c) => c.id === data.conversation.id);
+		return (storeConv?.kind ?? data.conversation.kind) === 'group';
+	});
 	let memberMap = $state<Record<string, string>>({});
 
 	// Load members for group conversations
 	$effect(() => {
-		if (data.conversation.kind === 'group') {
+		if (isGroup) {
 			const convId = data.conversation.id;
 			untrack(() => {
 				conversationService.listMembers(convId).then((members) => {
@@ -349,6 +352,24 @@
 					break;
 				}
 
+				// User messages from others — add directly, don't match with assistant.
+				if (msg.role === 'user') {
+					messages.push({
+						id: msg.message_id,
+						role: 'user',
+						content: msg.content,
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						userId: msg.user_id
+					});
+					if (msg.user_id && msg.username) {
+						memberMap[msg.user_id] = msg.username;
+					}
+					break;
+				}
+
 				// If an assistant message is actively streaming, update its
 				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
@@ -364,7 +385,7 @@
 					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
-				// New message from another user, scheduler, or agent.
+				// New message from scheduler or agent.
 				const newMsg: ChatMsg = {
 					id: msg.message_id,
 					role: msg.role as ChatMsg['role'],
