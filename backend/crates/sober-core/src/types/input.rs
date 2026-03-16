@@ -194,6 +194,30 @@ pub struct NewSecret {
     pub priority: Option<i32>,
 }
 
+/// Filter parameters for listing conversations.
+#[derive(Debug, Clone, Default)]
+pub struct ListConversationsFilter {
+    /// Filter by archived status.
+    pub archived: Option<bool>,
+    /// Filter by conversation kind.
+    pub kind: Option<super::enums::ConversationKind>,
+    /// Filter by tag name.
+    pub tag: Option<String>,
+    /// Search by title (ILIKE).
+    pub search: Option<String>,
+}
+
+/// Input for creating a new tag (idempotent).
+#[derive(Debug, Clone)]
+pub struct CreateTag {
+    /// The user who owns the tag.
+    pub user_id: UserId,
+    /// Tag name.
+    pub name: String,
+    /// Hex color code.
+    pub color: String,
+}
+
 /// Input for updating an existing secret.
 #[derive(Debug, Default)]
 pub struct UpdateSecret {
