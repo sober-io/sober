@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import type {
 		ToolCall,
@@ -65,8 +65,10 @@
 		timestamp: fmtTime(m.created_at)
 	});
 
-	const initialMessages = $derived(data.messages.map(toChat));
 	let messages = $state<ChatMsg[]>([]);
+	let loadingMore = $state(false);
+	let allLoaded = $state(data.messages.length < 50);
+	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
 
@@ -87,7 +89,8 @@
 	// Reset state when conversation changes
 	$effect(() => {
 		void conversationId;
-		messages = initialMessages;
+		messages = data.messages.map(toChat);
+		allLoaded = data.messages.length < 50;
 		assistantPhase = 'idle';
 		messageQueue = [];
 		editingQueueId = null;
@@ -95,6 +98,7 @@
 		title = data.conversation.title || '';
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
+		conversations.markRead(data.conversation.id);
 	});
 
 	// Scroll to bottom on conversation change
@@ -142,6 +146,39 @@
 		messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
 		isAtBottom = true;
 	};
+
+	const loadMore = async () => {
+		if (loadingMore || allLoaded) return;
+		loadingMore = true;
+		const oldest = messages[0];
+		if (!oldest) {
+			loadingMore = false;
+			return;
+		}
+		const container = messagesContainer;
+		const older = await conversationService.listMessages(data.conversation.id, oldest.id);
+		if (older.length < 50) allLoaded = true;
+		if (older.length > 0 && container) {
+			const prevHeight = container.scrollHeight;
+			messages = [...older.map(toChat), ...messages];
+			await tick();
+			container.scrollTop = container.scrollHeight - prevHeight;
+		}
+		loadingMore = false;
+	};
+
+	// IntersectionObserver on sentinel div to trigger loadMore
+	$effect(() => {
+		const el = sentinel;
+		if (!el) return;
+		const observer = new IntersectionObserver((entries) => {
+			if (entries[0].isIntersecting && !allLoaded) {
+				loadMore();
+			}
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
 
 	const dispatchMessage = (content: string) => {
 		const now = fmtTime();
@@ -417,6 +454,16 @@
 			onscroll={handleScroll}
 			class="h-full space-y-4 overflow-y-auto p-4"
 		>
+			<div bind:this={sentinel}></div>
+
+			{#if loadingMore}
+				<div class="flex justify-center py-2">
+					<div
+						class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300"
+					></div>
+				</div>
+			{/if}
+
 			{#each messages as msg (msg.id)}
 				<ChatMessage
 					role={msg.role}
