@@ -106,9 +106,36 @@ impl Mind {
             });
         }
 
+        // Group conversation context — tell the LLM about multiple users.
+        let is_group = context.conversation_kind == ConversationKind::Group;
+        if is_group && !context.user_display_names.is_empty() {
+            let user_list: Vec<&str> = context
+                .user_display_names
+                .values()
+                .map(String::as_str)
+                .collect();
+            messages.push(Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::System,
+                content: format!(
+                    "This is a group conversation with multiple users: {}. \
+                     Each user message is prefixed with [username]. \
+                     Address users by name when responding. \
+                     When a user asks a question, respond to that specific user.",
+                    user_list.join(", ")
+                ),
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                user_id: None,
+                metadata: None,
+                created_at: chrono::Utc::now(),
+            });
+        }
+
         // Recent conversation messages — filter out Event messages (timeline-only)
         // and prefix user messages with usernames in group conversations.
-        let is_group = context.conversation_kind == ConversationKind::Group;
         for msg in &context.recent_messages {
             if msg.role == MessageRole::Event {
                 continue;
@@ -496,12 +523,14 @@ mod tests {
         };
 
         let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
-        // system + 3 messages
-        assert_eq!(messages.len(), 4);
-        assert!(messages[1].content.starts_with("[Alice]: "));
-        assert!(messages[2].content.starts_with("[Bob]: "));
+        // system + group context + 3 messages
+        assert_eq!(messages.len(), 5);
+        // Second message is the group context
+        assert!(messages[1].content.contains("group conversation"));
+        assert!(messages[2].content.starts_with("[Alice]: "));
+        assert!(messages[3].content.starts_with("[Bob]: "));
         // Assistant message should not be prefixed
-        assert_eq!(messages[3].content, "hello!");
+        assert_eq!(messages[4].content, "hello!");
     }
 
     #[tokio::test]
