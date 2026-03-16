@@ -236,6 +236,7 @@ where
                     tool_result: None,
                     token_count: None,
                     metadata: None,
+                    user_id: Some(user_id),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -601,6 +602,7 @@ where
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
+                    user_id: None,
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;

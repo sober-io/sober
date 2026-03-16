@@ -198,6 +198,7 @@ async fn insert_event_message(
             tool_result: None,
             token_count: None,
             metadata: Some(metadata),
+            user_id: None,
         })
         .await
 }
