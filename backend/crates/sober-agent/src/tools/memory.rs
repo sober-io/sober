@@ -15,6 +15,12 @@ use sober_memory::bcf::ChunkType;
 use sober_memory::store::{MemoryStore, StoreChunk, StoreQuery};
 use uuid::Uuid;
 
+/// Default number of results for recall queries.
+const DEFAULT_RECALL_LIMIT: u64 = 10;
+
+/// Maximum number of results for recall queries.
+const MAX_RECALL_LIMIT: u64 = 20;
+
 /// Parses a string chunk type name into its [`ChunkType`] enum value.
 fn parse_chunk_type(s: &str) -> Result<ChunkType, ToolError> {
     match s {
@@ -119,8 +125,8 @@ impl RecallTool {
         let limit = input
             .get("limit")
             .and_then(|v| v.as_u64())
-            .unwrap_or(10)
-            .min(20);
+            .unwrap_or(DEFAULT_RECALL_LIMIT)
+            .min(MAX_RECALL_LIMIT);
 
         // Embed the crafted query
         let embeddings = self
