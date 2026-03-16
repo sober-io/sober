@@ -9,7 +9,7 @@ use std::sync::Arc;
 use sober_core::config::MemoryConfig;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
-use sober_core::types::enums::MessageRole;
+use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
@@ -95,6 +95,8 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     registrar: Option<&'a ConfirmationRegistrar>,
     /// What triggered this interaction — controls storage and tool behavior.
     trigger: TriggerKind,
+    /// The kind of conversation (direct vs group) — used for prompt assembly.
+    conversation_kind: ConversationKind,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -235,7 +237,43 @@ where
             sober_core::MessageId::new()
         };
 
-        // 3. Create event channel and spawn the agentic loop
+        // 3. Check agent mode — decide whether to run the LLM pipeline
+        let conversation = self
+            .conversation_repo
+            .get_by_id(conversation_id)
+            .await
+            .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+        let should_respond = match conversation.agent_mode {
+            AgentMode::Always => true,
+            AgentMode::Silent => false,
+            AgentMode::Mention => content.to_lowercase().contains("@sober"),
+        };
+
+        if !should_respond {
+            debug!(
+                agent_mode = ?conversation.agent_mode,
+                conversation_id = %conversation_id,
+                "skipping LLM pipeline due to agent mode"
+            );
+            // Return an empty stream — message was stored but no agent response.
+            let (event_tx, event_rx) = mpsc::channel::<Result<AgentEvent, AgentError>>(1);
+            let _ = event_tx
+                .send(Ok(AgentEvent::Done {
+                    message_id: user_msg_id,
+                    usage: Usage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                    },
+                    artifact_ref: None,
+                }))
+                .await;
+            return Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(
+                event_rx,
+            )));
+        }
+
+        // 4. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
             mpsc::channel::<Result<AgentEvent, AgentError>>(EVENT_CHANNEL_BUFFER);
 
@@ -252,6 +290,7 @@ where
         let registrar = self.registrar.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
+        let conversation_kind = conversation.kind;
 
         tokio::spawn(async move {
             let ctx = LoopContext {
@@ -272,6 +311,7 @@ where
                 broadcast_tx: &broadcast_tx,
                 registrar: registrar.as_ref(),
                 trigger,
+                conversation_kind,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -395,6 +435,8 @@ where
                         format!("## Relevant Memories\n\n{memory_context_text}")
                     },
                     recent_messages: loaded_context.recent_messages.clone(),
+                    conversation_kind: ctx.conversation_kind,
+                    user_display_names: std::collections::HashMap::new(),
                 };
 
                 let tool_metadata = tool_registry.tool_metadata();
