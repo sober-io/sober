@@ -49,7 +49,6 @@
 	let confirmDelete = $state(false);
 
 	// Derived
-	let displayTitle = $derived(conversation.title ?? 'Untitled');
 	let createdDate = $derived(
 		new Date(conversation.created_at).toLocaleDateString(undefined, {
 			year: 'numeric',
@@ -207,7 +206,7 @@
 			<!-- Permission mode -->
 			<SettingsSection title="Permission mode" description="Controls agent autonomy level">
 				<div class="flex gap-1">
-					{#each permissionModes as mode}
+					{#each permissionModes as mode (mode.value)}
 						<button
 							onclick={() => onUpdatePermissionMode(mode.value)}
 							class={[

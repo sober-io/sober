@@ -23,6 +23,7 @@
 	import StatusBar from '$lib/components/chat/StatusBar.svelte';
 	import TagInput from '$lib/components/TagInput.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ConversationSettings from '$lib/components/ConversationSettings.svelte';
 
 	interface ChatMsg {
 		id: string;
@@ -96,6 +97,7 @@
 	let deleteTarget = $state<string | null>(null);
 	let showClearConfirm = $state(false);
 	let showDeleteConversationConfirm = $state(false);
+	let settingsOpen = $state(false);
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -541,26 +543,26 @@
 					{title || 'New conversation'}
 				</button>
 			{/if}
-			<div class="flex shrink-0 items-center gap-1">
-				<button
-					onclick={handleArchive}
-					class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-					title={data.conversation.is_archived ? 'Unarchive conversation' : 'Archive conversation'}
-				>
-					{data.conversation.is_archived ? 'Unarchive' : 'Archive'}
-				</button>
-				{#if data.conversation.kind !== 'inbox'}
-					<button
-						onclick={() => {
-							showDeleteConversationConfirm = true;
-						}}
-						class="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
-						title="Delete conversation"
-					>
-						Delete
-					</button>
-				{/if}
-			</div>
+			<button
+				onclick={() => (settingsOpen = true)}
+				class="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+				title="Conversation settings"
+			>
+				<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+					/>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+					/>
+				</svg>
+			</button>
 		</div>
 		<TagInput {tags} onAdd={handleAddTag} onRemove={handleRemoveTag} />
 	</header>
@@ -679,6 +681,26 @@
 	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} />
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
+
+<ConversationSettings
+	open={settingsOpen}
+	conversation={data.conversation}
+	{tags}
+	{permissionMode}
+	onClose={() => (settingsOpen = false)}
+	onUpdateTitle={(t) => {
+		title = t;
+		conversations.updateTitle(conversationId, t);
+		conversationService.updateTitle(conversationId, t);
+	}}
+	onUpdatePermissionMode={handleModeChange}
+	onUpdateWorkspace={(wsId) => conversationService.updateWorkspace(conversationId, wsId)}
+	onAddTag={handleAddTag}
+	onRemoveTag={handleRemoveTag}
+	onArchive={handleArchive}
+	onClearHistory={confirmClear}
+	onDelete={handleDeleteConversation}
+/>
 
 <ConfirmDialog
 	open={!!deleteTarget}

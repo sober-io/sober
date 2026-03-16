@@ -11,19 +11,12 @@
 	let { title, description, danger = false, children }: Props = $props();
 </script>
 
-<section
-	class={[
-		'space-y-3 py-4',
-		danger && 'border-l-2 border-red-500 pl-4 dark:border-red-400'
-	]}
->
+<section class={['space-y-3 py-4', danger && 'border-l-2 border-red-500 pl-4 dark:border-red-400']}>
 	<div>
 		<h3
 			class={[
 				'text-sm font-medium',
-				danger
-					? 'text-red-700 dark:text-red-400'
-					: 'text-zinc-900 dark:text-zinc-100'
+				danger ? 'text-red-700 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'
 			]}
 		>
 			{title}
