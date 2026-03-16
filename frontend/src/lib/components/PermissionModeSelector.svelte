@@ -10,7 +10,8 @@
 	let { mode, onModeChange }: Props = $props();
 
 	function buttonClass(m: (typeof PERMISSION_MODES)[number]): string {
-		if (mode !== m.value) return 'text-zinc-500 hover:text-zinc-300 dark:hover:text-zinc-300';
+		if (mode !== m.value)
+			return 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200';
 		switch (m.color) {
 			case 'emerald':
 				return 'bg-emerald-600/30 text-emerald-400';
@@ -22,11 +23,11 @@
 	}
 </script>
 
-<div class="flex items-center gap-1 rounded-md bg-zinc-800 p-0.5 dark:bg-zinc-800">
+<div class="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
 	{#each PERMISSION_MODES as m (m.value)}
 		<button
 			onclick={() => onModeChange(m.value)}
-			class="rounded px-2 py-1 text-xs transition-colors {buttonClass(m)}"
+			class="flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors {buttonClass(m)}"
 			title={m.description}
 		>
 			{m.label}
