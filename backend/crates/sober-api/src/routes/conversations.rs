@@ -11,9 +11,9 @@ use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
     ApiResponse, ConversationId, ConversationKind, ConversationRepo, ConversationUserRepo,
-    ConversationWithDetails, ListConversationsFilter, MessageRepo, WorkspaceId,
+    ConversationWithDetails, ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
 };
-use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
@@ -124,15 +124,13 @@ async fn get_conversation(
     // Get all users in this conversation.
     let users = cu_repo.list_by_conversation(conversation_id).await?;
 
-    // Get tags for this conversation via list_with_details with no filters.
-    // We already have the conversation, so build ConversationWithDetails manually.
-    // Tags are fetched as part of list_with_details, but for a single conversation
-    // we build it from the pieces we have. Tags will be empty here — the tag route
-    // handles tag management. For now, return empty tags to match the type.
+    let tag_repo = PgTagRepo::new(state.db.clone());
+    let tags = tag_repo.list_by_conversation(conversation_id).await?;
+
     let details = ConversationWithDetails {
         conversation,
         unread_count: cu.unread_count,
-        tags: vec![],
+        tags,
         users,
     };
 
