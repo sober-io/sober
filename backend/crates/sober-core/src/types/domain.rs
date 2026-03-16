@@ -8,11 +8,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    ArtifactKind, ArtifactState, JobStatus, MessageRole, UserStatus, WorkspaceState, WorktreeState,
+    ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus, MessageRole,
+    UserStatus, WorkspaceState, WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
-    MessageId, RoleId, ScopeId, SecretId, SessionId, UserId, WorkspaceId, WorkspaceRepoId,
+    MessageId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId, WorkspaceRepoId,
     WorktreeId,
 };
 
@@ -87,6 +88,10 @@ pub struct Conversation {
     pub title: Option<String>,
     /// The workspace this conversation is scoped to, if any.
     pub workspace_id: Option<WorkspaceId>,
+    /// The kind of conversation.
+    pub kind: ConversationKind,
+    /// Whether the conversation is archived.
+    pub is_archived: bool,
     /// Shell execution permission mode for this conversation.
     pub permission_mode: crate::PermissionMode,
     /// When the conversation was created.
@@ -112,8 +117,56 @@ pub struct Message {
     pub tool_result: Option<serde_json::Value>,
     /// Approximate token count for context budgeting.
     pub token_count: Option<i32>,
+    /// The user who sent this message (None for assistant/system/tool messages).
+    pub user_id: Option<UserId>,
     /// When the message was created.
     pub created_at: DateTime<Utc>,
+}
+
+/// A user's membership in a conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationUser {
+    /// The conversation.
+    pub conversation_id: ConversationId,
+    /// The user.
+    pub user_id: UserId,
+    /// Number of unread messages.
+    pub unread_count: i32,
+    /// When the user last read this conversation.
+    pub last_read_at: Option<DateTime<Utc>>,
+    /// The user's role in this conversation.
+    pub role: ConversationUserRole,
+    /// When the user joined.
+    pub joined_at: DateTime<Utc>,
+}
+
+/// A user-created tag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tag {
+    /// Unique identifier.
+    pub id: TagId,
+    /// The user who owns this tag.
+    pub user_id: UserId,
+    /// Tag display name.
+    pub name: String,
+    /// Hex color code.
+    pub color: String,
+    /// When the tag was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A conversation with additional details for list/detail views.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationWithDetails {
+    /// The base conversation.
+    #[serde(flatten)]
+    pub conversation: Conversation,
+    /// Number of unread messages for the requesting user.
+    pub unread_count: i32,
+    /// Tags applied to this conversation.
+    pub tags: Vec<Tag>,
+    /// Users in this conversation (populated for detail view, empty for list view).
+    pub users: Vec<ConversationUser>,
 }
 
 /// A per-user MCP server configuration.
@@ -434,6 +487,7 @@ mod tests {
             ),
             tool_result: None,
             token_count: Some(42),
+            user_id: None,
             created_at: Utc::now(),
         };
         let json = serde_json::to_value(&msg).unwrap();
