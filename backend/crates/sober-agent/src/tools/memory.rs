@@ -194,11 +194,14 @@ impl Tool for RecallTool {
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata {
             name: "recall".to_owned(),
-            description: "Search your memory for stored facts, preferences, code, skills, \
-                and conversation history. Use this when the user asks about something they've \
-                told you before, when you need context from past conversations, when answering \
-                questions that might depend on stored facts/preferences, or before saying \
-                \"I don't know\" — check memory first."
+            description: "Search your long-term memory for stored facts, preferences, code, \
+                skills, and conversation history. You MUST use this tool proactively:\n\
+                - At the START of every new conversation to load relevant context about the user\n\
+                - Whenever the user references something from the past\n\
+                - Before answering any question that might depend on stored knowledge\n\
+                - Before saying \"I don't know\" — always check memory first\n\
+                Your passive context only includes user preferences. All facts, skills, \
+                code snippets, and conversation history require explicit recall."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",

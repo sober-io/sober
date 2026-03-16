@@ -6,6 +6,7 @@ use sober_core::config::MemoryConfig;
 use sober_core::{Message, MessageRepo, ScopeId, UserId};
 
 use super::types::{LoadRequest, LoadedContext};
+use crate::bcf::ChunkType;
 use crate::error::MemoryError;
 use crate::store::{MemoryHit, MemoryStore, StoreQuery};
 
@@ -65,13 +66,16 @@ impl<M: MessageRepo> ContextLoader<M> {
             .message_repo
             .list_by_conversation(request.conversation_id, request.recent_message_count);
 
+        // Passive loading fetches only Preference chunks — identity-building
+        // memories that shape how the agent responds. Facts, skills, code, and
+        // conversation history are retrieved on-demand via the `recall` tool.
         let user_query = StoreQuery {
             dense_vector: request.query_vector.clone(),
             query_text: request.query_text.clone(),
             scope_id: user_scope,
             limit: request.hits_per_scope,
             score_threshold: None,
-            chunk_type_filter: None,
+            chunk_type_filter: Some(u8::from(ChunkType::Preference)),
         };
         let user_search_fut = self.store.search(request.user_id, user_query);
 
@@ -87,7 +91,7 @@ impl<M: MessageRepo> ContextLoader<M> {
             scope_id: ScopeId::GLOBAL,
             limit: request.hits_per_scope,
             score_threshold: None,
-            chunk_type_filter: None,
+            chunk_type_filter: Some(u8::from(ChunkType::Preference)),
         };
         let all_system_memories = self.store.search(request.user_id, system_query).await?;
 
