@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -112,7 +112,7 @@
 		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
-		conversations.markRead(data.conversation.id);
+		untrack(() => conversations.markRead(data.conversation.id));
 	});
 
 	// Scroll to bottom on conversation change
