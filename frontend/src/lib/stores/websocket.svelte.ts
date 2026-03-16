@@ -1,5 +1,6 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { ClientWsMessage, ServerWsMessage } from '$lib/types';
+import { conversations } from '$lib/stores/conversations.svelte';
 
 type MessageHandler = (data: ServerWsMessage) => void;
 
@@ -100,6 +101,11 @@ export const websocket = (() => {
 		socket.onmessage = (e) => {
 			const msg: ServerWsMessage = JSON.parse(e.data);
 			if (!('conversation_id' in msg)) return;
+			// Handle global conversation-level events before per-conversation routing.
+			if (msg.type === 'chat.unread') {
+				conversations.updateUnread(msg.conversation_id, msg.unread_count);
+				return;
+			}
 			const handler = handlers.get(msg.conversation_id);
 			if (handler) handler(msg);
 		};

@@ -125,6 +125,7 @@ export type ServerWsMessage =
 			affects: string[];
 			reason: string;
 	  }
+	| { type: 'chat.unread'; conversation_id: string; unread_count: number }
 	| { type: 'pong' };
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
