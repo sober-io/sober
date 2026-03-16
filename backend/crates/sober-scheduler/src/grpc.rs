@@ -208,6 +208,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static>
                 &req.statuses,
                 workspace_id,
                 name_filter,
+                None,
             )
             .await
             .map_err(app_error_to_status)?;

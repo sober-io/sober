@@ -1,9 +1,11 @@
 <script lang="ts">
-	import type { ToolCall } from '$lib/types';
+	import type { Tag, ToolCall } from '$lib/types';
 	import { renderMarkdown } from '$lib/utils/markdown';
 	import StreamingText from './StreamingText.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
+	import MessageActionBar from './MessageActionBar.svelte';
+	import MessageTagPopover from './MessageTagPopover.svelte';
 
 	interface Props {
 		role: 'user' | 'assistant' | 'system';
@@ -15,6 +17,9 @@
 		timestamp?: string;
 		source?: string;
 		ephemeral?: boolean;
+		messageId?: string;
+		tags?: Tag[];
+		onTagsChange?: (tags: Tag[]) => void;
 		onDelete?: () => void;
 	}
 
@@ -28,6 +33,9 @@
 		timestamp,
 		source,
 		ephemeral = false,
+		messageId,
+		tags,
+		onTagsChange,
 		onDelete
 	}: Props = $props();
 
@@ -37,10 +45,23 @@
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
 	const canDelete = $derived(isUser && !!onDelete && !streaming && !ephemeral);
+	const canShowActions = $derived(!streaming && !ephemeral && !thinking);
+	const hasTags = $derived(tags && tags.length > 0);
+
+	let showTagPopover = $state(false);
+	let showAllTags = $state(false);
+
+	const visibleTags = $derived.by(() => {
+		if (!tags || tags.length === 0) return [];
+		if (showAllTags || tags.length < 3) return tags;
+		return tags.slice(0, 2);
+	});
+
+	const hiddenTagCount = $derived(tags && tags.length >= 3 && !showAllTags ? tags.length - 2 : 0);
 </script>
 
 <div class={['flex', isUser ? 'justify-end' : 'justify-start', ephemeral && 'opacity-75']}>
-	<div class={['group flex max-w-[80%] flex-col', isUser ? 'items-end' : 'items-start']}>
+	<div class={['group relative flex max-w-[80%] flex-col', isUser ? 'items-end' : 'items-start']}>
 		{#if sourceLabel}
 			<span
 				class="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500"
@@ -106,19 +127,56 @@
 				{/each}
 			{/if}
 		</div>
+
+		{#if hasTags}
+			<div class={['mt-1 flex flex-wrap gap-1', isUser ? 'justify-end' : 'justify-start']}>
+				{#each visibleTags as tag (tag.id)}
+					<span
+						class="inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium"
+						style="background-color: color-mix(in srgb, {tag.color} 15%, transparent); color: {tag.color}; border: 1px solid color-mix(in srgb, {tag.color} 30%, transparent);"
+					>
+						{tag.name}
+					</span>
+				{/each}
+				{#if hiddenTagCount > 0}
+					<button
+						onclick={() => (showAllTags = true)}
+						class="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-1.5 py-0 text-[10px] font-medium text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+					>
+						+{hiddenTagCount} more
+					</button>
+				{/if}
+			</div>
+		{/if}
+
+		{#if canShowActions}
+			<div
+				class={[
+					'absolute -top-3 opacity-0 transition-opacity group-hover:opacity-100',
+					isUser ? 'right-0' : 'left-0'
+				]}
+			>
+				<MessageActionBar
+					onTag={() => (showTagPopover = !showTagPopover)}
+					onDelete={canDelete ? onDelete : undefined}
+				/>
+			</div>
+		{/if}
+
+		{#if showTagPopover && messageId && onTagsChange}
+			<div class={['absolute top-6 z-50', isUser ? 'right-0' : 'left-0']}>
+				<MessageTagPopover
+					{messageId}
+					tags={tags ?? []}
+					{onTagsChange}
+					onClose={() => (showTagPopover = false)}
+				/>
+			</div>
+		{/if}
+
 		<div class="flex items-center gap-2">
 			{#if timestamp}
 				<span class="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-400">{timestamp}</span>
-			{/if}
-			{#if canDelete}
-				<button
-					onclick={onDelete}
-					class="mt-0.5 text-[10px] text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 dark:text-zinc-600 dark:hover:text-red-500"
-					title="Delete message"
-					aria-label="Delete message"
-				>
-					Delete
-				</button>
 			{/if}
 		</div>
 	</div>

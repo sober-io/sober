@@ -1,7 +1,9 @@
 import { api } from '$lib/utils/api';
-import type { PermissionMode, WorkspaceSettings } from '$lib/types';
+import type { PermissionMode, Workspace, WorkspaceSettings } from '$lib/types';
 
 export const workspaceService = {
+	list: () => api<Workspace[]>('/workspaces'),
+
 	getSettings: (workspaceId: string) =>
 		api<WorkspaceSettings>(`/workspaces/${workspaceId}/settings`),
 

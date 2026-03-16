@@ -2,6 +2,7 @@
 	import type { Conversation } from '$lib/types';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { formatRelativeTime } from '$lib/utils/time';
 
 	interface Props {
 		data: { conversations: Conversation[]; inbox: Conversation };
@@ -23,21 +24,6 @@
 			.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 			.slice(0, 20)
 	);
-
-	function formatRelativeTime(dateStr: string): string {
-		const date = new Date(dateStr);
-		const now = new Date();
-		const diffMs = now.getTime() - date.getTime();
-		const diffMins = Math.floor(diffMs / 60_000);
-		const diffHours = Math.floor(diffMins / 60);
-		const diffDays = Math.floor(diffHours / 24);
-
-		if (diffMins < 1) return 'just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		if (diffDays < 7) return `${diffDays}d ago`;
-		return date.toLocaleDateString();
-	}
 
 	async function createConversation() {
 		const { conversationService } = await import('$lib/services/conversations');

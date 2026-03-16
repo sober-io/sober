@@ -389,6 +389,25 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(())
     }
+
+    async fn update_workspace(
+        &self,
+        id: ConversationId,
+        workspace_id: Option<WorkspaceId>,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query("UPDATE conversations SET workspace_id = $2 WHERE id = $1")
+            .bind(id.as_uuid())
+            .bind(workspace_id.map(|w| *w.as_uuid()))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
 }
 
 /// Helper row type for the tag + conversation_id join.

@@ -45,5 +45,11 @@ export const conversationService = {
 		return api<Message[]>(`/conversations/${id}/messages?${params}`);
 	},
 
-	deleteMessage: (id: string) => api<{ deleted: boolean }>(`/messages/${id}`, { method: 'DELETE' })
+	deleteMessage: (id: string) => api<{ deleted: boolean }>(`/messages/${id}`, { method: 'DELETE' }),
+
+	updateWorkspace: (id: string, workspaceId: string | null) =>
+		api(`/conversations/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ workspace_id: workspaceId })
+		})
 };

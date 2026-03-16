@@ -130,9 +130,25 @@ export type ServerWsMessage =
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
 
+export interface Workspace {
+	id: string;
+	name: string;
+	path: string;
+	created_at: string;
+}
+
 export interface WorkspaceSettings {
 	permission_mode: PermissionMode;
 	auto_snapshot: boolean;
+}
+
+export interface Job {
+	id: string;
+	name: string;
+	schedule: string;
+	status: 'active' | 'paused' | 'cancelled' | 'running';
+	next_run_at: string;
+	last_run_at: string | null;
 }
 
 // API response envelope types

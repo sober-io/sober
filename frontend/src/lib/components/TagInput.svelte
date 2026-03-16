@@ -9,6 +9,10 @@
 	}
 
 	let { tags, onAdd, onRemove }: Props = $props();
+
+	/** Delay before hiding suggestions on blur, allowing click events to fire first. */
+	const BLUR_DELAY_MS = 150;
+
 	let input = $state('');
 	let showInput = $state(false);
 	let allTags = $state<Tag[]>([]);
@@ -57,7 +61,7 @@
 		// Delay so click on suggestion fires first
 		setTimeout(() => {
 			showSuggestions = false;
-		}, 150);
+		}, BLUR_DELAY_MS);
 	}
 
 	// Focus input when it becomes visible

@@ -63,7 +63,7 @@ fn system_jobs() -> Vec<SystemJobDef> {
 pub async fn register_system_jobs<J: JobRepo>(job_repo: &J) -> Result<(), AppError> {
     // Fetch existing system jobs to check for duplicates.
     let existing = job_repo
-        .list_filtered(Some("system"), None, &[], None, None)
+        .list_filtered(Some("system"), None, &[], None, None, None)
         .await?;
 
     for def in system_jobs() {

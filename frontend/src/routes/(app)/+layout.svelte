@@ -7,6 +7,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import { formatRelativeTime } from '$lib/utils/time';
 
 	interface Props {
 		children: Snippet;
@@ -95,17 +96,6 @@
 		} catch {
 			// Silently ignore errors for now
 		}
-	};
-
-	const timeAgo = (dateStr: string): string => {
-		const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-		if (seconds < 60) return 'just now';
-		const minutes = Math.floor(seconds / 60);
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		if (hours < 24) return `${hours}h ago`;
-		const days = Math.floor(hours / 24);
-		return `${days}d ago`;
 	};
 </script>
 
@@ -253,7 +243,7 @@
 								<!-- Bottom row: time + tag pills -->
 								<div class="mt-0.5 flex items-center gap-1">
 									<span class="text-xs text-zinc-400 dark:text-zinc-500">
-										{timeAgo(conv.updated_at)}
+										{formatRelativeTime(conv.updated_at)}
 									</span>
 									{#if conv.tags.length > 0}
 										<span class="ml-1 flex items-center gap-1">

@@ -165,6 +165,7 @@ impl sober_core::types::JobRepo for PgJobRepo {
         statuses: &[String],
         workspace_id: Option<uuid::Uuid>,
         name_filter: Option<&str>,
+        conversation_id: Option<uuid::Uuid>,
     ) -> Result<Vec<Job>, AppError> {
         // Build dynamic WHERE clause with correct parameter numbering
         let mut conditions = Vec::new();
@@ -195,6 +196,10 @@ impl sober_core::types::JobRepo for PgJobRepo {
         }
         if name_filter.is_some() {
             conditions.push(format!("name = ${param_idx}"));
+            param_idx += 1;
+        }
+        if conversation_id.is_some() {
+            conditions.push(format!("conversation_id = ${param_idx}"));
         }
 
         let where_clause = if conditions.is_empty() {
@@ -221,6 +226,9 @@ impl sober_core::types::JobRepo for PgJobRepo {
         }
         if let Some(name) = name_filter {
             q = q.bind(name.to_owned());
+        }
+        if let Some(conv) = conversation_id {
+            q = q.bind(conv);
         }
 
         let rows = q

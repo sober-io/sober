@@ -1,6 +1,6 @@
 {
 	"name": "sober-frontend",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"private": true,
 	"packageManager": "pnpm@10.30.3",
 	"scripts": {
@@ -38,6 +38,7 @@
 	},
 	"type": "module",
 	"dependencies": {
+		"dayjs": "^1.11.20",
 		"marked": "^17.0.4"
 	}
 }

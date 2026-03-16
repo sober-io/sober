@@ -162,6 +162,13 @@ pub trait ConversationRepo: Send + Sync {
         id: ConversationId,
         archived: bool,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Links or unlinks a workspace from a conversation.
+    fn update_workspace(
+        &self,
+        id: ConversationId,
+        workspace_id: Option<WorkspaceId>,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
@@ -340,6 +347,7 @@ pub trait JobRepo: Send + Sync {
         statuses: &[String],
         workspace_id: Option<uuid::Uuid>,
         name_filter: Option<&str>,
+        conversation_id: Option<uuid::Uuid>,
     ) -> impl Future<Output = Result<Vec<Job>, AppError>> + Send;
 }
 
