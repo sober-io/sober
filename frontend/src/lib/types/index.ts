@@ -135,6 +135,15 @@ export interface WorkspaceSettings {
 	auto_snapshot: boolean;
 }
 
+export interface Job {
+	id: string;
+	name: string;
+	schedule: string;
+	status: 'active' | 'paused' | 'cancelled' | 'running';
+	next_run_at: string;
+	last_run_at: string | null;
+}
+
 // API response envelope types
 
 export interface ApiData<T> {
