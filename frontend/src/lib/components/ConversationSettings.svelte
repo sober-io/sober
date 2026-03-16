@@ -171,13 +171,15 @@
 	}
 
 	async function handleAddMember(username: string) {
-		if (conversation.kind === 'direct') {
+		if (kind === 'direct') {
 			confirmConvertPending = username;
 			return;
 		}
 		try {
 			const member = await conversationService.addMember(conversation.id, username);
-			members = [...members, member];
+			if (!members.some((m) => m.user_id === member.user_id)) {
+				members = [...members, member];
+			}
 		} catch {
 			// Could show error toast in the future
 		}
@@ -195,7 +197,9 @@
 			conversations.update(conversation.id, { kind: 'group', title });
 
 			const member = await conversationService.addMember(conversation.id, username);
-			members = [...members, member];
+			if (!members.some((m) => m.user_id === member.user_id)) {
+				members = [...members, member];
+			}
 		} catch {
 			// Could show error toast in the future
 		}
