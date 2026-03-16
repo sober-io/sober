@@ -33,8 +33,6 @@ pub fn parse_extraction_type(s: &str) -> Option<ChunkType> {
         "preference" => Some(ChunkType::Preference),
         "skill" => Some(ChunkType::Skill),
         "code" => Some(ChunkType::Code),
-        "conversation" => Some(ChunkType::Conversation),
-        "soul" => Some(ChunkType::Soul),
         _ => None,
     }
 }
@@ -153,6 +151,8 @@ mod tests {
         assert_eq!(parse_extraction_type("skill"), Some(ChunkType::Skill));
         assert_eq!(parse_extraction_type("code"), Some(ChunkType::Code));
         assert_eq!(parse_extraction_type("unknown"), None);
+        assert_eq!(parse_extraction_type("conversation"), None);
+        assert_eq!(parse_extraction_type("soul"), None);
     }
 
     #[test]
