@@ -22,8 +22,8 @@ fn color_for_name(name: &str) -> String {
     });
     let hue = BASE_HUES[(hash as usize) % BASE_HUES.len()];
     // Use different bits of the hash for saturation and lightness variation.
-    let sat = 65 + ((hash >> 8) % 21); // 65–85
-    let lit = 45 + ((hash >> 16) % 16); // 45–60
+    let sat = 50 + ((hash >> 8) % 41); // 50–90
+    let lit = 35 + ((hash >> 16) % 31); // 35–65
     format!("hsl({hue}, {sat}%, {lit}%)")
 }
 
