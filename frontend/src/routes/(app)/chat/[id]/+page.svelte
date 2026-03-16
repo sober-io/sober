@@ -98,6 +98,7 @@
 	let showClearConfirm = $state(false);
 	let showDeleteConversationConfirm = $state(false);
 	let settingsOpen = $state(false);
+	let messageTags = $state<Record<string, Tag[]>>({});
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -114,6 +115,7 @@
 		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
+		messageTags = {};
 		untrack(() => conversations.markRead(data.conversation.id));
 	});
 
@@ -594,6 +596,11 @@
 					timestamp={msg.timestamp}
 					source={msg.source}
 					ephemeral={msg.ephemeral}
+					messageId={msg.id}
+					tags={messageTags[msg.id] ?? []}
+					onTagsChange={(newTags) => {
+						messageTags[msg.id] = newTags;
+					}}
 					onDelete={msg.role === 'user' && !msg.ephemeral
 						? () => {
 								deleteTarget = msg.id;
