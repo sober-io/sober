@@ -31,6 +31,6 @@
 <div
 	class="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-xs"
 >
-	<PermissionModeSelector {mode} {onModeChange} />
+	<PermissionModeSelector {mode} {onModeChange} compact />
 	<span class="text-zinc-600">Ctrl+Shift+P</span>
 </div>
