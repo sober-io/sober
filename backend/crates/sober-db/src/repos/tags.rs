@@ -9,17 +9,22 @@ use uuid::Uuid;
 
 use crate::rows::TagRow;
 
-/// Curated palette — all have good contrast on both light and dark backgrounds.
-const TAG_COLORS: &[&str] = &[
-    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
-];
+/// Base hues (degrees) for the tag color palette.
+const BASE_HUES: &[u16] = &[0, 25, 45, 145, 190, 220, 260, 330];
 
-/// Deterministic color assignment based on tag name.
-fn color_for_name(name: &str) -> &'static str {
+/// Generates a deterministic HSL color from a tag name.
+///
+/// The name hash selects a base hue, then varies saturation (65-85%)
+/// and lightness (45-60%) so tags sharing a hue bucket still look distinct.
+fn color_for_name(name: &str) -> String {
     let hash = name.bytes().fold(0u32, |acc, b| {
         acc.wrapping_mul(31).wrapping_add(u32::from(b))
     });
-    TAG_COLORS[(hash as usize) % TAG_COLORS.len()]
+    let hue = BASE_HUES[(hash as usize) % BASE_HUES.len()];
+    // Use different bits of the hash for saturation and lightness variation.
+    let sat = 65 + ((hash >> 8) % 21); // 65–85
+    let lit = 45 + ((hash >> 16) % 16); // 45–60
+    format!("hsl({hue}, {sat}%, {lit}%)")
 }
 
 /// PostgreSQL-backed tag repository.
