@@ -7,26 +7,45 @@ export interface User {
 	status: string;
 }
 
+export type ConversationKind = 'direct' | 'group' | 'inbox';
+export type ConversationUserRole = 'owner' | 'member';
+
+export interface Tag {
+	id: string;
+	name: string;
+	color: string;
+	created_at: string;
+}
+
+export interface ConversationUser {
+	conversation_id: string;
+	user_id: string;
+	unread_count: number;
+	role: ConversationUserRole;
+	joined_at: string;
+}
+
 export interface Conversation {
 	id: string;
-	title: string;
+	title: string | null;
 	workspace_id?: string;
+	kind: ConversationKind;
+	is_archived: boolean;
 	permission_mode: PermissionMode;
+	unread_count: number;
+	tags: Tag[];
 	created_at: string;
 	updated_at: string;
 }
 
-export interface ConversationWithMessages extends Conversation {
-	messages: Message[];
-}
-
 export interface Message {
 	id: string;
-	role: 'User' | 'Assistant' | 'System';
+	role: 'User' | 'Assistant' | 'System' | 'Tool';
 	content: string;
 	tool_calls?: unknown;
 	tool_result?: unknown;
 	token_count: number;
+	user_id?: string;
 	created_at: string;
 }
 

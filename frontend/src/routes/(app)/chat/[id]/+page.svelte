@@ -4,7 +4,7 @@
 	import type {
 		ToolCall,
 		ServerWsMessage,
-		ConversationWithMessages,
+		Conversation,
 		Message,
 		ConfirmRequest,
 		PermissionMode
@@ -36,7 +36,8 @@
 	}
 
 	interface PageData {
-		conversation: ConversationWithMessages;
+		conversation: Conversation;
+		messages: Message[];
 	}
 
 	type AssistantPhase = 'idle' | 'thinking' | 'streaming';
@@ -55,7 +56,7 @@
 
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role,
+		role: m.role === 'Tool' ? 'System' : m.role,
 		content: m.content,
 		thinkingContent: '',
 		toolCalls: undefined,
@@ -64,7 +65,7 @@
 		timestamp: fmtTime(m.created_at)
 	});
 
-	const initialMessages = $derived(data.conversation.messages.map(toChat));
+	const initialMessages = $derived(data.messages.map(toChat));
 	let messages = $state<ChatMsg[]>([]);
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
