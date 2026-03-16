@@ -11,9 +11,9 @@ use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
     ApiResponse, ConversationId, ConversationKind, ConversationRepo, ConversationUserRepo,
-    ConversationWithDetails, ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
+    ConversationWithDetails, JobRepo, ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
 };
-use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgTagRepo};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
@@ -33,6 +33,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/conversations/{id}/read", post(mark_read))
         .route("/conversations/{id}/messages", delete(clear_messages))
+        .route("/conversations/{id}/jobs", get(list_conversation_jobs))
 }
 
 /// Query parameters for `GET /conversations`.
@@ -143,6 +144,8 @@ struct UpdateConversationRequest {
     title: Option<String>,
     permission_mode: Option<PermissionMode>,
     archived: Option<bool>,
+    #[serde(default)]
+    workspace_id: Option<Option<String>>,
 }
 
 /// `PATCH /api/v1/conversations/:id` — update conversation fields.
@@ -169,6 +172,16 @@ async fn update_conversation(
     }
     if let Some(archived) = body.archived {
         repo.update_archived(conversation_id, archived).await?;
+    }
+    if let Some(ws_id) = body.workspace_id {
+        let workspace_id = ws_id
+            .map(|s| {
+                s.parse::<uuid::Uuid>()
+                    .map(WorkspaceId::from_uuid)
+                    .map_err(|_| AppError::Validation("invalid workspace_id".into()))
+            })
+            .transpose()?;
+        repo.update_workspace(conversation_id, workspace_id).await?;
     }
 
     // Re-fetch to return current state.
@@ -235,6 +248,25 @@ async fn mark_read(
         .await?;
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
+}
+
+/// `GET /api/v1/conversations/:id/jobs` — list jobs linked to a conversation.
+async fn list_conversation_jobs(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let conv_repo = PgConversationRepo::new(state.db.clone());
+    let conversation_id = ConversationId::from_uuid(id);
+    let conv = conv_repo.get_by_id(conversation_id).await?;
+    if conv.user_id != auth_user.user_id {
+        return Err(AppError::NotFound("conversation not found".into()));
+    }
+    let job_repo = PgJobRepo::new(state.db.clone());
+    let jobs = job_repo
+        .list_filtered(None, None, &[], None, None, Some(id))
+        .await?;
+    Ok(ApiResponse::new(jobs))
 }
 
 /// `DELETE /api/v1/conversations/:id/messages` — clear all messages in a conversation.
