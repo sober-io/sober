@@ -171,6 +171,8 @@ async fn create_conversation(
         "agent_mode": conversation.agent_mode,
         "is_archived": conversation.is_archived,
         "permission_mode": conversation.permission_mode.as_str(),
+        "unread_count": 0,
+        "tags": [],
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
