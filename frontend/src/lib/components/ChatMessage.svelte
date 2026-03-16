@@ -6,7 +6,7 @@
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 
 	interface Props {
-		role: 'User' | 'Assistant' | 'System';
+		role: 'user' | 'assistant' | 'system';
 		content: string;
 		thinkingContent?: string;
 		toolCalls?: ToolCall[];
@@ -14,6 +14,8 @@
 		thinking?: boolean;
 		timestamp?: string;
 		source?: string;
+		ephemeral?: boolean;
+		onDelete?: () => void;
 	}
 
 	let {
@@ -24,18 +26,21 @@
 		streaming = false,
 		thinking = false,
 		timestamp,
-		source
+		source,
+		ephemeral = false,
+		onDelete
 	}: Props = $props();
 
-	const isUser = $derived(role === 'User');
+	const isUser = $derived(role === 'user');
 	const hasToolCalls = $derived(toolCalls && toolCalls.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
+	const canDelete = $derived(isUser && !!onDelete && !streaming && !ephemeral);
 </script>
 
-<div class={['flex', isUser ? 'justify-end' : 'justify-start']}>
-	<div class={['flex max-w-[80%] flex-col', isUser ? 'items-end' : 'items-start']}>
+<div class={['flex', isUser ? 'justify-end' : 'justify-start', ephemeral && 'opacity-75']}>
+	<div class={['group flex max-w-[80%] flex-col', isUser ? 'items-end' : 'items-start']}>
 		{#if sourceLabel}
 			<span
 				class="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500"
@@ -101,8 +106,20 @@
 				{/each}
 			{/if}
 		</div>
-		{#if timestamp}
-			<span class="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-400">{timestamp}</span>
-		{/if}
+		<div class="flex items-center gap-2">
+			{#if timestamp}
+				<span class="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-400">{timestamp}</span>
+			{/if}
+			{#if canDelete}
+				<button
+					onclick={onDelete}
+					class="mt-0.5 text-[10px] text-zinc-300 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 dark:text-zinc-600 dark:hover:text-red-500"
+					title="Delete message"
+					aria-label="Delete message"
+				>
+					Delete
+				</button>
+			{/if}
+		</div>
 	</div>
 </div>

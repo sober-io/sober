@@ -79,6 +79,42 @@ pub enum MessageRole {
     Tool,
 }
 
+/// The kind/type of a conversation.
+///
+/// Maps to the `conversation_kind` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "conversation_kind", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationKind {
+    /// A one-on-one conversation between user and agent.
+    Direct,
+    /// A multi-user conversation (future).
+    Group,
+    /// The user's permanent catch-all inbox.
+    Inbox,
+}
+
+/// The role a user holds in a conversation.
+///
+/// Maps to the `user_role` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "user_role", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationUserRole {
+    /// Conversation creator/owner.
+    Owner,
+    /// Regular participant.
+    Member,
+}
+
 /// Lifecycle state of a scheduled job.
 ///
 /// Maps to the `job_status` PostgreSQL enum.
@@ -276,6 +312,28 @@ impl<'de> Deserialize<'de> for RoleKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_kind_serde_roundtrip() {
+        for variant in [
+            ConversationKind::Direct,
+            ConversationKind::Group,
+            ConversationKind::Inbox,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ConversationKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn conversation_user_role_serde_roundtrip() {
+        for variant in [ConversationUserRole::Owner, ConversationUserRole::Member] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ConversationUserRole = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
 
     #[test]
     fn scope_kind_serde_roundtrip() {

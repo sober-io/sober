@@ -274,7 +274,6 @@ async fn conversation_crud(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["data"]["title"], "Test Chat");
-    assert!(body["data"]["messages"].as_array().unwrap().is_empty());
 
     // Update title.
     let response = app

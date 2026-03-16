@@ -9,7 +9,9 @@
 use chrono::{DateTime, Utc};
 
 use super::domain::*;
-use super::enums::{ArtifactRelation, ArtifactState, JobStatus, RoleKind, UserStatus};
+use super::enums::{
+    ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind, UserStatus,
+};
 use super::ids::*;
 use super::input::*;
 use crate::error::AppError;
@@ -134,6 +136,32 @@ pub trait ConversationRepo: Send + Sync {
         user_id: UserId,
         workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<Option<Conversation>, AppError>> + Send;
+
+    /// Lists conversations for a user with filters, including unread counts and tags.
+    fn list_with_details(
+        &self,
+        user_id: UserId,
+        filter: ListConversationsFilter,
+    ) -> impl Future<Output = Result<Vec<ConversationWithDetails>, AppError>> + Send;
+
+    /// Gets the user's inbox conversation.
+    fn get_inbox(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
+
+    /// Creates an inbox conversation for a user.
+    fn create_inbox(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
+
+    /// Updates the archived status of a conversation.
+    fn update_archived(
+        &self,
+        id: ConversationId,
+        archived: bool,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
@@ -150,6 +178,117 @@ pub trait MessageRepo: Send + Sync {
         conversation_id: ConversationId,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<Message>, AppError>> + Send;
+
+    /// Lists messages with cursor-based pagination (newest first before cursor).
+    fn list_paginated(
+        &self,
+        conversation_id: ConversationId,
+        before: Option<MessageId>,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<Message>, AppError>> + Send;
+
+    /// Deletes a single message by ID.
+    fn delete(&self, id: MessageId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes all messages in a conversation.
+    fn clear_conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Gets a single message by ID.
+    fn get_by_id(&self, id: MessageId) -> impl Future<Output = Result<Message, AppError>> + Send;
+}
+
+/// Conversation membership and unread tracking operations.
+pub trait ConversationUserRepo: Send + Sync {
+    /// Creates a membership row (e.g., when a conversation is created).
+    fn create(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> impl Future<Output = Result<ConversationUser, AppError>> + Send;
+
+    /// Marks a conversation as read for a user (resets unread_count to 0).
+    fn mark_read(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Increments unread_count for all users in a conversation except the sender.
+    fn increment_unread(
+        &self,
+        conversation_id: ConversationId,
+        exclude_user_id: UserId,
+    ) -> impl Future<Output = Result<Vec<(UserId, i32)>, AppError>> + Send;
+
+    /// Gets the membership row for a user in a conversation.
+    fn get(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<ConversationUser, AppError>> + Send;
+
+    /// Lists all users in a conversation.
+    fn list_by_conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ConversationUser>, AppError>> + Send;
+
+    /// Resets unread_count to 0 for ALL users in a conversation (used by /clear).
+    fn reset_all_unread(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Tag operations.
+pub trait TagRepo: Send + Sync {
+    /// Creates a tag (idempotent — returns existing if name matches).
+    fn create_or_get(&self, input: CreateTag)
+    -> impl Future<Output = Result<Tag, AppError>> + Send;
+
+    /// Lists all tags for a user.
+    fn list_by_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Vec<Tag>, AppError>> + Send;
+
+    /// Adds a tag to a conversation.
+    fn tag_conversation(
+        &self,
+        conversation_id: ConversationId,
+        tag_id: TagId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Removes a tag from a conversation.
+    fn untag_conversation(
+        &self,
+        conversation_id: ConversationId,
+        tag_id: TagId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Adds a tag to a message.
+    fn tag_message(
+        &self,
+        message_id: MessageId,
+        tag_id: TagId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Removes a tag from a message.
+    fn untag_message(
+        &self,
+        message_id: MessageId,
+        tag_id: TagId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists tags for a conversation.
+    fn list_by_conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<Tag>, AppError>> + Send;
 }
 
 /// Scheduled job operations.

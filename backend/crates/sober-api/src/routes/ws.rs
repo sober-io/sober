@@ -17,6 +17,8 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
+use sober_core::types::ConversationId;
+use sober_db::PgConversationUserRepo;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -158,6 +160,14 @@ pub enum ServerWsMessage {
         /// What produced this message.
         source: sober_core::types::access::TriggerKind,
     },
+    /// Unread count changed for a conversation.
+    #[serde(rename = "chat.unread")]
+    ChatUnread {
+        /// Conversation with unread messages.
+        conversation_id: String,
+        /// New unread count.
+        unread_count: i32,
+    },
     /// Keepalive response.
     #[serde(rename = "pong")]
     Pong,
@@ -172,6 +182,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
     // Channel for sending messages back to the client from the connection registry.
     let (out_tx, mut out_rx) = mpsc::channel::<ServerWsMessage>(64);
+
+    // Register the user's connection for cross-conversation events (unread notifications).
+    state
+        .user_connections
+        .register(&user_id.to_string(), out_tx.clone())
+        .await;
 
     // Track which conversations this connection is registered for.
     let mut registered_conversations: HashSet<String> = HashSet::new();
@@ -231,6 +247,16 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .connections
                         .register(conversation_id.clone(), out_tx.clone())
                         .await;
+                }
+
+                // Mark conversation as read for this user (best-effort).
+                if let Ok(conv_id) = conversation_id
+                    .parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                {
+                    let cu_repo = PgConversationUserRepo::new(state.db.clone());
+                    use sober_core::types::ConversationUserRepo;
+                    cu_repo.mark_read(conv_id, auth_user.user_id).await.ok();
                 }
             }
             ClientWsMessage::ChatMessage {
@@ -303,6 +329,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
     for conv_id in &registered_conversations {
         state.connections.unregister(conv_id).await;
     }
+
+    // Unregister user-level connection.
+    state
+        .user_connections
+        .unregister(&user_id.to_string())
+        .await;
 
     send_task.abort();
     info!(user_id = %user_id, "WebSocket disconnected");

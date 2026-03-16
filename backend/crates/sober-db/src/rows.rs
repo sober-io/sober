@@ -5,14 +5,15 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::types::{
-    Artifact, AuditLogEntry, Conversation, Job, JobRun, McpServerConfig, Message, Role,
-    SecretMetadata, SecretRow, Session, StoredDek, User, UserRole, Workspace, WorkspaceRepoEntry,
-    Worktree,
+    Artifact, AuditLogEntry, Conversation, ConversationUser, Job, JobRun, McpServerConfig, Message,
+    Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace,
+    WorkspaceRepoEntry, Worktree,
 };
 use sober_core::types::{
-    ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, EncryptionKeyId, JobId,
-    JobRunId, JobStatus, McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId,
-    UserId, UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId, ConversationKind,
+    ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, McpServerId, MessageId,
+    MessageRole, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId,
+    WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use uuid::Uuid;
 
@@ -108,6 +109,8 @@ pub(crate) struct ConversationRow {
     pub user_id: Uuid,
     pub title: Option<String>,
     pub workspace_id: Option<Uuid>,
+    pub kind: ConversationKind,
+    pub is_archived: bool,
     pub permission_mode: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -126,6 +129,8 @@ impl From<ConversationRow> for Conversation {
             user_id: UserId::from_uuid(row.user_id),
             title: row.title,
             workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
+            kind: row.kind,
+            is_archived: row.is_archived,
             permission_mode,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -142,6 +147,7 @@ pub(crate) struct MessageRow {
     pub tool_calls: Option<serde_json::Value>,
     pub tool_result: Option<serde_json::Value>,
     pub token_count: Option<i32>,
+    pub user_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -155,6 +161,7 @@ impl From<MessageRow> for Message {
             tool_calls: row.tool_calls,
             tool_result: row.tool_result,
             token_count: row.token_count,
+            user_id: row.user_id.map(UserId::from_uuid),
             created_at: row.created_at,
         }
     }
@@ -497,6 +504,67 @@ impl From<UserSecretRow> for SecretRow {
             updated_at: row.updated_at,
         }
     }
+}
+
+/// Row type for the conversation_users table.
+#[derive(sqlx::FromRow)]
+pub(crate) struct ConversationUserRow {
+    pub conversation_id: Uuid,
+    pub user_id: Uuid,
+    pub unread_count: i32,
+    pub last_read_at: Option<DateTime<Utc>>,
+    pub role: ConversationUserRole,
+    pub joined_at: DateTime<Utc>,
+}
+
+impl From<ConversationUserRow> for ConversationUser {
+    fn from(row: ConversationUserRow) -> Self {
+        ConversationUser {
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            user_id: UserId::from_uuid(row.user_id),
+            unread_count: row.unread_count,
+            last_read_at: row.last_read_at,
+            role: row.role,
+            joined_at: row.joined_at,
+        }
+    }
+}
+
+/// Row type for the tags table.
+#[derive(sqlx::FromRow)]
+pub(crate) struct TagRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub color: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<TagRow> for Tag {
+    fn from(row: TagRow) -> Self {
+        Tag {
+            id: TagId::from_uuid(row.id),
+            user_id: UserId::from_uuid(row.user_id),
+            name: row.name,
+            color: row.color,
+            created_at: row.created_at,
+        }
+    }
+}
+
+/// Row type for the conversation + unread_count join used by `list_with_details`.
+#[derive(sqlx::FromRow)]
+pub(crate) struct ConversationWithUnreadRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub title: Option<String>,
+    pub workspace_id: Option<Uuid>,
+    pub kind: ConversationKind,
+    pub is_archived: bool,
+    pub permission_mode: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub unread_count: i32,
 }
 
 #[cfg(test)]

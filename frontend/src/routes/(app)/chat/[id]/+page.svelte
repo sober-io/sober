@@ -1,26 +1,32 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import type {
 		ToolCall,
 		ServerWsMessage,
-		ConversationWithMessages,
+		Conversation,
 		Message,
 		ConfirmRequest,
-		PermissionMode
+		PermissionMode,
+		Tag
 	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { conversationService } from '$lib/services/conversations';
+	import { tagService } from '$lib/services/tags';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
 	import ConfirmationCard from '$lib/components/chat/ConfirmationCard.svelte';
 	import StatusBar from '$lib/components/chat/StatusBar.svelte';
+	import TagInput from '$lib/components/TagInput.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	interface ChatMsg {
 		id: string;
-		role: 'User' | 'Assistant' | 'System';
+		role: 'user' | 'assistant' | 'system';
 		content: string;
 		thinkingContent: string;
 		toolCalls?: ToolCall[];
@@ -28,6 +34,7 @@
 		thinking: boolean;
 		timestamp: string;
 		source?: string;
+		ephemeral?: boolean;
 	}
 
 	interface QueuedMessage {
@@ -36,12 +43,15 @@
 	}
 
 	interface PageData {
-		conversation: ConversationWithMessages;
+		conversation: Conversation;
+		messages: Message[];
 	}
 
 	type AssistantPhase = 'idle' | 'thinking' | 'streaming';
 
 	let { data }: { data: PageData } = $props();
+
+	const PAGE_SIZE = 50;
 
 	const fmtTime = (iso?: string) => {
 		const d = iso ? new Date(iso) : new Date();
@@ -55,7 +65,7 @@
 
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role,
+		role: m.role === 'tool' ? 'system' : m.role,
 		content: m.content,
 		thinkingContent: '',
 		toolCalls: undefined,
@@ -64,8 +74,10 @@
 		timestamp: fmtTime(m.created_at)
 	});
 
-	const initialMessages = $derived(data.conversation.messages.map(toChat));
 	let messages = $state<ChatMsg[]>([]);
+	let loadingMore = $state(false);
+	let allLoaded = $state(data.messages.length < PAGE_SIZE);
+	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
 
@@ -76,24 +88,31 @@
 	let isAtBottom = $state(true);
 	let messagesContainer: HTMLDivElement | undefined = $state();
 	let title = $state(data.conversation.title || '');
+	let tags = $state<Tag[]>(data.conversation.tags ?? []);
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let permissionMode = $state<PermissionMode>('policy_based');
+	let deleteTarget = $state<string | null>(null);
+	let showClearConfirm = $state(false);
+	let showDeleteConversationConfirm = $state(false);
 
 	const conversationId = $derived($page.params.id ?? '');
 
 	// Reset state when conversation changes
 	$effect(() => {
 		void conversationId;
-		messages = initialMessages;
+		messages = data.messages.map(toChat);
+		allLoaded = data.messages.length < PAGE_SIZE;
 		assistantPhase = 'idle';
 		messageQueue = [];
 		editingQueueId = null;
 		isAtBottom = true;
 		title = data.conversation.title || '';
+		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
+		untrack(() => conversations.markRead(data.conversation.id));
 	});
 
 	// Scroll to bottom on conversation change
@@ -142,11 +161,44 @@
 		isAtBottom = true;
 	};
 
+	const loadMore = async () => {
+		if (loadingMore || allLoaded) return;
+		loadingMore = true;
+		const oldest = messages[0];
+		if (!oldest) {
+			loadingMore = false;
+			return;
+		}
+		const container = messagesContainer;
+		const older = await conversationService.listMessages(data.conversation.id, oldest.id);
+		if (older.length < PAGE_SIZE) allLoaded = true;
+		if (older.length > 0 && container) {
+			const prevHeight = container.scrollHeight;
+			messages = [...older.map(toChat), ...messages];
+			await tick();
+			container.scrollTop = container.scrollHeight - prevHeight;
+		}
+		loadingMore = false;
+	};
+
+	// IntersectionObserver on sentinel div to trigger loadMore
+	$effect(() => {
+		const el = sentinel;
+		if (!el) return;
+		const observer = new IntersectionObserver((entries) => {
+			if (entries[0].isIntersecting && !allLoaded) {
+				loadMore();
+			}
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+
 	const dispatchMessage = (content: string) => {
 		const now = fmtTime();
 		messages.push({
 			id: crypto.randomUUID(),
-			role: 'User',
+			role: 'user',
 			content,
 			thinkingContent: '',
 			streaming: false,
@@ -155,7 +207,7 @@
 		});
 		messages.push({
 			id: crypto.randomUUID(),
-			role: 'Assistant',
+			role: 'assistant',
 			content: '',
 			thinkingContent: '',
 			streaming: false,
@@ -213,14 +265,14 @@
 		switch (msg.type) {
 			case 'chat.thinking': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
+				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinkingContent += msg.content;
 				}
 				break;
 			}
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant' && (last.thinking || last.streaming)) {
+				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinking = false;
 					last.streaming = true;
 					last.content += msg.content;
@@ -228,7 +280,7 @@
 				} else {
 					messages.push({
 						id: crypto.randomUUID(),
-						role: 'Assistant',
+						role: 'assistant',
 						content: msg.content,
 						thinkingContent: '',
 						streaming: true,
@@ -241,7 +293,7 @@
 			}
 			case 'chat.tool_use': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'Assistant') {
+				if (last && last.role === 'assistant') {
 					const tc: ToolCall = {
 						id: crypto.randomUUID(),
 						name: msg.tool_call.name,
@@ -269,7 +321,7 @@
 				// If an assistant message is actively streaming, update its
 				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
-				if (active?.role === 'Assistant' && (active.streaming || active.thinking)) {
+				if (active?.role === 'assistant' && (active.streaming || active.thinking)) {
 					active.id = msg.message_id;
 					if (msg.source && msg.source !== 'human') active.source = msg.source;
 					break;
@@ -277,7 +329,7 @@
 				// Also check the last completed assistant message (done
 				// already fired before new_message arrived).
 				const prev = messages[messages.length - 1];
-				if (prev?.role === 'Assistant' && !prev.streaming && !prev.thinking) {
+				if (prev?.role === 'assistant' && !prev.streaming && !prev.thinking) {
 					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
@@ -332,7 +384,7 @@
 				} else {
 					messages.push({
 						id: crypto.randomUUID(),
-						role: 'System',
+						role: 'system',
 						content: `Error: ${msg.error}`,
 						thinkingContent: '',
 						streaming: false,
@@ -370,6 +422,67 @@
 		pendingConfirms = pendingConfirms.filter((c) => c.confirm_id !== confirmId);
 	};
 
+	const handleAddTag = async (name: string) => {
+		const tag = await tagService.addToConversation(data.conversation.id, name);
+		if (!tags.some((t) => t.id === tag.id)) {
+			tags = [...tags, tag];
+		}
+		conversations.updateTags(data.conversation.id, tags);
+	};
+
+	const handleRemoveTag = async (tagId: string) => {
+		tags = tags.filter((t) => t.id !== tagId);
+		conversations.updateTags(data.conversation.id, tags);
+		await tagService.removeFromConversation(data.conversation.id, tagId);
+	};
+
+	const confirmDelete = async () => {
+		if (!deleteTarget) return;
+		const id = deleteTarget;
+		deleteTarget = null;
+		await conversationService.deleteMessage(id);
+		messages = messages.filter((m) => m.id !== id);
+	};
+
+	const confirmClear = async () => {
+		showClearConfirm = false;
+		await conversationService.clearMessages(conversationId);
+		messages = [];
+	};
+
+	const handleSlashCommand = (command: string) => {
+		switch (command) {
+			case '/help':
+				messages.push({
+					id: crypto.randomUUID(),
+					role: 'system',
+					content:
+						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages',
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime(),
+					ephemeral: true
+				});
+				break;
+			case '/info':
+				messages.push({
+					id: crypto.randomUUID(),
+					role: 'system',
+					content: `**Conversation info:**\n- ID: \`${conversationId}\`\n- Title: ${title || 'Untitled'}\n- Messages: ${messages.length}`,
+					thinkingContent: '',
+					streaming: false,
+					thinking: false,
+					timestamp: fmtTime(),
+					ephemeral: true
+				});
+				break;
+			case '/clear':
+				showClearConfirm = true;
+				break;
+		}
+	};
+
 	const startEditTitle = () => {
 		editTitleValue = title || '';
 		editingTitle = true;
@@ -384,30 +497,72 @@
 		}
 		editingTitle = false;
 	};
+
+	const handleArchive = async () => {
+		const newArchived = !data.conversation.is_archived;
+		await conversationService.archive(data.conversation.id, newArchived);
+		if (newArchived) {
+			conversations.archive(data.conversation.id);
+		} else {
+			conversations.unarchive(data.conversation.id);
+		}
+	};
+
+	const handleDeleteConversation = async () => {
+		showDeleteConversationConfirm = false;
+		await conversationService.delete(data.conversation.id);
+		conversations.remove(data.conversation.id);
+		goto(resolve('/'));
+	};
 </script>
 
 <div class="flex h-full flex-col">
-	<header class="flex h-14 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
-		{#if editingTitle}
-			<input
-				type="text"
-				bind:value={editTitleValue}
-				onkeydown={(e) => {
-					if (e.key === 'Enter') saveTitle();
-					if (e.key === 'Escape') editingTitle = false;
-				}}
-				onblur={saveTitle}
-				class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
-			/>
-		{:else}
-			<button
-				onclick={startEditTitle}
-				class="text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
-				title="Click to rename"
-			>
-				{title || 'New conversation'}
-			</button>
-		{/if}
+	<header
+		class="flex flex-col justify-center gap-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800"
+	>
+		<div class="flex items-center gap-2">
+			{#if editingTitle}
+				<input
+					type="text"
+					bind:value={editTitleValue}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') saveTitle();
+						if (e.key === 'Escape') editingTitle = false;
+					}}
+					onblur={saveTitle}
+					class="min-w-0 flex-1 rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
+				/>
+			{:else}
+				<button
+					onclick={startEditTitle}
+					class="min-w-0 flex-1 truncate text-left text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
+					title="Click to rename"
+				>
+					{title || 'New conversation'}
+				</button>
+			{/if}
+			<div class="flex shrink-0 items-center gap-1">
+				<button
+					onclick={handleArchive}
+					class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+					title={data.conversation.is_archived ? 'Unarchive conversation' : 'Archive conversation'}
+				>
+					{data.conversation.is_archived ? 'Unarchive' : 'Archive'}
+				</button>
+				{#if data.conversation.kind !== 'inbox'}
+					<button
+						onclick={() => {
+							showDeleteConversationConfirm = true;
+						}}
+						class="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
+						title="Delete conversation"
+					>
+						Delete
+					</button>
+				{/if}
+			</div>
+		</div>
+		<TagInput {tags} onAdd={handleAddTag} onRemove={handleRemoveTag} />
 	</header>
 
 	<div class="relative flex-1 overflow-hidden">
@@ -416,6 +571,16 @@
 			onscroll={handleScroll}
 			class="h-full space-y-4 overflow-y-auto p-4"
 		>
+			<div bind:this={sentinel}></div>
+
+			{#if loadingMore}
+				<div class="flex justify-center py-2">
+					<div
+						class="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300"
+					></div>
+				</div>
+			{/if}
+
 			{#each messages as msg (msg.id)}
 				<ChatMessage
 					role={msg.role}
@@ -426,6 +591,12 @@
 					thinking={msg.thinking}
 					timestamp={msg.timestamp}
 					source={msg.source}
+					ephemeral={msg.ephemeral}
+					onDelete={msg.role === 'user' && !msg.ephemeral
+						? () => {
+								deleteTarget = msg.id;
+							}
+						: undefined}
 				/>
 			{/each}
 
@@ -505,9 +676,45 @@
 		</div>
 	{/if}
 
-	<ChatInput onsend={sendMessage} busy={isBusy} />
+	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} />
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
+
+<ConfirmDialog
+	open={!!deleteTarget}
+	title="Delete message"
+	message="Are you sure you want to delete this message? This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={confirmDelete}
+	onCancel={() => {
+		deleteTarget = null;
+	}}
+/>
+
+<ConfirmDialog
+	open={showClearConfirm}
+	title="Clear all messages"
+	message="Are you sure you want to clear all messages in this conversation? This cannot be undone."
+	confirmText="Clear"
+	destructive
+	onConfirm={confirmClear}
+	onCancel={() => {
+		showClearConfirm = false;
+	}}
+/>
+
+<ConfirmDialog
+	open={showDeleteConversationConfirm}
+	title="Delete conversation"
+	message="This will permanently delete this conversation and all messages. This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={handleDeleteConversation}
+	onCancel={() => {
+		showDeleteConversationConfirm = false;
+	}}
+/>
 
 <style>
 	.confirm-grow {

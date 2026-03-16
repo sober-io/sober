@@ -13,26 +13,28 @@ pub mod tool;
 pub use access::{CallerContext, Permission, TriggerKind};
 pub use api::ApiResponse;
 pub use domain::{
-    Artifact, AuditLogEntry, Conversation, Job, JobRun, McpServerConfig, Message, Role,
-    SecretMetadata, SecretRow, SecretScope, Session, StoredDek, User, UserRole, Workspace,
-    WorkspaceRepoEntry, Worktree,
+    Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationWithDetails, Job, JobRun,
+    McpServerConfig, Message, Role, SecretMetadata, SecretRow, SecretScope, Session, StoredDek,
+    Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 pub use enums::{
-    ArtifactKind, ArtifactRelation, ArtifactState, JobStatus, MessageRole, RoleKind, ScopeKind,
-    UserStatus, WorkspaceState, WorktreeState,
+    ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind, ConversationUserRole,
+    JobStatus, MessageRole, RoleKind, ScopeKind, UserStatus, WorkspaceState, WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
-    MessageId, RoleId, ScopeId, SecretId, SessionId, ToolId, UserId, WorkspaceId, WorkspaceRepoId,
-    WorktreeId,
+    MessageId, RoleId, ScopeId, SecretId, SessionId, TagId, ToolId, UserId, WorkspaceId,
+    WorkspaceRepoId, WorktreeId,
 };
 pub use input::{
     ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMcpServer, CreateMessage,
-    CreateSession, CreateUser, NewSecret, RegisterRepo, UpdateMcpServer, UpdateSecret,
+    CreateSession, CreateTag, CreateUser, ListConversationsFilter, NewSecret, RegisterRepo,
+    UpdateMcpServer, UpdateSecret,
 };
 pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, JobRepo, JobRunRepo, McpServerRepo, MessageRepo,
-    RoleRepo, SecretRepo, SessionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
+    ArtifactRepo, AuditLogRepo, ConversationRepo, ConversationUserRepo, JobRepo, JobRunRepo,
+    McpServerRepo, MessageRepo, RoleRepo, SecretRepo, SessionRepo, TagRepo, UserRepo,
+    WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};

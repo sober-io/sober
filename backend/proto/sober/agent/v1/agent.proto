@@ -114,6 +114,8 @@ message NewMessage {
   string content = 3;
   // What produced this message: "human", "scheduler", "replica", "admin", "system".
   string source = 4;
+  // The user who triggered the message (empty for system/scheduler).
+  optional string user_id = 5;
 }
 
 // The conversation title was changed.

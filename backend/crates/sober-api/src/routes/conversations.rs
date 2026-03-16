@@ -2,54 +2,68 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
-use axum::routing::{delete, get, patch, post};
+use axum::extract::{Path, Query, State};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::PermissionMode;
 use sober_core::error::AppError;
-use sober_core::types::{ApiResponse, ConversationId, ConversationRepo, MessageRepo, WorkspaceId};
-use sober_db::{PgConversationRepo, PgMessageRepo};
+use sober_core::types::{
+    ApiResponse, ConversationId, ConversationKind, ConversationRepo, ConversationUserRepo,
+    ConversationWithDetails, ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
+};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
 /// Returns the conversation routes.
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/conversations", get(list_conversations))
-        .route("/conversations", post(create_conversation))
-        .route("/conversations/{id}", get(get_conversation))
-        .route("/conversations/{id}", patch(update_conversation))
-        .route("/conversations/{id}", delete(delete_conversation))
+        .route("/conversations/inbox", get(get_inbox))
+        .route(
+            "/conversations",
+            get(list_conversations).post(create_conversation),
+        )
+        .route(
+            "/conversations/{id}",
+            get(get_conversation)
+                .patch(update_conversation)
+                .delete(delete_conversation),
+        )
+        .route("/conversations/{id}/read", post(mark_read))
+        .route("/conversations/{id}/messages", delete(clear_messages))
+}
+
+/// Query parameters for `GET /conversations`.
+#[derive(Deserialize)]
+struct ListConversationsQuery {
+    archived: Option<bool>,
+    kind: Option<ConversationKind>,
+    tag: Option<String>,
+    search: Option<String>,
 }
 
 /// `GET /api/v1/conversations` — list conversations for the authenticated user.
 async fn list_conversations(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    Query(query): Query<ListConversationsQuery>,
+) -> Result<ApiResponse<Vec<ConversationWithDetails>>, AppError> {
     let repo = PgConversationRepo::new(state.db.clone());
-    let conversations = repo.list_by_user(auth_user.user_id).await?;
+    let filter = ListConversationsFilter {
+        archived: query.archived,
+        kind: query.kind,
+        tag: query.tag,
+        search: query.search,
+    };
+    let conversations = repo.list_with_details(auth_user.user_id, filter).await?;
 
-    let items: Vec<serde_json::Value> = conversations
-        .into_iter()
-        .map(|c| {
-            serde_json::json!({
-                "id": c.id.to_string(),
-                "title": c.title,
-                "workspace_id": c.workspace_id.map(|w| w.to_string()),
-                "permission_mode": c.permission_mode.as_str(),
-                "created_at": c.created_at.to_rfc3339(),
-                "updated_at": c.updated_at.to_rfc3339(),
-            })
-        })
-        .collect();
-
-    Ok(ApiResponse::new(serde_json::json!(items)))
+    Ok(ApiResponse::new(conversations))
 }
 
 /// Request body for `POST /conversations`.
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 struct CreateConversationRequest {
     title: Option<String>,
     workspace_id: Option<String>,
@@ -79,20 +93,22 @@ async fn create_conversation(
         "id": conversation.id.to_string(),
         "title": conversation.title,
         "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
+        "kind": conversation.kind,
+        "is_archived": conversation.is_archived,
         "permission_mode": conversation.permission_mode.as_str(),
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
 }
 
-/// `GET /api/v1/conversations/:id` — get a conversation with its messages.
+/// `GET /api/v1/conversations/:id` — get a conversation with details.
 async fn get_conversation(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
-) -> Result<ApiResponse<serde_json::Value>, AppError> {
+) -> Result<ApiResponse<ConversationWithDetails>, AppError> {
     let conv_repo = PgConversationRepo::new(state.db.clone());
-    let msg_repo = PgMessageRepo::new(state.db.clone());
+    let cu_repo = PgConversationUserRepo::new(state.db.clone());
 
     let conversation_id = ConversationId::from_uuid(id);
     let conversation = conv_repo.get_by_id(conversation_id).await?;
@@ -102,38 +118,31 @@ async fn get_conversation(
         return Err(AppError::NotFound("conversation".into()));
     }
 
-    let messages = msg_repo.list_by_conversation(conversation_id, 1000).await?;
-    let messages: Vec<serde_json::Value> = messages
-        .into_iter()
-        .map(|m| {
-            serde_json::json!({
-                "id": m.id.to_string(),
-                "role": format!("{:?}", m.role),
-                "content": m.content,
-                "tool_calls": m.tool_calls,
-                "tool_result": m.tool_result,
-                "token_count": m.token_count,
-                "created_at": m.created_at.to_rfc3339(),
-            })
-        })
-        .collect();
+    // Get the user's unread count.
+    let cu = cu_repo.get(conversation_id, auth_user.user_id).await?;
 
-    Ok(ApiResponse::new(serde_json::json!({
-        "id": conversation.id.to_string(),
-        "title": conversation.title,
-        "workspace_id": conversation.workspace_id.map(|w| w.to_string()),
-        "permission_mode": conversation.permission_mode.as_str(),
-        "created_at": conversation.created_at.to_rfc3339(),
-        "updated_at": conversation.updated_at.to_rfc3339(),
-        "messages": messages,
-    })))
+    // Get all users in this conversation.
+    let users = cu_repo.list_by_conversation(conversation_id).await?;
+
+    let tag_repo = PgTagRepo::new(state.db.clone());
+    let tags = tag_repo.list_by_conversation(conversation_id).await?;
+
+    let details = ConversationWithDetails {
+        conversation,
+        unread_count: cu.unread_count,
+        tags,
+        users,
+    };
+
+    Ok(ApiResponse::new(details))
 }
 
 /// Request body for `PATCH /conversations/:id`.
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 struct UpdateConversationRequest {
     title: Option<String>,
     permission_mode: Option<PermissionMode>,
+    archived: Option<bool>,
 }
 
 /// `PATCH /api/v1/conversations/:id` — update conversation fields.
@@ -158,6 +167,9 @@ async fn update_conversation(
     if let Some(mode) = body.permission_mode {
         repo.update_permission_mode(conversation_id, mode).await?;
     }
+    if let Some(archived) = body.archived {
+        repo.update_archived(conversation_id, archived).await?;
+    }
 
     // Re-fetch to return current state.
     let updated = repo.get_by_id(conversation_id).await?;
@@ -165,6 +177,8 @@ async fn update_conversation(
     Ok(ApiResponse::new(serde_json::json!({
         "id": updated.id.to_string(),
         "title": updated.title,
+        "kind": updated.kind,
+        "is_archived": updated.is_archived,
         "permission_mode": updated.permission_mode.as_str(),
     })))
 }
@@ -187,4 +201,61 @@ async fn delete_conversation(
     repo.delete(conversation_id).await?;
 
     Ok(ApiResponse::new(serde_json::json!({ "deleted": true })))
+}
+
+/// `GET /api/v1/conversations/inbox` — get the user's inbox conversation.
+async fn get_inbox(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    let repo = PgConversationRepo::new(state.db.clone());
+    let conv = repo.get_inbox(auth_user.user_id).await?;
+
+    Ok(ApiResponse::new(serde_json::json!({
+        "id": conv.id.to_string(),
+        "title": conv.title,
+        "kind": conv.kind,
+        "is_archived": conv.is_archived,
+        "permission_mode": conv.permission_mode.as_str(),
+        "created_at": conv.created_at.to_rfc3339(),
+        "updated_at": conv.updated_at.to_rfc3339(),
+    })))
+}
+
+/// `POST /api/v1/conversations/:id/read` — mark conversation as read.
+async fn mark_read(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    let cu_repo = PgConversationUserRepo::new(state.db.clone());
+    let conversation_id = ConversationId::from_uuid(id);
+    cu_repo
+        .mark_read(conversation_id, auth_user.user_id)
+        .await?;
+
+    Ok(ApiResponse::new(serde_json::json!({"ok": true})))
+}
+
+/// `DELETE /api/v1/conversations/:id/messages` — clear all messages in a conversation.
+async fn clear_messages(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    let conv_repo = PgConversationRepo::new(state.db.clone());
+    let conversation_id = ConversationId::from_uuid(id);
+
+    // Verify ownership.
+    let conv = conv_repo.get_by_id(conversation_id).await?;
+    if conv.user_id != auth_user.user_id {
+        return Err(AppError::NotFound("conversation not found".into()));
+    }
+
+    let msg_repo = PgMessageRepo::new(state.db.clone());
+    let cu_repo = PgConversationUserRepo::new(state.db.clone());
+    msg_repo.clear_conversation(conversation_id).await?;
+    cu_repo.reset_all_unread(conversation_id).await?;
+
+    Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }

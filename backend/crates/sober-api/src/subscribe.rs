@@ -5,9 +5,12 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
+use sober_core::types::{ConversationId, ConversationUserRepo, UserId};
+use sober_db::PgConversationUserRepo;
+use sqlx::PgPool;
 use tracing::{error, info, warn};
 
-use crate::connections::ConnectionRegistry;
+use crate::connections::{ConnectionRegistry, UserConnectionRegistry};
 use crate::proto;
 use crate::routes::ws::ServerWsMessage;
 use crate::state::AgentClient;
@@ -16,10 +19,16 @@ use crate::state::AgentClient;
 ///
 /// This task runs forever, reconnecting with exponential backoff if the
 /// gRPC stream breaks. Events are routed to WebSocket clients via the
-/// [`ConnectionRegistry`].
-pub fn spawn_subscription(agent_client: AgentClient, registry: ConnectionRegistry) {
+/// [`ConnectionRegistry`]. Unread notifications are sent via the
+/// [`UserConnectionRegistry`].
+pub fn spawn_subscription(
+    agent_client: AgentClient,
+    registry: ConnectionRegistry,
+    user_connections: UserConnectionRegistry,
+    db: PgPool,
+) {
     tokio::spawn(async move {
-        subscription_loop(agent_client, registry).await;
+        subscription_loop(agent_client, registry, user_connections, db).await;
     });
 }
 
@@ -27,7 +36,12 @@ pub fn spawn_subscription(agent_client: AgentClient, registry: ConnectionRegistr
 const BACKOFF_DELAYS: &[u64] = &[1, 2, 5, 10, 30];
 
 /// Reconnection loop that subscribes to the agent and processes events.
-async fn subscription_loop(mut agent_client: AgentClient, registry: ConnectionRegistry) {
+async fn subscription_loop(
+    mut agent_client: AgentClient,
+    registry: ConnectionRegistry,
+    user_connections: UserConnectionRegistry,
+    db: PgPool,
+) {
     let mut attempt = 0usize;
 
     loop {
@@ -45,6 +59,20 @@ async fn subscription_loop(mut agent_client: AgentClient, registry: ConnectionRe
                     match result {
                         Ok(update) => {
                             let conversation_id = update.conversation_id.clone();
+
+                            // Handle unread notifications for NewMessage events.
+                            if let Some(proto::conversation_update::Event::NewMessage(ref nm)) =
+                                update.event
+                            {
+                                handle_new_message_unread(
+                                    &conversation_id,
+                                    nm,
+                                    &db,
+                                    &user_connections,
+                                )
+                                .await;
+                            }
+
                             if let Some(ws_msg) = conversation_update_to_ws(update) {
                                 registry.send(&conversation_id, ws_msg).await;
                             }
@@ -66,6 +94,45 @@ async fn subscription_loop(mut agent_client: AgentClient, registry: ConnectionRe
         let delay = BACKOFF_DELAYS[attempt.min(BACKOFF_DELAYS.len() - 1)];
         attempt += 1;
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+    }
+}
+
+/// Increments unread counts for all users in a conversation except the sender,
+/// and sends `chat.unread` notifications via the user connection registry.
+async fn handle_new_message_unread(
+    conversation_id: &str,
+    nm: &proto::NewMessage,
+    db: &PgPool,
+    user_connections: &UserConnectionRegistry,
+) {
+    let Ok(conv_uuid) = conversation_id.parse::<uuid::Uuid>() else {
+        return;
+    };
+    let conv_id = ConversationId::from_uuid(conv_uuid);
+
+    // Determine the sender user to exclude from unread increment.
+    // If no user_id is present (system/scheduler messages), use a nil UUID
+    // so all users get their unread count incremented.
+    let exclude_user_id = nm
+        .user_id
+        .as_deref()
+        .and_then(|id| id.parse::<uuid::Uuid>().ok())
+        .map(UserId::from_uuid)
+        .unwrap_or_default();
+
+    let cu_repo = PgConversationUserRepo::new(db.clone());
+    if let Ok(affected) = cu_repo.increment_unread(conv_id, exclude_user_id).await {
+        for (user_id, new_count) in affected {
+            user_connections
+                .send(
+                    &user_id.to_string(),
+                    ServerWsMessage::ChatUnread {
+                        conversation_id: conversation_id.to_string(),
+                        unread_count: new_count,
+                    },
+                )
+                .await;
+        }
     }
 }
 
@@ -176,6 +243,7 @@ mod tests {
                     role: "Assistant".to_owned(),
                     content: "hi".to_owned(),
                     source: "scheduler".to_owned(),
+                    user_id: None,
                 },
             )),
         };
