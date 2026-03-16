@@ -4,6 +4,7 @@ pub mod auth;
 pub mod conversations;
 pub mod health;
 pub mod mcp;
+pub mod messages;
 pub mod workspaces;
 pub mod ws;
 
@@ -23,6 +24,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(health::routes())
         .merge(auth::routes())
         .merge(conversations::routes())
+        .merge(messages::routes())
         .merge(mcp::routes())
         .merge(workspaces::routes())
         .merge(ws::routes())
