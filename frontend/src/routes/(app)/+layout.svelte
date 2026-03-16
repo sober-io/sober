@@ -257,7 +257,7 @@
 									</span>
 									{#if conv.tags.length > 0}
 										<span class="ml-1 flex items-center gap-1">
-											{#each conv.tags.slice(0, 3) as tag (tag.id)}
+											{#each conv.tags.slice(0, 5) as tag (tag.id)}
 												<span
 													class="h-2 w-2 rounded-full"
 													style="background-color: {tag.color}"
