@@ -87,6 +87,7 @@
 	let agentMode = $state<AgentMode>('always');
 	let members = $state<ConversationMember[]>([]);
 	let membersLoading = $state(false);
+	let localKind = $state(conversation.kind);
 
 	// Derived
 	let createdDate = $derived(
@@ -97,9 +98,9 @@
 		})
 	);
 	let kindLabel = $derived(
-		conversation.kind === 'inbox' ? 'Inbox' : conversation.kind === 'group' ? 'Group' : 'Direct'
+		localKind === 'inbox' ? 'Inbox' : localKind === 'group' ? 'Group' : 'Direct'
 	);
-	let isGroup = $derived(conversation.kind === 'group');
+	let isGroup = $derived(localKind === 'group');
 	let currentUserId = $derived(auth.user?.id ?? '');
 	let currentUserRole = $derived.by((): ConversationUserRole => {
 		const me = members.find((m) => m.user_id === currentUserId);
@@ -112,6 +113,7 @@
 		if (open) {
 			editingTitle = conversation.title ?? '';
 			agentMode = conversation.agent_mode ?? 'always';
+			localKind = conversation.kind;
 			loadJobs();
 			loadWorkspaces();
 			loadMembers();
@@ -189,7 +191,7 @@
 		try {
 			const title = conversation.title || 'Group conversation';
 			await conversationService.convertToGroup(conversation.id, title);
-			conversation = { ...conversation, kind: 'group', title };
+			localKind = 'group';
 			conversations.update(conversation.id, { kind: 'group', title });
 
 			const member = await conversationService.addMember(conversation.id, username);
