@@ -72,7 +72,7 @@
 	{#each tags as tag (tag.id)}
 		<span
 			class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-			style="background-color: {tag.color}22; color: {tag.color};"
+			style="background-color: color-mix(in srgb, {tag.color} 15%, transparent); color: {tag.color}; border: 1px solid color-mix(in srgb, {tag.color} 30%, transparent);"
 		>
 			{tag.name}
 			<button

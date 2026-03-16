@@ -260,7 +260,7 @@
 											{#each conv.tags.slice(0, 5) as tag (tag.id)}
 												<span
 													class="h-2 w-2 rounded-full"
-													style="background-color: {tag.color}"
+													style="background-color: {tag.color}; border: 1px solid color-mix(in srgb, {tag.color} 50%, transparent);"
 													title={tag.name}
 												></span>
 											{/each}

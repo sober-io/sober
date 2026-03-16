@@ -196,7 +196,7 @@
 												{#each conv.tags.slice(0, 3) as tag (tag.id)}
 													<span
 														class="rounded px-1 py-0.5 text-xs font-medium"
-														style="background-color: {tag.color}20; color: {tag.color}"
+														style="background-color: color-mix(in srgb, {tag.color} 15%, transparent); color: {tag.color}; border: 1px solid color-mix(in srgb, {tag.color} 30%, transparent);"
 													>
 														{tag.name}
 													</span>
