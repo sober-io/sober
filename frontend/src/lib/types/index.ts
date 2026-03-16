@@ -125,6 +125,8 @@ export type ServerWsMessage =
 			role: string;
 			content: string;
 			source: string;
+			user_id?: string;
+			username?: string;
 	  }
 	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string }

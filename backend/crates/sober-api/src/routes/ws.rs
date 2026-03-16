@@ -168,6 +168,12 @@ pub enum ServerWsMessage {
         content: String,
         /// What produced this message.
         source: sober_core::types::access::TriggerKind,
+        /// User ID of the sender (if applicable).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_id: Option<String>,
+        /// Username of the sender (if applicable).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
     },
     /// Unread count changed for a conversation.
     #[serde(rename = "chat.unread")]
@@ -214,6 +220,17 @@ pub enum ServerWsMessage {
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthUser) {
     let user_id = auth_user.user_id;
     info!(user_id = %user_id, "WebSocket connected");
+
+    // Look up username once for group message attribution.
+    let username = {
+        let user_repo = sober_db::PgUserRepo::new(state.db.clone());
+        use sober_core::types::UserRepo;
+        user_repo
+            .get_by_id(user_id)
+            .await
+            .map(|u| u.username)
+            .unwrap_or_default()
+    };
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -364,6 +381,19 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .register(conversation_id.clone(), out_tx.clone())
                         .await;
                 }
+
+                // Broadcast the user's message to all other subscribers
+                // so group members see it in real-time.
+                let user_msg = ServerWsMessage::ChatNewMessage {
+                    conversation_id: conversation_id.clone(),
+                    message_id: uuid::Uuid::now_v7().to_string(),
+                    role: "user".into(),
+                    content: content.clone(),
+                    source: sober_core::types::access::TriggerKind::Human,
+                    user_id: Some(user_id.to_string()),
+                    username: Some(username.clone()),
+                };
+                state.connections.send(&conversation_id, user_msg).await;
 
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();

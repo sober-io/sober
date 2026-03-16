@@ -344,6 +344,11 @@
 				break;
 			}
 			case 'chat.new_message': {
+				// Skip own user messages (already added optimistically by dispatchMessage).
+				if (msg.role === 'user' && msg.user_id === auth.user?.id) {
+					break;
+				}
+
 				// If an assistant message is actively streaming, update its
 				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
@@ -359,8 +364,8 @@
 					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
-				// Otherwise this is a new message from another source (scheduler).
-				messages.push({
+				// New message from another user, scheduler, or agent.
+				const newMsg: ChatMsg = {
 					id: msg.message_id,
 					role: msg.role as ChatMsg['role'],
 					content: msg.content,
@@ -368,8 +373,14 @@
 					streaming: false,
 					thinking: false,
 					timestamp: fmtTime(),
-					source: msg.source
-				});
+					source: msg.source,
+					userId: msg.user_id
+				};
+				messages.push(newMsg);
+				// Update memberMap if username is provided
+				if (msg.user_id && msg.username && !memberMap[msg.user_id]) {
+					memberMap[msg.user_id] = msg.username;
+				}
 				break;
 			}
 			case 'chat.done': {
