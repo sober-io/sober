@@ -2,6 +2,7 @@
 	import type { Conversation, Tag, Job, PermissionMode, Workspace } from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
 	import { workspaceService } from '$lib/services/workspaces';
+	import { PERMISSION_MODES } from '$lib/constants/permission-modes';
 	import TagInput from './TagInput.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -59,12 +60,6 @@
 	let kindLabel = $derived(
 		conversation.kind === 'inbox' ? 'Inbox' : conversation.kind === 'group' ? 'Group' : 'Direct'
 	);
-
-	const permissionModes: { value: PermissionMode; label: string; description: string }[] = [
-		{ value: 'interactive', label: 'Interactive', description: 'Ask before actions' },
-		{ value: 'policy_based', label: 'Policy', description: 'Follow rules' },
-		{ value: 'autonomous', label: 'Autonomous', description: 'Act freely' }
-	];
 
 	// Load data when panel opens
 	$effect(() => {
@@ -206,7 +201,7 @@
 			<!-- Permission mode -->
 			<SettingsSection title="Permission mode" description="Controls agent autonomy level">
 				<div class="flex gap-1">
-					{#each permissionModes as mode (mode.value)}
+					{#each PERMISSION_MODES as mode (mode.value)}
 						<button
 							onclick={() => onUpdatePermissionMode(mode.value)}
 							class={[

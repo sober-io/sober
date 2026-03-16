@@ -11,6 +11,9 @@
 
 	let { messageId, tags, onTagsChange, onClose }: Props = $props();
 
+	/** Delay before hiding suggestions on blur, allowing click events to fire first. */
+	const BLUR_DELAY_MS = 150;
+
 	let input = $state('');
 	let allTags = $state<Tag[]>([]);
 	let showSuggestions = $state(false);
@@ -59,7 +62,7 @@
 		// Delay so click on suggestion fires first
 		setTimeout(() => {
 			showSuggestions = false;
-		}, 150);
+		}, BLUR_DELAY_MS);
 	}
 
 	function handleBackdropClick(e: MouseEvent) {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Job } from '$lib/types';
+	import { formatRelativeFuture } from '$lib/utils/time';
 
 	interface Props {
 		jobs: Job[];
@@ -14,18 +15,6 @@
 		cancelled: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400',
 		running: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
 	};
-
-	function formatNextRun(iso: string): string {
-		const date = new Date(iso);
-		const now = new Date();
-		const diffMs = date.getTime() - now.getTime();
-
-		if (diffMs < 0) return 'overdue';
-		if (diffMs < 60_000) return 'in less than a minute';
-		if (diffMs < 3_600_000) return `in ${Math.round(diffMs / 60_000)}m`;
-		if (diffMs < 86_400_000) return `in ${Math.round(diffMs / 3_600_000)}h`;
-		return date.toLocaleDateString();
-	}
 </script>
 
 {#if loading}
@@ -53,7 +42,7 @@
 						{job.status}
 					</span>
 					<span class="text-xs text-zinc-400 dark:text-zinc-500">
-						{formatNextRun(job.next_run_at)}
+						{formatRelativeFuture(job.next_run_at)}
 					</span>
 				</div>
 			</li>

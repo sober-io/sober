@@ -38,6 +38,7 @@
 	},
 	"type": "module",
 	"dependencies": {
+		"dayjs": "^1.11.20",
 		"marked": "^17.0.4"
 	}
 }
