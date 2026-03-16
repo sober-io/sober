@@ -424,14 +424,15 @@
 
 	const handleAddTag = async (name: string) => {
 		const tag = await tagService.addToConversation(data.conversation.id, name);
-		// Optimistic: avoid duplicates
 		if (!tags.some((t) => t.id === tag.id)) {
 			tags = [...tags, tag];
 		}
+		conversations.updateTags(data.conversation.id, tags);
 	};
 
 	const handleRemoveTag = async (tagId: string) => {
 		tags = tags.filter((t) => t.id !== tagId);
+		conversations.updateTags(data.conversation.id, tags);
 		await tagService.removeFromConversation(data.conversation.id, tagId);
 	};
 

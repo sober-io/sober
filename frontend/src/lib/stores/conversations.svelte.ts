@@ -1,4 +1,4 @@
-import type { Conversation } from '$lib/types';
+import type { Conversation, Tag } from '$lib/types';
 
 /** Shared reactive conversations list for sidebar and chat pages. */
 export const conversations = (() => {
@@ -64,6 +64,10 @@ export const conversations = (() => {
 
 		unarchive(id: string) {
 			items = items.map((c) => (c.id === id ? { ...c, is_archived: false } : c));
+		},
+
+		updateTags(id: string, tags: Tag[]) {
+			items = items.map((c) => (c.id === id ? { ...c, tags } : c));
 		}
 	};
 })();
