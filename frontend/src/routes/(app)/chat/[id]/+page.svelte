@@ -293,9 +293,22 @@
 	const handleWsMessage = (msg: ServerWsMessage) => {
 		switch (msg.type) {
 			case 'chat.thinking': {
-				const last = messages[messages.length - 1];
+				let last = messages[messages.length - 1];
 				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinkingContent += msg.content;
+				} else {
+					// No active assistant message — create a thinking placeholder
+					// (happens for other group members who didn't send the message).
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'assistant',
+						content: '',
+						thinkingContent: msg.content,
+						streaming: false,
+						thinking: true,
+						timestamp: fmtTime()
+					});
+					assistantPhase = 'thinking';
 				}
 				break;
 			}
