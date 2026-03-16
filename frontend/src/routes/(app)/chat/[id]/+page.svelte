@@ -291,6 +291,7 @@
 	};
 
 	const handleWsMessage = (msg: ServerWsMessage) => {
+		console.log('[WS]', msg.type, msg);
 		switch (msg.type) {
 			case 'chat.thinking': {
 				let last = messages[messages.length - 1];
