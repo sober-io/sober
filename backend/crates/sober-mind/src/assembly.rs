@@ -167,7 +167,7 @@ Format:\n\
 ```\n\n\
 Rules:\n\
 - Each extraction must be a single concise sentence — not a raw copy of the message\n\
-- Type must be one of: fact, preference, skill, code\n\
+- Type must be one of: fact, preference, skill, code. Never use 'conversation' or 'soul'.\n\
 - Only extract genuinely useful information for future recall\n\
 - Do NOT extract trivial greetings, acknowledgments, or transient conversation\n\
 - The extraction block is stripped before the user sees your response";

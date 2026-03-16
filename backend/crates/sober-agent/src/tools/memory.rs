@@ -351,8 +351,8 @@ impl Tool for RememberTool {
                     },
                     "chunk_type": {
                         "type": "string",
-                        "enum": ["fact", "conversation", "preference", "skill", "code", "soul"],
-                        "description": "Type of memory: 'fact' for knowledge, 'preference' for user likes/dislikes, 'skill' for capabilities, 'code' for snippets, 'conversation' for exchanges, 'soul' for identity traits."
+                        "enum": ["fact", "preference", "skill", "code"],
+                        "description": "Type of memory: 'fact' for knowledge, 'preference' for user likes/dislikes, 'skill' for capabilities, 'code' for snippets."
                     },
                     "importance": {
                         "type": "number",
