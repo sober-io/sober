@@ -110,6 +110,7 @@ export type ClientWsMessage =
 export type ServerWsMessage =
 	| { type: 'chat.delta'; conversation_id: string; content: string }
 	| { type: 'chat.thinking'; conversation_id: string; content: string }
+	| { type: 'chat.agent_typing'; conversation_id: string }
 	| { type: 'chat.tool_use'; conversation_id: string; tool_call: { name: string; input: unknown } }
 	| {
 			type: 'chat.tool_result';

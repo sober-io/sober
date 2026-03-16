@@ -123,6 +123,12 @@ pub enum ServerWsMessage {
         /// Thinking text fragment.
         content: String,
     },
+    /// Agent is processing a message (typing indicator for other group members).
+    #[serde(rename = "chat.agent_typing")]
+    ChatAgentTyping {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+    },
     /// The conversation title was generated or changed.
     #[serde(rename = "chat.title")]
     ChatTitle {
@@ -394,6 +400,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                     username: Some(username.clone()),
                 };
                 state.connections.send(&conversation_id, user_msg).await;
+
+                // Notify all subscribers that the agent is processing.
+                state
+                    .connections
+                    .send(
+                        &conversation_id,
+                        ServerWsMessage::ChatAgentTyping {
+                            conversation_id: conversation_id.clone(),
+                        },
+                    )
+                    .await;
 
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();

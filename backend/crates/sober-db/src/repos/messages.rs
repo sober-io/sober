@@ -28,8 +28,8 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, MessageRow>(
             &format!(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_result, token_count, metadata) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_result, token_count, metadata, user_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
                  RETURNING {MSG_COLUMNS}"
             ),
         )
@@ -41,6 +41,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .bind(&input.tool_result)
         .bind(input.token_count)
         .bind(&input.metadata)
+        .bind(input.user_id.map(|u| *u.as_uuid()))
         .fetch_one(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

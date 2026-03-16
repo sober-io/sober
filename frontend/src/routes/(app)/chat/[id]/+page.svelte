@@ -291,8 +291,24 @@
 	};
 
 	const handleWsMessage = (msg: ServerWsMessage) => {
-		console.log('[WS]', msg.type, msg);
 		switch (msg.type) {
+			case 'chat.agent_typing': {
+				// Show thinking indicator if no active assistant message.
+				const last = messages[messages.length - 1];
+				if (!last || last.role !== 'assistant' || (!last.thinking && !last.streaming)) {
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'assistant',
+						content: '',
+						thinkingContent: '',
+						streaming: false,
+						thinking: true,
+						timestamp: fmtTime()
+					});
+					assistantPhase = 'thinking';
+				}
+				break;
+			}
 			case 'chat.thinking': {
 				let last = messages[messages.length - 1];
 				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
