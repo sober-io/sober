@@ -367,6 +367,9 @@
 					if (msg.user_id && msg.username) {
 						memberMap[msg.user_id] = msg.username;
 					}
+					// Mark as read — user is actively viewing this conversation.
+					untrack(() => conversations.markRead(conversationId));
+					conversationService.markRead(conversationId);
 					break;
 				}
 
@@ -413,6 +416,9 @@
 				}
 				assistantPhase = 'idle';
 				flushQueue();
+				// Mark as read — user is actively viewing this conversation.
+				untrack(() => conversations.markRead(conversationId));
+				conversationService.markRead(conversationId);
 				break;
 			}
 			case 'chat.title': {
