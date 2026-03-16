@@ -66,6 +66,15 @@ pub trait UserRepo: Send + Sync {
         &self,
         status: Option<UserStatus>,
     ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
+
+    /// Searches active users whose username starts with the given query (prefix match).
+    ///
+    /// Results are ordered by username and limited to `limit` rows.
+    fn search_by_username(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
 }
 
 /// Session management operations.

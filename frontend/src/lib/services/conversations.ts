@@ -88,6 +88,9 @@ export const conversationService = {
 
 	leave: (id: string) => api(`/conversations/${id}/leave`, { method: 'POST' }),
 
+	searchUsers: (query: string) =>
+		api<{ id: string; username: string }[]>(`/users/search?q=${encodeURIComponent(query)}`),
+
 	convertToGroup: (id: string, title: string) =>
 		api(`/conversations/${id}/convert-to-group`, {
 			method: 'POST',

@@ -58,7 +58,7 @@
 
 <div class="space-y-3">
 	{#if canManage}
-		<AddMemberInput onAdd={onAddMember} />
+		<AddMemberInput onAdd={onAddMember} existingUserIds={members.map((m) => m.user_id)} />
 	{/if}
 
 	<ul class="space-y-1">

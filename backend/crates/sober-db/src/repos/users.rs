@@ -183,6 +183,24 @@ impl sober_core::types::UserRepo for PgUserRepo {
         Ok(())
     }
 
+    async fn search_by_username(&self, query: &str, limit: i64) -> Result<Vec<User>, AppError> {
+        let pattern = format!("{}%", query);
+        let rows = sqlx::query_as::<_, UserRow>(
+            "SELECT id, email, username, password_hash, status, created_at, updated_at \
+             FROM users \
+             WHERE username ILIKE $1 AND status = 'active' \
+             ORDER BY username \
+             LIMIT $2",
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
     async fn list(&self, status: Option<UserStatus>) -> Result<Vec<User>, AppError> {
         let rows = match status {
             Some(s) => {

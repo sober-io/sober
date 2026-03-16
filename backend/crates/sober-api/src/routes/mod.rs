@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod members;
 pub mod messages;
 pub mod tags;
+pub mod users;
 pub mod workspaces;
 pub mod ws;
 
@@ -44,6 +45,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(messages::routes())
         .merge(mcp::routes())
         .merge(tags::routes())
+        .merge(users::routes())
         .merge(workspaces::routes())
         .merge(ws::routes())
         .layer(auth_layer)
