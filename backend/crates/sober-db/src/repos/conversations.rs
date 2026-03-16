@@ -266,8 +266,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
             qb.push_bind(*user_id.as_uuid());
         }
 
-        qb.push(" WHERE c.user_id = ");
-        qb.push_bind(*user_id.as_uuid());
+        qb.push(" WHERE cu.user_id IS NOT NULL");
 
         if let Some(archived) = filter.archived {
             qb.push(" AND c.is_archived = ");
