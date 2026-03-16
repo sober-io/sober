@@ -36,6 +36,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/conversations/{id}/read", post(mark_read))
         .route("/conversations/{id}/messages", delete(clear_messages))
+        .route(
+            "/conversations/{id}/convert-to-group",
+            post(convert_to_group),
+        )
         .route("/conversations/{id}/jobs", get(list_conversation_jobs))
 }
 
@@ -377,6 +381,51 @@ async fn list_conversation_jobs(
         .list_filtered(None, None, &[], None, None, Some(id))
         .await?;
     Ok(ApiResponse::new(jobs))
+}
+
+/// Request body for `POST /conversations/:id/convert-to-group`.
+#[derive(Deserialize)]
+struct ConvertToGroupRequest {
+    title: String,
+}
+
+/// `POST /api/v1/conversations/:id/convert-to-group` — convert a direct conversation to a group.
+async fn convert_to_group(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<uuid::Uuid>,
+    Json(body): Json<ConvertToGroupRequest>,
+) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    let conv_repo = PgConversationRepo::new(state.db.clone());
+    let conversation_id = ConversationId::from_uuid(id);
+
+    // Verify membership — only owner can convert.
+    let membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    if membership.role != ConversationUserRole::Owner {
+        return Err(AppError::Forbidden);
+    }
+
+    let conversation = conv_repo.get_by_id(conversation_id).await?;
+    if conversation.kind != ConversationKind::Direct {
+        return Err(AppError::Validation(
+            "only direct conversations can be converted to group".into(),
+        ));
+    }
+
+    conv_repo.convert_to_group(conversation_id).await?;
+    conv_repo.update_title(conversation_id, &body.title).await?;
+
+    let updated = conv_repo.get_by_id(conversation_id).await?;
+
+    Ok(ApiResponse::new(serde_json::json!({
+        "id": updated.id.to_string(),
+        "title": updated.title,
+        "kind": updated.kind,
+        "agent_mode": updated.agent_mode,
+        "is_archived": updated.is_archived,
+        "permission_mode": updated.permission_mode.as_str(),
+    })))
 }
 
 /// `DELETE /api/v1/conversations/:id/messages` — clear all messages in a conversation.

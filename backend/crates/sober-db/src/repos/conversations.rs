@@ -474,6 +474,25 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(())
     }
+
+    async fn convert_to_group(&self, id: ConversationId) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET kind = 'group', updated_at = now() \
+             WHERE id = $1 AND kind = 'direct'",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::Validation(
+                "conversation is not a direct conversation".into(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 /// Helper row type for the tag + conversation_id join.

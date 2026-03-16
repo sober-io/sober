@@ -185,6 +185,14 @@ pub trait ConversationRepo: Send + Sync {
         id: ConversationId,
         agent_mode: AgentMode,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Converts a direct conversation to a group conversation.
+    ///
+    /// Fails if the conversation is not currently `direct`.
+    fn convert_to_group(
+        &self,
+        id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.

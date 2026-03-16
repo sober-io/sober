@@ -8,8 +8,6 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { formatRelativeTime } from '$lib/utils/time';
-	import CreateGroupDialog from '$lib/components/CreateGroupDialog.svelte';
-
 	interface Props {
 		children: Snippet;
 	}
@@ -17,8 +15,6 @@
 	let { children }: Props = $props();
 
 	let sidebarOpen = $state(false);
-	let showNewMenu = $state(false);
-	let showCreateGroup = $state(false);
 
 	// Per-conversation context menu state: stores the id of the open menu
 	let openMenuId = $state<string | null>(null);
@@ -51,20 +47,8 @@
 	};
 
 	const createConversation = async () => {
-		showNewMenu = false;
 		const conv = await conversationService.create();
 		conversations.prepend(conv);
-		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
-	};
-
-	const createGroup = async (title: string, members: string[]) => {
-		const conv = await conversationService.create({
-			kind: 'group',
-			title,
-			members: members.map((u) => ({ username: u }))
-		});
-		conversations.prepend(conv);
-		showCreateGroup = false;
 		goto(resolve('/(app)/chat/[id]', { id: conv.id }));
 	};
 
@@ -118,7 +102,6 @@
 <svelte:window
 	onclick={() => {
 		openMenuId = null;
-		showNewMenu = false;
 	}}
 />
 
@@ -182,71 +165,14 @@
 			{#if conversations.loading}
 				<div class="p-4 text-sm text-zinc-500 dark:text-zinc-400">Loading...</div>
 			{:else}
-				<!-- New conversation dropdown -->
-				<div class="relative mx-3 mt-3 mb-2">
+				<!-- New conversation button -->
+				<div class="mx-3 mt-3 mb-2">
 					<button
-						onclick={(e) => {
-							e.stopPropagation();
-							showNewMenu = !showNewMenu;
-						}}
+						onclick={createConversation}
 						class="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
 					>
 						+ New chat
 					</button>
-
-					{#if showNewMenu}
-						<div
-							role="menu"
-							tabindex="-1"
-							class="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-							onclick={(e) => e.stopPropagation()}
-							onkeydown={(e) => e.stopPropagation()}
-						>
-							<button
-								onclick={createConversation}
-								class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
-							>
-								<svg
-									class="h-4 w-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-									aria-hidden="true"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-									/>
-								</svg>
-								New direct
-							</button>
-							<button
-								onclick={() => {
-									showNewMenu = false;
-									showCreateGroup = true;
-								}}
-								class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
-							>
-								<svg
-									class="h-4 w-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-									aria-hidden="true"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-									/>
-								</svg>
-								New group
-							</button>
-						</div>
-					{/if}
 				</div>
 
 				<!-- Inbox — pinned above conversation list, never scrolls -->
@@ -494,9 +420,3 @@
 		{@render children()}
 	</main>
 </div>
-
-<CreateGroupDialog
-	open={showCreateGroup}
-	onClose={() => (showCreateGroup = false)}
-	onCreate={createGroup}
-/>

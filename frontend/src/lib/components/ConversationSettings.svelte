@@ -82,6 +82,7 @@
 	let workspacesLoading = $state(false);
 	let confirmClear = $state(false);
 	let confirmDelete = $state(false);
+	let confirmConvertPending = $state<string | null>(null);
 	let agentMode = $state<AgentMode>('always');
 	let members = $state<ConversationMember[]>([]);
 	let membersLoading = $state(false);
@@ -112,9 +113,7 @@
 			agentMode = conversation.agent_mode ?? 'always';
 			loadJobs();
 			loadWorkspaces();
-			if (conversation.kind === 'group') {
-				loadMembers();
-			}
+			loadMembers();
 		}
 	});
 
@@ -122,7 +121,7 @@
 	$effect(() => {
 		if (!open) return;
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === 'Escape' && !confirmClear && !confirmDelete) {
+			if (e.key === 'Escape' && !confirmClear && !confirmDelete && !confirmConvertPending) {
 				onClose();
 			}
 		};
@@ -169,7 +168,28 @@
 	}
 
 	async function handleAddMember(username: string) {
+		if (conversation.kind === 'direct') {
+			confirmConvertPending = username;
+			return;
+		}
 		try {
+			const member = await conversationService.addMember(conversation.id, username);
+			members = [...members, member];
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function confirmConvertAndAdd() {
+		if (!confirmConvertPending) return;
+		const username = confirmConvertPending;
+		confirmConvertPending = null;
+
+		try {
+			const title = conversation.title || 'Group conversation';
+			await conversationService.convertToGroup(conversation.id, title);
+			conversation = { ...conversation, kind: 'group', title };
+
 			const member = await conversationService.addMember(conversation.id, username);
 			members = [...members, member];
 		} catch {
@@ -376,25 +396,23 @@
 				<TagInput {tags} onAdd={onAddTag} onRemove={onRemoveTag} />
 			</SettingsSection>
 
-			<!-- Members (group only) -->
-			{#if isGroup}
-				<SettingsSection title="Members" description="Manage group members">
-					{#if membersLoading}
-						<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
-					{:else}
-						<MemberList
-							{members}
-							{currentUserId}
-							{currentUserRole}
-							conversationKind={conversation.kind}
-							onAddMember={handleAddMember}
-							onUpdateRole={handleUpdateRole}
-							onRemoveMember={handleRemoveMember}
-							onLeave={handleLeave}
-						/>
-					{/if}
-				</SettingsSection>
-			{/if}
+			<!-- Members -->
+			<SettingsSection title="Members" description="Manage conversation members">
+				{#if membersLoading}
+					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+				{:else}
+					<MemberList
+						{members}
+						{currentUserId}
+						{currentUserRole}
+						conversationKind={conversation.kind}
+						onAddMember={handleAddMember}
+						onUpdateRole={handleUpdateRole}
+						onRemoveMember={handleRemoveMember}
+						onLeave={handleLeave}
+					/>
+				{/if}
+			</SettingsSection>
 
 			<!-- Scheduled jobs -->
 			<SettingsSection title="Scheduled jobs" description="Automated tasks for this conversation">
@@ -448,4 +466,13 @@
 	destructive
 	onConfirm={handleDeleteConfirm}
 	onCancel={() => (confirmDelete = false)}
+/>
+
+<ConfirmDialog
+	open={confirmConvertPending !== null}
+	title="Convert to group"
+	message="Adding members will convert this to a group conversation. Continue?"
+	confirmText="Convert & add"
+	onConfirm={confirmConvertAndAdd}
+	onCancel={() => (confirmConvertPending = null)}
 />

@@ -86,5 +86,11 @@ export const conversationService = {
 	removeMember: (id: string, userId: string) =>
 		api(`/conversations/${id}/members/${userId}`, { method: 'DELETE' }),
 
-	leave: (id: string) => api(`/conversations/${id}/leave`, { method: 'POST' })
+	leave: (id: string) => api(`/conversations/${id}/leave`, { method: 'POST' }),
+
+	convertToGroup: (id: string, title: string) =>
+		api(`/conversations/${id}/convert-to-group`, {
+			method: 'POST',
+			body: JSON.stringify({ title })
+		})
 };
