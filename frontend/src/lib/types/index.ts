@@ -130,6 +130,13 @@ export type ServerWsMessage =
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
 
+export interface Workspace {
+	id: string;
+	name: string;
+	path: string;
+	created_at: string;
+}
+
 export interface WorkspaceSettings {
 	permission_mode: PermissionMode;
 	auto_snapshot: boolean;
