@@ -13,6 +13,7 @@
 	import { workspaceService } from '$lib/services/workspaces';
 	import { conversationService } from '$lib/services/conversations';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
 	import MemberList from './MemberList.svelte';
@@ -97,9 +98,7 @@
 			day: 'numeric'
 		})
 	);
-	let kindLabel = $derived(
-		kind === 'inbox' ? 'Inbox' : kind === 'group' ? 'Group' : 'Direct'
-	);
+	let kindLabel = $derived(kind === 'inbox' ? 'Inbox' : kind === 'group' ? 'Group' : 'Direct');
 	let isGroup = $derived(kind === 'group');
 	let currentUserId = $derived(auth.user?.id ?? '');
 	let currentUserRole = $derived.by((): ConversationUserRole => {
@@ -108,16 +107,17 @@
 	});
 	let canEditAgentMode = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
 
-	// Load data when panel opens
+	// Load data when panel opens — only track `open`, not conversation fields
 	$effect(() => {
-		if (open) {
+		if (!open) return;
+		untrack(() => {
 			editingTitle = conversation.title ?? '';
 			agentMode = conversation.agent_mode ?? 'always';
 			kind = conversation.kind;
 			loadJobs();
 			loadWorkspaces();
 			loadMembers();
-		}
+		});
 	});
 
 	// Close on Escape
