@@ -14,6 +14,7 @@
 
 	const handleKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
+			if (showSlashCommands) return; // let palette handle Enter
 			e.preventDefault();
 			submit();
 		}

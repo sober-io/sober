@@ -56,7 +56,7 @@
 
 {#if filtered.length > 0}
 	<div
-		class="absolute bottom-full left-0 right-0 mb-1 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+		class="absolute bottom-full left-0 right-0 z-50 mb-1 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
 	>
 		{#each filtered as command, i (command.name)}
 			<button

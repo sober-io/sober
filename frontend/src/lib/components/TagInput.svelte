@@ -109,7 +109,7 @@
 
 			{#if showSuggestions && filtered.length > 0}
 				<ul
-					class="absolute left-0 top-full z-10 mt-1 max-h-40 min-w-[120px] overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-md dark:border-zinc-700 dark:bg-zinc-800"
+					class="absolute left-0 top-full z-50 mt-1 max-h-40 min-w-[120px] overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-md dark:border-zinc-700 dark:bg-zinc-800"
 				>
 					{#each filtered as suggestion (suggestion.id)}
 						<li>
