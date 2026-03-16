@@ -24,6 +24,12 @@ pub enum ChunkType {
     Conversation = 1,
     /// Raw f32 embedding vector.
     Embedding = 2,
+    /// User preference or personal setting.
+    Preference = 3,
+    /// Learned skill or capability.
+    Skill = 4,
+    /// Code snippet or technical reference.
+    Code = 5,
     /// Soul layer data (used by sober-mind).
     Soul = 6,
 }
@@ -36,6 +42,9 @@ impl TryFrom<u8> for ChunkType {
             0 => Ok(Self::Fact),
             1 => Ok(Self::Conversation),
             2 => Ok(Self::Embedding),
+            3 => Ok(Self::Preference),
+            4 => Ok(Self::Skill),
+            5 => Ok(Self::Code),
             6 => Ok(Self::Soul),
             other => Err(MemoryError::InvalidChunkType(other)),
         }
@@ -81,12 +90,15 @@ mod tests {
         assert_eq!(ChunkType::try_from(0).unwrap(), ChunkType::Fact);
         assert_eq!(ChunkType::try_from(1).unwrap(), ChunkType::Conversation);
         assert_eq!(ChunkType::try_from(2).unwrap(), ChunkType::Embedding);
+        assert_eq!(ChunkType::try_from(3).unwrap(), ChunkType::Preference);
+        assert_eq!(ChunkType::try_from(4).unwrap(), ChunkType::Skill);
+        assert_eq!(ChunkType::try_from(5).unwrap(), ChunkType::Code);
         assert_eq!(ChunkType::try_from(6).unwrap(), ChunkType::Soul);
     }
 
     #[test]
     fn chunk_type_unknown_value_errors() {
-        assert!(ChunkType::try_from(3).is_err());
+        assert!(ChunkType::try_from(7).is_err());
         assert!(ChunkType::try_from(255).is_err());
     }
 
@@ -96,6 +108,9 @@ mod tests {
             ChunkType::Fact,
             ChunkType::Conversation,
             ChunkType::Embedding,
+            ChunkType::Preference,
+            ChunkType::Skill,
+            ChunkType::Code,
             ChunkType::Soul,
         ] {
             let byte: u8 = ct.into();

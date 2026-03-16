@@ -143,10 +143,14 @@ impl MemoryStore {
         let sparse_indices: Vec<u32> = sparse.iter().map(|(i, _)| *i).collect();
         let sparse_values: Vec<f32> = sparse.iter().map(|(_, v)| *v).collect();
 
-        let scope_filter = Filter::must([Condition::matches(
+        let mut conditions: Vec<Condition> = vec![Condition::matches(
             fields::SCOPE_ID,
             query.scope_id.to_string(),
-        )]);
+        )];
+        if let Some(ct) = query.chunk_type_filter {
+            conditions.push(Condition::matches(fields::CHUNK_TYPE, ct as i64));
+        }
+        let scope_filter = Filter::must(conditions);
 
         // Prefetch: dense search
         let dense_prefetch = PrefetchQueryBuilder::default()

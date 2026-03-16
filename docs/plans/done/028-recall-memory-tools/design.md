@@ -174,7 +174,47 @@ These are agent-internal tools. The frontend already renders tool calls via
 `ToolCallDisplay.svelte` — `recall` and `remember` will appear there
 automatically.
 
-### 3.8 Testing
+### 3.8 Inline memory extraction (replaces background ingestion)
 
-Unit tests for the tool input parsing and chunk type mapping logic. Integration
-tests (requiring Docker + Qdrant) for end-to-end store/recall cycles.
+The existing `spawn_memory_ingestion_static` stores entire raw messages as
+`Conversation` chunks — producing noisy, low-quality memories. Replace with
+**inline extraction**: the system prompt instructs the LLM to append a
+structured `<memory_extractions>` block to its response containing concise
+facts extracted from the conversation turn.
+
+**System prompt addition** (in `sober-mind` prompt assembly):
+```
+After your response, if the conversation contained any facts, preferences,
+decisions, or other information worth remembering for future conversations,
+append a memory extraction block. If nothing is worth remembering, omit it.
+
+<memory_extractions>
+[{"content": "concise fact", "type": "fact|preference|skill|code"}]
+</memory_extractions>
+```
+
+**Agent-side processing:**
+1. After receiving the full assistant response, parse and strip
+   `<memory_extractions>...</memory_extractions>` from the content
+2. For each extraction, store via `MemoryStore::store()` with the appropriate
+   `ChunkType` and default importance for that type
+3. The stripped response (without the XML block) is what gets stored as the
+   message and shown to the user
+
+**Remove `spawn_memory_ingestion_static`** — no more raw conversation chunk
+storage. Memory is now either:
+- Explicitly stored via `remember` tool (LLM-initiated)
+- Automatically extracted via inline `<memory_extractions>` (zero extra cost)
+
+**Benefits:**
+- Zero extra LLM calls — extraction is part of the normal response
+- Higher quality — the model understands full context and extracts concise facts
+- Properly typed — facts, preferences, skills instead of everything being "conversation"
+- The `remember` tool serves as a manual override when the model wants to store
+  something outside the normal response flow
+
+### 3.9 Testing
+
+Unit tests for the tool input parsing, chunk type mapping, and memory extraction
+parsing logic. Integration tests (requiring Docker + Qdrant) for end-to-end
+store/recall cycles.

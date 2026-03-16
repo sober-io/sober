@@ -4,6 +4,7 @@ pub mod agent;
 pub mod broadcast;
 pub mod confirm;
 pub mod error;
+pub mod extraction;
 pub mod grpc;
 pub mod stream;
 pub mod system_jobs;
