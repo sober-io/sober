@@ -206,15 +206,11 @@ async fn get_conversation(
     let cu_repo = PgConversationUserRepo::new(state.db.clone());
 
     let conversation_id = ConversationId::from_uuid(id);
+
+    // Verify membership.
+    let cu = super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+
     let conversation = conv_repo.get_by_id(conversation_id).await?;
-
-    // Verify ownership.
-    if conversation.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation".into()));
-    }
-
-    // Get the user's unread count.
-    let cu = cu_repo.get(conversation_id, auth_user.user_id).await?;
 
     // Get all users in this conversation.
     let users = cu_repo.list_by_conversation(conversation_id).await?;
@@ -253,11 +249,10 @@ async fn update_conversation(
     let repo = PgConversationRepo::new(state.db.clone());
     let conversation_id = ConversationId::from_uuid(id);
 
-    // Verify ownership.
+    // Verify membership.
+    let membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
     let conversation = repo.get_by_id(conversation_id).await?;
-    if conversation.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation".into()));
-    }
 
     if let Some(ref title) = body.title {
         repo.update_title(conversation_id, title).await?;
@@ -280,12 +275,11 @@ async fn update_conversation(
     }
     if let Some(agent_mode) = body.agent_mode {
         // For group conversations, only owner/admin can change agent_mode.
-        if conversation.kind == ConversationKind::Group {
-            let cu_repo = PgConversationUserRepo::new(state.db.clone());
-            let cu = cu_repo.get(conversation_id, auth_user.user_id).await?;
-            if cu.role != ConversationUserRole::Owner && cu.role != ConversationUserRole::Admin {
-                return Err(AppError::Forbidden);
-            }
+        if conversation.kind == ConversationKind::Group
+            && membership.role != ConversationUserRole::Owner
+            && membership.role != ConversationUserRole::Admin
+        {
+            return Err(AppError::Forbidden);
         }
         repo.update_agent_mode(conversation_id, agent_mode).await?;
     }
@@ -312,10 +306,11 @@ async fn delete_conversation(
     let repo = PgConversationRepo::new(state.db.clone());
     let conversation_id = ConversationId::from_uuid(id);
 
-    // Verify ownership.
-    let conversation = repo.get_by_id(conversation_id).await?;
-    if conversation.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation".into()));
+    // Verify membership — only owner can delete.
+    let membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    if membership.role != ConversationUserRole::Owner {
+        return Err(AppError::Forbidden);
     }
 
     repo.delete(conversation_id).await?;
@@ -348,8 +343,14 @@ async fn mark_read(
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let cu_repo = PgConversationUserRepo::new(state.db.clone());
     let conversation_id = ConversationId::from_uuid(id);
+
+    // Verify membership (mark_read will also fail if not a member, but this
+    // gives a clearer error).
+    let _membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+
+    let cu_repo = PgConversationUserRepo::new(state.db.clone());
     cu_repo
         .mark_read(conversation_id, auth_user.user_id)
         .await?;
@@ -363,12 +364,12 @@ async fn list_conversation_jobs(
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let conv_repo = PgConversationRepo::new(state.db.clone());
     let conversation_id = ConversationId::from_uuid(id);
-    let conv = conv_repo.get_by_id(conversation_id).await?;
-    if conv.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation not found".into()));
-    }
+
+    // Verify membership.
+    let _membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+
     let job_repo = PgJobRepo::new(state.db.clone());
     let jobs = job_repo
         .list_filtered(None, None, &[], None, None, Some(id))
@@ -382,13 +383,13 @@ async fn clear_messages(
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let conv_repo = PgConversationRepo::new(state.db.clone());
     let conversation_id = ConversationId::from_uuid(id);
 
-    // Verify ownership.
-    let conv = conv_repo.get_by_id(conversation_id).await?;
-    if conv.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation not found".into()));
+    // Verify membership — only owner can clear messages.
+    let membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    if membership.role != ConversationUserRole::Owner {
+        return Err(AppError::Forbidden);
     }
 
     let msg_repo = PgMessageRepo::new(state.db.clone());

@@ -8,10 +8,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
-use sober_core::types::{
-    ApiResponse, ConversationId, ConversationRepo, CreateTag, Tag, TagId, TagRepo,
-};
-use sober_db::{PgConversationRepo, PgTagRepo};
+use sober_core::types::{ApiResponse, ConversationId, CreateTag, Tag, TagId, TagRepo};
+use sober_db::PgTagRepo;
 
 use crate::state::AppState;
 
@@ -53,16 +51,13 @@ async fn add_conversation_tag(
     Path(id): Path<uuid::Uuid>,
     Json(body): Json<AddTagRequest>,
 ) -> Result<ApiResponse<Tag>, AppError> {
-    let conv_repo = PgConversationRepo::new(state.db.clone());
     let tag_repo = PgTagRepo::new(state.db.clone());
 
     let conversation_id = ConversationId::from_uuid(id);
 
-    // Verify conversation ownership.
-    let conversation = conv_repo.get_by_id(conversation_id).await?;
-    if conversation.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation".into()));
-    }
+    // Verify membership.
+    let _membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
     let tag = tag_repo
         .create_or_get(CreateTag {
@@ -82,17 +77,14 @@ async fn remove_conversation_tag(
     auth_user: AuthUser,
     Path((id, tag_id)): Path<(uuid::Uuid, uuid::Uuid)>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let conv_repo = PgConversationRepo::new(state.db.clone());
     let tag_repo = PgTagRepo::new(state.db.clone());
 
     let conversation_id = ConversationId::from_uuid(id);
     let tag_id = TagId::from_uuid(tag_id);
 
-    // Verify conversation ownership.
-    let conversation = conv_repo.get_by_id(conversation_id).await?;
-    if conversation.user_id != auth_user.user_id {
-        return Err(AppError::NotFound("conversation".into()));
-    }
+    // Verify membership.
+    let _membership =
+        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
     tag_repo.untag_conversation(conversation_id, tag_id).await?;
 

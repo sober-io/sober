@@ -240,6 +240,36 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
         match client_msg {
             ClientWsMessage::ChatSubscribe { conversation_id } => {
+                // Verify membership before subscribing.
+                let conv_id = match conversation_id
+                    .parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                {
+                    Ok(id) => id,
+                    Err(_) => {
+                        let _ = out_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id,
+                                error: "invalid conversation_id".into(),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+
+                if super::verify_membership(&state.db, conv_id, auth_user.user_id)
+                    .await
+                    .is_err()
+                {
+                    let _ = out_tx
+                        .send(ServerWsMessage::ChatError {
+                            conversation_id,
+                            error: "not a member of this conversation".into(),
+                        })
+                        .await;
+                    continue;
+                }
+
                 // Register this connection for the conversation so events
                 // from the subscription task are routed here (e.g. scheduler results).
                 if registered_conversations.insert(conversation_id.clone()) {
@@ -250,9 +280,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 }
 
                 // Mark conversation as read for this user (best-effort).
-                if let Ok(conv_id) = conversation_id
-                    .parse::<uuid::Uuid>()
-                    .map(ConversationId::from_uuid)
                 {
                     let cu_repo = PgConversationUserRepo::new(state.db.clone());
                     use sober_core::types::ConversationUserRepo;
@@ -263,6 +290,36 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 conversation_id,
                 content,
             } => {
+                // Verify membership before sending message.
+                let conv_id = match conversation_id
+                    .parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                {
+                    Ok(id) => id,
+                    Err(_) => {
+                        let _ = out_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id,
+                                error: "invalid conversation_id".into(),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+
+                if super::verify_membership(&state.db, conv_id, auth_user.user_id)
+                    .await
+                    .is_err()
+                {
+                    let _ = out_tx
+                        .send(ServerWsMessage::ChatError {
+                            conversation_id,
+                            error: "not a member of this conversation".into(),
+                        })
+                        .await;
+                    continue;
+                }
+
                 // Ensure registration (in case chat.subscribe wasn't sent first).
                 if registered_conversations.insert(conversation_id.clone()) {
                     state
