@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import type {
 		ToolCall,
 		ServerWsMessage,
@@ -91,6 +92,7 @@
 	let permissionMode = $state<PermissionMode>('policy_based');
 	let deleteTarget = $state<string | null>(null);
 	let showClearConfirm = $state(false);
+	let showDeleteConversationConfirm = $state(false);
 
 	const conversationId = $derived($page.params.id ?? '');
 
@@ -491,13 +493,30 @@
 		}
 		editingTitle = false;
 	};
+
+	const handleArchive = async () => {
+		const newArchived = !data.conversation.is_archived;
+		await conversationService.archive(data.conversation.id, newArchived);
+		if (newArchived) {
+			conversations.archive(data.conversation.id);
+		} else {
+			conversations.unarchive(data.conversation.id);
+		}
+	};
+
+	const handleDeleteConversation = async () => {
+		showDeleteConversationConfirm = false;
+		await conversationService.delete(data.conversation.id);
+		conversations.remove(data.conversation.id);
+		goto('/');
+	};
 </script>
 
 <div class="flex h-full flex-col">
 	<header
 		class="flex flex-col justify-center gap-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800"
 	>
-		<div class="flex items-center">
+		<div class="flex items-center gap-2">
 			{#if editingTitle}
 				<input
 					type="text"
@@ -507,17 +526,37 @@
 						if (e.key === 'Escape') editingTitle = false;
 					}}
 					onblur={saveTitle}
-					class="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
+					class="min-w-0 flex-1 rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm font-medium text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:text-zinc-100 dark:focus:border-zinc-500"
 				/>
 			{:else}
 				<button
 					onclick={startEditTitle}
-					class="text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
+					class="min-w-0 flex-1 truncate text-left text-sm font-medium text-zinc-900 hover:text-zinc-600 dark:text-zinc-100 dark:hover:text-zinc-400"
 					title="Click to rename"
 				>
 					{title || 'New conversation'}
 				</button>
 			{/if}
+			<div class="flex shrink-0 items-center gap-1">
+				<button
+					onclick={handleArchive}
+					class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+					title={data.conversation.is_archived ? 'Unarchive conversation' : 'Archive conversation'}
+				>
+					{data.conversation.is_archived ? 'Unarchive' : 'Archive'}
+				</button>
+				{#if data.conversation.kind !== 'inbox'}
+					<button
+						onclick={() => {
+							showDeleteConversationConfirm = true;
+						}}
+						class="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
+						title="Delete conversation"
+					>
+						Delete
+					</button>
+				{/if}
+			</div>
 		</div>
 		<TagInput {tags} onAdd={handleAddTag} onRemove={handleRemoveTag} />
 	</header>
@@ -658,6 +697,18 @@
 	onConfirm={confirmClear}
 	onCancel={() => {
 		showClearConfirm = false;
+	}}
+/>
+
+<ConfirmDialog
+	open={showDeleteConversationConfirm}
+	title="Delete conversation"
+	message="This will permanently delete this conversation and all messages. This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={handleDeleteConversation}
+	onCancel={() => {
+		showDeleteConversationConfirm = false;
 	}}
 />
 
