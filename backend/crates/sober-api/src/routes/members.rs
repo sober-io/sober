@@ -9,11 +9,11 @@ use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
-    ApiResponse, ConversationId, ConversationUserRepo, ConversationUserRole,
+    ApiResponse, ConversationId, ConversationRepo, ConversationUserRepo, ConversationUserRole,
     ConversationUserWithUsername, CreateMessage, Message, MessageRepo, MessageRole, UserId,
     UserRepo,
 };
-use sober_db::{PgConversationUserRepo, PgMessageRepo, PgUserRepo};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgUserRepo};
 
 use crate::routes::ws::{MemberInfo, ServerWsMessage};
 use crate::state::AppState;
@@ -288,6 +288,13 @@ async fn remove_member(
         .send(&target_id.to_string(), ws_msg)
         .await;
 
+    // Auto-convert back to direct if only the owner remains.
+    let current_members = cu_repo.list_by_conversation(conversation_id).await?;
+    if current_members.len() == 1 {
+        let conv_repo = PgConversationRepo::new(state.db.clone());
+        conv_repo.convert_to_direct(conversation_id).await.ok();
+    }
+
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }
 
@@ -341,6 +348,13 @@ async fn leave(
         .user_connections
         .send(&auth_user.user_id.to_string(), ws_msg)
         .await;
+
+    // Auto-convert back to direct if only the owner remains.
+    let current_members = cu_repo.list_by_conversation(conversation_id).await?;
+    if current_members.len() == 1 {
+        let conv_repo = PgConversationRepo::new(state.db.clone());
+        conv_repo.convert_to_direct(conversation_id).await.ok();
+    }
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }

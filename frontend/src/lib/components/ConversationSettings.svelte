@@ -221,6 +221,11 @@
 		try {
 			await conversationService.removeMember(conversation.id, userId);
 			members = members.filter((m) => m.user_id !== userId);
+			// Auto-convert back to direct if only owner remains
+			if (members.length <= 1) {
+				kind = 'direct';
+				conversations.update(conversation.id, { kind: 'direct' });
+			}
 		} catch {
 			// Could show error toast in the future
 		}

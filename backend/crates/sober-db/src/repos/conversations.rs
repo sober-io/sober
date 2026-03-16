@@ -493,6 +493,19 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(())
     }
+
+    async fn convert_to_direct(&self, id: ConversationId) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE conversations SET kind = 'direct', agent_mode = 'always', updated_at = now() \
+             WHERE id = $1 AND kind = 'group'",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
 }
 
 /// Helper row type for the tag + conversation_id join.

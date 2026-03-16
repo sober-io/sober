@@ -202,6 +202,12 @@ pub trait ConversationRepo: Send + Sync {
         &self,
         id: ConversationId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Converts a group conversation back to direct (when only owner remains).
+    fn convert_to_direct(
+        &self,
+        id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
