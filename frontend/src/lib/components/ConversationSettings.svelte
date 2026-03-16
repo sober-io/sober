@@ -1,8 +1,20 @@
 <script lang="ts">
-	import type { Conversation, Tag, Job, PermissionMode, Workspace } from '$lib/types';
+	import type {
+		Conversation,
+		Tag,
+		Job,
+		PermissionMode,
+		Workspace,
+		AgentMode,
+		ConversationMember,
+		ConversationUserRole
+	} from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
 	import { workspaceService } from '$lib/services/workspaces';
+	import { conversationService } from '$lib/services/conversations';
+	import { auth } from '$lib/stores/auth.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
+	import MemberList from './MemberList.svelte';
 	import TagInput from './TagInput.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -40,6 +52,28 @@
 		onDelete
 	}: Props = $props();
 
+	// Agent mode options
+	const AGENT_MODES: ReadonlyArray<{
+		value: AgentMode;
+		label: string;
+		description: string;
+		color: string;
+	}> = [
+		{
+			value: 'always',
+			label: 'Always',
+			description: 'Agent responds to every message',
+			color: 'emerald'
+		},
+		{
+			value: 'mention',
+			label: 'Mention',
+			description: 'Agent responds only when mentioned',
+			color: 'amber'
+		},
+		{ value: 'silent', label: 'Silent', description: 'Agent does not respond', color: 'zinc' }
+	];
+
 	// Local state
 	let editingTitle = $state('');
 	let jobs = $state<Job[]>([]);
@@ -48,6 +82,9 @@
 	let workspacesLoading = $state(false);
 	let confirmClear = $state(false);
 	let confirmDelete = $state(false);
+	let agentMode = $state<AgentMode>('always');
+	let members = $state<ConversationMember[]>([]);
+	let membersLoading = $state(false);
 
 	// Derived
 	let createdDate = $derived(
@@ -60,13 +97,24 @@
 	let kindLabel = $derived(
 		conversation.kind === 'inbox' ? 'Inbox' : conversation.kind === 'group' ? 'Group' : 'Direct'
 	);
+	let isGroup = $derived(conversation.kind === 'group');
+	let currentUserId = $derived(auth.user?.id ?? '');
+	let currentUserRole = $derived.by((): ConversationUserRole => {
+		const me = members.find((m) => m.user_id === currentUserId);
+		return me?.role ?? 'member';
+	});
+	let canEditAgentMode = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
 
 	// Load data when panel opens
 	$effect(() => {
 		if (open) {
 			editingTitle = conversation.title ?? '';
+			agentMode = conversation.agent_mode ?? 'always';
 			loadJobs();
 			loadWorkspaces();
+			if (conversation.kind === 'group') {
+				loadMembers();
+			}
 		}
 	});
 
@@ -101,6 +149,75 @@
 			workspaces = [];
 		} finally {
 			workspacesLoading = false;
+		}
+	}
+
+	async function loadMembers() {
+		membersLoading = true;
+		try {
+			members = await conversationService.listMembers(conversation.id);
+		} catch {
+			members = [];
+		} finally {
+			membersLoading = false;
+		}
+	}
+
+	async function handleAgentModeChange(mode: AgentMode) {
+		agentMode = mode;
+		await conversationService.updateAgentMode(conversation.id, mode);
+	}
+
+	async function handleAddMember(username: string) {
+		try {
+			const member = await conversationService.addMember(conversation.id, username);
+			members = [...members, member];
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleUpdateRole(userId: string, role: string) {
+		try {
+			await conversationService.updateMemberRole(conversation.id, userId, role);
+			const idx = members.findIndex((m) => m.user_id === userId);
+			if (idx !== -1) {
+				members[idx] = { ...members[idx], role: role as ConversationUserRole };
+			}
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleRemoveMember(userId: string) {
+		try {
+			await conversationService.removeMember(conversation.id, userId);
+			members = members.filter((m) => m.user_id !== userId);
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleLeave() {
+		try {
+			await conversationService.leave(conversation.id);
+			onClose();
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	function agentModeButtonClass(m: (typeof AGENT_MODES)[number]): string {
+		if (agentMode !== m.value) {
+			return 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200';
+		}
+		switch (m.color) {
+			case 'emerald':
+				return 'bg-emerald-600/30 text-emerald-400';
+			case 'amber':
+				return 'bg-amber-600/30 text-amber-400';
+			default:
+				return 'bg-zinc-600/30 text-zinc-300';
 		}
 	}
 
@@ -203,6 +320,39 @@
 				<PermissionModeSelector mode={permissionMode} onModeChange={onUpdatePermissionMode} />
 			</SettingsSection>
 
+			<!-- Agent mode (group only) -->
+			{#if isGroup}
+				<SettingsSection title="Agent mode" description="When the agent responds in this group">
+					{#if canEditAgentMode}
+						<div class="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+							{#each AGENT_MODES as m (m.value)}
+								<button
+									onclick={() => handleAgentModeChange(m.value)}
+									class={[
+										'flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+										agentModeButtonClass(m)
+									]}
+									title={m.description}
+								>
+									{m.label}
+								</button>
+							{/each}
+						</div>
+					{:else}
+						<div class="flex items-center gap-2">
+							<span
+								class="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+							>
+								{AGENT_MODES.find((m) => m.value === agentMode)?.label ?? agentMode}
+							</span>
+							<span class="text-xs text-zinc-500 dark:text-zinc-400">
+								{AGENT_MODES.find((m) => m.value === agentMode)?.description ?? ''}
+							</span>
+						</div>
+					{/if}
+				</SettingsSection>
+			{/if}
+
 			<!-- Workspace -->
 			<SettingsSection title="Workspace" description="Link to a project workspace">
 				{#if workspacesLoading}
@@ -225,6 +375,26 @@
 			<SettingsSection title="Tags" description="Organize with tags">
 				<TagInput {tags} onAdd={onAddTag} onRemove={onRemoveTag} />
 			</SettingsSection>
+
+			<!-- Members (group only) -->
+			{#if isGroup}
+				<SettingsSection title="Members" description="Manage group members">
+					{#if membersLoading}
+						<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+					{:else}
+						<MemberList
+							{members}
+							{currentUserId}
+							{currentUserRole}
+							conversationKind={conversation.kind}
+							onAddMember={handleAddMember}
+							onUpdateRole={handleUpdateRole}
+							onRemoveMember={handleRemoveMember}
+							onLeave={handleLeave}
+						/>
+					{/if}
+				</SettingsSection>
+			{/if}
 
 			<!-- Scheduled jobs -->
 			<SettingsSection title="Scheduled jobs" description="Automated tasks for this conversation">
