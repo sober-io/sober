@@ -554,6 +554,7 @@ where
                         role: "Assistant".to_owned(),
                         content: text.clone(),
                         source: format!("{:?}", ctx.trigger).to_lowercase(),
+                        user_id: Some(user_id.to_string()),
                     },
                 )),
             });
@@ -998,6 +999,7 @@ mod tests {
                 tool_calls: None,
                 tool_result: None,
                 token_count: None,
+                user_id: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1008,6 +1010,7 @@ mod tests {
                 tool_calls: None,
                 tool_result: None,
                 token_count: None,
+                user_id: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1018,6 +1021,7 @@ mod tests {
                 tool_calls: None,
                 tool_result: None,
                 token_count: None,
+                user_id: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1028,6 +1032,7 @@ mod tests {
                 tool_calls: None,
                 tool_result: None,
                 token_count: None,
+                user_id: None,
                 created_at: chrono::Utc::now(),
             },
         ];

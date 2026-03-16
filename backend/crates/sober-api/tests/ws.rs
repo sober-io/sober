@@ -149,7 +149,12 @@ async fn start_server(pool: PgPool) -> (SocketAddr, String) {
     let state = AppState::from_parts(pool, agent_client, auth, config);
 
     // Spawn subscription task for the connection registry.
-    sober_api::subscribe::spawn_subscription(state.agent_client.clone(), state.connections.clone());
+    sober_api::subscribe::spawn_subscription(
+        state.agent_client.clone(),
+        state.connections.clone(),
+        state.user_connections.clone(),
+        state.db.clone(),
+    );
 
     let app = routes::build_router(state);
 

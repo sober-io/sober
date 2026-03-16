@@ -101,6 +101,55 @@ impl Default for ConnectionRegistry {
     }
 }
 
+/// Registry of active WebSocket connections per user.
+///
+/// Used for cross-conversation events like unread notifications. Thread-safe
+/// and shared across the subscription task and WebSocket handlers.
+#[derive(Clone, Default)]
+pub struct UserConnectionRegistry {
+    inner: Arc<RwLock<HashMap<String, Vec<mpsc::Sender<ServerWsMessage>>>>>,
+}
+
+impl UserConnectionRegistry {
+    /// Creates a new empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a sender for a user.
+    ///
+    /// Multiple senders can be registered per user (e.g. the same user
+    /// connected from multiple browser tabs).
+    pub async fn register(&self, user_id: &str, sender: mpsc::Sender<ServerWsMessage>) {
+        let mut map = self.inner.write().await;
+        map.entry(user_id.to_string()).or_default().push(sender);
+    }
+
+    /// Removes closed senders for a user.
+    ///
+    /// Called when a WebSocket disconnects. Uses the same retain pattern as
+    /// [`ConnectionRegistry::unregister`].
+    pub async fn unregister(&self, user_id: &str) {
+        let mut map = self.inner.write().await;
+        if let Some(senders) = map.get_mut(user_id) {
+            senders.retain(|s| !s.is_closed());
+            if senders.is_empty() {
+                map.remove(user_id);
+            }
+        }
+    }
+
+    /// Sends a message to all connections for a user.
+    pub async fn send(&self, user_id: &str, msg: ServerWsMessage) {
+        let map = self.inner.read().await;
+        if let Some(senders) = map.get(user_id) {
+            for sender in senders {
+                let _ = sender.send(msg.clone()).await;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

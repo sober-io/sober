@@ -29,7 +29,12 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(config.clone()).await?;
 
     // Spawn the background subscription to agent conversation updates.
-    sober_api::subscribe::spawn_subscription(state.agent_client.clone(), state.connections.clone());
+    sober_api::subscribe::spawn_subscription(
+        state.agent_client.clone(),
+        state.connections.clone(),
+        state.user_connections.clone(),
+        state.db.clone(),
+    );
 
     // Build the router with all middleware.
     let app = routes::build_router(state.clone());
