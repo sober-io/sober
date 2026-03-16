@@ -9,7 +9,7 @@ use crate::rows::MessageRow;
 
 /// Column list for message queries.
 const MSG_COLUMNS: &str = "id, conversation_id, role, content, tool_calls, \
-                            tool_result, token_count, user_id, created_at";
+                            tool_result, token_count, user_id, metadata, created_at";
 
 /// PostgreSQL-backed message repository.
 pub struct PgMessageRepo {
@@ -28,8 +28,8 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, MessageRow>(
             &format!(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_result, token_count) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_result, token_count, metadata) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
                  RETURNING {MSG_COLUMNS}"
             ),
         )
@@ -40,6 +40,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .bind(&input.tool_calls)
         .bind(&input.tool_result)
         .bind(input.token_count)
+        .bind(&input.metadata)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

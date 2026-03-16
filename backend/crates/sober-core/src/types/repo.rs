@@ -102,6 +102,14 @@ pub trait ConversationRepo: Send + Sync {
         workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
 
+    /// Creates a new group conversation with the given title.
+    fn create_group(
+        &self,
+        user_id: UserId,
+        title: &str,
+        workspace_id: Option<WorkspaceId>,
+    ) -> impl Future<Output = Result<Conversation, AppError>> + Send;
+
     /// Finds a conversation by ID.
     fn get_by_id(
         &self,
