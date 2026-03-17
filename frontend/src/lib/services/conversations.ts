@@ -1,5 +1,5 @@
 import { api } from '$lib/utils/api';
-import type { AgentMode, Collaborator, Conversation, Message, PermissionMode, Tag } from '$lib/types';
+import type { AgentMode, Collaborator, Conversation, Message, PermissionMode } from '$lib/types';
 
 export const conversationService = {
 	list: (params?: { archived?: boolean; kind?: string; tag?: string; search?: string }) => {
@@ -85,8 +85,5 @@ export const conversationService = {
 		api(`/conversations/${id}/convert-to-group`, {
 			method: 'POST',
 			body: JSON.stringify({ title })
-		}),
-
-	listMessageTags: (id: string) =>
-		api<Record<string, Tag[]>>(`/conversations/${id}/message-tags`)
+		})
 };

@@ -138,13 +138,19 @@
 		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
-		messageTags = {};
 		memberMap = {};
+
+		// Populate message tags from inline data.
+		const tagMap: Record<string, Tag[]> = {};
+		for (const m of data.messages) {
+			if (m.tags && m.tags.length > 0) {
+				tagMap[m.id] = m.tags;
+			}
+		}
+		messageTags = tagMap;
+
 		untrack(() => {
 			conversations.markRead(data.conversation.id);
-			conversationService.listMessageTags(data.conversation.id).then((tagMap) => {
-				messageTags = tagMap;
-			});
 		});
 	});
 
@@ -208,6 +214,12 @@
 		if (older.length > 0 && container) {
 			const prevHeight = container.scrollHeight;
 			messages = [...older.map(toChat), ...messages];
+			// Merge tags from older messages.
+			for (const m of older) {
+				if (m.tags && m.tags.length > 0) {
+					messageTags[m.id] = m.tags;
+				}
+			}
 			await tick();
 			container.scrollTop = container.scrollHeight - prevHeight;
 		}

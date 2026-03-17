@@ -11,7 +11,7 @@ use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
-    ApiResponse, ConversationId, CreateTag, Message, MessageId, MessageRepo, Tag, TagId, TagRepo,
+    ApiResponse, ConversationId, CreateTag, MessageId, MessageRepo, Tag, TagId, TagRepo,
 };
 use sober_db::{PgMessageRepo, PgTagRepo};
 
@@ -21,7 +21,6 @@ use crate::state::AppState;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/conversations/{id}/messages", get(list_messages))
-        .route("/conversations/{id}/message-tags", get(list_message_tags))
         .route("/messages/{id}", delete(delete_message))
         .route("/messages/{id}/tags", post(add_message_tag))
         .route("/messages/{id}/tags/{tag_id}", delete(remove_message_tag))
@@ -35,20 +34,50 @@ struct PaginationParams {
 }
 
 /// `GET /api/v1/conversations/:id/messages` — list messages with cursor pagination.
+///
+/// Each message includes an inline `tags` array (may be empty).
 async fn list_messages(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<ConversationId>,
     Query(params): Query<PaginationParams>,
-) -> Result<ApiResponse<Vec<Message>>, AppError> {
+) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
     let msg_repo = PgMessageRepo::new(state.db.clone());
+    let tag_repo = PgTagRepo::new(state.db.clone());
 
     // Verify membership.
     let _membership = super::verify_membership(&state.db, id, auth_user.user_id).await?;
 
     let limit = params.limit.unwrap_or(50).min(100);
     let messages = msg_repo.list_paginated(id, params.before, limit).await?;
-    Ok(ApiResponse::new(messages))
+
+    // Batch-fetch all message tags for this conversation.
+    let tag_pairs = tag_repo
+        .list_by_conversation_messages(id)
+        .await
+        .unwrap_or_default();
+    let mut tag_map: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    for (msg_id, tag) in &tag_pairs {
+        tag_map
+            .entry(msg_id.to_string())
+            .or_default()
+            .push(serde_json::to_value(tag).unwrap_or_default());
+    }
+
+    // Attach tags to each message.
+    let response: Vec<serde_json::Value> = messages
+        .iter()
+        .map(|m| {
+            let mut val = serde_json::to_value(m).unwrap_or_default();
+            let tags = tag_map.remove(&m.id.to_string()).unwrap_or_default();
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("tags".to_string(), serde_json::Value::Array(tags));
+            }
+            val
+        })
+        .collect();
+
+    Ok(ApiResponse::new(response))
 }
 
 /// `DELETE /api/v1/messages/:id` — delete a single message.
@@ -125,27 +154,4 @@ async fn remove_message_tag(
 
     tag_repo.untag_message(id, tag_id).await?;
     Ok(ApiResponse::new(serde_json::json!({ "removed": true })))
-}
-
-/// `GET /api/v1/conversations/:id/message-tags` — get all message tags for a conversation.
-///
-/// Returns a map of `message_id → [Tag]` for every tagged message in the conversation.
-async fn list_message_tags(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(id): Path<ConversationId>,
-) -> Result<ApiResponse<HashMap<String, Vec<Tag>>>, AppError> {
-    let tag_repo = PgTagRepo::new(state.db.clone());
-
-    // Verify membership.
-    let _membership = super::verify_membership(&state.db, id, auth_user.user_id).await?;
-
-    let pairs = tag_repo.list_by_conversation_messages(id).await?;
-
-    let mut map: HashMap<String, Vec<Tag>> = HashMap::new();
-    for (message_id, tag) in pairs {
-        map.entry(message_id.to_string()).or_default().push(tag);
-    }
-
-    Ok(ApiResponse::new(map))
 }

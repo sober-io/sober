@@ -58,6 +58,7 @@ export interface Message {
 	token_count: number;
 	user_id?: string;
 	metadata?: Record<string, unknown>;
+	tags?: Tag[];
 	created_at: string;
 }
 
