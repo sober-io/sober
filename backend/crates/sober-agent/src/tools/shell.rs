@@ -230,6 +230,7 @@ impl Tool for ShellTool {
                 "required": ["command"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 

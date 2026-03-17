@@ -25,6 +25,9 @@ pub struct ToolMetadata {
     /// If `true`, executing this tool may invalidate loaded context
     /// (e.g. memory writes, file modifications).
     pub context_modifying: bool,
+    /// If `true`, this tool's results contain sensitive data (e.g. decrypted
+    /// secret values) and must not be forwarded to WebSocket clients.
+    pub internal: bool,
 }
 
 /// Output returned by a tool execution.

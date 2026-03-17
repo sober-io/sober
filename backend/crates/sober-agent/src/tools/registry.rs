@@ -115,6 +115,7 @@ mod tests {
                     "properties": {}
                 }),
                 context_modifying: false,
+                internal: false,
             }
         }
 

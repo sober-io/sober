@@ -56,6 +56,7 @@ impl Tool for McpToolAdapter {
             description: self.tool_info.description.clone().unwrap_or_default(),
             input_schema: self.tool_info.input_schema.clone(),
             context_modifying: false,
+            internal: false,
         }
     }
 

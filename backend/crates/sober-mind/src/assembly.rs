@@ -312,6 +312,7 @@ mod tests {
             description: "Search the web.".into(),
             input_schema: serde_json::json!({}),
             context_modifying: false,
+            internal: false,
         }];
 
         let caller = make_caller(TriggerKind::Scheduler);

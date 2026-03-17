@@ -193,6 +193,7 @@ impl Tool for FetchUrlTool {
                 "required": ["url"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 

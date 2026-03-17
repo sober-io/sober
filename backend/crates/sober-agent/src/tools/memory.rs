@@ -234,6 +234,7 @@ impl Tool for RecallTool {
                 "required": ["query"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 
@@ -368,6 +369,7 @@ impl Tool for RememberTool {
                 "required": ["content", "chunk_type"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 
