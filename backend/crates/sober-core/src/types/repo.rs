@@ -631,27 +631,27 @@ pub trait AuditLogRepo: Send + Sync {
 /// Manages the two-layer key hierarchy: DEKs (data encryption keys) that
 /// are wrapped by a MEK, and user secrets encrypted by DEKs.
 pub trait SecretRepo: Send + Sync {
-    /// Gets the encrypted DEK for a scope, if one exists.
+    /// Gets the encrypted DEK for a user, if one exists.
     fn get_dek(
         &self,
-        scope: SecretScope,
+        user_id: UserId,
     ) -> impl Future<Output = Result<Option<StoredDek>, AppError>> + Send;
 
-    /// Stores or replaces the encrypted DEK for a scope.
+    /// Stores or replaces the encrypted DEK for a user.
     fn store_dek(
         &self,
-        scope: SecretScope,
+        user_id: UserId,
         encrypted_dek: Vec<u8>,
         mek_version: i32,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Lists secret metadata (without encrypted data) for a scope.
+    /// Lists secret metadata (without encrypted data) for a user.
     ///
     /// Results are ordered by priority (ascending, NULLs last).
     /// Optionally filters by `secret_type`.
     fn list_secrets(
         &self,
-        scope: SecretScope,
+        user_id: UserId,
         secret_type: Option<&str>,
     ) -> impl Future<Output = Result<Vec<SecretMetadata>, AppError>> + Send;
 
@@ -661,10 +661,10 @@ pub trait SecretRepo: Send + Sync {
         id: SecretId,
     ) -> impl Future<Output = Result<Option<SecretRow>, AppError>> + Send;
 
-    /// Gets a single secret by name within a scope.
+    /// Gets a single secret by name within a user's secrets.
     fn get_secret_by_name(
         &self,
-        scope: SecretScope,
+        user_id: UserId,
         name: &str,
     ) -> impl Future<Output = Result<Option<SecretRow>, AppError>> + Send;
 
@@ -684,9 +684,9 @@ pub trait SecretRepo: Send + Sync {
     /// Deletes a secret by ID.
     fn delete_secret(&self, id: SecretId) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Lists all secret IDs for a scope (for bulk operations like DEK rotation).
+    /// Lists all secret IDs for a user (for bulk operations like DEK rotation).
     fn list_secret_ids(
         &self,
-        scope: SecretScope,
+        user_id: UserId,
     ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
 }
