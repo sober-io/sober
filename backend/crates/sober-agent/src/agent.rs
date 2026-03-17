@@ -327,13 +327,45 @@ impl<R: AgentRepos> Agent<R> {
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
+        // Resolve or provision workspace for this conversation.
+        let workspace_root_env = std::env::var("WORKSPACE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
+
+        // If conversation has no workspace, create one via sober-workspace.
+        let mut conversation = conversation;
+        if conversation.workspace_id.is_none() {
+            let ws_id = uuid::Uuid::now_v7();
+            let root_path = format!("{}/{}", workspace_root_env, ws_id);
+            match self
+                .repos
+                .workspaces()
+                .create(user_id, "default", None, &root_path)
+                .await
+            {
+                Ok(ws) => {
+                    // Link workspace to conversation.
+                    if let Err(e) = self
+                        .repos
+                        .conversations()
+                        .update_workspace(conversation_id, Some(ws.id))
+                        .await
+                    {
+                        warn!("failed to link workspace to conversation: {e}");
+                    } else {
+                        conversation.workspace_id = Some(ws.id);
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to create workspace: {e}");
+                }
+            }
+        }
+
         // Resolve workspace directory for shell tool cwd.
         let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
             match self.repos.workspaces().get_by_id(ws_id).await {
                 Ok(ws) => {
                     let root = Path::new(&ws.root_path);
-                    // ensure_conversation_dir calls create_dir_all, which
-                    // creates the workspace root and conversation subdir.
                     match ensure_conversation_dir(root, conversation_id).await {
                         Ok(dir) => Some(dir),
                         Err(e) => {

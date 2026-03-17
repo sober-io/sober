@@ -12,12 +12,9 @@ use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, ApiResponse, ConversationId, ConversationKind, ConversationRepo,
     ConversationUserRepo, ConversationUserRole, ConversationWithDetails, JobRepo,
-    ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId, WorkspaceRepo,
+    ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
 };
-use sober_db::{
-    PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
-    PgWorkspaceRepo,
-};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
@@ -85,25 +82,15 @@ async fn create_conversation(
     Json(body): Json<CreateConversationRequest>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
     let conv_repo = PgConversationRepo::new(state.db.clone());
-    let workspace_id = if let Some(ref ws_id_str) = body.workspace_id {
-        Some(
-            ws_id_str
-                .parse::<uuid::Uuid>()
+    let workspace_id = body
+        .workspace_id
+        .as_deref()
+        .map(|s| {
+            s.parse::<uuid::Uuid>()
                 .map(WorkspaceId::from_uuid)
-                .map_err(|_| AppError::Validation("invalid workspace_id".into()))?,
-        )
-    } else {
-        // Auto-create a workspace for every new conversation.
-        let ws_repo = PgWorkspaceRepo::new(state.db.clone());
-        let workspace_root = std::env::var("WORKSPACE_ROOT")
-            .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
-        let ws_id = uuid::Uuid::now_v7();
-        let root_path = format!("{}/{}", workspace_root, ws_id);
-        let ws = ws_repo
-            .create(auth_user.user_id, "default", None, &root_path)
-            .await?;
-        Some(ws.id)
-    };
+                .map_err(|_| AppError::Validation("invalid workspace_id".into()))
+        })
+        .transpose()?;
 
     let conversation = conv_repo
         .create(auth_user.user_id, body.title.as_deref(), workspace_id)
