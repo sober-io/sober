@@ -111,6 +111,12 @@
 	$effect(() => {
 		if (!open) return;
 		untrack(() => {
+			// Refetch conversation to pick up agent-side changes (e.g. workspace linking).
+			conversationService.get(conversation.id).then((fresh) => {
+				if (fresh.workspace_id && !conversation.workspace_id) {
+					conversation.workspace_id = fresh.workspace_id;
+				}
+			}).catch(() => {});
 			editingTitle = conversation.title ?? '';
 			agentMode = conversation.agent_mode ?? 'always';
 			kind = conversation.kind;
