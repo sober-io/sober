@@ -91,7 +91,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`) |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
-| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. |
+| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`. |
 | `sober-plugin` | Plugin registry, sandboxed execution, security audit, code generation |
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
@@ -99,7 +99,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
 | `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution, injection detection |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
-| `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. |
+| `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
 | `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
 | `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage, config parsing. Used by agent, CLI, and scheduler. |

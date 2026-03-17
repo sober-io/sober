@@ -829,7 +829,6 @@
 		conversationService.updateTitle(conversationId, t);
 	}}
 	onUpdatePermissionMode={handleModeChange}
-	onUpdateWorkspace={(wsId) => conversationService.updateWorkspace(conversationId, wsId)}
 	onAddTag={handleAddTag}
 	onRemoveTag={handleRemoveTag}
 	onArchive={handleArchive}

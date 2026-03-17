@@ -4,13 +4,11 @@
 		Tag,
 		Job,
 		PermissionMode,
-		Workspace,
 		AgentMode,
 		Collaborator,
 		ConversationUserRole
 	} from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
-	import { workspaceService } from '$lib/services/workspaces';
 	import { conversationService } from '$lib/services/conversations';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { untrack } from 'svelte';
@@ -30,7 +28,6 @@
 		onClose: () => void;
 		onUpdateTitle: (title: string) => void;
 		onUpdatePermissionMode: (mode: PermissionMode) => void;
-		onUpdateWorkspace: (workspaceId: string | null) => void;
 		onAddTag: (name: string) => void;
 		onRemoveTag: (tagId: string) => void;
 		onArchive: () => void;
@@ -46,7 +43,6 @@
 		onClose,
 		onUpdateTitle,
 		onUpdatePermissionMode,
-		onUpdateWorkspace,
 		onAddTag,
 		onRemoveTag,
 		onArchive,
@@ -80,8 +76,6 @@
 	let editingTitle = $state('');
 	let jobs = $state<Job[]>([]);
 	let jobsLoading = $state(false);
-	let workspaces = $state<Workspace[]>([]);
-	let workspacesLoading = $state(false);
 	let confirmClear = $state(false);
 	let confirmDelete = $state(false);
 	let confirmConvertPending = $state<string | null>(null);
@@ -115,7 +109,6 @@
 			agentMode = conversation.agent_mode ?? 'always';
 			kind = conversation.kind;
 			loadJobs();
-			loadWorkspaces();
 			loadCollaborators();
 		});
 	});
@@ -140,17 +133,6 @@
 			jobs = [];
 		} finally {
 			jobsLoading = false;
-		}
-	}
-
-	async function loadWorkspaces() {
-		workspacesLoading = true;
-		try {
-			workspaces = await workspaceService.list();
-		} catch {
-			workspaces = [];
-		} finally {
-			workspacesLoading = false;
 		}
 	}
 
@@ -268,11 +250,6 @@
 		}
 	}
 
-	function handleWorkspaceChange(e: Event) {
-		const value = (e.target as HTMLSelectElement).value;
-		onUpdateWorkspace(value === '' ? null : value);
-	}
-
 	function handleClearConfirm() {
 		confirmClear = false;
 		onClearHistory();
@@ -387,20 +364,16 @@
 			{/if}
 
 			<!-- Workspace -->
-			<SettingsSection title="Workspace" description="Link to a project workspace">
-				{#if workspacesLoading}
-					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+			<SettingsSection title="Workspace" description="Linked project workspace">
+				{#if conversation.workspace_name}
+					<p class="text-sm text-zinc-900 dark:text-zinc-100">{conversation.workspace_name}</p>
+					{#if conversation.workspace_path}
+						<p class="mt-0.5 font-mono text-xs text-zinc-400 dark:text-zinc-500">
+							{conversation.workspace_path}
+						</p>
+					{/if}
 				{:else}
-					<select
-						onchange={handleWorkspaceChange}
-						value={conversation.workspace_id ?? ''}
-						class="w-full rounded-md border border-zinc-300 bg-transparent px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:focus:border-zinc-400"
-					>
-						<option value="">None</option>
-						{#each workspaces as ws (ws.id)}
-							<option value={ws.id}>{ws.name}</option>
-						{/each}
-					</select>
+					<p class="text-sm text-zinc-400 dark:text-zinc-500">None</p>
 				{/if}
 			</SettingsSection>
 

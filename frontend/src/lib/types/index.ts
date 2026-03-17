@@ -39,6 +39,8 @@ export interface Conversation {
 	id: string;
 	title: string | null;
 	workspace_id?: string;
+	workspace_name?: string;
+	workspace_path?: string;
 	kind: ConversationKind;
 	is_archived: boolean;
 	permission_mode: PermissionMode;

@@ -190,6 +190,12 @@ pub struct ConversationWithDetails {
     pub tags: Vec<Tag>,
     /// Users in this conversation (populated for detail view, empty for list view).
     pub users: Vec<ConversationUser>,
+    /// Linked workspace name (joined from workspaces table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
+    /// Linked workspace root path (joined from workspaces table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// A per-user MCP server configuration.
@@ -411,15 +417,6 @@ pub struct AuditLogEntry {
     pub created_at: DateTime<Utc>,
 }
 
-/// Determines whether a secret or encryption key is scoped to a user.
-///
-/// Future: extend with `Group(GroupId)` when groups are implemented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SecretScope {
-    /// Secret scoped to an individual user.
-    User(UserId),
-}
-
 /// Metadata returned when listing secrets (no encrypted data included).
 #[derive(Debug, Clone, Serialize)]
 pub struct SecretMetadata {
@@ -431,6 +428,8 @@ pub struct SecretMetadata {
     pub secret_type: String,
     /// Non-sensitive metadata (JSON) — provider name, base URL, etc.
     pub metadata: serde_json::Value,
+    /// Conversation this secret is scoped to, if any.
+    pub conversation_id: Option<ConversationId>,
     /// Priority for ordered fallback chains (lower = higher priority).
     pub priority: Option<i32>,
     /// When the secret was created.
@@ -454,6 +453,8 @@ pub struct SecretRow {
     pub metadata: serde_json::Value,
     /// AES-256-GCM encrypted data (nonce || ciphertext).
     pub encrypted_data: Vec<u8>,
+    /// Conversation this secret is scoped to, if any.
+    pub conversation_id: Option<ConversationId>,
     /// Priority for ordering.
     pub priority: Option<i32>,
     /// When the secret was created.

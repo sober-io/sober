@@ -8,6 +8,7 @@ pub mod blob;
 pub mod config;
 pub mod error;
 pub mod fs;
+pub mod layout;
 pub mod remote;
 pub mod snapshot;
 pub mod worktree;

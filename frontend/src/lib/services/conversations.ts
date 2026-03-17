@@ -14,7 +14,7 @@ export const conversationService = {
 
 	get: (id: string) => api<Conversation>(`/conversations/${id}`),
 
-	create: () => api<Conversation>('/conversations', { method: 'POST' }),
+	create: () => api<Conversation>('/conversations', { method: 'POST', body: '{}' }),
 
 	updateTitle: (id: string, title: string) =>
 		api<{ id: string; title: string }>(`/conversations/${id}`, {

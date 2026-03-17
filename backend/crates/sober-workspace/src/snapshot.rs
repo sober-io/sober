@@ -23,6 +23,7 @@ pub struct Snapshot {
 }
 
 /// Manages workspace snapshots (tar archives).
+#[derive(Clone)]
 pub struct SnapshotManager {
     snapshot_dir: PathBuf,
 }

@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::rows::AuditLogRow;
 
 /// PostgreSQL-backed audit log repository.
+#[derive(Clone)]
 pub struct PgAuditLogRepo {
     pool: PgPool,
 }

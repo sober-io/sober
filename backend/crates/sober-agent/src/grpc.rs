@@ -4,10 +4,10 @@
 
 use std::sync::Arc;
 
+use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, warn};
@@ -29,29 +29,17 @@ pub mod scheduler_proto {
 }
 
 /// gRPC service wrapping an [`Agent`].
-pub struct AgentGrpcService<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo,
-    Conv: ConversationRepo,
-    Mcp: McpServerRepo,
-    User: UserRepo,
-{
-    agent: Arc<Agent<Msg, Conv, Mcp, User>>,
+pub struct AgentGrpcService<R: AgentRepos> {
+    agent: Arc<Agent<R>>,
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
     broadcast_tx: ConversationUpdateSender,
 }
 
-impl<Msg, Conv, Mcp, User> AgentGrpcService<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo,
-    Conv: ConversationRepo,
-    Mcp: McpServerRepo,
-    User: UserRepo,
-{
+impl<R: AgentRepos> AgentGrpcService<R> {
     /// Creates a new gRPC service backed by the given agent.
     pub fn new(
-        agent: Arc<Agent<Msg, Conv, Mcp, User>>,
+        agent: Arc<Agent<R>>,
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
         broadcast_tx: ConversationUpdateSender,
@@ -72,14 +60,7 @@ type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
 type SubscribeConversationUpdatesStream = ReceiverStream<Result<proto::ConversationUpdate, Status>>;
 
 #[tonic::async_trait]
-impl<Msg, Conv, Mcp, User> proto::agent_service_server::AgentService
-    for AgentGrpcService<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo + 'static,
-    Conv: ConversationRepo + 'static,
-    Mcp: McpServerRepo + 'static,
-    User: UserRepo + 'static,
-{
+impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcService<R> {
     type ExecuteTaskStream = ExecuteTaskStream;
     type SubscribeConversationUpdatesStream = SubscribeConversationUpdatesStream;
 
@@ -319,20 +300,15 @@ where
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
-async fn execute_typed_payload<Msg, Conv, Mcp, User>(
-    agent: &Agent<Msg, Conv, Mcp, User>,
+async fn execute_typed_payload<R: AgentRepos>(
+    agent: &Agent<R>,
     payload: JobPayload,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
     workspace_id: Option<WorkspaceId>,
     task_id: &str,
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
-) where
-    Msg: MessageRepo + 'static,
-    Conv: ConversationRepo + 'static,
-    Mcp: sober_core::types::repo::McpServerRepo + 'static,
-    User: UserRepo + 'static,
-{
+) {
     match payload {
         JobPayload::Prompt { text, .. } => {
             // Resolve delivery conversation for the result.
@@ -412,19 +388,14 @@ async fn execute_typed_payload<Msg, Conv, Mcp, User>(
 }
 
 /// Executes a prompt payload by delegating to `handle_message` with conversation context.
-async fn execute_prompt_conversational<Msg, Conv, Mcp, User>(
-    agent: &Agent<Msg, Conv, Mcp, User>,
+async fn execute_prompt_conversational<R: AgentRepos>(
+    agent: &Agent<R>,
     prompt: &str,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
     task_id: &str,
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
-) where
-    Msg: MessageRepo + 'static,
-    Conv: ConversationRepo + 'static,
-    Mcp: sober_core::types::repo::McpServerRepo + 'static,
-    User: UserRepo + 'static,
-{
+) {
     let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
         agent
             .handle_message(
@@ -483,9 +454,14 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
         AgentEvent::ToolCallStart { name, input } => Event::ToolCallStart(proto::ToolCallStart {
             name,
             input_json: input.to_string(),
+            internal: false,
         }),
         AgentEvent::ToolCallResult { name, output } => {
-            Event::ToolCallResult(proto::ToolCallResult { name, output })
+            Event::ToolCallResult(proto::ToolCallResult {
+                name,
+                output,
+                internal: false,
+            })
         }
         AgentEvent::Done {
             message_id,

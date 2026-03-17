@@ -13,7 +13,7 @@ use crate::RiskLevel;
 use std::collections::HashMap;
 
 /// Classifies shell commands into risk tiers based on pattern matching.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CommandPolicy {
     overrides: HashMap<String, RiskLevel>,
     denied: Vec<String>,

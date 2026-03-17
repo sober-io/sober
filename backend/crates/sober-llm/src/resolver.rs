@@ -2,15 +2,18 @@
 //!
 //! Resolves the best available LLM provider key for a user by searching:
 //!
-//! 1. **User secrets** — encrypted keys stored per-user, ordered by priority.
-//! 2. **System config** — `LLM_API_KEY` from the environment.
+//! 1. **Conversation secrets** — encrypted keys scoped to the conversation.
+//! 2. **User secrets** — encrypted keys stored per-user, ordered by priority.
+//! 3. **System config** — `LLM_API_KEY` from the environment.
 //!
 //! The resolver decrypts secrets using the envelope encryption hierarchy
 //! (MEK -> DEK -> secret).
 
+use std::sync::Arc;
+
 use sober_core::config::LlmConfig;
 use sober_core::error::AppError;
-use sober_core::types::{SecretRepo, SecretScope, UserId};
+use sober_core::types::{ConversationId, SecretRepo, UserId};
 use sober_crypto::envelope::{EncryptedBlob, Mek};
 use tracing::warn;
 
@@ -31,13 +34,13 @@ pub struct ResolvedLlmKey {
 /// not `dyn`-compatible.
 pub struct LlmKeyResolver<S> {
     secret_repo: S,
-    mek: Mek,
+    mek: Arc<Mek>,
     system_config: LlmConfig,
 }
 
 impl<S: SecretRepo> LlmKeyResolver<S> {
     /// Creates a new resolver.
-    pub fn new(secret_repo: S, mek: Mek, system_config: LlmConfig) -> Self {
+    pub fn new(secret_repo: S, mek: Arc<Mek>, system_config: LlmConfig) -> Self {
         Self {
             secret_repo,
             mek,
@@ -48,15 +51,20 @@ impl<S: SecretRepo> LlmKeyResolver<S> {
     /// Resolves the best available LLM key for a user.
     ///
     /// Resolution order:
-    /// 1. User's own secrets (type `"llm_provider"`, ordered by priority)
-    /// 2. System config from environment variables
-    pub async fn resolve(&self, user_id: UserId) -> Result<ResolvedLlmKey, AppError> {
-        // 1. Try user's own keys (ordered by priority)
-        if let Some(key) = self.try_scope(SecretScope::User(user_id)).await? {
+    /// 1. Conversation-scoped secrets (if `conversation_id` is provided)
+    /// 2. User's own secrets (type `"llm_provider"`, ordered by priority)
+    /// 3. System config from environment variables
+    pub async fn resolve(
+        &self,
+        user_id: UserId,
+        conversation_id: Option<ConversationId>,
+    ) -> Result<ResolvedLlmKey, AppError> {
+        // 1 & 2. Try conversation-scoped then user secrets (DB returns conversation-scoped first)
+        if let Some(key) = self.try_user_secrets(user_id, conversation_id).await? {
             return Ok(key);
         }
 
-        // 2. Fall back to system config
+        // 3. Fall back to system config
         let api_key = self.system_config.api_key.clone().unwrap_or_default();
 
         Ok(ResolvedLlmKey {
@@ -66,22 +74,27 @@ impl<S: SecretRepo> LlmKeyResolver<S> {
         })
     }
 
-    /// Attempts to resolve a key from the given scope.
-    async fn try_scope(&self, scope: SecretScope) -> Result<Option<ResolvedLlmKey>, AppError> {
+    /// Attempts to resolve a key from user (and optionally conversation) secrets.
+    async fn try_user_secrets(
+        &self,
+        user_id: UserId,
+        conversation_id: Option<ConversationId>,
+    ) -> Result<Option<ResolvedLlmKey>, AppError> {
+        // Pass conversation_id to list_secrets — DB returns conversation-scoped first, then user-scoped
         let secrets = self
             .secret_repo
-            .list_secrets(scope, Some("llm_provider"))
+            .list_secrets(user_id, conversation_id, Some("llm_provider"))
             .await?;
 
         if secrets.is_empty() {
             return Ok(None);
         }
 
-        // Get the DEK for this scope
-        let stored_dek = match self.secret_repo.get_dek(scope).await? {
+        // Get the DEK for this user
+        let stored_dek = match self.secret_repo.get_dek(user_id).await? {
             Some(dek) => dek,
             None => {
-                warn!("secrets exist for scope but no DEK found");
+                warn!("secrets exist for user but no DEK found");
                 return Ok(None);
             }
         };
@@ -193,6 +206,7 @@ mod tests {
                     secret_type: "llm_provider".to_string(),
                     metadata,
                     encrypted_data: encrypted.to_bytes(),
+                    conversation_id: None,
                     priority,
                     created_at: sober_core::Utc::now(),
                     updated_at: sober_core::Utc::now(),
@@ -202,13 +216,13 @@ mod tests {
     }
 
     impl SecretRepo for MockSecretRepo {
-        async fn get_dek(&self, _scope: SecretScope) -> Result<Option<StoredDek>, AppError> {
+        async fn get_dek(&self, _user_id: UserId) -> Result<Option<StoredDek>, AppError> {
             Ok(self.stored_dek.clone())
         }
 
         async fn store_dek(
             &self,
-            _scope: SecretScope,
+            _user_id: UserId,
             _encrypted_dek: Vec<u8>,
             _mek_version: i32,
         ) -> Result<(), AppError> {
@@ -217,7 +231,8 @@ mod tests {
 
         async fn list_secrets(
             &self,
-            _scope: SecretScope,
+            _user_id: UserId,
+            _conversation_id: Option<ConversationId>,
             secret_type: Option<&str>,
         ) -> Result<Vec<SecretMetadata>, AppError> {
             Ok(self
@@ -229,6 +244,7 @@ mod tests {
                     name: s.name.clone(),
                     secret_type: s.secret_type.clone(),
                     metadata: s.metadata.clone(),
+                    conversation_id: s.conversation_id,
                     priority: s.priority,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
@@ -242,7 +258,8 @@ mod tests {
 
         async fn get_secret_by_name(
             &self,
-            _scope: SecretScope,
+            _user_id: UserId,
+            _conversation_id: Option<ConversationId>,
             name: &str,
         ) -> Result<Option<SecretRow>, AppError> {
             Ok(self.secrets.iter().find(|s| s.name == name).cloned())
@@ -264,7 +281,11 @@ mod tests {
             Ok(())
         }
 
-        async fn list_secret_ids(&self, _scope: SecretScope) -> Result<Vec<SecretId>, AppError> {
+        async fn list_secret_ids(
+            &self,
+            _user_id: UserId,
+            _conversation_id: Option<ConversationId>,
+        ) -> Result<Vec<SecretId>, AppError> {
             Ok(self.secrets.iter().map(|s| s.id).collect())
         }
     }
@@ -304,8 +325,8 @@ mod tests {
             Some(1),
         );
 
-        let resolver = LlmKeyResolver::new(repo, test_mek(), default_llm_config());
-        let result = resolver.resolve(user_id).await.expect("resolve");
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), default_llm_config());
+        let result = resolver.resolve(user_id, None).await.expect("resolve");
 
         assert_eq!(result.api_key, "sk-ant-user-key");
         assert_eq!(result.provider, "anthropic");
@@ -315,8 +336,11 @@ mod tests {
     #[tokio::test]
     async fn falls_back_to_system_config() {
         let repo = MockSecretRepo::empty();
-        let resolver = LlmKeyResolver::new(repo, test_mek(), default_llm_config());
-        let result = resolver.resolve(test_user_id()).await.expect("resolve");
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), default_llm_config());
+        let result = resolver
+            .resolve(test_user_id(), None)
+            .await
+            .expect("resolve");
 
         assert_eq!(result.api_key, "system-key");
         assert_eq!(result.provider, "system");
@@ -334,8 +358,11 @@ mod tests {
             embedding_model: "text-embedding-3-small".into(),
             embedding_dim: 1536,
         };
-        let resolver = LlmKeyResolver::new(repo, test_mek(), config);
-        let result = resolver.resolve(test_user_id()).await.expect("resolve");
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), config);
+        let result = resolver
+            .resolve(test_user_id(), None)
+            .await
+            .expect("resolve");
 
         assert_eq!(result.api_key, "");
         assert_eq!(result.provider, "system");

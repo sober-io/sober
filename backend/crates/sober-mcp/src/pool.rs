@@ -86,6 +86,15 @@ impl McpPool {
         for (id, run_config, sandbox_policy) in servers {
             debug!(server = %run_config.name, "connecting to MCP server");
 
+            // TODO(#029): Call `sober_mcp::credentials::resolve_mcp_credentials()`
+            // here to enrich `run_config.env` with user-stored secrets before
+            // spawning the server process.  This requires `SecretRepo` and `Mek`
+            // to be available at the call site; the caller (agent `main.rs`,
+            // step 9) should resolve credentials and pass the enriched
+            // `McpServerRunConfig` into this method, or accept a credential
+            // resolver callback.  Until that wiring is in place, MCP servers
+            // start without user-stored credentials.
+
             match McpClient::connect(&run_config, sandbox_policy.clone(), self.config.clone()).await
             {
                 Ok(mut client) => {

@@ -5,20 +5,24 @@
 //! → tool execution → response streaming.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use sober_core::config::MemoryConfig;
+use sober_core::config::{LlmConfig, MemoryConfig};
+use sober_core::types::AgentRepos;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
+use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
+use sober_crypto::envelope::Mek;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
-use sober_llm::{LlmEngine, Message as LlmMessage};
+use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
+
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -27,7 +31,7 @@ use crate::confirm::ConfirmationRegistrar;
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
-use crate::tools::ToolRegistry;
+use crate::tools::{ToolBootstrap, ToolRegistry, TurnContext};
 
 /// Buffer size for the agent event channel.
 const EVENT_CHANNEL_BUFFER: usize = 64;
@@ -77,15 +81,13 @@ struct ConfirmDetail {
 }
 
 /// Aggregated context passed to the agentic loop, avoiding long parameter lists.
-struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo> {
+struct LoopContext<'a, R: AgentRepos> {
     llm: &'a Arc<dyn LlmEngine>,
     mind: &'a Arc<Mind>,
     memory: &'a Arc<MemoryStore>,
-    context_loader: &'a Arc<ContextLoader<Msg>>,
+    context_loader: &'a Arc<ContextLoader<R::Msg>>,
     tool_registry: &'a Arc<ToolRegistry>,
-    message_repo: &'a Arc<Msg>,
-    conversation_repo: &'a Arc<Conv>,
-    user_repo: &'a Arc<User>,
+    repos: &'a Arc<R>,
     config: &'a AgentConfig,
     memory_config: &'a MemoryConfig,
     user_id: UserId,
@@ -99,80 +101,103 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo>
     trigger: TriggerKind,
     /// The kind of conversation (direct vs group) — used for prompt assembly.
     conversation_kind: ConversationKind,
+    /// Workspace ID from the conversation (for audit logging).
+    workspace_id: Option<WorkspaceId>,
+    /// Resolved workspace directory path (for LLM context).
+    workspace_dir: Option<PathBuf>,
+    /// LLM config for constructing dynamic engines from resolved user keys.
+    llm_config: &'a Option<LlmConfig>,
+    /// Master encryption key for resolving user-stored LLM keys.
+    mek: &'a Option<Arc<Mek>>,
 }
 
 /// The core agent that handles messages through an agentic loop.
 ///
-/// Generic over repository types so it can be tested without a real database.
-pub struct Agent<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo,
-    Conv: ConversationRepo,
-    Mcp: McpServerRepo,
-    User: UserRepo,
-{
+/// Generic over [`AgentRepos`] so it can be tested without a real database.
+pub struct Agent<R: AgentRepos> {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
     memory: Arc<MemoryStore>,
-    context_loader: Arc<ContextLoader<Msg>>,
-    tool_registry: Arc<ToolRegistry>,
-    message_repo: Arc<Msg>,
-    conversation_repo: Arc<Conv>,
-    #[allow(dead_code)]
-    mcp_server_repo: Arc<Mcp>,
-    user_repo: Arc<User>,
+    context_loader: Arc<ContextLoader<R::Msg>>,
+    repos: Arc<R>,
     config: AgentConfig,
     memory_config: MemoryConfig,
     /// Registrar for interactive confirmation of dangerous tool calls.
     registrar: Option<ConfirmationRegistrar>,
     /// Broadcast sender for conversation update events.
     broadcast_tx: ConversationUpdateSender,
+    /// Master encryption key for resolving user-stored LLM keys.
+    mek: Option<Arc<Mek>>,
+    /// LLM config for constructing dynamic engines from resolved keys.
+    llm_config: Option<LlmConfig>,
+    /// Centralized tool construction — builds a complete [`ToolRegistry`]
+    /// per conversation turn with the correct workspace paths and scoped tools.
+    tool_bootstrap: Arc<ToolBootstrap<R>>,
+    /// Pre-built static tools (web_search, fetch_url, scheduler, recall,
+    /// remember) that are identical across conversations. Built once at
+    /// construction and reused every turn.
+    static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
 }
 
-impl<Msg, Conv, Mcp, User> Agent<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo + 'static,
-    Conv: ConversationRepo + 'static,
-    Mcp: McpServerRepo + 'static,
-    User: UserRepo + 'static,
-{
+impl<R: AgentRepos> Agent<R> {
     /// Creates a new agent with all required dependencies.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         llm: Arc<dyn LlmEngine>,
         mind: Arc<Mind>,
         memory: Arc<MemoryStore>,
-        context_loader: Arc<ContextLoader<Msg>>,
-        tool_registry: Arc<ToolRegistry>,
-        message_repo: Arc<Msg>,
-        conversation_repo: Arc<Conv>,
-        mcp_server_repo: Arc<Mcp>,
-        user_repo: Arc<User>,
+        context_loader: Arc<ContextLoader<R::Msg>>,
+        repos: Arc<R>,
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
         broadcast_tx: ConversationUpdateSender,
+        mek: Option<Arc<Mek>>,
+        llm_config: Option<LlmConfig>,
+        tool_bootstrap: Arc<ToolBootstrap<R>>,
     ) -> Self {
+        let static_tools = tool_bootstrap.build_static_tools();
         Self {
             llm,
             mind,
             memory,
             context_loader,
-            tool_registry,
-            message_repo,
-            conversation_repo,
-            mcp_server_repo,
-            user_repo,
+            repos,
             config,
             memory_config,
             registrar,
             broadcast_tx,
+            mek,
+            llm_config,
+            tool_bootstrap,
+            static_tools,
         }
     }
 
     /// Returns a reference to the agent's [`Mind`] instance.
     pub fn mind(&self) -> &Arc<Mind> {
         &self.mind
+    }
+
+    /// Builds a [`ToolRegistry`] for the given conversation turn via the
+    /// centralized [`ToolBootstrap`].
+    ///
+    /// Reuses the pre-built [`static_tools`](Self::static_tools) and adds
+    /// per-conversation tools (shell, secrets, artifacts, snapshots).
+    fn build_turn_tools(
+        &self,
+        user_id: UserId,
+        conversation_id: ConversationId,
+        workspace_id: Option<WorkspaceId>,
+        workspace_dir: Option<PathBuf>,
+    ) -> Arc<ToolRegistry> {
+        let ctx = TurnContext {
+            user_id,
+            conversation_id,
+            workspace_id,
+            workspace_dir,
+        };
+        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools))
     }
 
     /// Resolves which conversation to deliver job results to.
@@ -187,17 +212,67 @@ where
     ) -> Option<ConversationId> {
         // Try the original conversation first
         if let Some(cid) = conversation_id
-            && self.conversation_repo.get_by_id(cid).await.is_ok()
+            && self.repos.conversations().get_by_id(cid).await.is_ok()
         {
             return Some(cid);
         }
         // Fallback: user's most recent conversation in the same workspace
-        self.conversation_repo
+        self.repos
+            .conversations()
             .find_latest_by_user_and_workspace(user_id, workspace_id)
             .await
             .ok()
             .flatten()
             .map(|c| c.id)
+    }
+
+    /// Attempts to resolve a dynamic LLM engine from user-stored keys.
+    ///
+    /// Returns `Some(engine)` if the user has a stored `llm_provider` secret
+    /// that decrypts successfully and differs from the system default.
+    /// Returns `None` if no user key is found, decryption fails, or no MEK
+    /// is available — in which case the static engine should be used.
+    async fn try_resolve_dynamic_engine(
+        repos: &Arc<R>,
+        user_id: UserId,
+        conversation_id: ConversationId,
+        llm_config: &Option<LlmConfig>,
+        mek: &Option<Arc<Mek>>,
+    ) -> Option<OpenAiCompatibleEngine> {
+        use sober_llm::LlmKeyResolver;
+
+        let config = llm_config.as_ref()?;
+        let mek = mek.as_ref()?;
+
+        let resolver =
+            LlmKeyResolver::new(repos.secrets().clone(), Arc::clone(mek), config.clone());
+
+        let resolved = match resolver.resolve(user_id, Some(conversation_id)).await {
+            Ok(key) => key,
+            Err(e) => {
+                warn!(error = %e, "LLM key resolution failed, using static engine");
+                return None;
+            }
+        };
+
+        // System fallback — no need to create a dynamic engine.
+        if resolved.provider == "system" {
+            return None;
+        }
+
+        debug!(
+            user_id = %user_id,
+            provider = %resolved.provider,
+            "using dynamically resolved LLM key"
+        );
+
+        Some(OpenAiCompatibleEngine::new(
+            resolved.base_url,
+            Some(resolved.api_key),
+            &config.model,
+            &config.embedding_model,
+            config.max_tokens,
+        ))
     }
 
     /// Handles a user message through the full agentic loop.
@@ -227,7 +302,8 @@ where
         // 2. Store user message (only for human-driven calls)
         let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
-                .message_repo
+                .repos
+                .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::User,
@@ -247,10 +323,69 @@ where
 
         // 3. Check agent mode — decide whether to run the LLM pipeline
         let conversation = self
-            .conversation_repo
+            .repos
+            .conversations()
             .get_by_id(conversation_id)
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+        // Resolve or provision workspace for this conversation.
+        let workspace_root_env = std::env::var("WORKSPACE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
+
+        // If conversation has no workspace, create one.
+        // Each conversation gets its own workspace: {WORKSPACE_ROOT}/{conversation_id}/
+        let mut conversation = conversation;
+        if conversation.workspace_id.is_none() {
+            let root_path = format!("{}/{}", workspace_root_env, conversation_id);
+            match self
+                .repos
+                .workspaces()
+                .create(user_id, &conversation_id.to_string(), None, &root_path)
+                .await
+            {
+                Ok(ws) => {
+                    // Link workspace to conversation.
+                    if let Err(e) = self
+                        .repos
+                        .conversations()
+                        .update_workspace(conversation_id, Some(ws.id))
+                        .await
+                    {
+                        warn!("failed to link workspace to conversation: {e}");
+                    } else {
+                        conversation.workspace_id = Some(ws.id);
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to create workspace: {e}");
+                }
+            }
+        }
+
+        // Resolve workspace directory for shell tool cwd.
+        // Each conversation's workspace root IS the working directory (no subdir nesting).
+        let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
+            match self.repos.workspaces().get_by_id(ws_id).await {
+                Ok(ws) => {
+                    let root = PathBuf::from(&ws.root_path);
+                    match tokio::fs::create_dir_all(&root).await {
+                        Ok(()) => Some(root),
+                        Err(e) => {
+                            warn!(
+                                workspace_id = %ws_id,
+                                root_path = %ws.root_path,
+                                "failed to create workspace dir: {e}"
+                            );
+                            None
+                        }
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
 
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
@@ -281,7 +416,15 @@ where
             )));
         }
 
-        // 4. Create event channel and spawn the agentic loop
+        // 4. Build per-conversation tools via ToolBootstrap.
+        let tool_registry = self.build_turn_tools(
+            user_id,
+            conversation_id,
+            conversation.workspace_id,
+            workspace_dir.clone(),
+        );
+
+        // 5. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
             mpsc::channel::<Result<AgentEvent, AgentError>>(EVENT_CHANNEL_BUFFER);
 
@@ -290,16 +433,16 @@ where
         let mind = Arc::clone(&self.mind);
         let memory = Arc::clone(&self.memory);
         let context_loader = Arc::clone(&self.context_loader);
-        let tool_registry = Arc::clone(&self.tool_registry);
-        let message_repo = Arc::clone(&self.message_repo);
-        let conversation_repo = Arc::clone(&self.conversation_repo);
-        let user_repo = Arc::clone(&self.user_repo);
+        let repos = Arc::clone(&self.repos);
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();
         let registrar = self.registrar.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
         let conversation_kind = conversation.kind;
+        let workspace_id = conversation.workspace_id;
+        let llm_config = self.llm_config.clone();
+        let mek = self.mek.clone();
 
         tokio::spawn(async move {
             let ctx = LoopContext {
@@ -308,9 +451,7 @@ where
                 memory: &memory,
                 context_loader: &context_loader,
                 tool_registry: &tool_registry,
-                message_repo: &message_repo,
-                conversation_repo: &conversation_repo,
-                user_repo: &user_repo,
+                repos: &repos,
                 config: &config,
                 memory_config: &memory_config,
                 user_id,
@@ -322,6 +463,10 @@ where
                 registrar: registrar.as_ref(),
                 trigger,
                 conversation_kind,
+                workspace_id,
+                workspace_dir,
+                llm_config: &llm_config,
+                mek: &mek,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -347,14 +492,13 @@ where
     /// This is the core loop: embed → load context → assemble → complete →
     /// handle tool calls → repeat. Events are sent immediately as they occur,
     /// enabling confirmation flow and progressive output.
-    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv, User>) -> Result<(), AgentError> {
+    async fn run_loop_streaming(ctx: &LoopContext<'_, R>) -> Result<(), AgentError> {
         let llm = ctx.llm;
         let mind = ctx.mind;
         let memory = ctx.memory;
         let context_loader = ctx.context_loader;
         let tool_registry = ctx.tool_registry;
-        let message_repo = ctx.message_repo;
-        let conversation_repo = ctx.conversation_repo;
+        let repos = ctx.repos;
         let config = ctx.config;
         let memory_config = ctx.memory_config;
         let user_id = ctx.user_id;
@@ -447,7 +591,7 @@ where
                         .collect();
                     let mut names = HashMap::new();
                     for uid in user_ids {
-                        if let Ok(user) = ctx.user_repo.get_by_id(uid).await {
+                        if let Ok(user) = repos.users().get_by_id(uid).await {
                             names.insert(uid, user.username);
                         }
                     }
@@ -457,12 +601,23 @@ where
                 };
 
                 let memory_context_text = format_memory_context(&loaded_context);
+                let mut task_description = String::new();
+
+                // Include workspace path so the LLM knows where it's working.
+                if let Some(ref ws_dir) = ctx.workspace_dir {
+                    task_description.push_str(&format!(
+                        "## Workspace\n\nCurrent workspace directory: `{}`\n\n",
+                        ws_dir.display()
+                    ));
+                }
+
+                if !memory_context_text.is_empty() {
+                    task_description
+                        .push_str(&format!("## Relevant Memories\n\n{memory_context_text}"));
+                }
+
                 let task_context = TaskContext {
-                    description: if memory_context_text.is_empty() {
-                        String::new()
-                    } else {
-                        format!("## Relevant Memories\n\n{memory_context_text}")
-                    },
+                    description: task_description,
                     recent_messages: loaded_context.recent_messages.clone(),
                     conversation_kind: ctx.conversation_kind,
                     user_display_names,
@@ -512,7 +667,22 @@ where
                 stream: false,
             };
 
-            let response = llm
+            // Try dynamic key resolution: if the user has stored an LLM key,
+            // construct a temporary engine with those credentials.
+            let dynamic_engine: Option<OpenAiCompatibleEngine> = Self::try_resolve_dynamic_engine(
+                repos,
+                user_id,
+                conversation_id,
+                ctx.llm_config,
+                ctx.mek,
+            )
+            .await;
+            let effective_llm: &dyn LlmEngine = match dynamic_engine {
+                Some(ref engine) => engine,
+                None => &**llm,
+            };
+
+            let response = effective_llm
                 .complete(req)
                 .await
                 .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
@@ -536,6 +706,23 @@ where
                     tool_call_id: None,
                 });
 
+                // Store assistant message with tool calls before executing them.
+                let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
+                repos
+                    .messages()
+                    .create(CreateMessage {
+                        conversation_id,
+                        role: MessageRole::Assistant,
+                        content: choice.message.content.clone().unwrap_or_default(),
+                        tool_calls: tool_calls_json,
+                        tool_result: None,
+                        token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
+                        metadata: None,
+                        user_id: Some(user_id),
+                    })
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
                 let (tool_msgs, any_context_modifying, had_errors) =
                     Self::execute_tool_calls_streaming(
                         tool_registry,
@@ -546,6 +733,8 @@ where
                         registrar,
                         user_id,
                         conversation_id,
+                        repos,
+                        ctx.workspace_id,
                     )
                     .await;
 
@@ -593,7 +782,8 @@ where
             }
 
             // Always store the assistant response (cleaned, without extraction block).
-            let assistant_msg = message_repo
+            let assistant_msg = repos
+                .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Assistant,
@@ -602,7 +792,7 @@ where
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
-                    user_id: None,
+                    user_id: Some(user_id),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -654,7 +844,7 @@ where
             });
 
             // i. Auto-generate title
-            let conversation = conversation_repo.get_by_id(conversation_id).await.ok();
+            let conversation = repos.conversations().get_by_id(conversation_id).await.ok();
             let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
             let needs_title = current_title.is_none() || current_title == Some("");
             if needs_title && !assistant_text.is_empty() {
@@ -708,7 +898,8 @@ where
                                 .map(|t| t.trim().trim_matches('"').to_owned())
                         })
                     })
-                    && conversation_repo
+                    && repos
+                        .conversations()
                         .update_title(conversation_id, &title)
                         .await
                         .is_ok()
@@ -750,6 +941,8 @@ where
         registrar: Option<&ConfirmationRegistrar>,
         user_id: UserId,
         conversation_id: ConversationId,
+        repos: &Arc<R>,
+        workspace_id: Option<WorkspaceId>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -784,21 +977,40 @@ where
                     .or_insert(serde_json::Value::Bool(false));
             }
 
-            let _ = event_tx
-                .send(Ok(AgentEvent::ToolCallStart {
-                    name: tool_name.clone(),
-                    input: tool_input.clone(),
-                }))
-                .await;
-            let _ = broadcast_tx.send(proto::ConversationUpdate {
-                conversation_id: conv_id_str.to_owned(),
-                event: Some(proto::conversation_update::Event::ToolCallStart(
-                    proto::ToolCallStart {
+            let tool_internal = tool_registry
+                .get_tool(tool_name)
+                .is_some_and(|t| t.metadata().internal);
+
+            // Skip broadcasting ToolCallStart for internal tools to prevent
+            // leaking secret data (e.g. store_secret arguments) to clients.
+            if !tool_internal {
+                let _ = event_tx
+                    .send(Ok(AgentEvent::ToolCallStart {
                         name: tool_name.clone(),
-                        input_json: tool_input.to_string(),
-                    },
-                )),
-            });
+                        input: tool_input.clone(),
+                    }))
+                    .await;
+                let _ = broadcast_tx.send(proto::ConversationUpdate {
+                    conversation_id: conv_id_str.to_owned(),
+                    event: Some(proto::conversation_update::Event::ToolCallStart(
+                        proto::ToolCallStart {
+                            name: tool_name.clone(),
+                            input_json: tool_input.to_string(),
+                            internal: false,
+                        },
+                    )),
+                });
+            }
+
+            // Save the command for audit logging before tool_input is moved.
+            let shell_command = if tool_name == "shell" {
+                tool_input
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            } else {
+                None
+            };
 
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
@@ -827,6 +1039,8 @@ where
                                 broadcast_tx,
                                 conv_id_str,
                                 registrar,
+                                user_id,
+                                repos,
                             )
                             .await
                         }
@@ -854,11 +1068,51 @@ where
                     proto::ToolCallResult {
                         name: tool_name.clone(),
                         output: output.clone(),
+                        internal: tool_internal,
                     },
                 )),
             });
 
-            messages.push(LlmMessage::tool(&tc.id, output));
+            messages.push(LlmMessage::tool(&tc.id, output.clone()));
+
+            // Store tool result message for audit trail.
+            if let Err(e) = repos
+                .messages()
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::Tool,
+                    content: output.clone(),
+                    tool_calls: None,
+                    tool_result: Some(serde_json::json!({
+                        "tool_call_id": tc.id,
+                        "name": tool_name,
+                    })),
+                    token_count: None,
+                    metadata: None,
+                    user_id: Some(user_id),
+                })
+                .await
+            {
+                warn!(
+                    tool = %tool_name,
+                    error = %e,
+                    "failed to persist tool result message"
+                );
+            }
+
+            // Audit logging for shell tool runs.
+            if let Some(ref cmd) = shell_command {
+                let _ = crate::audit::log_shell_exec(
+                    repos.audit_log(),
+                    user_id,
+                    workspace_id,
+                    serde_json::json!({
+                        "command": cmd,
+                        "conversation_id": conversation_id.to_string(),
+                    }),
+                )
+                .await;
+            }
         }
 
         (messages, any_context_modifying, any_errors)
@@ -868,6 +1122,7 @@ where
     ///
     /// Sends the confirmation event to the client, waits for the user's
     /// response, and re-executes the tool if approved.
+    #[allow(clippy::too_many_arguments)]
     async fn handle_confirmation(
         tool: &Arc<dyn sober_core::types::tool::Tool>,
         mut tool_input: serde_json::Value,
@@ -876,6 +1131,8 @@ where
         broadcast_tx: &ConversationUpdateSender,
         conv_id_str: &str,
         registrar: Option<&ConfirmationRegistrar>,
+        user_id: UserId,
+        repos: &Arc<R>,
     ) -> String {
         let Some(registrar) = registrar else {
             return format!(
@@ -902,26 +1159,42 @@ where
             event: Some(proto::conversation_update::Event::ConfirmRequest(
                 proto::ConfirmRequest {
                     confirm_id: confirm.confirm_id,
-                    command: confirm.command,
-                    risk_level: confirm.risk_level,
+                    command: confirm.command.clone(),
+                    risk_level: confirm.risk_level.clone(),
                     affects: Vec::new(),
-                    reason: confirm.reason,
+                    reason: confirm.reason.clone(),
                 },
             )),
         });
 
         match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
-            Ok(Ok(true)) => {
-                // Approved — re-execute with confirmed flag.
-                if let Some(obj) = tool_input.as_object_mut() {
-                    obj.insert("confirmed".to_string(), serde_json::Value::Bool(true));
-                }
-                match tool.execute(tool_input).await {
-                    Ok(output) => output.content,
-                    Err(e) => format!("Tool error after confirmation: {e}"),
+            Ok(Ok(approved)) => {
+                // Log the confirmation decision.
+                let _ = crate::audit::log_confirmation(
+                    repos.audit_log(),
+                    user_id,
+                    approved,
+                    serde_json::json!({
+                        "command": confirm.command,
+                        "risk_level": confirm.risk_level,
+                        "conversation_id": conv_id_str,
+                    }),
+                )
+                .await;
+
+                if approved {
+                    // Re-execute with confirmed flag.
+                    if let Some(obj) = tool_input.as_object_mut() {
+                        obj.insert("confirmed".to_string(), serde_json::Value::Bool(true));
+                    }
+                    match tool.execute(tool_input).await {
+                        Ok(output) => output.content,
+                        Err(e) => format!("Tool error after confirmation: {e}"),
+                    }
+                } else {
+                    "Command denied by user.".to_string()
                 }
             }
-            Ok(Ok(false)) => "Command denied by user.".to_string(),
             Ok(Err(_)) => "Confirmation cancelled.".to_string(),
             Err(_) => "Command timed out waiting for confirmation.".to_string(),
         }
@@ -1003,28 +1276,101 @@ where
 
 /// Converts domain [`DomainMessage`] values to LLM [`LlmMessage`] values.
 pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
-    msgs.iter()
-        // Skip empty assistant messages — the API rejects them.
-        .filter(|m| !(m.role == MessageRole::Assistant && m.content.is_empty()))
-        // Skip event messages — they are not forwarded to the LLM.
-        .filter(|m| m.role != MessageRole::Event)
-        .map(|m| {
-            let role = match m.role {
-                MessageRole::System => "system",
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::Tool => "tool",
-                MessageRole::Event => unreachable!("event messages filtered above"),
-            };
-            LlmMessage {
-                role: role.to_owned(),
-                content: Some(m.content.clone()),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
+    use std::collections::HashSet;
+
+    let mut result: Vec<LlmMessage> = Vec::with_capacity(msgs.len());
+    // Track which tool_call_ids are pending (from assistant messages).
+    let mut pending_tool_ids: HashSet<String> = HashSet::new();
+
+    for m in msgs {
+        // Skip empty assistant messages without tool_calls.
+        if m.role == MessageRole::Assistant && m.content.is_empty() && m.tool_calls.is_none() {
+            continue;
+        }
+        // Skip event messages.
+        if m.role == MessageRole::Event {
+            continue;
+        }
+
+        let role = match m.role {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+            MessageRole::Event => unreachable!(),
+        };
+
+        // Restore tool_calls on assistant messages.
+        let tool_calls: Option<Vec<LlmToolCall>> = if m.role == MessageRole::Assistant {
+            m.tool_calls
+                .as_ref()
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        } else {
+            None
+        };
+
+        // Track pending tool_call_ids from assistant messages.
+        if let Some(ref tcs) = tool_calls {
+            for tc in tcs {
+                pending_tool_ids.insert(tc.id.clone());
             }
-        })
-        .collect()
+        }
+
+        // When a non-tool message arrives and there are still pending tool_call_ids,
+        // the sequence is broken (e.g., user interrupted). Drop the pending assistant
+        // message's tool_calls by replacing the last assistant message.
+        if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
+            // The sequence was broken by a user message. Remove the preceding
+            // assistant message if it only existed for its tool_calls.
+            if let Some(last) = result.last()
+                && last.role == "assistant"
+                && last.tool_calls.is_some()
+            {
+                let empty_content = last.content.as_ref().is_none_or(|c| c.trim().is_empty());
+                if empty_content {
+                    result.pop();
+                } else {
+                    let last_mut = result.last_mut().unwrap();
+                    last_mut.tool_calls = None;
+                }
+            }
+            pending_tool_ids.clear();
+        }
+
+        // Restore tool_call_id on tool messages.
+        let tool_call_id = if m.role == MessageRole::Tool {
+            m.tool_result
+                .as_ref()
+                .and_then(|v| v.get("tool_call_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+        } else {
+            None
+        };
+
+        // Skip orphaned tool messages (no matching pending tool_call_id).
+        if m.role == MessageRole::Tool {
+            match &tool_call_id {
+                Some(id) if pending_tool_ids.remove(id) => {
+                    // Matched — keep this tool message.
+                }
+                _ => {
+                    // Orphaned tool message — skip it.
+                    continue;
+                }
+            }
+        }
+
+        result.push(LlmMessage {
+            role: role.to_owned(),
+            content: Some(m.content.clone()),
+            reasoning_content: None,
+            tool_calls,
+            tool_call_id,
+        });
+    }
+
+    result
 }
 
 /// Formats loaded memory context into a human-readable string for inclusion
@@ -1119,15 +1465,14 @@ mod tests {
         ];
 
         let llm_msgs = domain_to_llm_messages(&domain_msgs);
-        assert_eq!(llm_msgs.len(), 4);
+        // Tool message is orphaned (no preceding assistant tool_call), so it's dropped.
+        assert_eq!(llm_msgs.len(), 3);
         assert_eq!(llm_msgs[0].role, "system");
         assert_eq!(llm_msgs[0].content.as_deref(), Some("You are helpful."));
         assert_eq!(llm_msgs[1].role, "user");
         assert_eq!(llm_msgs[1].content.as_deref(), Some("Hello!"));
         assert_eq!(llm_msgs[2].role, "assistant");
         assert_eq!(llm_msgs[2].content.as_deref(), Some("Hi there."));
-        assert_eq!(llm_msgs[3].role, "tool");
-        assert_eq!(llm_msgs[3].content.as_deref(), Some("result"));
     }
 
     #[test]

@@ -146,6 +146,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             conversation_id: cid,
             content: td.content,
         }),
+        proto::conversation_update::Event::ToolCallStart(ref tcs) if tcs.internal => None,
         proto::conversation_update::Event::ToolCallStart(tcs) => {
             Some(ServerWsMessage::ChatToolUse {
                 conversation_id: cid,
@@ -155,6 +156,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 }),
             })
         }
+        proto::conversation_update::Event::ToolCallResult(ref tcr) if tcr.internal => None,
         proto::conversation_update::Event::ToolCallResult(tcr) => {
             Some(ServerWsMessage::ChatToolResult {
                 conversation_id: cid,

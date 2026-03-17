@@ -4,6 +4,7 @@
 //! trait from `sober-core`. All repos take a `PgPool` and are constructed
 //! at binary startup.
 
+mod agent_repos;
 mod artifacts;
 mod audit_log;
 mod conversation_users;
@@ -20,6 +21,7 @@ mod workspace_repos;
 mod workspaces;
 mod worktrees;
 
+pub use agent_repos::PgAgentRepos;
 pub use artifacts::PgArtifactRepo;
 pub use audit_log::PgAuditLogRepo;
 pub use conversation_users::PgConversationUserRepo;

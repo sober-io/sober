@@ -762,6 +762,7 @@ impl Tool for SchedulerTools {
                 "required": ["action"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 

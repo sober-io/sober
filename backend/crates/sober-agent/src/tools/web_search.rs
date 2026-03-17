@@ -85,6 +85,7 @@ impl Tool for WebSearchTool {
                 "required": ["query"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 

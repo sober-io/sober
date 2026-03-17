@@ -140,7 +140,8 @@ impl ShellTool {
             }
         }
 
-        // Determine working directory
+        // Determine working directory: user-specified relative path, or the
+        // default workspace home (set per-turn by ToolBootstrap).
         let workdir = if let Some(ref wd) = input.workdir {
             self.workspace_home.join(wd)
         } else {
@@ -151,6 +152,11 @@ impl ShellTool {
         let mut policy = self.sandbox_policy.clone();
         policy.fs_read.push(self.workspace_home.clone());
         policy.fs_write.push(self.workspace_home.clone());
+        // When the resolved workdir is outside workspace_home, grant access.
+        if !workdir.starts_with(&self.workspace_home) {
+            policy.fs_read.push(workdir.clone());
+            policy.fs_write.push(workdir.clone());
+        }
         // System tool paths for read-only access
         for sys_path in ["/usr", "/bin", "/lib", "/lib64", "/etc/alternatives"] {
             let p = PathBuf::from(sys_path);
@@ -230,6 +236,7 @@ impl Tool for ShellTool {
                 "required": ["command"]
             }),
             context_modifying: false,
+            internal: false,
         }
     }
 

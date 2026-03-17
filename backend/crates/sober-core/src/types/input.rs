@@ -7,7 +7,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::domain::SecretScope;
 use super::enums::{ArtifactKind, ArtifactState};
 use super::ids::{ArtifactId, ConversationId, UserId, WorkspaceId};
 
@@ -184,8 +183,10 @@ pub struct CreateAuditLog {
 /// Input for storing a new encrypted secret.
 #[derive(Debug)]
 pub struct NewSecret {
-    /// Which scope (user) owns this secret.
-    pub scope: SecretScope,
+    /// Owning user.
+    pub user_id: UserId,
+    /// Conversation this secret is scoped to, if any.
+    pub conversation_id: Option<ConversationId>,
     /// Human-readable label.
     pub name: String,
     /// Category (e.g. `"llm_provider"`, `"oauth_app"`).

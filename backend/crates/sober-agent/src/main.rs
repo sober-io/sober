@@ -15,18 +15,17 @@ use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
-use sober_agent::tools::{
-    FetchUrlTool, RecallTool, RememberTool, SchedulerTools, ShellTool, ToolRegistry, WebSearchTool,
-};
+use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, ToolBootstrap};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
-use sober_core::types::tool::Tool;
-use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, PgUserRepo, create_pool};
+use sober_crypto::envelope::Mek;
+use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
 use sober_sandbox::{CommandPolicy, SandboxProfile};
+use sober_workspace::BlobStore;
 use std::sync::RwLock;
 use tokio::net::UnixListener;
 use tokio::signal;
@@ -54,11 +53,8 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    // 4. Create repository instances
-    let message_repo = Arc::new(PgMessageRepo::new(pool.clone()));
-    let conversation_repo = Arc::new(PgConversationRepo::new(pool.clone()));
-    let mcp_server_repo = Arc::new(PgMcpServerRepo::new(pool.clone()));
-    let user_repo = Arc::new(PgUserRepo::new(pool.clone()));
+    // 4. Create repository bundle
+    let repos = Arc::new(PgAgentRepos::new(pool.clone()));
 
     // 5. Create LLM engine
     let llm: Arc<dyn sober_llm::LlmEngine> =
@@ -71,9 +67,13 @@ async fn main() -> Result<()> {
     );
 
     // 7. Create context loader
+    //
+    // ContextLoader is generic over MessageRepo and needs its own Arc-wrapped
+    // instance. PgPool is cheap to clone (internal Arc), so creating a second
+    // PgMessageRepo is fine.
     let context_loader = Arc::new(ContextLoader::new(
         Arc::clone(&memory),
-        Arc::clone(&message_repo),
+        Arc::new(PgMessageRepo::new(pool.clone())),
     ));
 
     // 8. Create Mind with SoulResolver
@@ -89,11 +89,7 @@ async fn main() -> Result<()> {
     let soul_resolver = SoulResolver::new(base_soul_path, user_soul_path, workspace_soul_path);
     let mind = Arc::new(Mind::new(soul_resolver));
 
-    // 9. Create tool registry with built-in tools
-    //
-    // The ShellTool uses a default workspace path and policy-based permission
-    // mode. In production these will be derived from the workspace config per
-    // conversation; for now we use sensible defaults.
+    // 9. Resolve workspace and sandbox configuration
     let workspace_root = PathBuf::from(
         std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
     );
@@ -110,46 +106,61 @@ async fn main() -> Result<()> {
     let snapshot_dir = workspace_root
         .join(sober_workspace::SOBER_DIR)
         .join("snapshots");
-    let snapshot_manager = sober_workspace::SnapshotManager::new(snapshot_dir);
-    let shell_tool = ShellTool::new(
-        command_policy,
-        Arc::clone(&shared_permission_mode),
-        workspace_root,
-        sandbox_policy,
-        true, // auto_snapshot
-        None, // max_snapshots (uses default; overridden by workspace config)
-        Some(snapshot_manager),
-    );
+    let snapshot_manager = Arc::new(sober_workspace::SnapshotManager::new(snapshot_dir));
 
-    // 10. Create shared scheduler client handle (connected in background later)
+    // 10. Load optional MEK for secret encryption
+    let mek: Option<Arc<Mek>> = config.crypto.master_encryption_key.as_ref().map(|hex| {
+        let mek = Mek::from_hex(hex).expect("invalid MASTER_ENCRYPTION_KEY (need 64 hex chars)");
+        info!("master encryption key loaded — secret tools enabled");
+        Arc::new(mek)
+    });
+    if mek.is_none() {
+        info!("no MASTER_ENCRYPTION_KEY set — secret tools disabled");
+    }
+
+    // 11. Create blob store for workspace artifacts
+    let blob_store = Arc::new(BlobStore::new(
+        workspace_root
+            .join(sober_workspace::SOBER_DIR)
+            .join("blobs"),
+    ));
+
+    // 12. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
-    let builtins: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(WebSearchTool::new(config.searxng.url.clone())),
-        Arc::new(FetchUrlTool::new()),
-        Arc::new(shell_tool),
-        Arc::new(SchedulerTools::new(Arc::clone(&scheduler_client))),
-        Arc::new(RecallTool::new(
-            Arc::clone(&memory),
-            Arc::clone(&llm),
-            config.memory.clone(),
-        )),
-        Arc::new(RememberTool::new(
-            Arc::clone(&memory),
-            Arc::clone(&llm),
-            config.memory.clone(),
-        )),
-    ];
-    let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
+    // 13. Create ToolBootstrap — centralized tool construction for all turns
+    let tool_bootstrap = Arc::new(ToolBootstrap {
+        shell: ShellToolConfig {
+            command_policy,
+            permission_mode: Arc::clone(&shared_permission_mode),
+            default_workspace_root: workspace_root,
+            sandbox_policy,
+            auto_snapshot: true,
+            max_snapshots: None,
+        },
+        search: SearchToolConfig {
+            searxng_url: config.searxng.url.clone(),
+        },
+        memory_tools: MemoryToolConfig {
+            memory: Arc::clone(&memory),
+            llm: Arc::clone(&llm),
+            config: config.memory.clone(),
+        },
+        scheduler_client: Arc::clone(&scheduler_client),
+        repos: Arc::clone(&repos),
+        mek: mek.clone(),
+        blob_store,
+        snapshot_manager,
+    });
 
-    // 11. Create broadcast channel for conversation update events
+    // 14. Create broadcast channel for conversation update events
     let (broadcast_tx, _broadcast_rx) = sober_agent::broadcast::create_broadcast_channel();
 
-    // 12. Create confirmation broker
+    // 15. Create confirmation broker
     let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
     let registrar = confirmation_broker.registrar();
 
-    // 13. Create Agent
+    // 16. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -162,21 +173,20 @@ async fn main() -> Result<()> {
         mind,
         memory,
         context_loader,
-        tool_registry,
-        message_repo,
-        conversation_repo,
-        mcp_server_repo,
-        user_repo,
+        repos,
         agent_config,
         config.memory.clone(),
         Some(registrar),
         broadcast_tx.clone(),
+        mek,
+        Some(config.llm.clone()),
+        tool_bootstrap,
     ));
 
-    // 14. Spawn the confirmation broker loop
+    // 17. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 15. Connect to scheduler gRPC service (background — retries until available)
+    // 18. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     tokio::spawn(async move {
@@ -190,7 +200,7 @@ async fn main() -> Result<()> {
         broadcast_tx,
     );
 
-    // 16. Bind to Unix domain socket
+    // 19. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -214,7 +224,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 17. Serve with graceful shutdown
+    // 20. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())

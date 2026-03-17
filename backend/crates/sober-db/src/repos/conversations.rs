@@ -207,8 +207,10 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
             "SELECT c.id, c.user_id, c.title, c.workspace_id, c.kind, c.agent_mode, c.is_archived, \
              c.permission_mode, c.created_at, c.updated_at, \
-             COALESCE(cu.unread_count, 0) AS unread_count \
+             COALESCE(cu.unread_count, 0) AS unread_count, \
+             w.name AS workspace_name, w.root_path AS workspace_path \
              FROM conversations c \
+             LEFT JOIN workspaces w ON w.id = c.workspace_id \
              LEFT JOIN conversation_users cu ON cu.conversation_id = c.id AND cu.user_id = ",
         );
         qb.push_bind(*user_id.as_uuid());
@@ -316,6 +318,8 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                     unread_count: r.unread_count,
                     tags: tags_by_conv.remove(&conv_id).unwrap_or_default(),
                     users: Vec::new(),
+                    workspace_name: r.workspace_name,
+                    workspace_path: r.workspace_path,
                 }
             })
             .collect();
