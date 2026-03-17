@@ -103,6 +103,8 @@ struct LoopContext<'a, R: AgentRepos> {
     conversation_kind: ConversationKind,
     /// Workspace ID from the conversation (for audit logging).
     workspace_id: Option<WorkspaceId>,
+    /// Resolved workspace directory path (for LLM context).
+    workspace_dir: Option<PathBuf>,
     /// LLM config for constructing dynamic engines from resolved user keys.
     llm_config: &'a Option<LlmConfig>,
     /// Master encryption key for resolving user-stored LLM keys.
@@ -462,6 +464,7 @@ impl<R: AgentRepos> Agent<R> {
                 trigger,
                 conversation_kind,
                 workspace_id,
+                workspace_dir,
                 llm_config: &llm_config,
                 mek: &mek,
             };
@@ -598,12 +601,23 @@ impl<R: AgentRepos> Agent<R> {
                 };
 
                 let memory_context_text = format_memory_context(&loaded_context);
+                let mut task_description = String::new();
+
+                // Include workspace path so the LLM knows where it's working.
+                if let Some(ref ws_dir) = ctx.workspace_dir {
+                    task_description.push_str(&format!(
+                        "## Workspace\n\nCurrent workspace directory: `{}`\n\n",
+                        ws_dir.display()
+                    ));
+                }
+
+                if !memory_context_text.is_empty() {
+                    task_description
+                        .push_str(&format!("## Relevant Memories\n\n{memory_context_text}"));
+                }
+
                 let task_context = TaskContext {
-                    description: if memory_context_text.is_empty() {
-                        String::new()
-                    } else {
-                        format!("## Relevant Memories\n\n{memory_context_text}")
-                    },
+                    description: task_description,
                     recent_messages: loaded_context.recent_messages.clone(),
                     conversation_kind: ctx.conversation_kind,
                     user_display_names,
