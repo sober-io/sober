@@ -35,7 +35,9 @@ pub use artifacts::{
     ArtifactToolContext, CreateArtifactTool, DeleteArtifactTool, ListArtifactsTool,
     ReadArtifactTool,
 };
-pub use bootstrap::{ToolBootstrap, TurnContext};
+pub use bootstrap::{
+    MemoryToolConfig, SearchToolConfig, ShellToolConfig, ToolBootstrap, TurnContext,
+};
 pub use fetch_url::FetchUrlTool;
 pub use memory::{RecallTool, RememberTool};
 pub use registry::ToolRegistry;

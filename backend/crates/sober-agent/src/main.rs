@@ -15,7 +15,7 @@ use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
-use sober_agent::tools::ToolBootstrap;
+use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, ToolBootstrap};
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
@@ -130,17 +130,23 @@ async fn main() -> Result<()> {
 
     // 13. Create ToolBootstrap — centralized tool construction for all turns
     let tool_bootstrap = Arc::new(ToolBootstrap {
-        command_policy,
-        permission_mode: Arc::clone(&shared_permission_mode),
-        default_workspace_root: workspace_root,
-        sandbox_policy,
-        searxng_url: config.searxng.url.clone(),
+        shell: ShellToolConfig {
+            command_policy,
+            permission_mode: Arc::clone(&shared_permission_mode),
+            default_workspace_root: workspace_root,
+            sandbox_policy,
+            auto_snapshot: true,
+            max_snapshots: None,
+        },
+        search: SearchToolConfig {
+            searxng_url: config.searxng.url.clone(),
+        },
+        memory_tools: MemoryToolConfig {
+            memory: Arc::clone(&memory),
+            llm: Arc::clone(&llm),
+            config: config.memory.clone(),
+        },
         scheduler_client: Arc::clone(&scheduler_client),
-        memory: Arc::clone(&memory),
-        llm: Arc::clone(&llm),
-        memory_config: config.memory.clone(),
-        auto_snapshot: true,
-        max_snapshots: None,
         repos: Arc::clone(&repos),
         mek: mek.clone(),
         blob_store,

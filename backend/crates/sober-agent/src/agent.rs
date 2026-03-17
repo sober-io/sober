@@ -131,6 +131,10 @@ pub struct Agent<R: AgentRepos> {
     /// Centralized tool construction — builds a complete [`ToolRegistry`]
     /// per conversation turn with the correct workspace paths and scoped tools.
     tool_bootstrap: Arc<ToolBootstrap<R>>,
+    /// Pre-built static tools (web_search, fetch_url, scheduler, recall,
+    /// remember) that are identical across conversations. Built once at
+    /// construction and reused every turn.
+    static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -150,6 +154,7 @@ impl<R: AgentRepos> Agent<R> {
         llm_config: Option<LlmConfig>,
         tool_bootstrap: Arc<ToolBootstrap<R>>,
     ) -> Self {
+        let static_tools = tool_bootstrap.build_static_tools();
         Self {
             llm,
             mind,
@@ -163,6 +168,7 @@ impl<R: AgentRepos> Agent<R> {
             mek,
             llm_config,
             tool_bootstrap,
+            static_tools,
         }
     }
 
@@ -173,6 +179,9 @@ impl<R: AgentRepos> Agent<R> {
 
     /// Builds a [`ToolRegistry`] for the given conversation turn via the
     /// centralized [`ToolBootstrap`].
+    ///
+    /// Reuses the pre-built [`static_tools`](Self::static_tools) and adds
+    /// per-conversation tools (shell, secrets, artifacts, snapshots).
     fn build_turn_tools(
         &self,
         user_id: UserId,
@@ -186,7 +195,7 @@ impl<R: AgentRepos> Agent<R> {
             workspace_id,
             workspace_dir,
         };
-        Arc::new(self.tool_bootstrap.build(&ctx))
+        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools))
     }
 
     /// Resolves which conversation to deliver job results to.
