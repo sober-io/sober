@@ -1322,18 +1322,16 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
         if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
             // The sequence was broken by a user message. Remove the preceding
             // assistant message if it only existed for its tool_calls.
-            if let Some(last) = result.last() {
-                if last.role == "assistant" && last.tool_calls.is_some() {
-                    // If the assistant message has no meaningful content,
-                    // drop it entirely (empty content + tool_calls = tool-only message).
-                    let empty_content = last.content.as_ref().map_or(true, |c| c.trim().is_empty());
-                    if empty_content {
-                        result.pop();
-                    } else {
-                        // Has text content — just strip the tool_calls.
-                        let last_mut = result.last_mut().unwrap();
-                        last_mut.tool_calls = None;
-                    }
+            if let Some(last) = result.last()
+                && last.role == "assistant"
+                && last.tool_calls.is_some()
+            {
+                let empty_content = last.content.as_ref().is_none_or(|c| c.trim().is_empty());
+                if empty_content {
+                    result.pop();
+                } else {
+                    let last_mut = result.last_mut().unwrap();
+                    last_mut.tool_calls = None;
                 }
             }
             pending_tool_ids.clear();
