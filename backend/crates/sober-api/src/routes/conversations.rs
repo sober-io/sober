@@ -95,10 +95,10 @@ async fn create_conversation(
     } else {
         // Auto-create a workspace for every new conversation.
         let ws_repo = PgWorkspaceRepo::new(state.db.clone());
-        let data_root =
-            std::env::var("SOBER_DATA_ROOT").unwrap_or_else(|_| "/opt/sober/data".to_string());
+        let workspace_root = std::env::var("WORKSPACE_ROOT")
+            .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
         let ws_id = uuid::Uuid::now_v7();
-        let root_path = format!("{}/workspaces/{}", data_root, ws_id);
+        let root_path = format!("{}/{}", workspace_root, ws_id);
         let ws = ws_repo
             .create(auth_user.user_id, "default", None, &root_path)
             .await?;
