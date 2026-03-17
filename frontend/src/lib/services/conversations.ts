@@ -1,11 +1,5 @@
 import { api } from '$lib/utils/api';
-import type {
-	AgentMode,
-	Conversation,
-	ConversationMember,
-	Message,
-	PermissionMode
-} from '$lib/types';
+import type { AgentMode, Collaborator, Conversation, Message, PermissionMode } from '$lib/types';
 
 export const conversationService = {
 	list: (params?: { archived?: boolean; kind?: string; tag?: string; search?: string }) => {
@@ -65,22 +59,22 @@ export const conversationService = {
 			body: JSON.stringify({ agent_mode: agentMode })
 		}),
 
-	listMembers: (id: string) => api<ConversationMember[]>(`/conversations/${id}/members`),
+	listCollaborators: (id: string) => api<Collaborator[]>(`/conversations/${id}/collaborators`),
 
-	addMember: (id: string, username: string) =>
-		api<ConversationMember>(`/conversations/${id}/members`, {
+	addCollaborator: (id: string, username: string) =>
+		api<Collaborator>(`/conversations/${id}/collaborators`, {
 			method: 'POST',
 			body: JSON.stringify({ username })
 		}),
 
-	updateMemberRole: (id: string, userId: string, role: string) =>
-		api(`/conversations/${id}/members/${userId}`, {
+	updateCollaboratorRole: (id: string, userId: string, role: string) =>
+		api(`/conversations/${id}/collaborators/${userId}`, {
 			method: 'PATCH',
 			body: JSON.stringify({ role })
 		}),
 
-	removeMember: (id: string, userId: string) =>
-		api(`/conversations/${id}/members/${userId}`, { method: 'DELETE' }),
+	removeCollaborator: (id: string, userId: string) =>
+		api(`/conversations/${id}/collaborators/${userId}`, { method: 'DELETE' }),
 
 	leave: (id: string) => api(`/conversations/${id}/leave`, { method: 'POST' }),
 

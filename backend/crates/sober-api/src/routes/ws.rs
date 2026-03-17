@@ -25,9 +25,9 @@ use tracing::{error, info, warn};
 use crate::proto;
 use crate::state::AppState;
 
-/// Basic user info included in member change WebSocket events.
+/// Basic user info included in collaborator change WebSocket events.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct MemberInfo {
+pub struct CollaboratorInfo {
     /// User ID.
     pub id: String,
     /// Username.
@@ -189,25 +189,25 @@ pub enum ServerWsMessage {
         /// New unread count.
         unread_count: i32,
     },
-    /// A member was added to the conversation.
-    #[serde(rename = "chat.member_added")]
-    ChatMemberAdded {
+    /// A collaborator was added to the conversation.
+    #[serde(rename = "chat.collaborator_added")]
+    ChatCollaboratorAdded {
         /// Conversation this event belongs to.
         conversation_id: String,
         /// The added user.
-        user: MemberInfo,
+        user: CollaboratorInfo,
         /// The role assigned.
         role: String,
     },
-    /// A member was removed from the conversation.
-    #[serde(rename = "chat.member_removed")]
-    ChatMemberRemoved {
+    /// A collaborator was removed from the conversation.
+    #[serde(rename = "chat.collaborator_removed")]
+    ChatCollaboratorRemoved {
         /// Conversation this event belongs to.
         conversation_id: String,
         /// The removed user's ID.
         user_id: String,
     },
-    /// A member's role was changed.
+    /// A collaborator's role was changed.
     #[serde(rename = "chat.role_changed")]
     ChatRoleChanged {
         /// Conversation this event belongs to.

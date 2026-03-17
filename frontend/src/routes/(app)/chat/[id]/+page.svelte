@@ -109,14 +109,14 @@
 	});
 	let memberMap = $state<Record<string, string>>({});
 
-	// Load members for group conversations
+	// Load collaborators for group conversations
 	$effect(() => {
 		if (isGroup) {
 			const convId = data.conversation.id;
 			untrack(() => {
-				conversationService.listMembers(convId).then((members) => {
+				conversationService.listCollaborators(convId).then((collaborators) => {
 					const map: Record<string, string> = {};
-					for (const m of members) map[m.user_id] = m.username;
+					for (const c of collaborators) map[c.user_id] = c.username;
 					memberMap = map;
 				});
 			});
@@ -468,11 +468,11 @@
 				];
 				break;
 			}
-			case 'chat.member_added': {
+			case 'chat.collaborator_added': {
 				memberMap = { ...memberMap, [msg.user.id]: msg.user.username };
 				break;
 			}
-			case 'chat.member_removed': {
+			case 'chat.collaborator_removed': {
 				// If the current user was removed (kicked), navigate away.
 				if (msg.user_id === auth.user?.id) {
 					conversations.remove(conversationId);

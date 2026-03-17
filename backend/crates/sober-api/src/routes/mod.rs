@@ -1,10 +1,10 @@
 //! Route handlers and router assembly.
 
 pub mod auth;
+pub mod collaborators;
 pub mod conversations;
 pub mod health;
 pub mod mcp;
-pub mod members;
 pub mod messages;
 pub mod tags;
 pub mod users;
@@ -65,7 +65,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(health::routes())
         .merge(auth::routes())
         .merge(conversations::routes())
-        .merge(members::routes())
+        .merge(collaborators::routes())
         .merge(messages::routes())
         .merge(mcp::routes())
         .merge(tags::routes())

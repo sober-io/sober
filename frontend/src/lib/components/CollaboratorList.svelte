@@ -1,26 +1,26 @@
 <script lang="ts">
-	import type { ConversationMember, ConversationUserRole, ConversationKind } from '$lib/types';
-	import AddMemberInput from './AddMemberInput.svelte';
+	import type { Collaborator, ConversationUserRole, ConversationKind } from '$lib/types';
+	import AddCollaboratorInput from './AddCollaboratorInput.svelte';
 
 	interface Props {
-		members: ConversationMember[];
+		collaborators: Collaborator[];
 		currentUserId: string;
 		currentUserRole: ConversationUserRole;
 		conversationKind: ConversationKind;
-		onAddMember: (username: string) => void;
+		onAddCollaborator: (username: string) => void;
 		onUpdateRole: (userId: string, role: string) => void;
-		onRemoveMember: (userId: string) => void;
+		onRemoveCollaborator: (userId: string) => void;
 		onLeave: () => void;
 	}
 
 	let {
-		members,
+		collaborators,
 		currentUserId,
 		currentUserRole,
 		conversationKind,
-		onAddMember,
+		onAddCollaborator,
 		onUpdateRole,
-		onRemoveMember,
+		onRemoveCollaborator,
 		onLeave
 	}: Props = $props();
 
@@ -37,16 +37,16 @@
 		}
 	}
 
-	function canKick(member: ConversationMember): boolean {
-		if (member.user_id === currentUserId) return false;
+	function canKick(collaborator: Collaborator): boolean {
+		if (collaborator.user_id === currentUserId) return false;
 		if (currentUserRole === 'owner') return true;
-		if (currentUserRole === 'admin' && member.role === 'member') return true;
+		if (currentUserRole === 'admin' && collaborator.role === 'member') return true;
 		return false;
 	}
 
-	function canChangeRole(member: ConversationMember): boolean {
-		if (member.user_id === currentUserId) return false;
-		if (currentUserRole === 'owner' && member.role !== 'owner') return true;
+	function canChangeRole(collaborator: Collaborator): boolean {
+		if (collaborator.user_id === currentUserId) return false;
+		if (currentUserRole === 'owner' && collaborator.role !== 'owner') return true;
 		return false;
 	}
 
@@ -58,23 +58,26 @@
 
 <div class="space-y-3">
 	{#if canManage}
-		<AddMemberInput onAdd={onAddMember} existingUserIds={members.map((m) => m.user_id)} />
+		<AddCollaboratorInput
+			onAdd={onAddCollaborator}
+			existingUserIds={collaborators.map((c) => c.user_id)}
+		/>
 	{/if}
 
 	<ul class="space-y-1">
-		{#each members as member (member.user_id)}
+		{#each collaborators as collaborator (collaborator.user_id)}
 			<li class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm">
 				<span class="min-w-0 flex-1 truncate text-zinc-900 dark:text-zinc-100">
-					{member.username}
-					{#if member.user_id === currentUserId}
+					{collaborator.username}
+					{#if collaborator.user_id === currentUserId}
 						<span class="text-xs text-zinc-400 dark:text-zinc-500">(you)</span>
 					{/if}
 				</span>
 
-				{#if canChangeRole(member)}
+				{#if canChangeRole(collaborator)}
 					<select
-						value={member.role}
-						onchange={(e) => handleRoleChange(member.user_id, e)}
+						value={collaborator.role}
+						onchange={(e) => handleRoleChange(collaborator.user_id, e)}
 						class="rounded border border-zinc-300 bg-transparent px-1.5 py-0.5 text-xs text-zinc-700 outline-none focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-300 dark:focus:border-zinc-400"
 					>
 						<option value="admin">Admin</option>
@@ -82,17 +85,20 @@
 					</select>
 				{:else}
 					<span
-						class={['rounded-full px-2 py-0.5 text-xs font-medium', roleBadgeClass(member.role)]}
+						class={[
+							'rounded-full px-2 py-0.5 text-xs font-medium',
+							roleBadgeClass(collaborator.role)
+						]}
 					>
-						{member.role}
+						{collaborator.role}
 					</span>
 				{/if}
 
-				{#if canKick(member)}
+				{#if canKick(collaborator)}
 					<button
-						onclick={() => onRemoveMember(member.user_id)}
+						onclick={() => onRemoveCollaborator(collaborator.user_id)}
 						class="rounded p-0.5 text-zinc-400 hover:text-red-500 dark:text-zinc-500 dark:hover:text-red-400"
-						title="Remove member"
+						title="Remove collaborator"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"

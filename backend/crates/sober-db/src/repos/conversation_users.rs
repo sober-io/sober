@@ -141,7 +141,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
         Ok(())
     }
 
-    async fn list_members(
+    async fn list_collaborators(
         &self,
         conversation_id: ConversationId,
     ) -> Result<Vec<ConversationUserWithUsername>, AppError> {
@@ -185,7 +185,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
         Ok(())
     }
 
-    async fn remove_member(
+    async fn remove_collaborator(
         &self,
         conversation_id: ConversationId,
         user_id: UserId,

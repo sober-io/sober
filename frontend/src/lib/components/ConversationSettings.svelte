@@ -6,7 +6,7 @@
 		PermissionMode,
 		Workspace,
 		AgentMode,
-		ConversationMember,
+		Collaborator,
 		ConversationUserRole
 	} from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
@@ -16,7 +16,7 @@
 	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
-	import MemberList from './MemberList.svelte';
+	import CollaboratorList from './CollaboratorList.svelte';
 	import TagInput from './TagInput.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -86,8 +86,8 @@
 	let confirmDelete = $state(false);
 	let confirmConvertPending = $state<string | null>(null);
 	let agentMode = $state<AgentMode>('always');
-	let members = $state<ConversationMember[]>([]);
-	let membersLoading = $state(false);
+	let collaborators = $state<Collaborator[]>([]);
+	let collaboratorsLoading = $state(false);
 	let kind = $state(conversation.kind);
 
 	// Derived
@@ -102,7 +102,7 @@
 	let isGroup = $derived(kind === 'group');
 	let currentUserId = $derived(auth.user?.id ?? '');
 	let currentUserRole = $derived.by((): ConversationUserRole => {
-		const me = members.find((m) => m.user_id === currentUserId);
+		const me = collaborators.find((c) => c.user_id === currentUserId);
 		return me?.role ?? 'member';
 	});
 	let canEditAgentMode = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
@@ -116,7 +116,7 @@
 			kind = conversation.kind;
 			loadJobs();
 			loadWorkspaces();
-			loadMembers();
+			loadCollaborators();
 		});
 	});
 
@@ -154,14 +154,14 @@
 		}
 	}
 
-	async function loadMembers() {
-		membersLoading = true;
+	async function loadCollaborators() {
+		collaboratorsLoading = true;
 		try {
-			members = await conversationService.listMembers(conversation.id);
+			collaborators = await conversationService.listCollaborators(conversation.id);
 		} catch {
-			members = [];
+			collaborators = [];
 		} finally {
-			membersLoading = false;
+			collaboratorsLoading = false;
 		}
 	}
 
@@ -170,15 +170,15 @@
 		await conversationService.updateAgentMode(conversation.id, mode);
 	}
 
-	async function handleAddMember(username: string) {
+	async function handleAddCollaborator(username: string) {
 		if (kind === 'direct') {
 			confirmConvertPending = username;
 			return;
 		}
 		try {
-			const member = await conversationService.addMember(conversation.id, username);
-			if (!members.some((m) => m.user_id === member.user_id)) {
-				members = [...members, member];
+			const collaborator = await conversationService.addCollaborator(conversation.id, username);
+			if (!collaborators.some((c) => c.user_id === collaborator.user_id)) {
+				collaborators = [...collaborators, collaborator];
 			}
 		} catch {
 			// Could show error toast in the future
@@ -196,9 +196,9 @@
 			kind = 'group';
 			conversations.update(conversation.id, { kind: 'group', title });
 
-			const member = await conversationService.addMember(conversation.id, username);
-			if (!members.some((m) => m.user_id === member.user_id)) {
-				members = [...members, member];
+			const collaborator = await conversationService.addCollaborator(conversation.id, username);
+			if (!collaborators.some((c) => c.user_id === collaborator.user_id)) {
+				collaborators = [...collaborators, collaborator];
 			}
 		} catch {
 			// Could show error toast in the future
@@ -207,22 +207,22 @@
 
 	async function handleUpdateRole(userId: string, role: string) {
 		try {
-			await conversationService.updateMemberRole(conversation.id, userId, role);
-			const idx = members.findIndex((m) => m.user_id === userId);
+			await conversationService.updateCollaboratorRole(conversation.id, userId, role);
+			const idx = collaborators.findIndex((c) => c.user_id === userId);
 			if (idx !== -1) {
-				members[idx] = { ...members[idx], role: role as ConversationUserRole };
+				collaborators[idx] = { ...collaborators[idx], role: role as ConversationUserRole };
 			}
 		} catch {
 			// Could show error toast in the future
 		}
 	}
 
-	async function handleRemoveMember(userId: string) {
+	async function handleRemoveCollaborator(userId: string) {
 		try {
-			await conversationService.removeMember(conversation.id, userId);
-			members = members.filter((m) => m.user_id !== userId);
+			await conversationService.removeCollaborator(conversation.id, userId);
+			collaborators = collaborators.filter((c) => c.user_id !== userId);
 			// Auto-convert back to direct if only owner remains
-			if (members.length <= 1) {
+			if (collaborators.length <= 1) {
 				kind = 'direct';
 				conversations.update(conversation.id, { kind: 'direct' });
 			}
@@ -409,19 +409,19 @@
 				<TagInput {tags} onAdd={onAddTag} onRemove={onRemoveTag} />
 			</SettingsSection>
 
-			<!-- Members -->
-			<SettingsSection title="Members" description="Manage conversation members">
-				{#if membersLoading}
+			<!-- Collaborators -->
+			<SettingsSection title="Collaborators" description="Manage conversation collaborators">
+				{#if collaboratorsLoading}
 					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
 				{:else}
-					<MemberList
-						{members}
+					<CollaboratorList
+						{collaborators}
 						{currentUserId}
 						{currentUserRole}
 						conversationKind={conversation.kind}
-						onAddMember={handleAddMember}
+						onAddCollaborator={handleAddCollaborator}
 						onUpdateRole={handleUpdateRole}
-						onRemoveMember={handleRemoveMember}
+						onRemoveCollaborator={handleRemoveCollaborator}
 						onLeave={handleLeave}
 					/>
 				{/if}
@@ -484,7 +484,7 @@
 <ConfirmDialog
 	open={confirmConvertPending !== null}
 	title="Convert to group"
-	message="Adding members will convert this to a group conversation. Continue?"
+	message="Adding collaborators will convert this to a group conversation. Continue?"
 	confirmText="Convert & add"
 	onConfirm={confirmConvertAndAdd}
 	onCancel={() => (confirmConvertPending = null)}

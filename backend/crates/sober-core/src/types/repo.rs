@@ -281,13 +281,13 @@ pub trait ConversationUserRepo: Send + Sync {
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Lists all members with usernames (joins users table).
-    fn list_members(
+    /// Lists all collaborators with usernames (joins users table).
+    fn list_collaborators(
         &self,
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<Vec<ConversationUserWithUsername>, AppError>> + Send;
 
-    /// Updates a member's role.
+    /// Updates a collaborator's role.
     fn update_role(
         &self,
         conversation_id: ConversationId,
@@ -295,8 +295,8 @@ pub trait ConversationUserRepo: Send + Sync {
         role: ConversationUserRole,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Removes a member from a conversation.
-    fn remove_member(
+    /// Removes a collaborator from a conversation.
+    fn remove_collaborator(
         &self,
         conversation_id: ConversationId,
         user_id: UserId,
