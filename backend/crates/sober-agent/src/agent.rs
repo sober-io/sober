@@ -332,20 +332,17 @@ impl<R: AgentRepos> Agent<R> {
             match self.repos.workspaces().get_by_id(ws_id).await {
                 Ok(ws) => {
                     let root = Path::new(&ws.root_path);
-                    if !root.exists() {
-                        tracing::error!(
-                            workspace_id = %ws_id,
-                            root_path = %ws.root_path,
-                            "workspace root_path does not exist"
-                        );
-                        None
-                    } else {
-                        match ensure_conversation_dir(root, conversation_id).await {
-                            Ok(dir) => Some(dir),
-                            Err(e) => {
-                                warn!("failed to create workspace dir: {e}");
-                                None
-                            }
+                    // ensure_conversation_dir calls create_dir_all, which
+                    // creates the workspace root and conversation subdir.
+                    match ensure_conversation_dir(root, conversation_id).await {
+                        Ok(dir) => Some(dir),
+                        Err(e) => {
+                            warn!(
+                                workspace_id = %ws_id,
+                                root_path = %ws.root_path,
+                                "failed to create workspace dir: {e}"
+                            );
+                            None
                         }
                     }
                 }
