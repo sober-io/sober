@@ -8,12 +8,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sober_core::config::MemoryConfig;
+use sober_core::types::AgentRepos;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
+use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
@@ -77,15 +78,13 @@ struct ConfirmDetail {
 }
 
 /// Aggregated context passed to the agentic loop, avoiding long parameter lists.
-struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo> {
+struct LoopContext<'a, R: AgentRepos> {
     llm: &'a Arc<dyn LlmEngine>,
     mind: &'a Arc<Mind>,
     memory: &'a Arc<MemoryStore>,
-    context_loader: &'a Arc<ContextLoader<Msg>>,
+    context_loader: &'a Arc<ContextLoader<R::Msg>>,
     tool_registry: &'a Arc<ToolRegistry>,
-    message_repo: &'a Arc<Msg>,
-    conversation_repo: &'a Arc<Conv>,
-    user_repo: &'a Arc<User>,
+    repos: &'a Arc<R>,
     config: &'a AgentConfig,
     memory_config: &'a MemoryConfig,
     user_id: UserId,
@@ -103,24 +102,14 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo>
 
 /// The core agent that handles messages through an agentic loop.
 ///
-/// Generic over repository types so it can be tested without a real database.
-pub struct Agent<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo,
-    Conv: ConversationRepo,
-    Mcp: McpServerRepo,
-    User: UserRepo,
-{
+/// Generic over [`AgentRepos`] so it can be tested without a real database.
+pub struct Agent<R: AgentRepos> {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
     memory: Arc<MemoryStore>,
-    context_loader: Arc<ContextLoader<Msg>>,
+    context_loader: Arc<ContextLoader<R::Msg>>,
     tool_registry: Arc<ToolRegistry>,
-    message_repo: Arc<Msg>,
-    conversation_repo: Arc<Conv>,
-    #[allow(dead_code)]
-    mcp_server_repo: Arc<Mcp>,
-    user_repo: Arc<User>,
+    repos: Arc<R>,
     config: AgentConfig,
     memory_config: MemoryConfig,
     /// Registrar for interactive confirmation of dangerous tool calls.
@@ -129,25 +118,16 @@ where
     broadcast_tx: ConversationUpdateSender,
 }
 
-impl<Msg, Conv, Mcp, User> Agent<Msg, Conv, Mcp, User>
-where
-    Msg: MessageRepo + 'static,
-    Conv: ConversationRepo + 'static,
-    Mcp: McpServerRepo + 'static,
-    User: UserRepo + 'static,
-{
+impl<R: AgentRepos> Agent<R> {
     /// Creates a new agent with all required dependencies.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         llm: Arc<dyn LlmEngine>,
         mind: Arc<Mind>,
         memory: Arc<MemoryStore>,
-        context_loader: Arc<ContextLoader<Msg>>,
+        context_loader: Arc<ContextLoader<R::Msg>>,
         tool_registry: Arc<ToolRegistry>,
-        message_repo: Arc<Msg>,
-        conversation_repo: Arc<Conv>,
-        mcp_server_repo: Arc<Mcp>,
-        user_repo: Arc<User>,
+        repos: Arc<R>,
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
@@ -159,10 +139,7 @@ where
             memory,
             context_loader,
             tool_registry,
-            message_repo,
-            conversation_repo,
-            mcp_server_repo,
-            user_repo,
+            repos,
             config,
             memory_config,
             registrar,
@@ -187,12 +164,13 @@ where
     ) -> Option<ConversationId> {
         // Try the original conversation first
         if let Some(cid) = conversation_id
-            && self.conversation_repo.get_by_id(cid).await.is_ok()
+            && self.repos.conversations().get_by_id(cid).await.is_ok()
         {
             return Some(cid);
         }
         // Fallback: user's most recent conversation in the same workspace
-        self.conversation_repo
+        self.repos
+            .conversations()
             .find_latest_by_user_and_workspace(user_id, workspace_id)
             .await
             .ok()
@@ -227,7 +205,8 @@ where
         // 2. Store user message (only for human-driven calls)
         let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
-                .message_repo
+                .repos
+                .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::User,
@@ -247,7 +226,8 @@ where
 
         // 3. Check agent mode — decide whether to run the LLM pipeline
         let conversation = self
-            .conversation_repo
+            .repos
+            .conversations()
             .get_by_id(conversation_id)
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -291,9 +271,7 @@ where
         let memory = Arc::clone(&self.memory);
         let context_loader = Arc::clone(&self.context_loader);
         let tool_registry = Arc::clone(&self.tool_registry);
-        let message_repo = Arc::clone(&self.message_repo);
-        let conversation_repo = Arc::clone(&self.conversation_repo);
-        let user_repo = Arc::clone(&self.user_repo);
+        let repos = Arc::clone(&self.repos);
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();
         let registrar = self.registrar.clone();
@@ -308,9 +286,7 @@ where
                 memory: &memory,
                 context_loader: &context_loader,
                 tool_registry: &tool_registry,
-                message_repo: &message_repo,
-                conversation_repo: &conversation_repo,
-                user_repo: &user_repo,
+                repos: &repos,
                 config: &config,
                 memory_config: &memory_config,
                 user_id,
@@ -347,14 +323,13 @@ where
     /// This is the core loop: embed → load context → assemble → complete →
     /// handle tool calls → repeat. Events are sent immediately as they occur,
     /// enabling confirmation flow and progressive output.
-    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv, User>) -> Result<(), AgentError> {
+    async fn run_loop_streaming(ctx: &LoopContext<'_, R>) -> Result<(), AgentError> {
         let llm = ctx.llm;
         let mind = ctx.mind;
         let memory = ctx.memory;
         let context_loader = ctx.context_loader;
         let tool_registry = ctx.tool_registry;
-        let message_repo = ctx.message_repo;
-        let conversation_repo = ctx.conversation_repo;
+        let repos = ctx.repos;
         let config = ctx.config;
         let memory_config = ctx.memory_config;
         let user_id = ctx.user_id;
@@ -447,7 +422,7 @@ where
                         .collect();
                     let mut names = HashMap::new();
                     for uid in user_ids {
-                        if let Ok(user) = ctx.user_repo.get_by_id(uid).await {
+                        if let Ok(user) = repos.users().get_by_id(uid).await {
                             names.insert(uid, user.username);
                         }
                     }
@@ -593,7 +568,8 @@ where
             }
 
             // Always store the assistant response (cleaned, without extraction block).
-            let assistant_msg = message_repo
+            let assistant_msg = repos
+                .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Assistant,
@@ -654,7 +630,7 @@ where
             });
 
             // i. Auto-generate title
-            let conversation = conversation_repo.get_by_id(conversation_id).await.ok();
+            let conversation = repos.conversations().get_by_id(conversation_id).await.ok();
             let current_title = conversation.as_ref().and_then(|c| c.title.as_deref());
             let needs_title = current_title.is_none() || current_title == Some("");
             if needs_title && !assistant_text.is_empty() {
@@ -708,7 +684,8 @@ where
                                 .map(|t| t.trim().trim_matches('"').to_owned())
                         })
                     })
-                    && conversation_repo
+                    && repos
+                        .conversations()
                         .update_title(conversation_id, &title)
                         .await
                         .is_ok()
@@ -854,6 +831,7 @@ where
                     proto::ToolCallResult {
                         name: tool_name.clone(),
                         output: output.clone(),
+                        internal: false,
                     },
                 )),
             });

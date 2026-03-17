@@ -21,7 +21,7 @@ use sober_agent::tools::{
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
-use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, PgUserRepo, create_pool};
+use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
@@ -54,11 +54,8 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    // 4. Create repository instances
-    let message_repo = Arc::new(PgMessageRepo::new(pool.clone()));
-    let conversation_repo = Arc::new(PgConversationRepo::new(pool.clone()));
-    let mcp_server_repo = Arc::new(PgMcpServerRepo::new(pool.clone()));
-    let user_repo = Arc::new(PgUserRepo::new(pool.clone()));
+    // 4. Create repository bundle
+    let repos = Arc::new(PgAgentRepos::new(pool.clone()));
 
     // 5. Create LLM engine
     let llm: Arc<dyn sober_llm::LlmEngine> =
@@ -71,9 +68,13 @@ async fn main() -> Result<()> {
     );
 
     // 7. Create context loader
+    //
+    // ContextLoader is generic over MessageRepo and needs its own Arc-wrapped
+    // instance. PgPool is cheap to clone (internal Arc), so creating a second
+    // PgMessageRepo is fine.
     let context_loader = Arc::new(ContextLoader::new(
         Arc::clone(&memory),
-        Arc::clone(&message_repo),
+        Arc::new(PgMessageRepo::new(pool.clone())),
     ));
 
     // 8. Create Mind with SoulResolver
@@ -163,10 +164,7 @@ async fn main() -> Result<()> {
         memory,
         context_loader,
         tool_registry,
-        message_repo,
-        conversation_repo,
-        mcp_server_repo,
-        user_repo,
+        repos,
         agent_config,
         config.memory.clone(),
         Some(registrar),
