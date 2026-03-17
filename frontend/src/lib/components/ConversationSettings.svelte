@@ -401,6 +401,14 @@
 							<option value={ws.id}>{ws.name}</option>
 						{/each}
 					</select>
+					{#if conversation.workspace_id}
+						{@const linked = workspaces.find((w) => w.id === conversation.workspace_id)}
+						{#if linked?.path}
+							<p class="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-500">
+								{linked.path}
+							</p>
+						{/if}
+					{/if}
 				{/if}
 			</SettingsSection>
 
