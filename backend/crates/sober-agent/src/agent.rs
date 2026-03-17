@@ -511,6 +511,23 @@ impl<R: AgentRepos> Agent<R> {
                     tool_call_id: None,
                 });
 
+                // Store assistant message with tool calls before executing them.
+                let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
+                repos
+                    .messages()
+                    .create(CreateMessage {
+                        conversation_id,
+                        role: MessageRole::Assistant,
+                        content: choice.message.content.clone().unwrap_or_default(),
+                        tool_calls: tool_calls_json,
+                        tool_result: None,
+                        token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
+                        metadata: None,
+                        user_id: None,
+                    })
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
                 let (tool_msgs, any_context_modifying, had_errors) =
                     Self::execute_tool_calls_streaming(
                         tool_registry,
@@ -521,6 +538,7 @@ impl<R: AgentRepos> Agent<R> {
                         registrar,
                         user_id,
                         conversation_id,
+                        repos,
                     )
                     .await;
 
@@ -727,6 +745,7 @@ impl<R: AgentRepos> Agent<R> {
         registrar: Option<&ConfirmationRegistrar>,
         user_id: UserId,
         conversation_id: ConversationId,
+        repos: &Arc<R>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -776,6 +795,10 @@ impl<R: AgentRepos> Agent<R> {
                     },
                 )),
             });
+
+            let tool_internal = tool_registry
+                .get_tool(tool_name)
+                .map_or(false, |t| t.metadata().internal);
 
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
@@ -831,12 +854,37 @@ impl<R: AgentRepos> Agent<R> {
                     proto::ToolCallResult {
                         name: tool_name.clone(),
                         output: output.clone(),
-                        internal: false,
+                        internal: tool_internal,
                     },
                 )),
             });
 
-            messages.push(LlmMessage::tool(&tc.id, output));
+            messages.push(LlmMessage::tool(&tc.id, output.clone()));
+
+            // Store tool result message for audit trail.
+            if let Err(e) = repos
+                .messages()
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::Tool,
+                    content: output,
+                    tool_calls: None,
+                    tool_result: Some(serde_json::json!({
+                        "tool_call_id": tc.id,
+                        "name": tool_name,
+                    })),
+                    token_count: None,
+                    metadata: None,
+                    user_id: None,
+                })
+                .await
+            {
+                warn!(
+                    tool = %tool_name,
+                    error = %e,
+                    "failed to persist tool result message"
+                );
+            }
         }
 
         (messages, any_context_modifying, any_errors)
