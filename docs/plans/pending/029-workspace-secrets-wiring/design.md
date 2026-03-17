@@ -69,10 +69,10 @@ non-conversation work.
 
 #### Artifact Agent Tools
 
-Four tools registered in the agent alongside shell_exec, recall, remember.
-Artifact tools are only available in workspace-bound conversations. If no
-workspace is set, the tools return an error indicating workspace context is
-required.
+Six tools registered in the agent alongside shell_exec, recall, remember.
+Artifact and snapshot tools are only available in workspace-bound conversations.
+If no workspace is set, the tools return an error indicating workspace context
+is required.
 
 **`create_artifact`**
 - Input: title, description, kind (code_change | document | proposal |
@@ -98,6 +98,20 @@ required.
 - Soft-deletes: sets state to `archived`
 - Logged to audit trail
 
+**`create_snapshot`**
+- Input: optional description (reason for snapshot)
+- Creates a tar archive of the conversation's working directory
+  (`{workspace.root_path}/{conversation_id}/`)
+- Stores in `{workspace.root_path}/.sober/snapshots/{timestamp}-{conv_id}.tar`
+- Also creates an artifact record (kind = `snapshot`) for tracking
+- Returns snapshot path and artifact ID
+
+**`restore_snapshot`**
+- Input: artifact ID of a snapshot, or "latest" to restore most recent
+- Extracts tar archive back to the conversation's working directory
+- Creates a pre-restore snapshot automatically (safety net)
+- Logged to audit trail
+
 #### SOUL.md Artifact Guidance
 
 Add to the "Workspace Discipline" section in `backend/soul/SOUL.md`:
@@ -119,6 +133,10 @@ Add to the "Workspace Discipline" section in `backend/soul/SOUL.md`:
   - `approved` / `rejected` — after user decision
 - When building on previous work, set `parent_id` to link artifacts.
 - Use `list_artifacts` to check existing work before creating duplicates.
+- Use `create_snapshot` before risky operations (large refactors, dependency
+  upgrades, destructive commands). If something goes wrong, `restore_snapshot`
+  reverts to the captured state.
+- When restoring a snapshot, explain to the user what was reverted and why.
 ```
 
 #### sober-workspace Helper
@@ -418,7 +436,7 @@ one generic parameter regardless of how many repos it needs.
 | **sober-core** | Remove `SecretScope` enum. Add `conversation_id: Option<ConversationId>` to `SecretRow`, `SecretMetadata`, `NewSecret`. Update `SecretRepo` trait signatures to use `user_id` + optional `conversation_id`. Define `AgentRepos` trait bundle. Add `ArtifactFilter` to input types. |
 | **sober-db** | Rename table migration (`user_secrets` → `secrets`). Update all SQL queries and rename `UserSecretRow` → `SecretDbRow`. Update `PgSecretRepo` for conversation-scoped queries. Add audit log write calls. Implement `AgentRepos` for Pg types. Regenerate `.sqlx/` prepared statements. |
 | **sober-llm** | Update `LlmKeyResolver::resolve()` to accept `conversation_id`. Resolution: conversation → user → system config. |
-| **sober-agent** | Refactor to `AgentGrpcService<R: AgentRepos>`. Inject `LlmKeyResolver` + `Mek`. Resolve workspace + conversation working directory on message receipt. Register 8 new tools (4 artifact + 4 secret). Persist tool calls/results to messages table. Write sandbox audit entries after shell exec. Add `internal` flag to `ToolCallResult` events, filter in broadcast relay. |
+| **sober-agent** | Refactor to `AgentGrpcService<R: AgentRepos>`. Inject `LlmKeyResolver` + `Mek`. Resolve workspace + conversation working directory on message receipt. Register 10 new tools (6 workspace: create/list/read/delete artifact + create/restore snapshot; 4 secret: store/read/list/delete). Persist tool calls/results to messages table. Write sandbox audit entries after shell exec. Add `internal` flag to `ToolCallResult` events, filter in broadcast relay. |
 | **sober-mcp** | Resolve `mcp_server` credentials from secrets before MCP server spawn. |
 | **sober-workspace** | Add `layout` module with `ensure_conversation_dir()` function. |
 | **sober-mind** (SOUL.md) | Add "Artifact Discipline" section to workspace guidance. |
