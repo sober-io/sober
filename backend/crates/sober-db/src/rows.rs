@@ -459,10 +459,13 @@ impl From<EncryptionKeyRow> for StoredDek {
 #[derive(sqlx::FromRow)]
 pub(crate) struct SecretMetadataRow {
     pub id: Uuid,
+    #[allow(dead_code)] // Present in DB row but absent from domain type
+    pub user_id: Uuid,
     pub name: String,
     pub secret_type: String,
     pub metadata: serde_json::Value,
     pub priority: Option<i32>,
+    pub conversation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -474,6 +477,7 @@ impl From<SecretMetadataRow> for SecretMetadata {
             name: row.name,
             secret_type: row.secret_type,
             metadata: row.metadata,
+            conversation_id: row.conversation_id.map(ConversationId::from_uuid),
             priority: row.priority,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -482,20 +486,21 @@ impl From<SecretMetadataRow> for SecretMetadata {
 }
 
 #[derive(sqlx::FromRow)]
-pub(crate) struct UserSecretRow {
+pub(crate) struct SecretDbRow {
     pub id: Uuid,
     pub user_id: Uuid,
     pub name: String,
     pub secret_type: String,
     pub metadata: serde_json::Value,
     pub encrypted_data: Vec<u8>,
+    pub conversation_id: Option<Uuid>,
     pub priority: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<UserSecretRow> for SecretRow {
-    fn from(row: UserSecretRow) -> Self {
+impl From<SecretDbRow> for SecretRow {
+    fn from(row: SecretDbRow) -> Self {
         SecretRow {
             id: SecretId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
@@ -503,6 +508,7 @@ impl From<UserSecretRow> for SecretRow {
             secret_type: row.secret_type,
             metadata: row.metadata,
             encrypted_data: row.encrypted_data,
+            conversation_id: row.conversation_id.map(ConversationId::from_uuid),
             priority: row.priority,
             created_at: row.created_at,
             updated_at: row.updated_at,
