@@ -191,6 +191,7 @@ async fn main() -> Result<()> {
         mek,
         Some(blob_store),
         Some(snapshot_manager),
+        Some(config.llm.clone()),
     ));
 
     // 16. Spawn the confirmation broker loop

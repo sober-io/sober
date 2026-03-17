@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sober_core::config::MemoryConfig;
+use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
@@ -19,7 +19,7 @@ use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, Workspace
 use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
-use sober_llm::{LlmEngine, Message as LlmMessage};
+use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
@@ -111,6 +111,12 @@ struct LoopContext<'a, R: AgentRepos> {
     /// Resolved workspace directory for shell tool cwd, if this conversation
     /// is scoped to a workspace.
     workspace_dir: Option<PathBuf>,
+    /// Workspace ID from the conversation (for audit logging).
+    workspace_id: Option<WorkspaceId>,
+    /// LLM config for constructing dynamic engines from resolved user keys.
+    llm_config: &'a Option<LlmConfig>,
+    /// Master encryption key for resolving user-stored LLM keys.
+    mek: &'a Option<Arc<Mek>>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -135,6 +141,8 @@ pub struct Agent<R: AgentRepos> {
     blob_store: Option<Arc<BlobStore>>,
     /// Snapshot manager for snapshot tools.
     snapshot_manager: Option<Arc<SnapshotManager>>,
+    /// LLM config for constructing dynamic engines from resolved keys.
+    llm_config: Option<LlmConfig>,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -154,6 +162,7 @@ impl<R: AgentRepos> Agent<R> {
         mek: Option<Arc<Mek>>,
         blob_store: Option<Arc<BlobStore>>,
         snapshot_manager: Option<Arc<SnapshotManager>>,
+        llm_config: Option<LlmConfig>,
     ) -> Self {
         Self {
             llm,
@@ -169,6 +178,7 @@ impl<R: AgentRepos> Agent<R> {
             mek,
             blob_store,
             snapshot_manager,
+            llm_config,
         }
     }
 
@@ -271,6 +281,55 @@ impl<R: AgentRepos> Agent<R> {
             .map(|c| c.id)
     }
 
+    /// Attempts to resolve a dynamic LLM engine from user-stored keys.
+    ///
+    /// Returns `Some(engine)` if the user has a stored `llm_provider` secret
+    /// that decrypts successfully and differs from the system default.
+    /// Returns `None` if no user key is found, decryption fails, or no MEK
+    /// is available — in which case the static engine should be used.
+    async fn try_resolve_dynamic_engine(
+        repos: &Arc<R>,
+        user_id: UserId,
+        conversation_id: ConversationId,
+        llm_config: &Option<LlmConfig>,
+        mek: &Option<Arc<Mek>>,
+    ) -> Option<OpenAiCompatibleEngine> {
+        use sober_llm::LlmKeyResolver;
+
+        let config = llm_config.as_ref()?;
+        let mek = mek.as_ref()?;
+
+        let resolver =
+            LlmKeyResolver::new(repos.secrets().clone(), Arc::clone(mek), config.clone());
+
+        let resolved = match resolver.resolve(user_id, Some(conversation_id)).await {
+            Ok(key) => key,
+            Err(e) => {
+                warn!(error = %e, "LLM key resolution failed, using static engine");
+                return None;
+            }
+        };
+
+        // System fallback — no need to create a dynamic engine.
+        if resolved.provider == "system" {
+            return None;
+        }
+
+        debug!(
+            user_id = %user_id,
+            provider = %resolved.provider,
+            "using dynamically resolved LLM key"
+        );
+
+        Some(OpenAiCompatibleEngine::new(
+            resolved.base_url,
+            Some(resolved.api_key),
+            &config.model,
+            &config.embedding_model,
+            config.max_tokens,
+        ))
+    }
+
     /// Handles a user message through the full agentic loop.
     ///
     /// Returns a stream of [`AgentEvent`]s that are emitted in real-time
@@ -329,11 +388,21 @@ impl<R: AgentRepos> Agent<R> {
         let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
             match self.repos.workspaces().get_by_id(ws_id).await {
                 Ok(ws) => {
-                    match ensure_conversation_dir(Path::new(&ws.root_path), conversation_id).await {
-                        Ok(dir) => Some(dir),
-                        Err(e) => {
-                            warn!("failed to create workspace dir: {e}");
-                            None
+                    let root = Path::new(&ws.root_path);
+                    if !root.exists() {
+                        tracing::error!(
+                            workspace_id = %ws_id,
+                            root_path = %ws.root_path,
+                            "workspace root_path does not exist"
+                        );
+                        None
+                    } else {
+                        match ensure_conversation_dir(root, conversation_id).await {
+                            Ok(dir) => Some(dir),
+                            Err(e) => {
+                                warn!("failed to create workspace dir: {e}");
+                                None
+                            }
                         }
                     }
                 }
@@ -396,6 +465,9 @@ impl<R: AgentRepos> Agent<R> {
         let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
         let conversation_kind = conversation.kind;
+        let workspace_id = conversation.workspace_id;
+        let llm_config = self.llm_config.clone();
+        let mek = self.mek.clone();
 
         tokio::spawn(async move {
             let ctx = LoopContext {
@@ -417,6 +489,9 @@ impl<R: AgentRepos> Agent<R> {
                 trigger,
                 conversation_kind,
                 workspace_dir,
+                workspace_id,
+                llm_config: &llm_config,
+                mek: &mek,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -606,7 +681,22 @@ impl<R: AgentRepos> Agent<R> {
                 stream: false,
             };
 
-            let response = llm
+            // Try dynamic key resolution: if the user has stored an LLM key,
+            // construct a temporary engine with those credentials.
+            let dynamic_engine: Option<OpenAiCompatibleEngine> = Self::try_resolve_dynamic_engine(
+                repos,
+                user_id,
+                conversation_id,
+                ctx.llm_config,
+                ctx.mek,
+            )
+            .await;
+            let effective_llm: &dyn LlmEngine = match dynamic_engine {
+                Some(ref engine) => engine,
+                None => &**llm,
+            };
+
+            let response = effective_llm
                 .complete(req)
                 .await
                 .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
@@ -642,7 +732,7 @@ impl<R: AgentRepos> Agent<R> {
                         tool_result: None,
                         token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
                         metadata: None,
-                        user_id: None,
+                        user_id: Some(user_id),
                     })
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -659,6 +749,7 @@ impl<R: AgentRepos> Agent<R> {
                         conversation_id,
                         repos,
                         ctx.workspace_dir.as_ref(),
+                        ctx.workspace_id,
                     )
                     .await;
 
@@ -716,7 +807,7 @@ impl<R: AgentRepos> Agent<R> {
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
-                    user_id: None,
+                    user_id: Some(user_id),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -867,6 +958,7 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         repos: &Arc<R>,
         workspace_dir: Option<&PathBuf>,
+        workspace_id: Option<WorkspaceId>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -909,25 +1001,40 @@ impl<R: AgentRepos> Agent<R> {
                     serde_json::Value::String(dir.to_string_lossy().to_string());
             }
 
-            let _ = event_tx
-                .send(Ok(AgentEvent::ToolCallStart {
-                    name: tool_name.clone(),
-                    input: tool_input.clone(),
-                }))
-                .await;
-            let _ = broadcast_tx.send(proto::ConversationUpdate {
-                conversation_id: conv_id_str.to_owned(),
-                event: Some(proto::conversation_update::Event::ToolCallStart(
-                    proto::ToolCallStart {
-                        name: tool_name.clone(),
-                        input_json: tool_input.to_string(),
-                    },
-                )),
-            });
-
             let tool_internal = tool_registry
                 .get_tool(tool_name)
                 .is_some_and(|t| t.metadata().internal);
+
+            // Skip broadcasting ToolCallStart for internal tools to prevent
+            // leaking secret data (e.g. store_secret arguments) to clients.
+            if !tool_internal {
+                let _ = event_tx
+                    .send(Ok(AgentEvent::ToolCallStart {
+                        name: tool_name.clone(),
+                        input: tool_input.clone(),
+                    }))
+                    .await;
+                let _ = broadcast_tx.send(proto::ConversationUpdate {
+                    conversation_id: conv_id_str.to_owned(),
+                    event: Some(proto::conversation_update::Event::ToolCallStart(
+                        proto::ToolCallStart {
+                            name: tool_name.clone(),
+                            input_json: tool_input.to_string(),
+                            internal: false,
+                        },
+                    )),
+                });
+            }
+
+            // Save the command for audit logging before tool_input is moved.
+            let shell_command = if tool_name == "shell" {
+                tool_input
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            } else {
+                None
+            };
 
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
@@ -956,6 +1063,8 @@ impl<R: AgentRepos> Agent<R> {
                                 broadcast_tx,
                                 conv_id_str,
                                 registrar,
+                                user_id,
+                                repos,
                             )
                             .await
                         }
@@ -996,7 +1105,7 @@ impl<R: AgentRepos> Agent<R> {
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::Tool,
-                    content: output,
+                    content: output.clone(),
                     tool_calls: None,
                     tool_result: Some(serde_json::json!({
                         "tool_call_id": tc.id,
@@ -1004,7 +1113,7 @@ impl<R: AgentRepos> Agent<R> {
                     })),
                     token_count: None,
                     metadata: None,
-                    user_id: None,
+                    user_id: Some(user_id),
                 })
                 .await
             {
@@ -1013,6 +1122,20 @@ impl<R: AgentRepos> Agent<R> {
                     error = %e,
                     "failed to persist tool result message"
                 );
+            }
+
+            // Audit logging for shell tool runs.
+            if let Some(ref cmd) = shell_command {
+                let _ = crate::audit::log_shell_exec(
+                    repos.audit_log(),
+                    user_id,
+                    workspace_id,
+                    serde_json::json!({
+                        "command": cmd,
+                        "conversation_id": conversation_id.to_string(),
+                    }),
+                )
+                .await;
             }
         }
 
@@ -1023,6 +1146,7 @@ impl<R: AgentRepos> Agent<R> {
     ///
     /// Sends the confirmation event to the client, waits for the user's
     /// response, and re-executes the tool if approved.
+    #[allow(clippy::too_many_arguments)]
     async fn handle_confirmation(
         tool: &Arc<dyn sober_core::types::tool::Tool>,
         mut tool_input: serde_json::Value,
@@ -1031,6 +1155,8 @@ impl<R: AgentRepos> Agent<R> {
         broadcast_tx: &ConversationUpdateSender,
         conv_id_str: &str,
         registrar: Option<&ConfirmationRegistrar>,
+        user_id: UserId,
+        repos: &Arc<R>,
     ) -> String {
         let Some(registrar) = registrar else {
             return format!(
@@ -1057,26 +1183,42 @@ impl<R: AgentRepos> Agent<R> {
             event: Some(proto::conversation_update::Event::ConfirmRequest(
                 proto::ConfirmRequest {
                     confirm_id: confirm.confirm_id,
-                    command: confirm.command,
-                    risk_level: confirm.risk_level,
+                    command: confirm.command.clone(),
+                    risk_level: confirm.risk_level.clone(),
                     affects: Vec::new(),
-                    reason: confirm.reason,
+                    reason: confirm.reason.clone(),
                 },
             )),
         });
 
         match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
-            Ok(Ok(true)) => {
-                // Approved — re-execute with confirmed flag.
-                if let Some(obj) = tool_input.as_object_mut() {
-                    obj.insert("confirmed".to_string(), serde_json::Value::Bool(true));
-                }
-                match tool.execute(tool_input).await {
-                    Ok(output) => output.content,
-                    Err(e) => format!("Tool error after confirmation: {e}"),
+            Ok(Ok(approved)) => {
+                // Log the confirmation decision.
+                let _ = crate::audit::log_confirmation(
+                    repos.audit_log(),
+                    user_id,
+                    approved,
+                    serde_json::json!({
+                        "command": confirm.command,
+                        "risk_level": confirm.risk_level,
+                        "conversation_id": conv_id_str,
+                    }),
+                )
+                .await;
+
+                if approved {
+                    // Re-execute with confirmed flag.
+                    if let Some(obj) = tool_input.as_object_mut() {
+                        obj.insert("confirmed".to_string(), serde_json::Value::Bool(true));
+                    }
+                    match tool.execute(tool_input).await {
+                        Ok(output) => output.content,
+                        Err(e) => format!("Tool error after confirmation: {e}"),
+                    }
+                } else {
+                    "Command denied by user.".to_string()
                 }
             }
-            Ok(Ok(false)) => "Command denied by user.".to_string(),
             Ok(Err(_)) => "Confirmation cancelled.".to_string(),
             Err(_) => "Command timed out waiting for confirmation.".to_string(),
         }

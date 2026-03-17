@@ -9,6 +9,8 @@
 //! The resolver decrypts secrets using the envelope encryption hierarchy
 //! (MEK -> DEK -> secret).
 
+use std::sync::Arc;
+
 use sober_core::config::LlmConfig;
 use sober_core::error::AppError;
 use sober_core::types::{ConversationId, SecretRepo, UserId};
@@ -32,13 +34,13 @@ pub struct ResolvedLlmKey {
 /// not `dyn`-compatible.
 pub struct LlmKeyResolver<S> {
     secret_repo: S,
-    mek: Mek,
+    mek: Arc<Mek>,
     system_config: LlmConfig,
 }
 
 impl<S: SecretRepo> LlmKeyResolver<S> {
     /// Creates a new resolver.
-    pub fn new(secret_repo: S, mek: Mek, system_config: LlmConfig) -> Self {
+    pub fn new(secret_repo: S, mek: Arc<Mek>, system_config: LlmConfig) -> Self {
         Self {
             secret_repo,
             mek,
@@ -323,7 +325,7 @@ mod tests {
             Some(1),
         );
 
-        let resolver = LlmKeyResolver::new(repo, test_mek(), default_llm_config());
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), default_llm_config());
         let result = resolver.resolve(user_id, None).await.expect("resolve");
 
         assert_eq!(result.api_key, "sk-ant-user-key");
@@ -334,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn falls_back_to_system_config() {
         let repo = MockSecretRepo::empty();
-        let resolver = LlmKeyResolver::new(repo, test_mek(), default_llm_config());
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), default_llm_config());
         let result = resolver
             .resolve(test_user_id(), None)
             .await
@@ -356,7 +358,7 @@ mod tests {
             embedding_model: "text-embedding-3-small".into(),
             embedding_dim: 1536,
         };
-        let resolver = LlmKeyResolver::new(repo, test_mek(), config);
+        let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), config);
         let result = resolver
             .resolve(test_user_id(), None)
             .await

@@ -454,6 +454,7 @@ fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
         AgentEvent::ToolCallStart { name, input } => Event::ToolCallStart(proto::ToolCallStart {
             name,
             input_json: input.to_string(),
+            internal: false,
         }),
         AgentEvent::ToolCallResult { name, output } => {
             Event::ToolCallResult(proto::ToolCallResult {

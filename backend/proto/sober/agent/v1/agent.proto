@@ -72,7 +72,7 @@ message AgentEvent {
 }
 
 message TextDelta { string content = 1; }
-message ToolCallStart { string name = 1; string input_json = 2; }
+message ToolCallStart { string name = 1; string input_json = 2; bool internal = 3; }
 message ToolCallResult {
   string name = 1;
   string output = 2;
