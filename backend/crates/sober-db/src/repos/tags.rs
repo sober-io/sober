@@ -159,19 +159,23 @@ impl TagRepo for PgTagRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn list_by_conversation_messages(
+    async fn list_by_message_ids(
         &self,
-        conversation_id: ConversationId,
+        message_ids: &[MessageId],
     ) -> Result<Vec<(MessageId, Tag)>, AppError> {
+        if message_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let uuids: Vec<uuid::Uuid> = message_ids.iter().map(|id| *id.as_uuid()).collect();
         let rows = sqlx::query_as::<_, MessageTagRow>(
             "SELECT mt.message_id, t.id, t.user_id, t.name, t.color, t.created_at \
              FROM message_tags mt \
              JOIN tags t ON t.id = mt.tag_id \
-             JOIN messages m ON m.id = mt.message_id \
-             WHERE m.conversation_id = $1 \
+             WHERE mt.message_id = ANY($1) \
              ORDER BY mt.message_id, t.name",
         )
-        .bind(conversation_id.as_uuid())
+        .bind(&uuids)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

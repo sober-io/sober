@@ -51,9 +51,10 @@ async fn list_messages(
     let limit = params.limit.unwrap_or(50).min(100);
     let messages = msg_repo.list_paginated(id, params.before, limit).await?;
 
-    // Batch-fetch all message tags for this conversation.
+    // Batch-fetch tags for only the returned messages.
+    let msg_ids: Vec<_> = messages.iter().map(|m| m.id).collect();
     let tag_pairs = tag_repo
-        .list_by_conversation_messages(id)
+        .list_by_message_ids(&msg_ids)
         .await
         .unwrap_or_default();
     let mut tag_map: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
