@@ -25,6 +25,9 @@ x-mcp-env: &mcp-env
   MCP_MAX_CONSECUTIVE_FAILURES: "3"
   MCP_IDLE_TIMEOUT_SECS: "300"
 
+x-crypto-env: &crypto-env
+  MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
+
 services:
   # ---------------------------------------------------------------------------
   # Infrastructure
@@ -88,7 +91,7 @@ services:
       dockerfile: infra/docker/Dockerfile.agent
     privileged: true
     environment:
-      <<: [*common-env, *llm-env, *memory-env, *mcp-env]
+      <<: [*common-env, *llm-env, *memory-env, *mcp-env, *crypto-env]
       AGENT_SOCKET_PATH: /run/sober/agent.sock
       SANDBOX_PROFILE: unrestricted
       ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
