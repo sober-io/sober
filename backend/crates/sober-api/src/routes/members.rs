@@ -10,8 +10,7 @@ use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
     ApiResponse, ConversationId, ConversationRepo, ConversationUserRepo, ConversationUserRole,
-    ConversationUserWithUsername, CreateMessage, Message, MessageRepo, MessageRole, UserId,
-    UserRepo,
+    ConversationUserWithUsername, UserId, UserRepo,
 };
 use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgUserRepo};
 
@@ -108,7 +107,7 @@ async fn add_member(
         "target_username": target_user.username,
         "role": "member"
     });
-    insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+    super::insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
 
     // Return the new member with username.
     let members = cu_repo.list_members(conversation_id).await?;
@@ -199,7 +198,7 @@ async fn update_role(
         "target_username": target_user.username,
         "role": role_str
     });
-    insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+    super::insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
 
     // Broadcast the role_changed event to all members.
     let members = cu_repo.list_by_conversation(conversation_id).await?;
@@ -269,7 +268,7 @@ async fn remove_member(
         "target_id": target_id.to_string(),
         "target_username": target_user.username
     });
-    insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+    super::insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
 
     // Broadcast the member_removed event to all remaining members.
     let ws_msg = ServerWsMessage::ChatMemberRemoved {
@@ -330,7 +329,7 @@ async fn leave(
         "type": "member_left",
         "actor_id": auth_user.user_id.to_string()
     });
-    insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
+    super::insert_event_message(&msg_repo, conversation_id, &content, metadata).await?;
 
     // Broadcast the member_removed event to all remaining members.
     let ws_msg = ServerWsMessage::ChatMemberRemoved {
@@ -357,25 +356,4 @@ async fn leave(
     }
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
-}
-
-/// Inserts a timeline event message into a conversation.
-async fn insert_event_message(
-    msg_repo: &PgMessageRepo,
-    conversation_id: ConversationId,
-    content: &str,
-    metadata: serde_json::Value,
-) -> Result<Message, AppError> {
-    msg_repo
-        .create(CreateMessage {
-            conversation_id,
-            role: MessageRole::Event,
-            content: content.to_string(),
-            tool_calls: None,
-            tool_result: None,
-            token_count: None,
-            metadata: Some(metadata),
-            user_id: None,
-        })
-        .await
 }

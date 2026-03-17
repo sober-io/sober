@@ -72,50 +72,6 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         Ok(row.into())
     }
 
-    async fn create_group(
-        &self,
-        user_id: UserId,
-        title: &str,
-        workspace_id: Option<WorkspaceId>,
-    ) -> Result<Conversation, AppError> {
-        let id = Uuid::now_v7();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
-
-        let row = sqlx::query_as::<_, ConversationRow>(&format!(
-            "INSERT INTO conversations (id, user_id, title, workspace_id, kind) \
-                 VALUES ($1, $2, $3, $4, 'group') \
-                 RETURNING {CONV_COLUMNS}"
-        ))
-        .bind(id)
-        .bind(user_id.as_uuid())
-        .bind(title)
-        .bind(workspace_id.map(|w| *w.as_uuid()))
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        // Create a conversation_users row with role = 'owner'.
-        sqlx::query(
-            "INSERT INTO conversation_users (conversation_id, user_id, role) \
-             VALUES ($1, $2, 'owner')",
-        )
-        .bind(id)
-        .bind(user_id.as_uuid())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
-
-        Ok(row.into())
-    }
-
     async fn get_by_id(&self, id: ConversationId) -> Result<Conversation, AppError> {
         let row = sqlx::query_as::<_, ConversationRow>(&format!(
             "SELECT {CONV_COLUMNS} FROM conversations WHERE id = $1"

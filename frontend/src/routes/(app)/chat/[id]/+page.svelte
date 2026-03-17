@@ -80,7 +80,7 @@
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
-	let allLoaded = $state(data.messages.length < PAGE_SIZE);
+	let allLoaded = $state(false);
 	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
@@ -91,15 +91,14 @@
 
 	let isAtBottom = $state(true);
 	let messagesContainer: HTMLDivElement | undefined = $state();
-	let title = $state(data.conversation.title || '');
-	let tags = $state<Tag[]>(data.conversation.tags ?? []);
+	let title = $state('');
+	let tags = $state<Tag[]>([]);
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let permissionMode = $state<PermissionMode>('policy_based');
 	let deleteTarget = $state<string | null>(null);
 	let showClearConfirm = $state(false);
-	let showDeleteConversationConfirm = $state(false);
 	let settingsOpen = $state(false);
 	let messageTags = $state<Record<string, Tag[]>>({});
 
@@ -622,7 +621,6 @@
 	};
 
 	const handleDeleteConversation = async () => {
-		showDeleteConversationConfirm = false;
 		await conversationService.delete(data.conversation.id);
 		conversations.remove(data.conversation.id);
 		goto(resolve('/'));
@@ -840,18 +838,6 @@
 	onConfirm={confirmClear}
 	onCancel={() => {
 		showClearConfirm = false;
-	}}
-/>
-
-<ConfirmDialog
-	open={showDeleteConversationConfirm}
-	title="Delete conversation"
-	message="This will permanently delete this conversation and all messages. This cannot be undone."
-	confirmText="Delete"
-	destructive
-	onConfirm={handleDeleteConversation}
-	onCancel={() => {
-		showDeleteConversationConfirm = false;
 	}}
 />
 

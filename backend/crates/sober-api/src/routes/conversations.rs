@@ -11,12 +11,10 @@ use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, ApiResponse, ConversationId, ConversationKind, ConversationRepo,
-    ConversationUserRepo, ConversationUserRole, ConversationWithDetails, CreateMessage, JobRepo,
-    ListConversationsFilter, Message, MessageRepo, MessageRole, TagRepo, UserRepo, WorkspaceId,
+    ConversationUserRepo, ConversationUserRole, ConversationWithDetails, JobRepo,
+    ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
 };
-use sober_db::{
-    PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo, PgUserRepo,
-};
+use sober_db::{PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo};
 
 use crate::state::AppState;
 
@@ -75,19 +73,9 @@ async fn list_conversations(
 struct CreateConversationRequest {
     title: Option<String>,
     workspace_id: Option<String>,
-    /// Conversation kind: "direct" (default) or "group".
-    kind: Option<ConversationKind>,
-    /// Members to add (only for group conversations).
-    members: Option<Vec<AddMemberReq>>,
 }
 
-/// A member to add to a group conversation at creation time.
-#[derive(Deserialize)]
-struct AddMemberReq {
-    username: String,
-}
-
-/// `POST /api/v1/conversations` — create a new conversation.
+/// `POST /api/v1/conversations` — create a new direct conversation.
 async fn create_conversation(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -104,68 +92,9 @@ async fn create_conversation(
         })
         .transpose()?;
 
-    let kind = body.kind.unwrap_or(ConversationKind::Direct);
-
-    let conversation = match kind {
-        ConversationKind::Group => {
-            let title = body.title.as_deref().ok_or_else(|| {
-                AppError::Validation("title is required for group conversations".into())
-            })?;
-
-            let conversation = conv_repo
-                .create_group(auth_user.user_id, title, workspace_id)
-                .await?;
-
-            // Add members if provided.
-            if let Some(members) = &body.members {
-                let user_repo = PgUserRepo::new(state.db.clone());
-                let cu_repo = PgConversationUserRepo::new(state.db.clone());
-                let msg_repo = PgMessageRepo::new(state.db.clone());
-
-                // Get the creator's username for event messages.
-                let creator = user_repo.get_by_id(auth_user.user_id).await?;
-
-                for member_req in members {
-                    let target_user = user_repo.get_by_username(&member_req.username).await?;
-
-                    // Skip if this is the creator (already added as owner).
-                    if target_user.id == auth_user.user_id {
-                        continue;
-                    }
-
-                    // Check if already a member (idempotent).
-                    if cu_repo.get(conversation.id, target_user.id).await.is_ok() {
-                        continue;
-                    }
-
-                    cu_repo
-                        .create(
-                            conversation.id,
-                            target_user.id,
-                            ConversationUserRole::Member,
-                        )
-                        .await?;
-
-                    let content = format!("{} added {}", creator.username, target_user.username);
-                    let metadata = serde_json::json!({
-                        "type": "member_added",
-                        "actor_id": auth_user.user_id.to_string(),
-                        "target_id": target_user.id.to_string(),
-                        "target_username": target_user.username,
-                        "role": "member"
-                    });
-                    insert_event_message(&msg_repo, conversation.id, &content, metadata).await?;
-                }
-            }
-
-            conversation
-        }
-        ConversationKind::Direct | ConversationKind::Inbox => {
-            conv_repo
-                .create(auth_user.user_id, body.title.as_deref(), workspace_id)
-                .await?
-        }
-    };
+    let conversation = conv_repo
+        .create(auth_user.user_id, body.title.as_deref(), workspace_id)
+        .await?;
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": conversation.id.to_string(),
@@ -180,27 +109,6 @@ async fn create_conversation(
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
     })))
-}
-
-/// Inserts a timeline event message into a conversation.
-async fn insert_event_message(
-    msg_repo: &PgMessageRepo,
-    conversation_id: ConversationId,
-    content: &str,
-    metadata: serde_json::Value,
-) -> Result<Message, AppError> {
-    msg_repo
-        .create(CreateMessage {
-            conversation_id,
-            role: MessageRole::Event,
-            content: content.to_string(),
-            tool_calls: None,
-            tool_result: None,
-            token_count: None,
-            metadata: Some(metadata),
-            user_id: None,
-        })
-        .await
 }
 
 /// `GET /api/v1/conversations/:id` — get a conversation with details.

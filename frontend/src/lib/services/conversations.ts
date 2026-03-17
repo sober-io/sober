@@ -20,11 +20,7 @@ export const conversationService = {
 
 	get: (id: string) => api<Conversation>(`/conversations/${id}`),
 
-	create: (params?: { kind?: string; title?: string; members?: { username: string }[] }) =>
-		api<Conversation>('/conversations', {
-			method: 'POST',
-			body: JSON.stringify(params ?? {})
-		}),
+	create: () => api<Conversation>('/conversations', { method: 'POST' }),
 
 	updateTitle: (id: string, title: string) =>
 		api<{ id: string; title: string }>(`/conversations/${id}`, {
