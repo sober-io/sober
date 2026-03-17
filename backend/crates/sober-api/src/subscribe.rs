@@ -155,6 +155,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 }),
             })
         }
+        proto::conversation_update::Event::ToolCallResult(ref tcr) if tcr.internal => None,
         proto::conversation_update::Event::ToolCallResult(tcr) => {
             Some(ServerWsMessage::ChatToolResult {
                 conversation_id: cid,

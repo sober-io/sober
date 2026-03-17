@@ -5,6 +5,7 @@
 //! → tool execution → response streaming.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sober_core::config::MemoryConfig;
@@ -14,12 +15,13 @@ use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo};
+use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
+use sober_workspace::layout::ensure_conversation_dir;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -98,6 +100,9 @@ struct LoopContext<'a, R: AgentRepos> {
     trigger: TriggerKind,
     /// The kind of conversation (direct vs group) — used for prompt assembly.
     conversation_kind: ConversationKind,
+    /// Resolved workspace directory for shell tool cwd, if this conversation
+    /// is scoped to a workspace.
+    workspace_dir: Option<PathBuf>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -232,6 +237,24 @@ impl<R: AgentRepos> Agent<R> {
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
+        // Resolve workspace directory for shell tool cwd.
+        let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
+            match self.repos.workspaces().get_by_id(ws_id).await {
+                Ok(ws) => {
+                    match ensure_conversation_dir(Path::new(&ws.root_path), conversation_id).await {
+                        Ok(dir) => Some(dir),
+                        Err(e) => {
+                            warn!("failed to create workspace dir: {e}");
+                            None
+                        }
+                    }
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,
@@ -298,6 +321,7 @@ impl<R: AgentRepos> Agent<R> {
                 registrar: registrar.as_ref(),
                 trigger,
                 conversation_kind,
+                workspace_dir,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
