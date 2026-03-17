@@ -190,6 +190,12 @@ pub struct ConversationWithDetails {
     pub tags: Vec<Tag>,
     /// Users in this conversation (populated for detail view, empty for list view).
     pub users: Vec<ConversationUser>,
+    /// Linked workspace name (joined from workspaces table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
+    /// Linked workspace root path (joined from workspaces table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// A per-user MCP server configuration.

@@ -12,9 +12,12 @@ use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, ApiResponse, ConversationId, ConversationKind, ConversationRepo,
     ConversationUserRepo, ConversationUserRole, ConversationWithDetails, JobRepo,
-    ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId,
+    ListConversationsFilter, MessageRepo, TagRepo, WorkspaceId, WorkspaceRepo,
 };
-use sober_db::{PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo};
+use sober_db::{
+    PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
+    PgWorkspaceRepo,
+};
 
 use crate::state::AppState;
 
@@ -133,11 +136,24 @@ async fn get_conversation(
     let tag_repo = PgTagRepo::new(state.db.clone());
     let tags = tag_repo.list_by_conversation(conversation_id).await?;
 
+    // Join workspace name/path if linked.
+    let (workspace_name, workspace_path) = if let Some(ws_id) = conversation.workspace_id {
+        let ws_repo = PgWorkspaceRepo::new(state.db.clone());
+        match ws_repo.get_by_id(ws_id).await {
+            Ok(ws) => (Some(ws.name), Some(ws.root_path)),
+            Err(_) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
     let details = ConversationWithDetails {
         conversation,
         unread_count: cu.unread_count,
         tags,
         users,
+        workspace_name,
+        workspace_path,
     };
 
     Ok(ApiResponse::new(details))

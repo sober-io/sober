@@ -613,6 +613,8 @@ pub(crate) struct ConversationWithUnreadRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub unread_count: i32,
+    pub workspace_name: Option<String>,
+    pub workspace_path: Option<String>,
 }
 
 #[cfg(test)]
