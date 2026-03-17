@@ -1,6 +1,7 @@
 //! Domain types and primitives shared across all crates.
 
 pub mod access;
+pub mod agent_repos;
 pub mod api;
 pub mod domain;
 pub mod enums;
@@ -11,6 +12,7 @@ pub mod repo;
 pub mod tool;
 
 pub use access::{CallerContext, Permission, TriggerKind};
+pub use agent_repos::AgentRepos;
 pub use api::ApiResponse;
 pub use domain::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername,
