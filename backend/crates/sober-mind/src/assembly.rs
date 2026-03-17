@@ -4,10 +4,12 @@
 //! access masks, task context, and tool definitions. This is the central
 //! coordination point for everything that feeds into an LLM invocation.
 
+use std::collections::HashMap;
+
 use sober_core::types::access::CallerContext;
 use sober_core::types::domain::Message;
-use sober_core::types::enums::MessageRole;
-use sober_core::types::ids::MessageId;
+use sober_core::types::enums::{ConversationKind, MessageRole};
+use sober_core::types::ids::{MessageId, UserId};
 use sober_core::types::tool::ToolMetadata;
 
 use crate::access::apply_access_mask;
@@ -22,6 +24,11 @@ pub struct TaskContext {
     pub description: String,
     /// Recent conversation messages for context continuity.
     pub recent_messages: Vec<Message>,
+    /// The kind of conversation (direct vs group). Determines whether user
+    /// messages are prefixed with usernames in the assembled prompt.
+    pub conversation_kind: ConversationKind,
+    /// Mapping from user IDs to display names for group message attribution.
+    pub user_display_names: HashMap<UserId, String>,
 }
 
 /// The agent's cognitive engine — assembles prompts from identity + context.
@@ -79,6 +86,7 @@ impl Mind {
             tool_result: None,
             token_count: None,
             user_id: None,
+            metadata: None,
             created_at: chrono::Utc::now(),
         });
 
@@ -93,12 +101,58 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             });
         }
 
-        // Recent conversation messages
-        messages.extend(context.recent_messages.iter().cloned());
+        // Group conversation context — tell the LLM about multiple users.
+        let is_group = context.conversation_kind == ConversationKind::Group;
+        if is_group && !context.user_display_names.is_empty() {
+            let user_list: Vec<&str> = context
+                .user_display_names
+                .values()
+                .map(String::as_str)
+                .collect();
+            messages.push(Message {
+                id: MessageId::new(),
+                conversation_id: sober_core::ConversationId::new(),
+                role: MessageRole::System,
+                content: format!(
+                    "This is a group conversation with multiple users: {}. \
+                     Each user message is prefixed with [username]. \
+                     Address users by name when responding. \
+                     When a user asks a question, respond to that specific user.",
+                    user_list.join(", ")
+                ),
+                tool_calls: None,
+                tool_result: None,
+                token_count: None,
+                user_id: None,
+                metadata: None,
+                created_at: chrono::Utc::now(),
+            });
+        }
+
+        // Recent conversation messages — filter out Event messages (timeline-only)
+        // and prefix user messages with usernames in group conversations.
+        for msg in &context.recent_messages {
+            if msg.role == MessageRole::Event {
+                continue;
+            }
+            if is_group && msg.role == MessageRole::User {
+                let username = msg
+                    .user_id
+                    .and_then(|uid| context.user_display_names.get(&uid))
+                    .map(String::as_str)
+                    .unwrap_or("User");
+                let mut prefixed = msg.clone();
+                prefixed.content = format!("[{username}]: {}", msg.content);
+                messages.push(prefixed);
+            } else {
+                messages.push(msg.clone());
+            }
+        }
 
         Ok(messages)
     }
@@ -132,6 +186,7 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             Message {
@@ -143,6 +198,7 @@ impl Mind {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
         ])
@@ -230,6 +286,8 @@ mod tests {
         let context = TaskContext {
             description: "Help with Rust code".into(),
             recent_messages: vec![],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
         };
 
         let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
@@ -260,6 +318,8 @@ mod tests {
         let context = TaskContext {
             description: String::new(),
             recent_messages: vec![],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
         };
 
         let messages = mind.assemble(&caller, &context, &tools, "").await.unwrap();
@@ -282,6 +342,8 @@ mod tests {
         let context = TaskContext {
             description: String::new(),
             recent_messages: vec![],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
         };
 
         // Human should not see internal content.
@@ -316,6 +378,8 @@ mod tests {
         let context = TaskContext {
             description: String::new(),
             recent_messages: vec![],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
         };
         let layer_text = "## Learned Adaptations\n\n- **tone**: formal (confidence: 85%)";
 
@@ -385,5 +449,112 @@ mod tests {
 
         let result = Mind::check_injection("hello world");
         assert!(matches!(result, InjectionVerdict::Pass));
+    }
+
+    fn make_message(role: MessageRole, content: &str, user_id: Option<UserId>) -> Message {
+        Message {
+            id: MessageId::new(),
+            conversation_id: sober_core::ConversationId::new(),
+            role,
+            content: content.to_string(),
+            tool_calls: None,
+            tool_result: None,
+            token_count: None,
+            user_id,
+            metadata: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn filters_event_messages() {
+        let soul_file = write_temp_file("# Sõber");
+        let resolver = SoulResolver::new(
+            soul_file.path(),
+            None::<std::path::PathBuf>,
+            None::<std::path::PathBuf>,
+        );
+        let mind = Mind::new(resolver);
+        let caller = make_caller(TriggerKind::Human);
+
+        let context = TaskContext {
+            description: String::new(),
+            recent_messages: vec![
+                make_message(MessageRole::User, "hello", None),
+                make_message(MessageRole::Event, "user joined", None),
+                make_message(MessageRole::Assistant, "hi there", None),
+            ],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
+        };
+
+        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        // system + 2 messages (Event filtered out)
+        assert_eq!(messages.len(), 3);
+        assert!(!messages.iter().any(|m| m.role == MessageRole::Event));
+    }
+
+    #[tokio::test]
+    async fn prefixes_user_messages_in_group() {
+        let soul_file = write_temp_file("# Sõber");
+        let resolver = SoulResolver::new(
+            soul_file.path(),
+            None::<std::path::PathBuf>,
+            None::<std::path::PathBuf>,
+        );
+        let mind = Mind::new(resolver);
+        let caller = make_caller(TriggerKind::Human);
+
+        let alice_id = UserId::new();
+        let bob_id = UserId::new();
+        let mut names = HashMap::new();
+        names.insert(alice_id, "Alice".to_string());
+        names.insert(bob_id, "Bob".to_string());
+
+        let context = TaskContext {
+            description: String::new(),
+            recent_messages: vec![
+                make_message(MessageRole::User, "hey everyone", Some(alice_id)),
+                make_message(MessageRole::User, "hi alice", Some(bob_id)),
+                make_message(MessageRole::Assistant, "hello!", None),
+            ],
+            conversation_kind: ConversationKind::Group,
+            user_display_names: names,
+        };
+
+        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        // system + group context + 3 messages
+        assert_eq!(messages.len(), 5);
+        // Second message is the group context
+        assert!(messages[1].content.contains("group conversation"));
+        assert!(messages[2].content.starts_with("[Alice]: "));
+        assert!(messages[3].content.starts_with("[Bob]: "));
+        // Assistant message should not be prefixed
+        assert_eq!(messages[4].content, "hello!");
+    }
+
+    #[tokio::test]
+    async fn no_prefix_in_direct_conversation() {
+        let soul_file = write_temp_file("# Sõber");
+        let resolver = SoulResolver::new(
+            soul_file.path(),
+            None::<std::path::PathBuf>,
+            None::<std::path::PathBuf>,
+        );
+        let mind = Mind::new(resolver);
+        let caller = make_caller(TriggerKind::Human);
+
+        let user_id = UserId::new();
+        let context = TaskContext {
+            description: String::new(),
+            recent_messages: vec![make_message(MessageRole::User, "hello", Some(user_id))],
+            conversation_kind: ConversationKind::Direct,
+            user_display_names: HashMap::new(),
+        };
+
+        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        // system + 1 message — no prefix for direct
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "hello");
     }
 }

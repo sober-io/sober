@@ -25,6 +25,15 @@ use tracing::{error, info, warn};
 use crate::proto;
 use crate::state::AppState;
 
+/// Basic user info included in collaborator change WebSocket events.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct CollaboratorInfo {
+    /// User ID.
+    pub id: String,
+    /// Username.
+    pub username: String,
+}
+
 /// Returns the WebSocket route.
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/ws", get(ws_upgrade))
@@ -114,6 +123,12 @@ pub enum ServerWsMessage {
         /// Thinking text fragment.
         content: String,
     },
+    /// Agent is processing a message (typing indicator for other group members).
+    #[serde(rename = "chat.agent_typing")]
+    ChatAgentTyping {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+    },
     /// The conversation title was generated or changed.
     #[serde(rename = "chat.title")]
     ChatTitle {
@@ -159,6 +174,12 @@ pub enum ServerWsMessage {
         content: String,
         /// What produced this message.
         source: sober_core::types::access::TriggerKind,
+        /// User ID of the sender (if applicable).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_id: Option<String>,
+        /// Username of the sender (if applicable).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
     },
     /// Unread count changed for a conversation.
     #[serde(rename = "chat.unread")]
@@ -167,6 +188,34 @@ pub enum ServerWsMessage {
         conversation_id: String,
         /// New unread count.
         unread_count: i32,
+    },
+    /// A collaborator was added to the conversation.
+    #[serde(rename = "chat.collaborator_added")]
+    ChatCollaboratorAdded {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The added user.
+        user: CollaboratorInfo,
+        /// The role assigned.
+        role: String,
+    },
+    /// A collaborator was removed from the conversation.
+    #[serde(rename = "chat.collaborator_removed")]
+    ChatCollaboratorRemoved {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The removed user's ID.
+        user_id: String,
+    },
+    /// A collaborator's role was changed.
+    #[serde(rename = "chat.role_changed")]
+    ChatRoleChanged {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// The user whose role changed.
+        user_id: String,
+        /// The new role.
+        role: String,
     },
     /// Keepalive response.
     #[serde(rename = "pong")]
@@ -177,6 +226,17 @@ pub enum ServerWsMessage {
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthUser) {
     let user_id = auth_user.user_id;
     info!(user_id = %user_id, "WebSocket connected");
+
+    // Look up username once for group message attribution.
+    let username = {
+        let user_repo = sober_db::PgUserRepo::new(state.db.clone());
+        use sober_core::types::UserRepo;
+        user_repo
+            .get_by_id(user_id)
+            .await
+            .map(|u| u.username)
+            .unwrap_or_default()
+    };
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -240,6 +300,36 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
         match client_msg {
             ClientWsMessage::ChatSubscribe { conversation_id } => {
+                // Verify membership before subscribing.
+                let conv_id = match conversation_id
+                    .parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                {
+                    Ok(id) => id,
+                    Err(_) => {
+                        let _ = out_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id,
+                                error: "invalid conversation_id".into(),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+
+                if super::verify_membership(&state.db, conv_id, auth_user.user_id)
+                    .await
+                    .is_err()
+                {
+                    let _ = out_tx
+                        .send(ServerWsMessage::ChatError {
+                            conversation_id,
+                            error: "not a member of this conversation".into(),
+                        })
+                        .await;
+                    continue;
+                }
+
                 // Register this connection for the conversation so events
                 // from the subscription task are routed here (e.g. scheduler results).
                 if registered_conversations.insert(conversation_id.clone()) {
@@ -250,9 +340,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 }
 
                 // Mark conversation as read for this user (best-effort).
-                if let Ok(conv_id) = conversation_id
-                    .parse::<uuid::Uuid>()
-                    .map(ConversationId::from_uuid)
                 {
                     let cu_repo = PgConversationUserRepo::new(state.db.clone());
                     use sober_core::types::ConversationUserRepo;
@@ -263,6 +350,36 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 conversation_id,
                 content,
             } => {
+                // Verify membership before sending message.
+                let conv_id = match conversation_id
+                    .parse::<uuid::Uuid>()
+                    .map(ConversationId::from_uuid)
+                {
+                    Ok(id) => id,
+                    Err(_) => {
+                        let _ = out_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id,
+                                error: "invalid conversation_id".into(),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+
+                if super::verify_membership(&state.db, conv_id, auth_user.user_id)
+                    .await
+                    .is_err()
+                {
+                    let _ = out_tx
+                        .send(ServerWsMessage::ChatError {
+                            conversation_id,
+                            error: "not a member of this conversation".into(),
+                        })
+                        .await;
+                    continue;
+                }
+
                 // Ensure registration (in case chat.subscribe wasn't sent first).
                 if registered_conversations.insert(conversation_id.clone()) {
                     state
@@ -270,6 +387,30 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .register(conversation_id.clone(), out_tx.clone())
                         .await;
                 }
+
+                // Broadcast the user's message to all other subscribers
+                // so group members see it in real-time.
+                let user_msg = ServerWsMessage::ChatNewMessage {
+                    conversation_id: conversation_id.clone(),
+                    message_id: uuid::Uuid::now_v7().to_string(),
+                    role: "user".into(),
+                    content: content.clone(),
+                    source: sober_core::types::access::TriggerKind::Human,
+                    user_id: Some(user_id.to_string()),
+                    username: Some(username.clone()),
+                };
+                state.connections.send(&conversation_id, user_msg).await;
+
+                // Notify all subscribers that the agent is processing.
+                state
+                    .connections
+                    .send(
+                        &conversation_id,
+                        ServerWsMessage::ChatAgentTyping {
+                            conversation_id: conversation_id.clone(),
+                        },
+                    )
+                    .await;
 
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();

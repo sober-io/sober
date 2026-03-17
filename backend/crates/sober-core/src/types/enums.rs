@@ -77,6 +77,8 @@ pub enum MessageRole {
     System,
     /// Tool invocation result.
     Tool,
+    /// System-generated event notification (e.g. user joined/left).
+    Event,
 }
 
 /// The kind/type of a conversation.
@@ -111,8 +113,29 @@ pub enum ConversationKind {
 pub enum ConversationUserRole {
     /// Conversation creator/owner.
     Owner,
+    /// Elevated participant with moderation privileges.
+    Admin,
     /// Regular participant.
     Member,
+}
+
+/// Agent response mode for group conversations.
+///
+/// Maps to the `agent_mode` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "agent_mode", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    /// Respond to every message.
+    Always,
+    /// Only respond when @sober is mentioned.
+    Mention,
+    /// Never respond automatically.
+    Silent,
 }
 
 /// Lifecycle state of a scheduled job.
@@ -328,11 +351,40 @@ mod tests {
 
     #[test]
     fn conversation_user_role_serde_roundtrip() {
-        for variant in [ConversationUserRole::Owner, ConversationUserRole::Member] {
+        for variant in [
+            ConversationUserRole::Owner,
+            ConversationUserRole::Admin,
+            ConversationUserRole::Member,
+        ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: ConversationUserRole = serde_json::from_str(&json).unwrap();
             assert_eq!(variant, deserialized);
         }
+    }
+
+    #[test]
+    fn agent_mode_serde_roundtrip() {
+        for variant in [AgentMode::Always, AgentMode::Mention, AgentMode::Silent] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: AgentMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn agent_mode_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&AgentMode::Always).unwrap(),
+            "\"always\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentMode::Mention).unwrap(),
+            "\"mention\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentMode::Silent).unwrap(),
+            "\"silent\""
+        );
     }
 
     #[test]
@@ -378,6 +430,7 @@ mod tests {
             MessageRole::Assistant,
             MessageRole::System,
             MessageRole::Tool,
+            MessageRole::Event,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: MessageRole = serde_json::from_str(&json).unwrap();

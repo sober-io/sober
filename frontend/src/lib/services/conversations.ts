@@ -1,5 +1,5 @@
 import { api } from '$lib/utils/api';
-import type { Conversation, Message, PermissionMode } from '$lib/types';
+import type { AgentMode, Collaborator, Conversation, Message, PermissionMode } from '$lib/types';
 
 export const conversationService = {
 	list: (params?: { archived?: boolean; kind?: string; tag?: string; search?: string }) => {
@@ -14,7 +14,7 @@ export const conversationService = {
 
 	get: (id: string) => api<Conversation>(`/conversations/${id}`),
 
-	create: () => api<Conversation>('/conversations', { method: 'POST', body: JSON.stringify({}) }),
+	create: () => api<Conversation>('/conversations', { method: 'POST' }),
 
 	updateTitle: (id: string, title: string) =>
 		api<{ id: string; title: string }>(`/conversations/${id}`, {
@@ -51,5 +51,39 @@ export const conversationService = {
 		api(`/conversations/${id}`, {
 			method: 'PATCH',
 			body: JSON.stringify({ workspace_id: workspaceId })
+		}),
+
+	updateAgentMode: (id: string, agentMode: AgentMode) =>
+		api(`/conversations/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ agent_mode: agentMode })
+		}),
+
+	listCollaborators: (id: string) => api<Collaborator[]>(`/conversations/${id}/collaborators`),
+
+	addCollaborator: (id: string, username: string) =>
+		api<Collaborator>(`/conversations/${id}/collaborators`, {
+			method: 'POST',
+			body: JSON.stringify({ username })
+		}),
+
+	updateCollaboratorRole: (id: string, userId: string, role: string) =>
+		api(`/conversations/${id}/collaborators/${userId}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ role })
+		}),
+
+	removeCollaborator: (id: string, userId: string) =>
+		api(`/conversations/${id}/collaborators/${userId}`, { method: 'DELETE' }),
+
+	leave: (id: string) => api(`/conversations/${id}/leave`, { method: 'POST' }),
+
+	searchUsers: (query: string) =>
+		api<{ id: string; username: string }[]>(`/users/search?q=${encodeURIComponent(query)}`),
+
+	convertToGroup: (id: string, title: string) =>
+		api(`/conversations/${id}/convert-to-group`, {
+			method: 'POST',
+			body: JSON.stringify({ title })
 		})
 };

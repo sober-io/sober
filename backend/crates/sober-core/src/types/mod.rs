@@ -13,13 +13,15 @@ pub mod tool;
 pub use access::{CallerContext, Permission, TriggerKind};
 pub use api::ApiResponse;
 pub use domain::{
-    Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationWithDetails, Job, JobRun,
-    McpServerConfig, Message, Role, SecretMetadata, SecretRow, SecretScope, Session, StoredDek,
-    Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername,
+    ConversationWithDetails, Job, JobRun, McpServerConfig, Message, Role, SecretMetadata,
+    SecretRow, SecretScope, Session, StoredDek, Tag, User, UserRole, Workspace, WorkspaceRepoEntry,
+    Worktree,
 };
 pub use enums::{
-    ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind, ConversationUserRole,
-    JobStatus, MessageRole, RoleKind, ScopeKind, UserStatus, WorkspaceState, WorktreeState,
+    AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind,
+    ConversationUserRole, JobStatus, MessageRole, RoleKind, ScopeKind, UserStatus, WorkspaceState,
+    WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,

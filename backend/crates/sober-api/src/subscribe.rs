@@ -201,6 +201,8 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 role: nm.role,
                 content: nm.content,
                 source,
+                user_id: nm.user_id.filter(|s| !s.is_empty()),
+                username: None,
             })
         }
     }
@@ -255,6 +257,8 @@ mod tests {
                 role,
                 content,
                 source,
+                user_id: _,
+                username: _,
             } => {
                 assert_eq!(conversation_id, "conv-1");
                 assert_eq!(message_id, "msg-1");

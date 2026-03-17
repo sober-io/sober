@@ -14,6 +14,7 @@
 	} from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import { tagService } from '$lib/services/tags';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
@@ -27,7 +28,7 @@
 
 	interface ChatMsg {
 		id: string;
-		role: 'user' | 'assistant' | 'system';
+		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
 		thinkingContent: string;
 		toolCalls?: ToolCall[];
@@ -36,6 +37,7 @@
 		timestamp: string;
 		source?: string;
 		ephemeral?: boolean;
+		userId?: string;
 	}
 
 	interface QueuedMessage {
@@ -72,12 +74,13 @@
 		toolCalls: undefined,
 		streaming: false,
 		thinking: false,
-		timestamp: fmtTime(m.created_at)
+		timestamp: fmtTime(m.created_at),
+		userId: m.user_id
 	});
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
-	let allLoaded = $state(data.messages.length < PAGE_SIZE);
+	let allLoaded = $state(false);
 	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
@@ -88,19 +91,39 @@
 
 	let isAtBottom = $state(true);
 	let messagesContainer: HTMLDivElement | undefined = $state();
-	let title = $state(data.conversation.title || '');
-	let tags = $state<Tag[]>(data.conversation.tags ?? []);
+	let title = $state('');
+	let tags = $state<Tag[]>([]);
 	let editingTitle = $state(false);
 	let editTitleValue = $state('');
 	let pendingConfirms = $state<ConfirmRequest[]>([]);
 	let permissionMode = $state<PermissionMode>('policy_based');
 	let deleteTarget = $state<string | null>(null);
 	let showClearConfirm = $state(false);
-	let showDeleteConversationConfirm = $state(false);
 	let settingsOpen = $state(false);
 	let messageTags = $state<Record<string, Tag[]>>({});
 
 	const conversationId = $derived($page.params.id ?? '');
+	const isGroup = $derived.by(() => {
+		const storeConv = conversations.items.find((c) => c.id === data.conversation.id);
+		return (storeConv?.kind ?? data.conversation.kind) === 'group';
+	});
+	let memberMap = $state<Record<string, string>>({});
+
+	// Load collaborators for group conversations
+	$effect(() => {
+		if (isGroup) {
+			const convId = data.conversation.id;
+			untrack(() => {
+				conversationService.listCollaborators(convId).then((collaborators) => {
+					const map: Record<string, string> = {};
+					for (const c of collaborators) map[c.user_id] = c.username;
+					memberMap = map;
+				});
+			});
+		} else {
+			memberMap = {};
+		}
+	});
 
 	// Reset state when conversation changes
 	$effect(() => {
@@ -115,8 +138,20 @@
 		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
-		messageTags = {};
-		untrack(() => conversations.markRead(data.conversation.id));
+		memberMap = {};
+
+		// Populate message tags from inline data.
+		const tagMap: Record<string, Tag[]> = {};
+		for (const m of data.messages) {
+			if (m.tags && m.tags.length > 0) {
+				tagMap[m.id] = m.tags;
+			}
+		}
+		messageTags = tagMap;
+
+		untrack(() => {
+			conversations.markRead(data.conversation.id);
+		});
 	});
 
 	// Scroll to bottom on conversation change
@@ -179,6 +214,12 @@
 		if (older.length > 0 && container) {
 			const prevHeight = container.scrollHeight;
 			messages = [...older.map(toChat), ...messages];
+			// Merge tags from older messages.
+			for (const m of older) {
+				if (m.tags && m.tags.length > 0) {
+					messageTags[m.id] = m.tags;
+				}
+			}
 			await tick();
 			container.scrollTop = container.scrollHeight - prevHeight;
 		}
@@ -267,10 +308,40 @@
 
 	const handleWsMessage = (msg: ServerWsMessage) => {
 		switch (msg.type) {
-			case 'chat.thinking': {
+			case 'chat.agent_typing': {
+				// Show thinking indicator if no active assistant message.
 				const last = messages[messages.length - 1];
+				if (!last || last.role !== 'assistant' || (!last.thinking && !last.streaming)) {
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'assistant',
+						content: '',
+						thinkingContent: '',
+						streaming: false,
+						thinking: true,
+						timestamp: fmtTime()
+					});
+					assistantPhase = 'thinking';
+				}
+				break;
+			}
+			case 'chat.thinking': {
+				let last = messages[messages.length - 1];
 				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinkingContent += msg.content;
+				} else {
+					// No active assistant message — create a thinking placeholder
+					// (happens for other group members who didn't send the message).
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'assistant',
+						content: '',
+						thinkingContent: msg.content,
+						streaming: false,
+						thinking: true,
+						timestamp: fmtTime()
+					});
+					assistantPhase = 'thinking';
 				}
 				break;
 			}
@@ -322,6 +393,35 @@
 				break;
 			}
 			case 'chat.new_message': {
+				// Own user messages were added optimistically — update the ID
+				// to the real DB ID so tagging/deletion works.
+				if (msg.role === 'user' && msg.user_id === auth.user?.id) {
+					const ownMsg = [...messages].reverse().find((m) => m.role === 'user');
+					if (ownMsg) ownMsg.id = msg.message_id;
+					break;
+				}
+
+				// User messages from others — add directly, don't match with assistant.
+				if (msg.role === 'user') {
+					messages.push({
+						id: msg.message_id,
+						role: 'user',
+						content: msg.content,
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						userId: msg.user_id
+					});
+					if (msg.user_id && msg.username) {
+						memberMap[msg.user_id] = msg.username;
+					}
+					// Mark as read — user is actively viewing this conversation.
+					untrack(() => conversations.markRead(conversationId));
+					conversationService.markRead(conversationId);
+					break;
+				}
+
 				// If an assistant message is actively streaming, update its
 				// ID and source from the stored-message notification.
 				const active = messages[messages.length - 1];
@@ -337,8 +437,8 @@
 					if (msg.source && msg.source !== 'human') prev.source = msg.source;
 					break;
 				}
-				// Otherwise this is a new message from another source (scheduler).
-				messages.push({
+				// New message from scheduler or agent.
+				const newMsg: ChatMsg = {
 					id: msg.message_id,
 					role: msg.role as ChatMsg['role'],
 					content: msg.content,
@@ -346,8 +446,14 @@
 					streaming: false,
 					thinking: false,
 					timestamp: fmtTime(),
-					source: msg.source
-				});
+					source: msg.source,
+					userId: msg.user_id
+				};
+				messages.push(newMsg);
+				// Update memberMap if username is provided
+				if (msg.user_id && msg.username && !memberMap[msg.user_id]) {
+					memberMap[msg.user_id] = msg.username;
+				}
 				break;
 			}
 			case 'chat.done': {
@@ -359,6 +465,9 @@
 				}
 				assistantPhase = 'idle';
 				flushQueue();
+				// Mark as read — user is actively viewing this conversation.
+				untrack(() => conversations.markRead(conversationId));
+				conversationService.markRead(conversationId);
 				break;
 			}
 			case 'chat.title': {
@@ -377,6 +486,25 @@
 						reason: msg.reason
 					}
 				];
+				break;
+			}
+			case 'chat.collaborator_added': {
+				memberMap = { ...memberMap, [msg.user.id]: msg.user.username };
+				break;
+			}
+			case 'chat.collaborator_removed': {
+				// If the current user was removed (kicked), navigate away.
+				if (msg.user_id === auth.user?.id) {
+					conversations.remove(conversationId);
+					goto(resolve('/'));
+					return;
+				}
+				const updated = { ...memberMap };
+				delete updated[msg.user_id];
+				memberMap = updated;
+				break;
+			}
+			case 'chat.role_changed': {
 				break;
 			}
 			case 'chat.error': {
@@ -513,7 +641,6 @@
 	};
 
 	const handleDeleteConversation = async () => {
-		showDeleteConversationConfirm = false;
 		await conversationService.delete(data.conversation.id);
 		conversations.remove(data.conversation.id);
 		goto(resolve('/'));
@@ -597,6 +724,7 @@
 					source={msg.source}
 					ephemeral={msg.ephemeral}
 					messageId={msg.id}
+					senderUsername={isGroup ? (memberMap[msg.userId ?? ''] ?? undefined) : undefined}
 					tags={messageTags[msg.id] ?? []}
 					onTagsChange={(newTags) => {
 						messageTags[msg.id] = newTags;
@@ -730,18 +858,6 @@
 	onConfirm={confirmClear}
 	onCancel={() => {
 		showClearConfirm = false;
-	}}
-/>
-
-<ConfirmDialog
-	open={showDeleteConversationConfirm}
-	title="Delete conversation"
-	message="This will permanently delete this conversation and all messages. This cannot be undone."
-	confirmText="Delete"
-	destructive
-	onConfirm={handleDeleteConversation}
-	onCancel={() => {
-		showDeleteConversationConfirm = false;
 	}}
 />
 

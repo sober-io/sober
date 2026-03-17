@@ -7,7 +7,7 @@ use std::sync::Arc;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
+use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, warn};
@@ -29,27 +29,29 @@ pub mod scheduler_proto {
 }
 
 /// gRPC service wrapping an [`Agent`].
-pub struct AgentGrpcService<Msg, Conv, Mcp>
+pub struct AgentGrpcService<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo,
     Conv: ConversationRepo,
     Mcp: McpServerRepo,
+    User: UserRepo,
 {
-    agent: Arc<Agent<Msg, Conv, Mcp>>,
+    agent: Arc<Agent<Msg, Conv, Mcp, User>>,
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
     broadcast_tx: ConversationUpdateSender,
 }
 
-impl<Msg, Conv, Mcp> AgentGrpcService<Msg, Conv, Mcp>
+impl<Msg, Conv, Mcp, User> AgentGrpcService<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo,
     Conv: ConversationRepo,
     Mcp: McpServerRepo,
+    User: UserRepo,
 {
     /// Creates a new gRPC service backed by the given agent.
     pub fn new(
-        agent: Arc<Agent<Msg, Conv, Mcp>>,
+        agent: Arc<Agent<Msg, Conv, Mcp, User>>,
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
         broadcast_tx: ConversationUpdateSender,
@@ -70,11 +72,13 @@ type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
 type SubscribeConversationUpdatesStream = ReceiverStream<Result<proto::ConversationUpdate, Status>>;
 
 #[tonic::async_trait]
-impl<Msg, Conv, Mcp> proto::agent_service_server::AgentService for AgentGrpcService<Msg, Conv, Mcp>
+impl<Msg, Conv, Mcp, User> proto::agent_service_server::AgentService
+    for AgentGrpcService<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo + 'static,
     Conv: ConversationRepo + 'static,
     Mcp: McpServerRepo + 'static,
+    User: UserRepo + 'static,
 {
     type ExecuteTaskStream = ExecuteTaskStream;
     type SubscribeConversationUpdatesStream = SubscribeConversationUpdatesStream;
@@ -315,8 +319,8 @@ where
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
-async fn execute_typed_payload<Msg, Conv, Mcp>(
-    agent: &Agent<Msg, Conv, Mcp>,
+async fn execute_typed_payload<Msg, Conv, Mcp, User>(
+    agent: &Agent<Msg, Conv, Mcp, User>,
     payload: JobPayload,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
@@ -327,6 +331,7 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
     Msg: MessageRepo + 'static,
     Conv: ConversationRepo + 'static,
     Mcp: sober_core::types::repo::McpServerRepo + 'static,
+    User: UserRepo + 'static,
 {
     match payload {
         JobPayload::Prompt { text, .. } => {
@@ -407,8 +412,8 @@ async fn execute_typed_payload<Msg, Conv, Mcp>(
 }
 
 /// Executes a prompt payload by delegating to `handle_message` with conversation context.
-async fn execute_prompt_conversational<Msg, Conv, Mcp>(
-    agent: &Agent<Msg, Conv, Mcp>,
+async fn execute_prompt_conversational<Msg, Conv, Mcp, User>(
+    agent: &Agent<Msg, Conv, Mcp, User>,
     prompt: &str,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
@@ -418,6 +423,7 @@ async fn execute_prompt_conversational<Msg, Conv, Mcp>(
     Msg: MessageRepo + 'static,
     Conv: ConversationRepo + 'static,
     Mcp: sober_core::types::repo::McpServerRepo + 'static,
+    User: UserRepo + 'static,
 {
     let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
         agent

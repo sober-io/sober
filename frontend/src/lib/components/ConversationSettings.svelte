@@ -1,8 +1,22 @@
 <script lang="ts">
-	import type { Conversation, Tag, Job, PermissionMode, Workspace } from '$lib/types';
+	import type {
+		Conversation,
+		Tag,
+		Job,
+		PermissionMode,
+		Workspace,
+		AgentMode,
+		Collaborator,
+		ConversationUserRole
+	} from '$lib/types';
 	import { jobService } from '$lib/services/jobs';
 	import { workspaceService } from '$lib/services/workspaces';
+	import { conversationService } from '$lib/services/conversations';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { untrack } from 'svelte';
+	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
+	import CollaboratorList from './CollaboratorList.svelte';
 	import TagInput from './TagInput.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -40,6 +54,28 @@
 		onDelete
 	}: Props = $props();
 
+	// Agent mode options
+	const AGENT_MODES: ReadonlyArray<{
+		value: AgentMode;
+		label: string;
+		description: string;
+		color: string;
+	}> = [
+		{
+			value: 'always',
+			label: 'Always',
+			description: 'Agent responds to every message',
+			color: 'emerald'
+		},
+		{
+			value: 'mention',
+			label: 'Mention',
+			description: 'Agent responds only when mentioned',
+			color: 'amber'
+		},
+		{ value: 'silent', label: 'Silent', description: 'Agent does not respond', color: 'zinc' }
+	];
+
 	// Local state
 	let editingTitle = $state('');
 	let jobs = $state<Job[]>([]);
@@ -48,6 +84,11 @@
 	let workspacesLoading = $state(false);
 	let confirmClear = $state(false);
 	let confirmDelete = $state(false);
+	let confirmConvertPending = $state<string | null>(null);
+	let agentMode = $state<AgentMode>('always');
+	let collaborators = $state<Collaborator[]>([]);
+	let collaboratorsLoading = $state(false);
+	let kind = $state(conversation.kind);
 
 	// Derived
 	let createdDate = $derived(
@@ -57,24 +98,33 @@
 			day: 'numeric'
 		})
 	);
-	let kindLabel = $derived(
-		conversation.kind === 'inbox' ? 'Inbox' : conversation.kind === 'group' ? 'Group' : 'Direct'
-	);
+	let kindLabel = $derived(kind === 'inbox' ? 'Inbox' : kind === 'group' ? 'Group' : 'Direct');
+	let isGroup = $derived(kind === 'group');
+	let currentUserId = $derived(auth.user?.id ?? '');
+	let currentUserRole = $derived.by((): ConversationUserRole => {
+		const me = collaborators.find((c) => c.user_id === currentUserId);
+		return me?.role ?? 'member';
+	});
+	let canEditAgentMode = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
 
-	// Load data when panel opens
+	// Load data when panel opens — only track `open`, not conversation fields
 	$effect(() => {
-		if (open) {
+		if (!open) return;
+		untrack(() => {
 			editingTitle = conversation.title ?? '';
+			agentMode = conversation.agent_mode ?? 'always';
+			kind = conversation.kind;
 			loadJobs();
 			loadWorkspaces();
-		}
+			loadCollaborators();
+		});
 	});
 
 	// Close on Escape
 	$effect(() => {
 		if (!open) return;
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === 'Escape' && !confirmClear && !confirmDelete) {
+			if (e.key === 'Escape' && !confirmClear && !confirmDelete && !confirmConvertPending) {
 				onClose();
 			}
 		};
@@ -101,6 +151,106 @@
 			workspaces = [];
 		} finally {
 			workspacesLoading = false;
+		}
+	}
+
+	async function loadCollaborators() {
+		collaboratorsLoading = true;
+		try {
+			collaborators = await conversationService.listCollaborators(conversation.id);
+		} catch {
+			collaborators = [];
+		} finally {
+			collaboratorsLoading = false;
+		}
+	}
+
+	async function handleAgentModeChange(mode: AgentMode) {
+		agentMode = mode;
+		await conversationService.updateAgentMode(conversation.id, mode);
+	}
+
+	async function handleAddCollaborator(username: string) {
+		if (kind === 'direct') {
+			confirmConvertPending = username;
+			return;
+		}
+		try {
+			const collaborator = await conversationService.addCollaborator(conversation.id, username);
+			if (!collaborators.some((c) => c.user_id === collaborator.user_id)) {
+				collaborators = [...collaborators, collaborator];
+			}
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function confirmConvertAndAdd() {
+		if (!confirmConvertPending) return;
+		const username = confirmConvertPending;
+		confirmConvertPending = null;
+
+		try {
+			const title = conversation.title || 'Group conversation';
+			await conversationService.convertToGroup(conversation.id, title);
+			kind = 'group';
+			conversations.update(conversation.id, { kind: 'group', title });
+
+			const collaborator = await conversationService.addCollaborator(conversation.id, username);
+			if (!collaborators.some((c) => c.user_id === collaborator.user_id)) {
+				collaborators = [...collaborators, collaborator];
+			}
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleUpdateRole(userId: string, role: string) {
+		try {
+			await conversationService.updateCollaboratorRole(conversation.id, userId, role);
+			const idx = collaborators.findIndex((c) => c.user_id === userId);
+			if (idx !== -1) {
+				collaborators[idx] = { ...collaborators[idx], role: role as ConversationUserRole };
+			}
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleRemoveCollaborator(userId: string) {
+		try {
+			await conversationService.removeCollaborator(conversation.id, userId);
+			collaborators = collaborators.filter((c) => c.user_id !== userId);
+			// Auto-convert back to direct if only owner remains
+			if (collaborators.length <= 1) {
+				kind = 'direct';
+				conversations.update(conversation.id, { kind: 'direct' });
+			}
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleLeave() {
+		try {
+			await conversationService.leave(conversation.id);
+			onClose();
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	function agentModeButtonClass(m: (typeof AGENT_MODES)[number]): string {
+		if (agentMode !== m.value) {
+			return 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200';
+		}
+		switch (m.color) {
+			case 'emerald':
+				return 'bg-emerald-600/30 text-emerald-400';
+			case 'amber':
+				return 'bg-amber-600/30 text-amber-400';
+			default:
+				return 'bg-zinc-600/30 text-zinc-300';
 		}
 	}
 
@@ -203,6 +353,39 @@
 				<PermissionModeSelector mode={permissionMode} onModeChange={onUpdatePermissionMode} />
 			</SettingsSection>
 
+			<!-- Agent mode (group only) -->
+			{#if isGroup}
+				<SettingsSection title="Agent mode" description="When the agent responds in this group">
+					{#if canEditAgentMode}
+						<div class="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+							{#each AGENT_MODES as m (m.value)}
+								<button
+									onclick={() => handleAgentModeChange(m.value)}
+									class={[
+										'flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+										agentModeButtonClass(m)
+									]}
+									title={m.description}
+								>
+									{m.label}
+								</button>
+							{/each}
+						</div>
+					{:else}
+						<div class="flex items-center gap-2">
+							<span
+								class="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+							>
+								{AGENT_MODES.find((m) => m.value === agentMode)?.label ?? agentMode}
+							</span>
+							<span class="text-xs text-zinc-500 dark:text-zinc-400">
+								{AGENT_MODES.find((m) => m.value === agentMode)?.description ?? ''}
+							</span>
+						</div>
+					{/if}
+				</SettingsSection>
+			{/if}
+
 			<!-- Workspace -->
 			<SettingsSection title="Workspace" description="Link to a project workspace">
 				{#if workspacesLoading}
@@ -224,6 +407,24 @@
 			<!-- Tags -->
 			<SettingsSection title="Tags" description="Organize with tags">
 				<TagInput {tags} onAdd={onAddTag} onRemove={onRemoveTag} />
+			</SettingsSection>
+
+			<!-- Collaborators -->
+			<SettingsSection title="Collaborators" description="Manage conversation collaborators">
+				{#if collaboratorsLoading}
+					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+				{:else}
+					<CollaboratorList
+						{collaborators}
+						{currentUserId}
+						{currentUserRole}
+						conversationKind={conversation.kind}
+						onAddCollaborator={handleAddCollaborator}
+						onUpdateRole={handleUpdateRole}
+						onRemoveCollaborator={handleRemoveCollaborator}
+						onLeave={handleLeave}
+					/>
+				{/if}
 			</SettingsSection>
 
 			<!-- Scheduled jobs -->
@@ -278,4 +479,13 @@
 	destructive
 	onConfirm={handleDeleteConfirm}
 	onCancel={() => (confirmDelete = false)}
+/>
+
+<ConfirmDialog
+	open={confirmConvertPending !== null}
+	title="Convert to group"
+	message="Adding collaborators will convert this to a group conversation. Continue?"
+	confirmText="Convert & add"
+	onConfirm={confirmConvertAndAdd}
+	onCancel={() => (confirmConvertPending = null)}
 />

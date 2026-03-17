@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus, MessageRole,
-    UserStatus, WorkspaceState, WorktreeState,
+    AgentMode, ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus,
+    MessageRole, UserStatus, WorkspaceState, WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
@@ -90,6 +90,8 @@ pub struct Conversation {
     pub workspace_id: Option<WorkspaceId>,
     /// The kind of conversation.
     pub kind: ConversationKind,
+    /// Agent response mode for this conversation.
+    pub agent_mode: AgentMode,
     /// Whether the conversation is archived.
     pub is_archived: bool,
     /// Shell execution permission mode for this conversation.
@@ -119,6 +121,8 @@ pub struct Message {
     pub token_count: Option<i32>,
     /// The user who sent this message (None for assistant/system/tool messages).
     pub user_id: Option<UserId>,
+    /// Extensible metadata (e.g. event details for event-role messages).
+    pub metadata: Option<serde_json::Value>,
     /// When the message was created.
     pub created_at: DateTime<Utc>,
 }
@@ -130,6 +134,25 @@ pub struct ConversationUser {
     pub conversation_id: ConversationId,
     /// The user.
     pub user_id: UserId,
+    /// Number of unread messages.
+    pub unread_count: i32,
+    /// When the user last read this conversation.
+    pub last_read_at: Option<DateTime<Utc>>,
+    /// The user's role in this conversation.
+    pub role: ConversationUserRole,
+    /// When the user joined.
+    pub joined_at: DateTime<Utc>,
+}
+
+/// A conversation member with their username (for display in member lists).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationUserWithUsername {
+    /// The conversation.
+    pub conversation_id: ConversationId,
+    /// The user.
+    pub user_id: UserId,
+    /// The user's display username.
+    pub username: String,
     /// Number of unread messages.
     pub unread_count: i32,
     /// When the user last read this conversation.
@@ -488,6 +511,7 @@ mod tests {
             tool_result: None,
             token_count: Some(42),
             user_id: None,
+            metadata: None,
             created_at: Utc::now(),
         };
         let json = serde_json::to_value(&msg).unwrap();

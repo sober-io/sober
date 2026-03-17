@@ -7,7 +7,7 @@ use sober_core::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::rows::TagRow;
+use crate::rows::{MessageTagRow, TagRow};
 
 /// Base hues (degrees) for the tag color palette.
 const BASE_HUES: &[u16] = &[0, 25, 45, 145, 190, 220, 260, 330];
@@ -157,5 +157,42 @@ impl TagRepo for PgTagRepo {
         .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_by_message_ids(
+        &self,
+        message_ids: &[MessageId],
+    ) -> Result<Vec<(MessageId, Tag)>, AppError> {
+        if message_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let uuids: Vec<uuid::Uuid> = message_ids.iter().map(|id| *id.as_uuid()).collect();
+        let rows = sqlx::query_as::<_, MessageTagRow>(
+            "SELECT mt.message_id, t.id, t.user_id, t.name, t.color, t.created_at \
+             FROM message_tags mt \
+             JOIN tags t ON t.id = mt.tag_id \
+             WHERE mt.message_id = ANY($1) \
+             ORDER BY mt.message_id, t.name",
+        )
+        .bind(&uuids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let message_id = MessageId::from_uuid(r.message_id);
+                let tag = Tag {
+                    id: TagId::from_uuid(r.id),
+                    user_id: UserId::from_uuid(r.user_id),
+                    name: r.name,
+                    color: r.color,
+                    created_at: r.created_at,
+                };
+                (message_id, tag)
+            })
+            .collect())
     }
 }

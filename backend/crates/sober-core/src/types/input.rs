@@ -48,6 +48,10 @@ pub struct CreateMessage {
     pub tool_result: Option<serde_json::Value>,
     /// Approximate token count.
     pub token_count: Option<i32>,
+    /// Extensible metadata (e.g. event details).
+    pub metadata: Option<serde_json::Value>,
+    /// The user who sent this message (for user role messages).
+    pub user_id: Option<super::ids::UserId>,
 }
 
 /// Input for creating a new scheduled job.

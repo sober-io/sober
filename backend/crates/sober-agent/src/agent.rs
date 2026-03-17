@@ -4,15 +4,16 @@
 //! injection detection → context loading → prompt assembly → LLM completion
 //! → tool execution → response streaming.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sober_core::config::MemoryConfig;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
-use sober_core::types::enums::MessageRole;
+use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo};
+use sober_core::types::repo::{ConversationRepo, McpServerRepo, MessageRepo, UserRepo};
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
@@ -76,7 +77,7 @@ struct ConfirmDetail {
 }
 
 /// Aggregated context passed to the agentic loop, avoiding long parameter lists.
-struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
+struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo, User: UserRepo> {
     llm: &'a Arc<dyn LlmEngine>,
     mind: &'a Arc<Mind>,
     memory: &'a Arc<MemoryStore>,
@@ -84,6 +85,7 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     tool_registry: &'a Arc<ToolRegistry>,
     message_repo: &'a Arc<Msg>,
     conversation_repo: &'a Arc<Conv>,
+    user_repo: &'a Arc<User>,
     config: &'a AgentConfig,
     memory_config: &'a MemoryConfig,
     user_id: UserId,
@@ -95,16 +97,19 @@ struct LoopContext<'a, Msg: MessageRepo, Conv: ConversationRepo> {
     registrar: Option<&'a ConfirmationRegistrar>,
     /// What triggered this interaction — controls storage and tool behavior.
     trigger: TriggerKind,
+    /// The kind of conversation (direct vs group) — used for prompt assembly.
+    conversation_kind: ConversationKind,
 }
 
 /// The core agent that handles messages through an agentic loop.
 ///
 /// Generic over repository types so it can be tested without a real database.
-pub struct Agent<Msg, Conv, Mcp>
+pub struct Agent<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo,
     Conv: ConversationRepo,
     Mcp: McpServerRepo,
+    User: UserRepo,
 {
     llm: Arc<dyn LlmEngine>,
     mind: Arc<Mind>,
@@ -115,6 +120,7 @@ where
     conversation_repo: Arc<Conv>,
     #[allow(dead_code)]
     mcp_server_repo: Arc<Mcp>,
+    user_repo: Arc<User>,
     config: AgentConfig,
     memory_config: MemoryConfig,
     /// Registrar for interactive confirmation of dangerous tool calls.
@@ -123,11 +129,12 @@ where
     broadcast_tx: ConversationUpdateSender,
 }
 
-impl<Msg, Conv, Mcp> Agent<Msg, Conv, Mcp>
+impl<Msg, Conv, Mcp, User> Agent<Msg, Conv, Mcp, User>
 where
     Msg: MessageRepo + 'static,
     Conv: ConversationRepo + 'static,
     Mcp: McpServerRepo + 'static,
+    User: UserRepo + 'static,
 {
     /// Creates a new agent with all required dependencies.
     #[allow(clippy::too_many_arguments)]
@@ -140,6 +147,7 @@ where
         message_repo: Arc<Msg>,
         conversation_repo: Arc<Conv>,
         mcp_server_repo: Arc<Mcp>,
+        user_repo: Arc<User>,
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
@@ -154,6 +162,7 @@ where
             message_repo,
             conversation_repo,
             mcp_server_repo,
+            user_repo,
             config,
             memory_config,
             registrar,
@@ -226,6 +235,8 @@ where
                     tool_calls: None,
                     tool_result: None,
                     token_count: None,
+                    metadata: None,
+                    user_id: Some(user_id),
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -234,7 +245,43 @@ where
             sober_core::MessageId::new()
         };
 
-        // 3. Create event channel and spawn the agentic loop
+        // 3. Check agent mode — decide whether to run the LLM pipeline
+        let conversation = self
+            .conversation_repo
+            .get_by_id(conversation_id)
+            .await
+            .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+        let should_respond = match conversation.agent_mode {
+            AgentMode::Always => true,
+            AgentMode::Silent => false,
+            AgentMode::Mention => content.to_lowercase().contains("@sober"),
+        };
+
+        if !should_respond {
+            debug!(
+                agent_mode = ?conversation.agent_mode,
+                conversation_id = %conversation_id,
+                "skipping LLM pipeline due to agent mode"
+            );
+            // Return an empty stream — message was stored but no agent response.
+            let (event_tx, event_rx) = mpsc::channel::<Result<AgentEvent, AgentError>>(1);
+            let _ = event_tx
+                .send(Ok(AgentEvent::Done {
+                    message_id: user_msg_id,
+                    usage: Usage {
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                    },
+                    artifact_ref: None,
+                }))
+                .await;
+            return Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(
+                event_rx,
+            )));
+        }
+
+        // 4. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
             mpsc::channel::<Result<AgentEvent, AgentError>>(EVENT_CHANNEL_BUFFER);
 
@@ -246,11 +293,13 @@ where
         let tool_registry = Arc::clone(&self.tool_registry);
         let message_repo = Arc::clone(&self.message_repo);
         let conversation_repo = Arc::clone(&self.conversation_repo);
+        let user_repo = Arc::clone(&self.user_repo);
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();
         let registrar = self.registrar.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let content = content.to_owned();
+        let conversation_kind = conversation.kind;
 
         tokio::spawn(async move {
             let ctx = LoopContext {
@@ -261,6 +310,7 @@ where
                 tool_registry: &tool_registry,
                 message_repo: &message_repo,
                 conversation_repo: &conversation_repo,
+                user_repo: &user_repo,
                 config: &config,
                 memory_config: &memory_config,
                 user_id,
@@ -271,6 +321,7 @@ where
                 broadcast_tx: &broadcast_tx,
                 registrar: registrar.as_ref(),
                 trigger,
+                conversation_kind,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -296,7 +347,7 @@ where
     /// This is the core loop: embed → load context → assemble → complete →
     /// handle tool calls → repeat. Events are sent immediately as they occur,
     /// enabling confirmation flow and progressive output.
-    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv>) -> Result<(), AgentError> {
+    async fn run_loop_streaming(ctx: &LoopContext<'_, Msg, Conv, User>) -> Result<(), AgentError> {
         let llm = ctx.llm;
         let mind = ctx.mind;
         let memory = ctx.memory;
@@ -386,6 +437,25 @@ where
                     workspace_id: None,
                 };
 
+                // Build user display names for group conversations so the
+                // mind can prefix messages with `[username]:`.
+                let user_display_names = if ctx.conversation_kind == ConversationKind::Group {
+                    let user_ids: HashSet<UserId> = loaded_context
+                        .recent_messages
+                        .iter()
+                        .filter_map(|m| m.user_id)
+                        .collect();
+                    let mut names = HashMap::new();
+                    for uid in user_ids {
+                        if let Ok(user) = ctx.user_repo.get_by_id(uid).await {
+                            names.insert(uid, user.username);
+                        }
+                    }
+                    names
+                } else {
+                    HashMap::new()
+                };
+
                 let memory_context_text = format_memory_context(&loaded_context);
                 let task_context = TaskContext {
                     description: if memory_context_text.is_empty() {
@@ -394,6 +464,8 @@ where
                         format!("## Relevant Memories\n\n{memory_context_text}")
                     },
                     recent_messages: loaded_context.recent_messages.clone(),
+                    conversation_kind: ctx.conversation_kind,
+                    user_display_names,
                 };
 
                 let tool_metadata = tool_registry.tool_metadata();
@@ -529,6 +601,8 @@ where
                     tool_calls: None,
                     tool_result: None,
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
+                    metadata: None,
+                    user_id: None,
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -932,12 +1006,15 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
     msgs.iter()
         // Skip empty assistant messages — the API rejects them.
         .filter(|m| !(m.role == MessageRole::Assistant && m.content.is_empty()))
+        // Skip event messages — they are not forwarded to the LLM.
+        .filter(|m| m.role != MessageRole::Event)
         .map(|m| {
             let role = match m.role {
                 MessageRole::System => "system",
                 MessageRole::User => "user",
                 MessageRole::Assistant => "assistant",
                 MessageRole::Tool => "tool",
+                MessageRole::Event => unreachable!("event messages filtered above"),
             };
             LlmMessage {
                 role: role.to_owned(),
@@ -1000,6 +1077,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1011,6 +1089,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1022,6 +1101,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
             DomainMessage {
@@ -1033,6 +1113,7 @@ mod tests {
                 tool_result: None,
                 token_count: None,
                 user_id: None,
+                metadata: None,
                 created_at: chrono::Utc::now(),
             },
         ];

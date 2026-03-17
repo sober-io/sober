@@ -305,6 +305,8 @@ async fn message_create_and_list(pool: PgPool) {
             tool_calls: None,
             tool_result: None,
             token_count: Some(5),
+            metadata: None,
+            user_id: None,
         })
         .await
         .unwrap();
@@ -319,6 +321,8 @@ async fn message_create_and_list(pool: PgPool) {
             tool_calls: None,
             tool_result: None,
             token_count: Some(8),
+            metadata: None,
+            user_id: None,
         })
         .await
         .unwrap();

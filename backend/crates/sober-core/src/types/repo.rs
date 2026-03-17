@@ -10,7 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::domain::*;
 use super::enums::{
-    ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind, UserStatus,
+    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind,
+    UserStatus,
 };
 use super::ids::*;
 use super::input::*;
@@ -64,6 +65,15 @@ pub trait UserRepo: Send + Sync {
     fn list(
         &self,
         status: Option<UserStatus>,
+    ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
+
+    /// Searches active users whose username starts with the given query (prefix match).
+    ///
+    /// Results are ordered by username and limited to `limit` rows.
+    fn search_by_username(
+        &self,
+        query: &str,
+        limit: i64,
     ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
 }
 
@@ -169,6 +179,27 @@ pub trait ConversationRepo: Send + Sync {
         id: ConversationId,
         workspace_id: Option<WorkspaceId>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates the agent mode for a conversation.
+    fn update_agent_mode(
+        &self,
+        id: ConversationId,
+        agent_mode: AgentMode,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Converts a direct conversation to a group conversation.
+    ///
+    /// Fails if the conversation is not currently `direct`.
+    fn convert_to_group(
+        &self,
+        id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Converts a group conversation back to direct (when only owner remains).
+    fn convert_to_direct(
+        &self,
+        id: ConversationId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Message operations.
@@ -249,6 +280,27 @@ pub trait ConversationUserRepo: Send + Sync {
         &self,
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all collaborators with usernames (joins users table).
+    fn list_collaborators(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ConversationUserWithUsername>, AppError>> + Send;
+
+    /// Updates a collaborator's role.
+    fn update_role(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Removes a collaborator from a conversation.
+    fn remove_collaborator(
+        &self,
+        conversation_id: ConversationId,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Tag operations.
@@ -296,6 +348,13 @@ pub trait TagRepo: Send + Sync {
         &self,
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<Vec<Tag>, AppError>> + Send;
+
+    /// Lists all message tags for a conversation, returned as (message_id, tag) pairs.
+    /// Lists tags for a set of messages.
+    fn list_by_message_ids(
+        &self,
+        message_ids: &[MessageId],
+    ) -> impl Future<Output = Result<Vec<(MessageId, Tag)>, AppError>> + Send;
 }
 
 /// Scheduled job operations.

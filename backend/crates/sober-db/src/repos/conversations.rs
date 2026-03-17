@@ -3,7 +3,7 @@
 use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
-    Conversation, ConversationId, ConversationKind, ConversationWithDetails,
+    AgentMode, Conversation, ConversationId, ConversationKind, ConversationWithDetails,
     ListConversationsFilter, Tag, UserId, WorkspaceId,
 };
 use sqlx::PgPool;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::rows::ConversationRow;
 
 /// Column list for conversation queries.
-const CONV_COLUMNS: &str = "id, user_id, title, workspace_id, kind, is_archived, \
+const CONV_COLUMNS: &str = "id, user_id, title, workspace_id, kind, agent_mode, is_archived, \
                              permission_mode, created_at, updated_at";
 
 /// PostgreSQL-backed conversation repository.
@@ -205,7 +205,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
     ) -> Result<Vec<ConversationWithDetails>, AppError> {
         // Build the main query dynamically.
         let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
-            "SELECT c.id, c.user_id, c.title, c.workspace_id, c.kind, c.is_archived, \
+            "SELECT c.id, c.user_id, c.title, c.workspace_id, c.kind, c.agent_mode, c.is_archived, \
              c.permission_mode, c.created_at, c.updated_at, \
              COALESCE(cu.unread_count, 0) AS unread_count \
              FROM conversations c \
@@ -222,8 +222,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
             qb.push_bind(*user_id.as_uuid());
         }
 
-        qb.push(" WHERE c.user_id = ");
-        qb.push_bind(*user_id.as_uuid());
+        qb.push(" WHERE cu.user_id IS NOT NULL");
 
         if let Some(archived) = filter.archived {
             qb.push(" AND c.is_archived = ");
@@ -308,6 +307,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                             .workspace_id
                             .map(sober_core::types::WorkspaceId::from_uuid),
                         kind: r.kind,
+                        agent_mode: r.agent_mode,
                         is_archived: r.is_archived,
                         permission_mode,
                         created_at: r.created_at,
@@ -405,6 +405,59 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         if result.rows_affected() == 0 {
             return Err(AppError::NotFound("conversation".into()));
         }
+
+        Ok(())
+    }
+
+    async fn update_agent_mode(
+        &self,
+        id: ConversationId,
+        agent_mode: AgentMode,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET agent_mode = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .bind(agent_mode)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
+
+    async fn convert_to_group(&self, id: ConversationId) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET kind = 'group', updated_at = now() \
+             WHERE id = $1 AND kind = 'direct'",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::Validation(
+                "conversation is not a direct conversation".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn convert_to_direct(&self, id: ConversationId) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE conversations SET kind = 'direct', agent_mode = 'always', updated_at = now() \
+             WHERE id = $1 AND kind = 'group'",
+        )
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(())
     }

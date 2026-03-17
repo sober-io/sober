@@ -21,7 +21,7 @@ use sober_agent::tools::{
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_core::types::tool::Tool;
-use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, create_pool};
+use sober_db::{PgConversationRepo, PgMcpServerRepo, PgMessageRepo, PgUserRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
@@ -58,6 +58,7 @@ async fn main() -> Result<()> {
     let message_repo = Arc::new(PgMessageRepo::new(pool.clone()));
     let conversation_repo = Arc::new(PgConversationRepo::new(pool.clone()));
     let mcp_server_repo = Arc::new(PgMcpServerRepo::new(pool.clone()));
+    let user_repo = Arc::new(PgUserRepo::new(pool.clone()));
 
     // 5. Create LLM engine
     let llm: Arc<dyn sober_llm::LlmEngine> =
@@ -165,6 +166,7 @@ async fn main() -> Result<()> {
         message_repo,
         conversation_repo,
         mcp_server_repo,
+        user_repo,
         agent_config,
         config.memory.clone(),
         Some(registrar),

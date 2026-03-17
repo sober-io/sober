@@ -8,6 +8,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { formatRelativeTime } from '$lib/utils/time';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	interface Props {
 		children: Snippet;
@@ -19,6 +20,7 @@
 
 	// Per-conversation context menu state: stores the id of the open menu
 	let openMenuId = $state<string | null>(null);
+	let deleteConfirmId = $state<string | null>(null);
 
 	const activeId = $derived($page.params.id ?? '');
 
@@ -83,10 +85,15 @@
 		}
 	};
 
-	const handleDelete = async (id: string) => {
+	const handleDelete = (id: string) => {
 		openMenuId = null;
-		const confirmed = confirm('Delete this conversation? This cannot be undone.');
-		if (!confirmed) return;
+		deleteConfirmId = id;
+	};
+
+	const confirmDelete = async () => {
+		if (!deleteConfirmId) return;
+		const id = deleteConfirmId;
+		deleteConfirmId = null;
 		try {
 			await conversationService.delete(id);
 			conversations.remove(id);
@@ -99,8 +106,12 @@
 	};
 </script>
 
-<!-- Close context menu on outside click -->
-<svelte:window onclick={() => (openMenuId = null)} />
+<!-- Close menus on outside click -->
+<svelte:window
+	onclick={() => {
+		openMenuId = null;
+	}}
+/>
 
 <div class="flex h-screen bg-white dark:bg-zinc-950">
 	<!-- Mobile sidebar toggle -->
@@ -162,13 +173,15 @@
 			{#if conversations.loading}
 				<div class="p-4 text-sm text-zinc-500 dark:text-zinc-400">Loading...</div>
 			{:else}
-				<!-- New chat button -->
-				<button
-					onclick={createConversation}
-					class="mx-3 mt-3 mb-2 rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-				>
-					+ New chat
-				</button>
+				<!-- New conversation button -->
+				<div class="mx-3 mt-3 mb-2">
+					<button
+						onclick={createConversation}
+						class="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-200 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+					>
+						+ New chat
+					</button>
+				</div>
 
 				<!-- Inbox — pinned above conversation list, never scrolls -->
 				{#if conversations.inbox}
@@ -228,6 +241,22 @@
 							>
 								<!-- Title row: title + unread badge -->
 								<div class="flex items-center gap-1.5">
+									{#if conv.kind === 'group'}
+										<svg
+											class="h-3.5 w-3.5 shrink-0 text-zinc-400 dark:text-zinc-500"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+											/>
+										</svg>
+									{/if}
 									<span class="min-w-0 flex-1 truncate font-medium">
 										{conv.title || 'New conversation'}
 									</span>
@@ -399,3 +428,13 @@
 		{@render children()}
 	</main>
 </div>
+
+<ConfirmDialog
+	open={deleteConfirmId !== null}
+	title="Delete conversation"
+	message="This will permanently delete this conversation and all messages. This cannot be undone."
+	confirmText="Delete"
+	destructive
+	onConfirm={confirmDelete}
+	onCancel={() => (deleteConfirmId = null)}
+/>

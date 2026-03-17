@@ -8,7 +8,8 @@ export interface User {
 }
 
 export type ConversationKind = 'direct' | 'group' | 'inbox';
-export type ConversationUserRole = 'owner' | 'member';
+export type ConversationUserRole = 'owner' | 'admin' | 'member';
+export type AgentMode = 'always' | 'mention' | 'silent';
 
 export interface Tag {
 	id: string;
@@ -25,6 +26,15 @@ export interface ConversationUser {
 	joined_at: string;
 }
 
+export interface Collaborator {
+	conversation_id: string;
+	user_id: string;
+	username: string;
+	unread_count: number;
+	role: ConversationUserRole;
+	joined_at: string;
+}
+
 export interface Conversation {
 	id: string;
 	title: string | null;
@@ -32,6 +42,7 @@ export interface Conversation {
 	kind: ConversationKind;
 	is_archived: boolean;
 	permission_mode: PermissionMode;
+	agent_mode: AgentMode;
 	unread_count: number;
 	tags: Tag[];
 	created_at: string;
@@ -40,12 +51,14 @@ export interface Conversation {
 
 export interface Message {
 	id: string;
-	role: 'user' | 'assistant' | 'system' | 'tool';
+	role: 'user' | 'assistant' | 'system' | 'tool' | 'event';
 	content: string;
 	tool_calls?: unknown;
 	tool_result?: unknown;
 	token_count: number;
 	user_id?: string;
+	metadata?: Record<string, unknown>;
+	tags?: Tag[];
 	created_at: string;
 }
 
@@ -98,6 +111,7 @@ export type ClientWsMessage =
 export type ServerWsMessage =
 	| { type: 'chat.delta'; conversation_id: string; content: string }
 	| { type: 'chat.thinking'; conversation_id: string; content: string }
+	| { type: 'chat.agent_typing'; conversation_id: string }
 	| { type: 'chat.tool_use'; conversation_id: string; tool_call: { name: string; input: unknown } }
 	| {
 			type: 'chat.tool_result';
@@ -113,6 +127,8 @@ export type ServerWsMessage =
 			role: string;
 			content: string;
 			source: string;
+			user_id?: string;
+			username?: string;
 	  }
 	| { type: 'chat.title'; conversation_id: string; title: string }
 	| { type: 'chat.error'; conversation_id: string; error: string }
@@ -126,6 +142,14 @@ export type ServerWsMessage =
 			reason: string;
 	  }
 	| { type: 'chat.unread'; conversation_id: string; unread_count: number }
+	| {
+			type: 'chat.collaborator_added';
+			conversation_id: string;
+			user: { id: string; username: string };
+			role: string;
+	  }
+	| { type: 'chat.collaborator_removed'; conversation_id: string; user_id: string }
+	| { type: 'chat.role_changed'; conversation_id: string; user_id: string; role: string }
 	| { type: 'pong' };
 
 export type PermissionMode = 'interactive' | 'policy_based' | 'autonomous';
