@@ -31,7 +31,8 @@ const SYSTEM_JOBS: &[fn() -> SystemJobDef] = &[
     },
     || SystemJobDef {
         name: "trait_evolution_check",
-        schedule: "0 3 * * *",
+        // 7-field cron: sec min hour dom month dow year
+        schedule: "0 0 3 * * * *",
         payload: JobPayload::Prompt {
             text: "Review interaction patterns across users. Propose SOUL.md \
                    trait adjustments if high-confidence patterns detected."
@@ -42,14 +43,15 @@ const SYSTEM_JOBS: &[fn() -> SystemJobDef] = &[
     },
     || SystemJobDef {
         name: "plugin_audit",
-        schedule: "0 4 * * MON",
+        // 7-field cron: sec min hour dom month dow year (dow: 1=Sun..7=Sat)
+        schedule: "0 0 4 * * 2 *",
         payload: JobPayload::Internal {
             operation: InternalOp::PluginAudit,
         },
     },
     || SystemJobDef {
         name: "vector_index_optimize",
-        schedule: "0 2 * * SUN",
+        schedule: "0 0 2 * * 1 *",
         payload: JobPayload::Internal {
             operation: InternalOp::VectorIndexOptimize,
         },
