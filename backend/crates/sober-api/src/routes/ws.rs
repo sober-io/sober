@@ -388,55 +388,48 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .await;
                 }
 
-                // Call HandleMessage RPC — broadcasts user message + typing
-                // indicator once we have the real message_id from the agent.
+                // Broadcast the user's message to all other subscribers
+                // so group members see it in real-time.
+                let user_msg = ServerWsMessage::ChatNewMessage {
+                    conversation_id: conversation_id.clone(),
+                    message_id: uuid::Uuid::now_v7().to_string(),
+                    role: "user".into(),
+                    content: content.clone(),
+                    source: sober_core::types::access::TriggerKind::Human,
+                    user_id: Some(user_id.to_string()),
+                    username: Some(username.clone()),
+                };
+                state.connections.send(&conversation_id, user_msg).await;
+
+                // Notify all subscribers that the agent is processing.
+                state
+                    .connections
+                    .send(
+                        &conversation_id,
+                        ServerWsMessage::ChatAgentTyping {
+                            conversation_id: conversation_id.clone(),
+                        },
+                    )
+                    .await;
+
+                // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();
                 let request = proto::HandleMessageRequest {
                     user_id: user_id.to_string(),
                     conversation_id: conversation_id.clone(),
-                    content: content.clone(),
+                    content,
                 };
 
                 let conv_id = conversation_id.clone();
-                let conn_registry = state.connections.clone();
                 let error_tx = out_tx.clone();
-                let uid = user_id.to_string();
-                let uname = username.clone();
                 tokio::spawn(async move {
-                    match agent_client.handle_message(request).await {
-                        Ok(resp) => {
-                            let resp = resp.into_inner();
-                            // Broadcast user message with the real DB message_id.
-                            let user_msg = ServerWsMessage::ChatNewMessage {
-                                conversation_id: conv_id.clone(),
-                                message_id: resp.message_id,
-                                role: "user".into(),
-                                content,
-                                source: sober_core::types::access::TriggerKind::Human,
-                                user_id: Some(uid),
-                                username: Some(uname),
-                            };
-                            conn_registry.send(&conv_id, user_msg).await;
-
-                            // Notify subscribers that the agent is processing.
-                            let typing_cid = conv_id.clone();
-                            conn_registry
-                                .send(
-                                    &conv_id,
-                                    ServerWsMessage::ChatAgentTyping {
-                                        conversation_id: typing_cid,
-                                    },
-                                )
-                                .await;
-                        }
-                        Err(e) => {
-                            let _ = error_tx
-                                .send(ServerWsMessage::ChatError {
-                                    conversation_id: conv_id,
-                                    error: e.message().to_owned(),
-                                })
-                                .await;
-                        }
+                    if let Err(e) = agent_client.handle_message(request).await {
+                        let _ = error_tx
+                            .send(ServerWsMessage::ChatError {
+                                conversation_id: conv_id,
+                                error: e.message().to_owned(),
+                            })
+                            .await;
                     }
                 });
             }
