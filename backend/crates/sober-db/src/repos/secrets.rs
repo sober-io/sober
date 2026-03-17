@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::rows::{EncryptionKeyRow, SecretDbRow, SecretMetadataRow};
 
 /// PostgreSQL-backed secret repository.
+#[derive(Clone)]
 pub struct PgSecretRepo {
     pool: PgPool,
 }

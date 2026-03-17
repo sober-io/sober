@@ -17,6 +17,7 @@ const ARTIFACT_COLS: &str = "id, workspace_id, user_id, kind, state, title, desc
                              reviewed_by, reviewed_at, metadata, created_at, updated_at";
 
 /// PostgreSQL-backed artifact repository.
+#[derive(Clone)]
 pub struct PgArtifactRepo {
     pool: PgPool,
 }

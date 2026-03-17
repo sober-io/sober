@@ -16,12 +16,15 @@ use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
+use sober_core::types::tool::Tool;
+use sober_crypto::envelope::Mek;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
 use sober_workspace::layout::ensure_conversation_dir;
+use sober_workspace::{BlobStore, SnapshotManager};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -30,7 +33,12 @@ use crate::confirm::ConfirmationRegistrar;
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
-use crate::tools::ToolRegistry;
+use crate::tools::{
+    ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
+    DeleteSecretTool, ListArtifactsTool, ListSecretsTool, ListSnapshotsTool, ReadArtifactTool,
+    ReadSecretTool, RestoreSnapshotTool, SecretToolContext, SnapshotToolContext, StoreSecretTool,
+    ToolRegistry,
+};
 
 /// Buffer size for the agent event channel.
 const EVENT_CHANNEL_BUFFER: usize = 64;
@@ -121,6 +129,12 @@ pub struct Agent<R: AgentRepos> {
     registrar: Option<ConfirmationRegistrar>,
     /// Broadcast sender for conversation update events.
     broadcast_tx: ConversationUpdateSender,
+    /// Master encryption key for secret tools (optional — secrets disabled without it).
+    mek: Option<Arc<Mek>>,
+    /// Content-addressed blob store for artifact tools.
+    blob_store: Option<Arc<BlobStore>>,
+    /// Snapshot manager for snapshot tools.
+    snapshot_manager: Option<Arc<SnapshotManager>>,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -137,6 +151,9 @@ impl<R: AgentRepos> Agent<R> {
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
         broadcast_tx: ConversationUpdateSender,
+        mek: Option<Arc<Mek>>,
+        blob_store: Option<Arc<BlobStore>>,
+        snapshot_manager: Option<Arc<SnapshotManager>>,
     ) -> Self {
         Self {
             llm,
@@ -149,12 +166,83 @@ impl<R: AgentRepos> Agent<R> {
             memory_config,
             registrar,
             broadcast_tx,
+            mek,
+            blob_store,
+            snapshot_manager,
         }
     }
 
     /// Returns a reference to the agent's [`Mind`] instance.
     pub fn mind(&self) -> &Arc<Mind> {
         &self.mind
+    }
+
+    /// Builds an extended [`ToolRegistry`] that includes per-conversation tools
+    /// (secrets, artifacts, snapshots) alongside the static built-in tools.
+    ///
+    /// Secret tools are added when a MEK is configured. Artifact and snapshot
+    /// tools are added when the conversation is scoped to a workspace.
+    fn build_conversation_tools(
+        &self,
+        user_id: UserId,
+        conversation_id: ConversationId,
+        workspace_id: Option<WorkspaceId>,
+        workspace_dir: Option<&PathBuf>,
+    ) -> Arc<ToolRegistry> {
+        let mut extra_tools: Vec<Arc<dyn Tool>> = Vec::new();
+
+        // Secret tools — available whenever a MEK is configured.
+        if let Some(mek) = &self.mek {
+            let secret_ctx = Arc::new(SecretToolContext {
+                secret_repo: Arc::new(self.repos.secrets().clone()),
+                audit_repo: Arc::new(self.repos.audit_log().clone()),
+                mek: Arc::clone(mek),
+                user_id,
+                conversation_id: Some(conversation_id),
+            });
+            extra_tools.push(Arc::new(StoreSecretTool::new(Arc::clone(&secret_ctx))));
+            extra_tools.push(Arc::new(ReadSecretTool::new(Arc::clone(&secret_ctx))));
+            extra_tools.push(Arc::new(ListSecretsTool::new(Arc::clone(&secret_ctx))));
+            extra_tools.push(Arc::new(DeleteSecretTool::new(secret_ctx)));
+        }
+
+        // Artifact and snapshot tools — only when the conversation has a workspace.
+        if let (Some(ws_id), Some(ws_dir)) = (workspace_id, workspace_dir) {
+            if let Some(blob_store) = &self.blob_store {
+                let artifact_ctx = Arc::new(ArtifactToolContext {
+                    artifact_repo: Arc::new(self.repos.artifacts().clone()),
+                    audit_repo: Arc::new(self.repos.audit_log().clone()),
+                    blob_store: Arc::clone(blob_store),
+                    user_id,
+                    conversation_id,
+                    workspace_id: ws_id,
+                });
+                extra_tools.push(Arc::new(CreateArtifactTool::new(Arc::clone(&artifact_ctx))));
+                extra_tools.push(Arc::new(ListArtifactsTool::new(Arc::clone(&artifact_ctx))));
+                extra_tools.push(Arc::new(ReadArtifactTool::new(Arc::clone(&artifact_ctx))));
+                extra_tools.push(Arc::new(DeleteArtifactTool::new(artifact_ctx)));
+            }
+
+            if let Some(snapshot_mgr) = &self.snapshot_manager {
+                let snapshot_ctx = Arc::new(SnapshotToolContext {
+                    artifact_repo: Arc::new(self.repos.artifacts().clone()),
+                    audit_repo: Arc::new(self.repos.audit_log().clone()),
+                    snapshot_manager: Arc::clone(snapshot_mgr),
+                    conversation_id,
+                    workspace_id: ws_id,
+                    conversation_dir: ws_dir.clone(),
+                });
+                extra_tools.push(Arc::new(CreateSnapshotTool::new(Arc::clone(&snapshot_ctx))));
+                extra_tools.push(Arc::new(ListSnapshotsTool::new(Arc::clone(&snapshot_ctx))));
+                extra_tools.push(Arc::new(RestoreSnapshotTool::new(snapshot_ctx)));
+            }
+        }
+
+        if extra_tools.is_empty() {
+            Arc::clone(&self.tool_registry)
+        } else {
+            Arc::new(self.tool_registry.with_additional(extra_tools))
+        }
     }
 
     /// Resolves which conversation to deliver job results to.
@@ -284,7 +372,15 @@ impl<R: AgentRepos> Agent<R> {
             )));
         }
 
-        // 4. Create event channel and spawn the agentic loop
+        // 4. Build per-conversation tools (secrets, artifacts, snapshots).
+        let tool_registry = self.build_conversation_tools(
+            user_id,
+            conversation_id,
+            conversation.workspace_id,
+            workspace_dir.as_ref(),
+        );
+
+        // 5. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
             mpsc::channel::<Result<AgentEvent, AgentError>>(EVENT_CHANNEL_BUFFER);
 
@@ -293,7 +389,6 @@ impl<R: AgentRepos> Agent<R> {
         let mind = Arc::clone(&self.mind);
         let memory = Arc::clone(&self.memory);
         let context_loader = Arc::clone(&self.context_loader);
-        let tool_registry = Arc::clone(&self.tool_registry);
         let repos = Arc::clone(&self.repos);
         let config = self.config.clone();
         let memory_config = self.memory_config.clone();

@@ -382,12 +382,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for RestoreSnap
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn create_snapshot_metadata() {
-        use sober_core::types::tool::Tool;
-
         // We can test metadata without needing real repos.
         // Use a type-erased check via the trait object — not possible without
         // concrete repos, so we just verify the schema constants.
