@@ -15,12 +15,9 @@ use sober_agent::agent::{Agent, AgentConfig};
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
-use sober_agent::tools::{
-    FetchUrlTool, RecallTool, RememberTool, SchedulerTools, ShellTool, ToolRegistry, WebSearchTool,
-};
+use sober_agent::tools::ToolBootstrap;
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
-use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
 use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
@@ -92,11 +89,7 @@ async fn main() -> Result<()> {
     let soul_resolver = SoulResolver::new(base_soul_path, user_soul_path, workspace_soul_path);
     let mind = Arc::new(Mind::new(soul_resolver));
 
-    // 9. Create tool registry with built-in tools
-    //
-    // The ShellTool uses a default workspace path and policy-based permission
-    // mode. In production these will be derived from the workspace config per
-    // conversation; for now we use sensible defaults.
+    // 9. Resolve workspace and sandbox configuration
     let workspace_root = PathBuf::from(
         std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
     );
@@ -114,15 +107,6 @@ async fn main() -> Result<()> {
         .join(sober_workspace::SOBER_DIR)
         .join("snapshots");
     let snapshot_manager = Arc::new(sober_workspace::SnapshotManager::new(snapshot_dir));
-    let shell_tool = ShellTool::new(
-        command_policy,
-        Arc::clone(&shared_permission_mode),
-        workspace_root.clone(),
-        sandbox_policy,
-        true, // auto_snapshot
-        None, // max_snapshots (uses default; overridden by workspace config)
-        Some((*snapshot_manager).clone()),
-    );
 
     // 10. Load optional MEK for secret encryption
     let mek: Option<Arc<Mek>> = config.crypto.master_encryption_key.as_ref().map(|hex| {
@@ -144,32 +128,33 @@ async fn main() -> Result<()> {
     // 12. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
-    let builtins: Vec<Arc<dyn Tool>> = vec![
-        Arc::new(WebSearchTool::new(config.searxng.url.clone())),
-        Arc::new(FetchUrlTool::new()),
-        Arc::new(shell_tool),
-        Arc::new(SchedulerTools::new(Arc::clone(&scheduler_client))),
-        Arc::new(RecallTool::new(
-            Arc::clone(&memory),
-            Arc::clone(&llm),
-            config.memory.clone(),
-        )),
-        Arc::new(RememberTool::new(
-            Arc::clone(&memory),
-            Arc::clone(&llm),
-            config.memory.clone(),
-        )),
-    ];
-    let tool_registry = Arc::new(ToolRegistry::with_builtins(builtins));
+    // 13. Create ToolBootstrap — centralized tool construction for all turns
+    let tool_bootstrap = Arc::new(ToolBootstrap {
+        command_policy,
+        permission_mode: Arc::clone(&shared_permission_mode),
+        default_workspace_root: workspace_root,
+        sandbox_policy,
+        searxng_url: config.searxng.url.clone(),
+        scheduler_client: Arc::clone(&scheduler_client),
+        memory: Arc::clone(&memory),
+        llm: Arc::clone(&llm),
+        memory_config: config.memory.clone(),
+        auto_snapshot: true,
+        max_snapshots: None,
+        repos: Arc::clone(&repos),
+        mek: mek.clone(),
+        blob_store,
+        snapshot_manager,
+    });
 
-    // 13. Create broadcast channel for conversation update events
+    // 14. Create broadcast channel for conversation update events
     let (broadcast_tx, _broadcast_rx) = sober_agent::broadcast::create_broadcast_channel();
 
-    // 14. Create confirmation broker
+    // 15. Create confirmation broker
     let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
     let registrar = confirmation_broker.registrar();
 
-    // 15. Create Agent
+    // 16. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -182,22 +167,20 @@ async fn main() -> Result<()> {
         mind,
         memory,
         context_loader,
-        tool_registry,
         repos,
         agent_config,
         config.memory.clone(),
         Some(registrar),
         broadcast_tx.clone(),
         mek,
-        Some(blob_store),
-        Some(snapshot_manager),
         Some(config.llm.clone()),
+        tool_bootstrap,
     ));
 
-    // 16. Spawn the confirmation broker loop
+    // 17. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 17. Connect to scheduler gRPC service (background — retries until available)
+    // 18. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     tokio::spawn(async move {
@@ -211,7 +194,7 @@ async fn main() -> Result<()> {
         broadcast_tx,
     );
 
-    // 18. Bind to Unix domain socket
+    // 19. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -235,7 +218,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 19. Serve with graceful shutdown
+    // 20. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())

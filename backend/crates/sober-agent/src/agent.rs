@@ -16,7 +16,6 @@ use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
-use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
@@ -24,7 +23,6 @@ use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, Store
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
 use sober_workspace::layout::ensure_conversation_dir;
-use sober_workspace::{BlobStore, SnapshotManager};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -33,12 +31,7 @@ use crate::confirm::ConfirmationRegistrar;
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::stream::{AgentEvent, AgentResponseStream, Usage};
-use crate::tools::{
-    ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
-    DeleteSecretTool, ListArtifactsTool, ListSecretsTool, ListSnapshotsTool, ReadArtifactTool,
-    ReadSecretTool, RestoreSnapshotTool, SecretToolContext, SnapshotToolContext, StoreSecretTool,
-    ToolRegistry,
-};
+use crate::tools::{ToolBootstrap, ToolRegistry, TurnContext};
 
 /// Buffer size for the agent event channel.
 const EVENT_CHANNEL_BUFFER: usize = 64;
@@ -108,9 +101,6 @@ struct LoopContext<'a, R: AgentRepos> {
     trigger: TriggerKind,
     /// The kind of conversation (direct vs group) — used for prompt assembly.
     conversation_kind: ConversationKind,
-    /// Resolved workspace directory for shell tool cwd, if this conversation
-    /// is scoped to a workspace.
-    workspace_dir: Option<PathBuf>,
     /// Workspace ID from the conversation (for audit logging).
     workspace_id: Option<WorkspaceId>,
     /// LLM config for constructing dynamic engines from resolved user keys.
@@ -127,7 +117,6 @@ pub struct Agent<R: AgentRepos> {
     mind: Arc<Mind>,
     memory: Arc<MemoryStore>,
     context_loader: Arc<ContextLoader<R::Msg>>,
-    tool_registry: Arc<ToolRegistry>,
     repos: Arc<R>,
     config: AgentConfig,
     memory_config: MemoryConfig,
@@ -135,14 +124,13 @@ pub struct Agent<R: AgentRepos> {
     registrar: Option<ConfirmationRegistrar>,
     /// Broadcast sender for conversation update events.
     broadcast_tx: ConversationUpdateSender,
-    /// Master encryption key for secret tools (optional — secrets disabled without it).
+    /// Master encryption key for resolving user-stored LLM keys.
     mek: Option<Arc<Mek>>,
-    /// Content-addressed blob store for artifact tools.
-    blob_store: Option<Arc<BlobStore>>,
-    /// Snapshot manager for snapshot tools.
-    snapshot_manager: Option<Arc<SnapshotManager>>,
     /// LLM config for constructing dynamic engines from resolved keys.
     llm_config: Option<LlmConfig>,
+    /// Centralized tool construction — builds a complete [`ToolRegistry`]
+    /// per conversation turn with the correct workspace paths and scoped tools.
+    tool_bootstrap: Arc<ToolBootstrap<R>>,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -153,32 +141,28 @@ impl<R: AgentRepos> Agent<R> {
         mind: Arc<Mind>,
         memory: Arc<MemoryStore>,
         context_loader: Arc<ContextLoader<R::Msg>>,
-        tool_registry: Arc<ToolRegistry>,
         repos: Arc<R>,
         config: AgentConfig,
         memory_config: MemoryConfig,
         registrar: Option<ConfirmationRegistrar>,
         broadcast_tx: ConversationUpdateSender,
         mek: Option<Arc<Mek>>,
-        blob_store: Option<Arc<BlobStore>>,
-        snapshot_manager: Option<Arc<SnapshotManager>>,
         llm_config: Option<LlmConfig>,
+        tool_bootstrap: Arc<ToolBootstrap<R>>,
     ) -> Self {
         Self {
             llm,
             mind,
             memory,
             context_loader,
-            tool_registry,
             repos,
             config,
             memory_config,
             registrar,
             broadcast_tx,
             mek,
-            blob_store,
-            snapshot_manager,
             llm_config,
+            tool_bootstrap,
         }
     }
 
@@ -187,72 +171,22 @@ impl<R: AgentRepos> Agent<R> {
         &self.mind
     }
 
-    /// Builds an extended [`ToolRegistry`] that includes per-conversation tools
-    /// (secrets, artifacts, snapshots) alongside the static built-in tools.
-    ///
-    /// Secret tools are added when a MEK is configured. Artifact and snapshot
-    /// tools are added when the conversation is scoped to a workspace.
-    fn build_conversation_tools(
+    /// Builds a [`ToolRegistry`] for the given conversation turn via the
+    /// centralized [`ToolBootstrap`].
+    fn build_turn_tools(
         &self,
         user_id: UserId,
         conversation_id: ConversationId,
         workspace_id: Option<WorkspaceId>,
-        workspace_dir: Option<&PathBuf>,
+        workspace_dir: Option<PathBuf>,
     ) -> Arc<ToolRegistry> {
-        let mut extra_tools: Vec<Arc<dyn Tool>> = Vec::new();
-
-        // Secret tools — available whenever a MEK is configured.
-        if let Some(mek) = &self.mek {
-            let secret_ctx = Arc::new(SecretToolContext {
-                secret_repo: Arc::new(self.repos.secrets().clone()),
-                audit_repo: Arc::new(self.repos.audit_log().clone()),
-                mek: Arc::clone(mek),
-                user_id,
-                conversation_id: Some(conversation_id),
-            });
-            extra_tools.push(Arc::new(StoreSecretTool::new(Arc::clone(&secret_ctx))));
-            extra_tools.push(Arc::new(ReadSecretTool::new(Arc::clone(&secret_ctx))));
-            extra_tools.push(Arc::new(ListSecretsTool::new(Arc::clone(&secret_ctx))));
-            extra_tools.push(Arc::new(DeleteSecretTool::new(secret_ctx)));
-        }
-
-        // Artifact and snapshot tools — only when the conversation has a workspace.
-        if let (Some(ws_id), Some(ws_dir)) = (workspace_id, workspace_dir) {
-            if let Some(blob_store) = &self.blob_store {
-                let artifact_ctx = Arc::new(ArtifactToolContext {
-                    artifact_repo: Arc::new(self.repos.artifacts().clone()),
-                    audit_repo: Arc::new(self.repos.audit_log().clone()),
-                    blob_store: Arc::clone(blob_store),
-                    user_id,
-                    conversation_id,
-                    workspace_id: ws_id,
-                });
-                extra_tools.push(Arc::new(CreateArtifactTool::new(Arc::clone(&artifact_ctx))));
-                extra_tools.push(Arc::new(ListArtifactsTool::new(Arc::clone(&artifact_ctx))));
-                extra_tools.push(Arc::new(ReadArtifactTool::new(Arc::clone(&artifact_ctx))));
-                extra_tools.push(Arc::new(DeleteArtifactTool::new(artifact_ctx)));
-            }
-
-            if let Some(snapshot_mgr) = &self.snapshot_manager {
-                let snapshot_ctx = Arc::new(SnapshotToolContext {
-                    artifact_repo: Arc::new(self.repos.artifacts().clone()),
-                    audit_repo: Arc::new(self.repos.audit_log().clone()),
-                    snapshot_manager: Arc::clone(snapshot_mgr),
-                    conversation_id,
-                    workspace_id: ws_id,
-                    conversation_dir: ws_dir.clone(),
-                });
-                extra_tools.push(Arc::new(CreateSnapshotTool::new(Arc::clone(&snapshot_ctx))));
-                extra_tools.push(Arc::new(ListSnapshotsTool::new(Arc::clone(&snapshot_ctx))));
-                extra_tools.push(Arc::new(RestoreSnapshotTool::new(snapshot_ctx)));
-            }
-        }
-
-        if extra_tools.is_empty() {
-            Arc::clone(&self.tool_registry)
-        } else {
-            Arc::new(self.tool_registry.with_additional(extra_tools))
-        }
+        let ctx = TurnContext {
+            user_id,
+            conversation_id,
+            workspace_id,
+            workspace_dir,
+        };
+        Arc::new(self.tool_bootstrap.build(&ctx))
     }
 
     /// Resolves which conversation to deliver job results to.
@@ -441,12 +375,12 @@ impl<R: AgentRepos> Agent<R> {
             )));
         }
 
-        // 4. Build per-conversation tools (secrets, artifacts, snapshots).
-        let tool_registry = self.build_conversation_tools(
+        // 4. Build per-conversation tools via ToolBootstrap.
+        let tool_registry = self.build_turn_tools(
             user_id,
             conversation_id,
             conversation.workspace_id,
-            workspace_dir.as_ref(),
+            workspace_dir.clone(),
         );
 
         // 5. Create event channel and spawn the agentic loop
@@ -488,7 +422,6 @@ impl<R: AgentRepos> Agent<R> {
                 registrar: registrar.as_ref(),
                 trigger,
                 conversation_kind,
-                workspace_dir,
                 workspace_id,
                 llm_config: &llm_config,
                 mek: &mek,
@@ -748,7 +681,6 @@ impl<R: AgentRepos> Agent<R> {
                         user_id,
                         conversation_id,
                         repos,
-                        ctx.workspace_dir.as_ref(),
                         ctx.workspace_id,
                     )
                     .await;
@@ -957,7 +889,6 @@ impl<R: AgentRepos> Agent<R> {
         user_id: UserId,
         conversation_id: ConversationId,
         repos: &Arc<R>,
-        workspace_dir: Option<&PathBuf>,
         workspace_id: Option<WorkspaceId>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
@@ -991,14 +922,6 @@ impl<R: AgentRepos> Agent<R> {
                 // TODO: resolve from RoleRepo when RBAC is wired into the agent
                 map.entry("is_admin")
                     .or_insert(serde_json::Value::Bool(false));
-            }
-
-            // Inject workspace directory as shell tool working directory.
-            if tool_name == "shell"
-                && let Some(dir) = workspace_dir
-            {
-                tool_input["workdir_override"] =
-                    serde_json::Value::String(dir.to_string_lossy().to_string());
             }
 
             let tool_internal = tool_registry

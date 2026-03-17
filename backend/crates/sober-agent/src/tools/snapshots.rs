@@ -103,6 +103,11 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> CreateSnapshotTool<A, Au> {
         let snapshot_path = snapshot.path.to_string_lossy().to_string();
 
         // Persist as an inline artifact so it can be listed and restored later.
+        //
+        // Snapshots are stored as filesystem paths in inline_content.
+        // The actual tar archive lives at this path, managed by SnapshotManager.
+        // Unlike blob artifacts, snapshots are not content-addressed — they're
+        // workspace-local files tied to the SnapshotManager's directory.
         let artifact = self
             .ctx
             .artifact_repo

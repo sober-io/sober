@@ -77,13 +77,7 @@ impl ShellTool {
         }
     }
 
-    async fn execute_inner(&self, mut input: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        // Extract agent-injected workdir_override before deserializing into ShellInput.
-        let workdir_override = input
-            .as_object_mut()
-            .and_then(|obj| obj.remove("workdir_override"))
-            .and_then(|v| v.as_str().map(PathBuf::from));
-
+    async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let input: ShellInput = serde_json::from_value(input)
             .map_err(|e| ToolError::InvalidInput(format!("invalid input: {e}")))?;
 
@@ -146,11 +140,9 @@ impl ShellTool {
             }
         }
 
-        // Determine working directory: agent-injected override takes precedence,
-        // then user-specified relative path, then default workspace home.
-        let workdir = if let Some(ov) = workdir_override {
-            ov
-        } else if let Some(ref wd) = input.workdir {
+        // Determine working directory: user-specified relative path, or the
+        // default workspace home (set per-turn by ToolBootstrap).
+        let workdir = if let Some(ref wd) = input.workdir {
             self.workspace_home.join(wd)
         } else {
             self.workspace_home.clone()

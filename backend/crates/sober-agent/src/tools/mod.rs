@@ -21,6 +21,7 @@
 //! - [`RestoreSnapshotTool`](snapshots::RestoreSnapshotTool) — restore from snapshot
 
 pub mod artifacts;
+pub mod bootstrap;
 pub mod fetch_url;
 pub mod memory;
 pub mod registry;
@@ -34,6 +35,7 @@ pub use artifacts::{
     ArtifactToolContext, CreateArtifactTool, DeleteArtifactTool, ListArtifactsTool,
     ReadArtifactTool,
 };
+pub use bootstrap::{ToolBootstrap, TurnContext};
 pub use fetch_url::FetchUrlTool;
 pub use memory::{RecallTool, RememberTool};
 pub use registry::ToolRegistry;
