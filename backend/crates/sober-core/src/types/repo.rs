@@ -652,6 +652,7 @@ pub trait SecretRepo: Send + Sync {
     fn list_secrets(
         &self,
         user_id: UserId,
+        conversation_id: Option<ConversationId>,
         secret_type: Option<&str>,
     ) -> impl Future<Output = Result<Vec<SecretMetadata>, AppError>> + Send;
 
@@ -665,6 +666,7 @@ pub trait SecretRepo: Send + Sync {
     fn get_secret_by_name(
         &self,
         user_id: UserId,
+        conversation_id: Option<ConversationId>,
         name: &str,
     ) -> impl Future<Output = Result<Option<SecretRow>, AppError>> + Send;
 
@@ -688,5 +690,6 @@ pub trait SecretRepo: Send + Sync {
     fn list_secret_ids(
         &self,
         user_id: UserId,
+        conversation_id: Option<ConversationId>,
     ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
 }
