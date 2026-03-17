@@ -1232,52 +1232,93 @@ impl<R: AgentRepos> Agent<R> {
 
 /// Converts domain [`DomainMessage`] values to LLM [`LlmMessage`] values.
 pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
-    msgs.iter()
-        // Skip empty assistant messages — the API rejects them.
-        // But keep assistant messages that have tool_calls (content may be empty).
-        .filter(|m| {
-            !(m.role == MessageRole::Assistant && m.content.is_empty() && m.tool_calls.is_none())
-        })
-        // Skip event messages — they are not forwarded to the LLM.
-        .filter(|m| m.role != MessageRole::Event)
-        .map(|m| {
-            let role = match m.role {
-                MessageRole::System => "system",
-                MessageRole::User => "user",
-                MessageRole::Assistant => "assistant",
-                MessageRole::Tool => "tool",
-                MessageRole::Event => unreachable!("event messages filtered above"),
-            };
+    use std::collections::HashSet;
 
-            // Restore tool_calls on assistant messages (stored as JSONB).
-            let tool_calls = if m.role == MessageRole::Assistant {
-                m.tool_calls
-                    .as_ref()
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-            } else {
-                None
-            };
+    let mut result: Vec<LlmMessage> = Vec::with_capacity(msgs.len());
+    // Track which tool_call_ids are pending (from assistant messages).
+    let mut pending_tool_ids: HashSet<String> = HashSet::new();
 
-            // Restore tool_call_id on tool messages from the tool_result JSONB.
-            let tool_call_id = if m.role == MessageRole::Tool {
-                m.tool_result
-                    .as_ref()
-                    .and_then(|v| v.get("tool_call_id"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_owned())
-            } else {
-                None
-            };
+    for m in msgs {
+        // Skip empty assistant messages without tool_calls.
+        if m.role == MessageRole::Assistant && m.content.is_empty() && m.tool_calls.is_none() {
+            continue;
+        }
+        // Skip event messages.
+        if m.role == MessageRole::Event {
+            continue;
+        }
 
-            LlmMessage {
-                role: role.to_owned(),
-                content: Some(m.content.clone()),
-                reasoning_content: None,
-                tool_calls,
-                tool_call_id,
+        let role = match m.role {
+            MessageRole::System => "system",
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::Tool => "tool",
+            MessageRole::Event => unreachable!(),
+        };
+
+        // Restore tool_calls on assistant messages.
+        let tool_calls: Option<Vec<LlmToolCall>> = if m.role == MessageRole::Assistant {
+            m.tool_calls
+                .as_ref()
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        } else {
+            None
+        };
+
+        // Track pending tool_call_ids from assistant messages.
+        if let Some(ref tcs) = tool_calls {
+            for tc in tcs {
+                pending_tool_ids.insert(tc.id.clone());
             }
-        })
-        .collect()
+        }
+
+        // When a non-tool message arrives and there are still pending tool_call_ids,
+        // the sequence is broken (e.g., user interrupted). Drop the pending assistant
+        // message's tool_calls by replacing the last assistant message.
+        if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
+            // Remove unmatched tool_calls from the preceding assistant message.
+            if let Some(last) = result.last_mut() {
+                if last.role == "assistant" && last.tool_calls.is_some() {
+                    last.tool_calls = None;
+                }
+            }
+            pending_tool_ids.clear();
+        }
+
+        // Restore tool_call_id on tool messages.
+        let tool_call_id = if m.role == MessageRole::Tool {
+            m.tool_result
+                .as_ref()
+                .and_then(|v| v.get("tool_call_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_owned())
+        } else {
+            None
+        };
+
+        // Skip orphaned tool messages (no matching pending tool_call_id).
+        if m.role == MessageRole::Tool {
+            match &tool_call_id {
+                Some(id) if pending_tool_ids.remove(id) => {
+                    // Matched — keep this tool message.
+                }
+                _ => {
+                    // Orphaned tool message — skip it.
+                    continue;
+                }
+            }
+        }
+
+        result.push(LlmMessage {
+            role: role.to_owned(),
+            content: Some(m.content.clone()),
+            reasoning_content: None,
+            tool_calls,
+            tool_call_id,
+        });
+    }
+
+    result
 }
 
 /// Formats loaded memory context into a human-readable string for inclusion
@@ -1372,15 +1413,14 @@ mod tests {
         ];
 
         let llm_msgs = domain_to_llm_messages(&domain_msgs);
-        assert_eq!(llm_msgs.len(), 4);
+        // Tool message is orphaned (no preceding assistant tool_call), so it's dropped.
+        assert_eq!(llm_msgs.len(), 3);
         assert_eq!(llm_msgs[0].role, "system");
         assert_eq!(llm_msgs[0].content.as_deref(), Some("You are helpful."));
         assert_eq!(llm_msgs[1].role, "user");
         assert_eq!(llm_msgs[1].content.as_deref(), Some("Hello!"));
         assert_eq!(llm_msgs[2].role, "assistant");
         assert_eq!(llm_msgs[2].content.as_deref(), Some("Hi there."));
-        assert_eq!(llm_msgs[3].role, "tool");
-        assert_eq!(llm_msgs[3].content.as_deref(), Some("result"));
     }
 
     #[test]
