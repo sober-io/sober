@@ -5,7 +5,7 @@
 //! → tool execution → response streaming.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use sober_core::config::{LlmConfig, MemoryConfig};
@@ -22,7 +22,7 @@ use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
 use sober_mind::assembly::{Mind, TaskContext};
 use sober_mind::injection::InjectionVerdict;
-use sober_workspace::layout::ensure_conversation_dir;
+
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -331,15 +331,15 @@ impl<R: AgentRepos> Agent<R> {
         let workspace_root_env = std::env::var("WORKSPACE_ROOT")
             .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
 
-        // If conversation has no workspace, create one via sober-workspace.
+        // If conversation has no workspace, create one.
+        // Each conversation gets its own workspace: {WORKSPACE_ROOT}/{conversation_id}/
         let mut conversation = conversation;
         if conversation.workspace_id.is_none() {
-            let ws_id = uuid::Uuid::now_v7();
-            let root_path = format!("{}/{}", workspace_root_env, ws_id);
+            let root_path = format!("{}/{}", workspace_root_env, conversation_id);
             match self
                 .repos
                 .workspaces()
-                .create(user_id, "default", None, &root_path)
+                .create(user_id, &conversation_id.to_string(), None, &root_path)
                 .await
             {
                 Ok(ws) => {
@@ -362,12 +362,13 @@ impl<R: AgentRepos> Agent<R> {
         }
 
         // Resolve workspace directory for shell tool cwd.
+        // Each conversation's workspace root IS the working directory (no subdir nesting).
         let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
             match self.repos.workspaces().get_by_id(ws_id).await {
                 Ok(ws) => {
-                    let root = Path::new(&ws.root_path);
-                    match ensure_conversation_dir(root, conversation_id).await {
-                        Ok(dir) => Some(dir),
+                    let root = PathBuf::from(&ws.root_path);
+                    match tokio::fs::create_dir_all(&root).await {
+                        Ok(()) => Some(root),
                         Err(e) => {
                             warn!(
                                 workspace_id = %ws_id,
