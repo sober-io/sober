@@ -77,7 +77,13 @@ impl ShellTool {
         }
     }
 
-    async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
+    async fn execute_inner(&self, mut input: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        // Extract agent-injected workdir_override before deserializing into ShellInput.
+        let workdir_override = input
+            .as_object_mut()
+            .and_then(|obj| obj.remove("workdir_override"))
+            .and_then(|v| v.as_str().map(PathBuf::from));
+
         let input: ShellInput = serde_json::from_value(input)
             .map_err(|e| ToolError::InvalidInput(format!("invalid input: {e}")))?;
 
@@ -140,8 +146,11 @@ impl ShellTool {
             }
         }
 
-        // Determine working directory
-        let workdir = if let Some(ref wd) = input.workdir {
+        // Determine working directory: agent-injected override takes precedence,
+        // then user-specified relative path, then default workspace home.
+        let workdir = if let Some(ov) = workdir_override {
+            ov
+        } else if let Some(ref wd) = input.workdir {
             self.workspace_home.join(wd)
         } else {
             self.workspace_home.clone()
@@ -151,6 +160,11 @@ impl ShellTool {
         let mut policy = self.sandbox_policy.clone();
         policy.fs_read.push(self.workspace_home.clone());
         policy.fs_write.push(self.workspace_home.clone());
+        // When the resolved workdir is outside workspace_home, grant access.
+        if !workdir.starts_with(&self.workspace_home) {
+            policy.fs_read.push(workdir.clone());
+            policy.fs_write.push(workdir.clone());
+        }
         // System tool paths for read-only access
         for sys_path in ["/usr", "/bin", "/lib", "/lib64", "/etc/alternatives"] {
             let p = PathBuf::from(sys_path);

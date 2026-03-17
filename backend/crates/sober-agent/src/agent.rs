@@ -563,6 +563,7 @@ impl<R: AgentRepos> Agent<R> {
                         user_id,
                         conversation_id,
                         repos,
+                        ctx.workspace_dir.as_ref(),
                     )
                     .await;
 
@@ -770,6 +771,7 @@ impl<R: AgentRepos> Agent<R> {
         user_id: UserId,
         conversation_id: ConversationId,
         repos: &Arc<R>,
+        workspace_dir: Option<&PathBuf>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -804,6 +806,14 @@ impl<R: AgentRepos> Agent<R> {
                     .or_insert(serde_json::Value::Bool(false));
             }
 
+            // Inject workspace directory as shell tool working directory.
+            if tool_name == "shell"
+                && let Some(dir) = workspace_dir
+            {
+                tool_input["workdir_override"] =
+                    serde_json::Value::String(dir.to_string_lossy().to_string());
+            }
+
             let _ = event_tx
                 .send(Ok(AgentEvent::ToolCallStart {
                     name: tool_name.clone(),
@@ -822,7 +832,7 @@ impl<R: AgentRepos> Agent<R> {
 
             let tool_internal = tool_registry
                 .get_tool(tool_name)
-                .map_or(false, |t| t.metadata().internal);
+                .is_some_and(|t| t.metadata().internal);
 
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
