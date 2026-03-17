@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -19,6 +21,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/conversations/{id}/messages", get(list_messages))
+        .route("/conversations/{id}/message-tags", get(list_message_tags))
         .route("/messages/{id}", delete(delete_message))
         .route("/messages/{id}/tags", post(add_message_tag))
         .route("/messages/{id}/tags/{tag_id}", delete(remove_message_tag))
@@ -122,4 +125,27 @@ async fn remove_message_tag(
 
     tag_repo.untag_message(id, tag_id).await?;
     Ok(ApiResponse::new(serde_json::json!({ "removed": true })))
+}
+
+/// `GET /api/v1/conversations/:id/message-tags` — get all message tags for a conversation.
+///
+/// Returns a map of `message_id → [Tag]` for every tagged message in the conversation.
+async fn list_message_tags(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(id): Path<ConversationId>,
+) -> Result<ApiResponse<HashMap<String, Vec<Tag>>>, AppError> {
+    let tag_repo = PgTagRepo::new(state.db.clone());
+
+    // Verify membership.
+    let _membership = super::verify_membership(&state.db, id, auth_user.user_id).await?;
+
+    let pairs = tag_repo.list_by_conversation_messages(id).await?;
+
+    let mut map: HashMap<String, Vec<Tag>> = HashMap::new();
+    for (message_id, tag) in pairs {
+        map.entry(message_id.to_string()).or_default().push(tag);
+    }
+
+    Ok(ApiResponse::new(map))
 }

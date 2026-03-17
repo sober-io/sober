@@ -348,6 +348,12 @@ pub trait TagRepo: Send + Sync {
         &self,
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<Vec<Tag>, AppError>> + Send;
+
+    /// Lists all message tags for a conversation, returned as (message_id, tag) pairs.
+    fn list_by_conversation_messages(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<(MessageId, Tag)>, AppError>> + Send;
 }
 
 /// Scheduled job operations.

@@ -582,6 +582,17 @@ impl From<TagRow> for Tag {
     }
 }
 
+/// Row type for the message_tags join used by `list_by_conversation_messages`.
+#[derive(sqlx::FromRow)]
+pub(crate) struct MessageTagRow {
+    pub message_id: Uuid,
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub color: String,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Row type for the conversation + unread_count join used by `list_with_details`.
 #[derive(sqlx::FromRow)]
 pub(crate) struct ConversationWithUnreadRow {

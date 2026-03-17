@@ -140,7 +140,12 @@
 		permissionMode = data.conversation.permission_mode ?? 'policy_based';
 		messageTags = {};
 		memberMap = {};
-		untrack(() => conversations.markRead(data.conversation.id));
+		untrack(() => {
+			conversations.markRead(data.conversation.id);
+			conversationService.listMessageTags(data.conversation.id).then((tagMap) => {
+				messageTags = tagMap;
+			});
+		});
 	});
 
 	// Scroll to bottom on conversation change
