@@ -379,6 +379,18 @@ impl<S: SecretRepo, A: AuditLogRepo> ListSecretsTool<S, A> {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to list secrets: {e}")))?;
 
+        write_audit(
+            self.ctx.audit_repo.as_ref(),
+            user_id,
+            "secret_list",
+            None,
+            Some(serde_json::json!({
+                "secret_type": secret_type,
+                "count": secrets.len(),
+            })),
+        )
+        .await;
+
         if secrets.is_empty() {
             return Ok(ToolOutput {
                 content: "No secrets found.".to_owned(),
