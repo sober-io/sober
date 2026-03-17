@@ -1234,7 +1234,10 @@ impl<R: AgentRepos> Agent<R> {
 pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
     msgs.iter()
         // Skip empty assistant messages — the API rejects them.
-        .filter(|m| !(m.role == MessageRole::Assistant && m.content.is_empty()))
+        // But keep assistant messages that have tool_calls (content may be empty).
+        .filter(|m| {
+            !(m.role == MessageRole::Assistant && m.content.is_empty() && m.tool_calls.is_none())
+        })
         // Skip event messages — they are not forwarded to the LLM.
         .filter(|m| m.role != MessageRole::Event)
         .map(|m| {
@@ -1245,12 +1248,33 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
                 MessageRole::Tool => "tool",
                 MessageRole::Event => unreachable!("event messages filtered above"),
             };
+
+            // Restore tool_calls on assistant messages (stored as JSONB).
+            let tool_calls = if m.role == MessageRole::Assistant {
+                m.tool_calls
+                    .as_ref()
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+            } else {
+                None
+            };
+
+            // Restore tool_call_id on tool messages from the tool_result JSONB.
+            let tool_call_id = if m.role == MessageRole::Tool {
+                m.tool_result
+                    .as_ref()
+                    .and_then(|v| v.get("tool_call_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned())
+            } else {
+                None
+            };
+
             LlmMessage {
                 role: role.to_owned(),
                 content: Some(m.content.clone()),
                 reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: None,
+                tool_calls,
+                tool_call_id,
             }
         })
         .collect()
