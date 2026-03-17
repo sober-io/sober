@@ -1276,10 +1276,20 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
         // the sequence is broken (e.g., user interrupted). Drop the pending assistant
         // message's tool_calls by replacing the last assistant message.
         if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
-            // Remove unmatched tool_calls from the preceding assistant message.
-            if let Some(last) = result.last_mut() {
+            // The sequence was broken by a user message. Remove the preceding
+            // assistant message if it only existed for its tool_calls.
+            if let Some(last) = result.last() {
                 if last.role == "assistant" && last.tool_calls.is_some() {
-                    last.tool_calls = None;
+                    // If the assistant message has no meaningful content,
+                    // drop it entirely (empty content + tool_calls = tool-only message).
+                    let empty_content = last.content.as_ref().map_or(true, |c| c.trim().is_empty());
+                    if empty_content {
+                        result.pop();
+                    } else {
+                        // Has text content — just strip the tool_calls.
+                        let last_mut = result.last_mut().unwrap();
+                        last_mut.tool_calls = None;
+                    }
                 }
             }
             pending_tool_ids.clear();
