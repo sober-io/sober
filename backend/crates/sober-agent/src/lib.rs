@@ -1,6 +1,7 @@
 //! Sober Agent — gRPC server for agent orchestration.
 
 pub mod agent;
+pub mod audit;
 pub mod broadcast;
 pub mod confirm;
 pub mod error;
