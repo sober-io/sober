@@ -376,8 +376,11 @@
 				break;
 			}
 			case 'chat.new_message': {
-				// Skip own user messages (already added optimistically by dispatchMessage).
+				// Own user messages were added optimistically — update the ID
+				// to the real DB ID so tagging/deletion works.
 				if (msg.role === 'user' && msg.user_id === auth.user?.id) {
+					const ownMsg = [...messages].reverse().find((m) => m.role === 'user');
+					if (ownMsg) ownMsg.id = msg.message_id;
 					break;
 				}
 
