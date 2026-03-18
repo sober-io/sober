@@ -1,14 +1,16 @@
 <script lang="ts">
 	import SlashCommandPalette from './SlashCommandPalette.svelte';
+	import type { SkillInfo } from '$lib/types';
 
 	interface Props {
 		onsend: (content: string) => void;
 		busy?: boolean;
 		value?: string;
 		onSlashCommand?: (command: string) => void;
+		skills?: SkillInfo[];
 	}
 
-	let { onsend, busy = false, value = $bindable(''), onSlashCommand }: Props = $props();
+	let { onsend, busy = false, value = $bindable(''), onSlashCommand, skills = [] }: Props = $props();
 
 	const showSlashCommands = $derived(value.startsWith('/'));
 
@@ -45,7 +47,7 @@
 
 <div class="relative border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 	{#if showSlashCommands}
-		<SlashCommandPalette query={value} onExecute={handleSlashExecute} onClose={handleSlashClose} />
+		<SlashCommandPalette query={value} onExecute={handleSlashExecute} onClose={handleSlashClose} {skills} />
 	{/if}
 	<div class="flex gap-2 p-4">
 		<textarea

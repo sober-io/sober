@@ -1,25 +1,38 @@
 <script lang="ts">
+	import type { SkillInfo } from '$lib/types';
+
 	interface Command {
 		name: string;
 		description: string;
+		isSkill?: boolean;
 	}
 
 	interface Props {
 		query: string;
 		onExecute: (command: string) => void;
 		onClose: () => void;
+		skills?: SkillInfo[];
 	}
 
-	const COMMANDS: Command[] = [
+	const BUILTIN_COMMANDS: Command[] = [
 		{ name: '/help', description: 'Show available commands' },
 		{ name: '/info', description: 'Show conversation info' },
 		{ name: '/clear', description: 'Clear all messages' }
 	];
 
-	let { query, onExecute, onClose }: Props = $props();
+	let { query, onExecute, onClose, skills = [] }: Props = $props();
+
+	const commands = $derived([
+		...BUILTIN_COMMANDS,
+		...skills.map((s) => ({
+			name: `/${s.name}`,
+			description: s.description,
+			isSkill: true
+		}))
+	]);
 
 	const filtered = $derived(
-		COMMANDS.filter((c) => c.name.startsWith(query.length > 0 ? query : '/'))
+		commands.filter((c) => c.name.startsWith(query.length > 0 ? query : '/'))
 	);
 
 	let selectedIndex = $state(0);
@@ -69,6 +82,9 @@
 				]}
 			>
 				<span class="font-mono font-medium text-zinc-900 dark:text-zinc-100">{command.name}</span>
+				{#if command.isSkill}
+					<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">skill</span>
+				{/if}
 				<span class="text-zinc-500 dark:text-zinc-400">{command.description}</span>
 			</button>
 		{/each}
