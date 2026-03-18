@@ -257,23 +257,15 @@
 
 	const dispatchMessage = (content: string) => {
 		const now = fmtTime();
-		const isSkillCommand =
-			content.startsWith('/') &&
-			skills.some((s) => content === `/${s.name}` || content.startsWith(`/${s.name} `));
-
-		// Don't add user bubble for skill slash commands — the backend
-		// won't store them in conversation history.
-		if (!isSkillCommand) {
-			messages.push({
-				id: crypto.randomUUID(),
-				role: 'user',
-				content,
-				thinkingContent: '',
-				streaming: false,
-				thinking: false,
-				timestamp: now
-			});
-		}
+		messages.push({
+			id: crypto.randomUUID(),
+			role: 'user',
+			content,
+			thinkingContent: '',
+			streaming: false,
+			thinking: false,
+			timestamp: now
+		});
 		messages.push({
 			id: crypto.randomUUID(),
 			role: 'assistant',
