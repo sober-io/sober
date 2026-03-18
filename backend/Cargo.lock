@@ -3252,7 +3252,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3272,6 +3272,7 @@ dependencies = [
  "sober-memory",
  "sober-mind",
  "sober-sandbox",
+ "sober-skill",
  "sober-workspace",
  "tempfile",
  "thiserror 2.0.18",
@@ -3288,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -3474,7 +3475,7 @@ dependencies = [
 
 [[package]]
 name = "sober-mind"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "regex",
@@ -3484,6 +3485,7 @@ dependencies = [
  "sober-core",
  "sober-crypto",
  "sober-memory",
+ "sober-skill",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3541,6 +3543,20 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "sober-skill"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "sober-core",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

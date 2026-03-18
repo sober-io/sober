@@ -1,6 +1,6 @@
 [package]
 name = "sober-agent"
-version = "0.11.0"
+version = "0.12.0"
 edition.workspace = true
 
 [[bin]]
@@ -18,6 +18,7 @@ sober-db = { path = "../sober-db" }
 sober-mind = { path = "../sober-mind" }
 sober-mcp = { path = "../sober-mcp" }
 sober-sandbox = { path = "../sober-sandbox" }
+sober-skill = { path = "../sober-skill" }
 sober-workspace = { path = "../sober-workspace" }
 sober-llm = { path = "../sober-llm" }
 sober-memory = { path = "../sober-memory" }

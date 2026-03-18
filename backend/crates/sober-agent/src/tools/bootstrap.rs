@@ -22,6 +22,7 @@ use sober_crypto::envelope::Mek;
 use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
 use sober_sandbox::{CommandPolicy, SandboxPolicy};
+use sober_skill::{ActivateSkillTool, SkillActivationState, SkillLoader};
 use sober_workspace::{BlobStore, SnapshotManager};
 
 use super::shell::SharedPermissionMode;
@@ -87,6 +88,10 @@ pub struct TurnContext {
     pub workspace_id: Option<WorkspaceId>,
     /// Resolved filesystem path for the conversation workspace directory.
     pub workspace_dir: Option<PathBuf>,
+    /// Tracks which skills have already been activated in this conversation.
+    /// Prevents the same skill from being injected twice across multiple turns.
+    /// NOT the skill cache — that's managed by [`SkillLoader`]'s TTL cache.
+    pub skill_activation_state: Option<Arc<std::sync::Mutex<SkillActivationState>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +125,8 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub blob_store: Arc<BlobStore>,
     /// Snapshot manager for snapshot and shell auto-snapshot tools.
     pub snapshot_manager: Arc<SnapshotManager>,
+    /// Skill loader for discovering and caching skills from the filesystem.
+    pub skill_loader: Arc<SkillLoader>,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {
@@ -152,7 +159,8 @@ impl<R: AgentRepos> ToolBootstrap<R> {
     /// 1. Shell tool with the correct workspace directory.
     /// 2. Secret tools (if MEK is configured).
     /// 3. Artifact and snapshot tools (if a workspace directory exists).
-    pub fn build(&self, ctx: &TurnContext, static_tools: &[Arc<dyn Tool>]) -> ToolRegistry {
+    /// 4. Skill tool (if any skills are available in the catalog).
+    pub async fn build(&self, ctx: &TurnContext, static_tools: &[Arc<dyn Tool>]) -> ToolRegistry {
         let mut tools: Vec<Arc<dyn Tool>> = static_tools.to_vec();
 
         // 1. Shell tool — use workspace_dir when available, otherwise the default root.
@@ -214,6 +222,20 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             tools.push(Arc::new(RestoreSnapshotTool::new(snapshot_ctx)));
         }
 
+        // 4. Skill tool — loaded per-turn from cached catalog.
+        //    Reuses the per-conversation activation state when provided so that
+        //    skills activated in earlier turns remain marked as active.
+        let user_home = sober_workspace::user_home_dir();
+        let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
+        if let Ok(catalog) = self.skill_loader.load(&user_home, &workspace_path).await
+            && !catalog.is_empty()
+        {
+            let activation_state = ctx.skill_activation_state.clone().unwrap_or_else(|| {
+                Arc::new(std::sync::Mutex::new(SkillActivationState::default()))
+            });
+            tools.push(Arc::new(ActivateSkillTool::new(catalog, activation_state)));
+        }
+
         ToolRegistry::with_builtins(tools)
     }
 }
@@ -229,9 +251,11 @@ mod tests {
             conversation_id: ConversationId::new(),
             workspace_id: None,
             workspace_dir: None,
+            skill_activation_state: None,
         };
         // Sanity: context is constructible without workspace.
         assert!(ctx.workspace_id.is_none());
         assert!(ctx.workspace_dir.is_none());
+        assert!(ctx.skill_activation_state.is_none());
     }
 }

@@ -17,6 +17,8 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { conversationService } from '$lib/services/conversations';
 	import { tagService } from '$lib/services/tags';
+	import { skillsService } from '$lib/services/skills';
+	import type { SkillInfo } from '$lib/types';
 	import ChatMessage from '$lib/components/ChatMessage.svelte';
 	import ChatInput from '$lib/components/ChatInput.svelte';
 	import ScrollToBottom from '$lib/components/ScrollToBottom.svelte';
@@ -101,6 +103,7 @@
 	let showClearConfirm = $state(false);
 	let settingsOpen = $state(false);
 	let messageTags = $state<Record<string, Tag[]>>({});
+	let skills = $state<SkillInfo[]>([]);
 
 	const conversationId = $derived($page.params.id ?? '');
 	const isGroup = $derived.by(() => {
@@ -123,6 +126,19 @@
 		} else {
 			memberMap = {};
 		}
+	});
+
+	// Fetch available skills when conversation changes
+	$effect(() => {
+		const id = conversationId;
+		skillsService
+			.list(id || undefined)
+			.then((s) => {
+				skills = s;
+			})
+			.catch(() => {
+				skills = [];
+			});
 	});
 
 	// Reset state when conversation changes
@@ -582,14 +598,14 @@
 		messages = [];
 	};
 
-	const handleSlashCommand = (command: string) => {
+	const handleSlashCommand = async (command: string) => {
 		switch (command) {
 			case '/help':
 				messages.push({
 					id: crypto.randomUUID(),
 					role: 'system',
 					content:
-						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages',
+						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages\n- `/reload-skills` — Reload skills from disk\n\nType `/` to see available skills.',
 					thinkingContent: '',
 					streaming: false,
 					thinking: false,
@@ -611,6 +627,39 @@
 				break;
 			case '/clear':
 				showClearConfirm = true;
+				break;
+			case '/reload-skills':
+				try {
+					const reloaded = await skillsService.reload(conversationId || undefined);
+					skills = reloaded;
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'system',
+						content: `Skills reloaded. ${reloaded.length} skill(s) available.`,
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						ephemeral: true
+					});
+				} catch {
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'system',
+						content: 'Failed to reload skills.',
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						ephemeral: true
+					});
+				}
+				break;
+			default:
+				// Skill command — send as regular message with /skill-name prefix
+				if (skills.some((s) => `/${s.name}` === command)) {
+					sendMessage(command);
+				}
 				break;
 		}
 	};
@@ -813,7 +862,7 @@
 		</div>
 	{/if}
 
-	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} />
+	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} {skills} />
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
 

@@ -15,6 +15,8 @@ service AgentService {
   rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
   // Subscribe to real-time conversation events from all conversations.
   rpc SubscribeConversationUpdates(SubscribeRequest) returns (stream ConversationUpdate);
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc ReloadSkills(ReloadSkillsRequest) returns (ReloadSkillsResponse);
 }
 
 message ConfirmAck {}
@@ -125,6 +127,30 @@ message NewMessage {
 // The conversation title was changed.
 message TitleChanged {
   string title = 1;
+}
+
+// --- Skill listing types ---
+
+message ListSkillsRequest {
+  string user_id = 1;
+  optional string conversation_id = 2;
+}
+
+message SkillInfo {
+  string name = 1;
+  string description = 2;
+}
+
+message ListSkillsResponse {
+  repeated SkillInfo skills = 1;
+}
+
+message ReloadSkillsRequest {
+  optional string conversation_id = 1;
+}
+
+message ReloadSkillsResponse {
+  repeated SkillInfo skills = 1;
 }
 
 // Wraps an event with its conversation_id for routing.

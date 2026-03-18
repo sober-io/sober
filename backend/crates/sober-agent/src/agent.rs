@@ -109,6 +109,8 @@ struct LoopContext<'a, R: AgentRepos> {
     llm_config: &'a Option<LlmConfig>,
     /// Master encryption key for resolving user-stored LLM keys.
     mek: &'a Option<Arc<Mek>>,
+    /// XML listing of all available skills for system prompt injection.
+    skill_catalog_xml: String,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -137,6 +139,11 @@ pub struct Agent<R: AgentRepos> {
     /// remember) that are identical across conversations. Built once at
     /// construction and reused every turn.
     static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
+    /// Per-conversation skill activation tracking. Skills activated in one turn
+    /// remain active in subsequent turns of the same conversation.
+    skill_activations: std::sync::RwLock<
+        HashMap<ConversationId, Arc<std::sync::Mutex<sober_skill::SkillActivationState>>>,
+    >,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -171,6 +178,7 @@ impl<R: AgentRepos> Agent<R> {
             llm_config,
             tool_bootstrap,
             static_tools,
+            skill_activations: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -179,12 +187,64 @@ impl<R: AgentRepos> Agent<R> {
         &self.mind
     }
 
+    /// Resolves the workspace directory path for a conversation.
+    ///
+    /// Returns `None` if the conversation has no workspace or the workspace
+    /// doesn't exist in the database.
+    pub async fn resolve_workspace_dir(&self, conversation_id: ConversationId) -> Option<PathBuf> {
+        let conversation = self
+            .repos
+            .conversations()
+            .get_by_id(conversation_id)
+            .await
+            .ok()?;
+        let ws_id = conversation.workspace_id?;
+        let ws = self.repos.workspaces().get_by_id(ws_id).await.ok()?;
+        Some(PathBuf::from(&ws.root_path))
+    }
+
+    /// Returns the skill activation state for a conversation, creating one if needed.
+    fn skill_activation_state(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Arc<std::sync::Mutex<sober_skill::SkillActivationState>> {
+        // Try read first
+        {
+            let activations = self
+                .skill_activations
+                .read()
+                .expect("skill activations lock");
+            if let Some(state) = activations.get(&conversation_id) {
+                return Arc::clone(state);
+            }
+        }
+        // Create new
+        let mut activations = self
+            .skill_activations
+            .write()
+            .expect("skill activations lock");
+        let state = activations.entry(conversation_id).or_insert_with(|| {
+            Arc::new(std::sync::Mutex::new(
+                sober_skill::SkillActivationState::default(),
+            ))
+        });
+        Arc::clone(state)
+    }
+
+    /// Removes the skill activation state for a conversation.
+    /// Call when a conversation ends or is deleted.
+    pub fn clear_skill_activations(&self, conversation_id: ConversationId) {
+        if let Ok(mut activations) = self.skill_activations.write() {
+            activations.remove(&conversation_id);
+        }
+    }
+
     /// Builds a [`ToolRegistry`] for the given conversation turn via the
     /// centralized [`ToolBootstrap`].
     ///
     /// Reuses the pre-built [`static_tools`](Self::static_tools) and adds
-    /// per-conversation tools (shell, secrets, artifacts, snapshots).
-    fn build_turn_tools(
+    /// per-conversation tools (shell, secrets, artifacts, snapshots, skills).
+    async fn build_turn_tools(
         &self,
         user_id: UserId,
         conversation_id: ConversationId,
@@ -196,8 +256,9 @@ impl<R: AgentRepos> Agent<R> {
             conversation_id,
             workspace_id,
             workspace_dir,
+            skill_activation_state: Some(self.skill_activation_state(conversation_id)),
         };
-        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools))
+        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools).await)
     }
 
     /// Resolves which conversation to deliver job results to.
@@ -299,29 +360,8 @@ impl<R: AgentRepos> Agent<R> {
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Store user message (only for human-driven calls)
-        let user_msg_id = if trigger == TriggerKind::Human {
-            let user_msg = self
-                .repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::User,
-                    content: content.to_owned(),
-                    tool_calls: None,
-                    tool_result: None,
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-            user_msg.id
-        } else {
-            sober_core::MessageId::new()
-        };
-
-        // 3. Check agent mode — decide whether to run the LLM pipeline
+        // 2. Resolve conversation and workspace.
+        //    Must happen before slash interception (workspace-level skills need the path).
         let conversation = self
             .repos
             .conversations()
@@ -387,6 +427,47 @@ impl<R: AgentRepos> Agent<R> {
             None
         };
 
+        // 3. Store user message (only for human-driven calls).
+        let user_msg_id = if trigger == TriggerKind::Human {
+            let user_msg = self
+                .repos
+                .messages()
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::User,
+                    content: content.to_owned(),
+                    tool_calls: None,
+                    tool_result: None,
+                    token_count: None,
+                    metadata: None,
+                    user_id: Some(user_id),
+                })
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            user_msg.id
+        } else {
+            sober_core::MessageId::new()
+        };
+
+        // Load skill catalog XML for system prompt injection.
+        let skill_catalog_xml = {
+            let user_home = sober_workspace::user_home_dir();
+            let ws_path = workspace_dir.clone().unwrap_or_default();
+            match self
+                .tool_bootstrap
+                .skill_loader
+                .load(&user_home, &ws_path)
+                .await
+            {
+                Ok(catalog) => catalog.to_catalog_xml(),
+                Err(e) => {
+                    warn!(error = %e, "failed to load skill catalog for prompt injection");
+                    String::new()
+                }
+            }
+        };
+
+        // 5. Check agent mode — decide whether to run the LLM pipeline
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,
@@ -417,12 +498,14 @@ impl<R: AgentRepos> Agent<R> {
         }
 
         // 4. Build per-conversation tools via ToolBootstrap.
-        let tool_registry = self.build_turn_tools(
-            user_id,
-            conversation_id,
-            conversation.workspace_id,
-            workspace_dir.clone(),
-        );
+        let tool_registry = self
+            .build_turn_tools(
+                user_id,
+                conversation_id,
+                conversation.workspace_id,
+                workspace_dir.clone(),
+            )
+            .await;
 
         // 5. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
@@ -467,6 +550,7 @@ impl<R: AgentRepos> Agent<R> {
                 workspace_dir,
                 llm_config: &llm_config,
                 mek: &mek,
+                skill_catalog_xml,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -625,7 +709,13 @@ impl<R: AgentRepos> Agent<R> {
 
                 let tool_metadata = tool_registry.tool_metadata();
                 let assembled = mind
-                    .assemble(&caller, &task_context, &tool_metadata, "")
+                    .assemble(
+                        &caller,
+                        &task_context,
+                        &tool_metadata,
+                        "",
+                        &ctx.skill_catalog_xml,
+                    )
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
@@ -650,8 +740,8 @@ impl<R: AgentRepos> Agent<R> {
                 needs_rebuild = false;
             }
 
-            // e. Call LLM — exclude scheduler tool for scheduler-driven calls
-            //    to prevent the LLM from recreating cancelled jobs.
+            // e. Call LLM — exclude tools that shouldn't be available:
+            //    - scheduler tool excluded for scheduler-driven calls (prevent job recreation)
             let tool_definitions = if ctx.trigger == TriggerKind::Scheduler {
                 tool_registry.tool_definitions_except(&["scheduler"])
             } else {
@@ -707,21 +797,36 @@ impl<R: AgentRepos> Agent<R> {
                 });
 
                 // Store assistant message with tool calls before executing them.
-                let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
-                repos
-                    .messages()
-                    .create(CreateMessage {
-                        conversation_id,
-                        role: MessageRole::Assistant,
-                        content: choice.message.content.clone().unwrap_or_default(),
-                        tool_calls: tool_calls_json,
-                        tool_result: None,
-                        token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
-                        metadata: None,
-                        user_id: Some(user_id),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                // Skip DB storage when all tool calls are for internal tools
+                // (e.g. activate_skill) — they stay in-memory only.
+                let all_internal = tool_calls.iter().all(|tc| {
+                    tool_registry
+                        .get_tool(&tc.function.name)
+                        .is_some_and(|t| t.metadata().internal)
+                });
+
+                if !all_internal {
+                    let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
+                    let msg_metadata = choice
+                        .message
+                        .reasoning_content
+                        .as_ref()
+                        .map(|rc| serde_json::json!({ "reasoning_content": rc }));
+                    repos
+                        .messages()
+                        .create(CreateMessage {
+                            conversation_id,
+                            role: MessageRole::Assistant,
+                            content: choice.message.content.clone().unwrap_or_default(),
+                            tool_calls: tool_calls_json,
+                            tool_result: None,
+                            token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
+                            metadata: msg_metadata,
+                            user_id: Some(user_id),
+                        })
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                }
 
                 let (tool_msgs, any_context_modifying, had_errors) =
                     Self::execute_tool_calls_streaming(
@@ -1075,23 +1180,24 @@ impl<R: AgentRepos> Agent<R> {
 
             messages.push(LlmMessage::tool(&tc.id, output.clone()));
 
-            // Store tool result message for audit trail.
-            if let Err(e) = repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::Tool,
-                    content: output.clone(),
-                    tool_calls: None,
-                    tool_result: Some(serde_json::json!({
-                        "tool_call_id": tc.id,
-                        "name": tool_name,
-                    })),
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
+            // Store tool result message for audit trail (skip internal tools).
+            if !tool_internal
+                && let Err(e) = repos
+                    .messages()
+                    .create(CreateMessage {
+                        conversation_id,
+                        role: MessageRole::Tool,
+                        content: output.clone(),
+                        tool_calls: None,
+                        tool_result: Some(serde_json::json!({
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                        })),
+                        token_count: None,
+                        metadata: None,
+                        user_id: Some(user_id),
+                    })
+                    .await
             {
                 warn!(
                     tool = %tool_name,
@@ -1361,10 +1467,18 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
             }
         }
 
+        // Restore reasoning_content from metadata if present (persisted during tool-call storage).
+        let reasoning_content = m
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.get("reasoning_content"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
+
         result.push(LlmMessage {
             role: role.to_owned(),
             content: Some(m.content.clone()),
-            reasoning_content: None,
+            reasoning_content,
             tool_calls,
             tool_call_id,
         });

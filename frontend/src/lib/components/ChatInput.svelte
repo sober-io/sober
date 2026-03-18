@@ -1,16 +1,28 @@
 <script lang="ts">
 	import SlashCommandPalette from './SlashCommandPalette.svelte';
+	import type { SkillInfo } from '$lib/types';
 
 	interface Props {
 		onsend: (content: string) => void;
 		busy?: boolean;
 		value?: string;
 		onSlashCommand?: (command: string) => void;
+		skills?: SkillInfo[];
 	}
 
-	let { onsend, busy = false, value = $bindable(''), onSlashCommand }: Props = $props();
+	let {
+		onsend,
+		busy = false,
+		value = $bindable(''),
+		onSlashCommand,
+		skills = []
+	}: Props = $props();
 
-	const showSlashCommands = $derived(value.startsWith('/'));
+	const BUILTIN_COMMANDS = ['/help', '/info', '/clear', '/reload-skills'];
+
+	// Show palette only when typing a command prefix, not after selecting one.
+	// e.g. "/" or "/hel" shows palette, but "/test-skill do something" does not.
+	const showSlashCommands = $derived(value.startsWith('/') && !value.includes(' '));
 
 	const handleKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
@@ -23,9 +35,16 @@
 	const submit = () => {
 		const trimmed = value.trim();
 		if (!trimmed) return;
-		if (trimmed.startsWith('/') && onSlashCommand) {
-			// intercept slash commands
-			onSlashCommand(trimmed.split(' ')[0]);
+		if (trimmed.startsWith('/')) {
+			const cmd = trimmed.split(' ')[0];
+			if (BUILTIN_COMMANDS.includes(cmd) && onSlashCommand) {
+				// Built-in command — execute immediately
+				onSlashCommand(cmd);
+				value = '';
+				return;
+			}
+			// Skill slash command — send as regular message to backend
+			onsend(trimmed);
 			value = '';
 			return;
 		}
@@ -38,6 +57,10 @@
 		value = '';
 	};
 
+	const handleSlashPrefill = (command: string) => {
+		value = command + ' ';
+	};
+
 	const handleSlashClose = () => {
 		value = '';
 	};
@@ -45,7 +68,13 @@
 
 <div class="relative border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 	{#if showSlashCommands}
-		<SlashCommandPalette query={value} onExecute={handleSlashExecute} onClose={handleSlashClose} />
+		<SlashCommandPalette
+			query={value}
+			onExecute={handleSlashExecute}
+			onPrefill={handleSlashPrefill}
+			onClose={handleSlashClose}
+			{skills}
+		/>
 	{/if}
 	<div class="flex gap-2 p-4">
 		<textarea

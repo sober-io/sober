@@ -6,6 +6,13 @@ use sober_core::types::ConversationId;
 
 use crate::error::WorkspaceError;
 
+/// Returns the current user's home directory from the `HOME` environment variable.
+///
+/// Falls back to an empty path if `HOME` is not set.
+pub fn user_home_dir() -> PathBuf {
+    std::env::var("HOME").map(PathBuf::from).unwrap_or_default()
+}
+
 /// Returns the conversation-specific directory under a workspace root.
 /// Creates the directory if it does not exist.
 pub async fn ensure_conversation_dir(

@@ -25,6 +25,7 @@ use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
 use sober_sandbox::{CommandPolicy, SandboxProfile};
+use sober_skill::SkillLoader;
 use sober_workspace::BlobStore;
 use std::sync::RwLock;
 use tokio::net::UnixListener;
@@ -33,6 +34,9 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::{Endpoint, Server, Uri};
 use tower::service_fn;
 use tracing::{info, warn};
+
+/// TTL for the skill catalog cache. Skills are rescanned after this duration.
+const SKILL_CACHE_TTL_SECS: u64 = 300;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -133,7 +137,11 @@ async fn main() -> Result<()> {
     // 12. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
-    // 13. Create ToolBootstrap — centralized tool construction for all turns
+    // 13. Create SkillLoader and ToolBootstrap — centralized tool construction for all turns
+    let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(
+        SKILL_CACHE_TTL_SECS,
+    )));
+
     let tool_bootstrap = Arc::new(ToolBootstrap {
         shell: ShellToolConfig {
             command_policy,
@@ -156,6 +164,7 @@ async fn main() -> Result<()> {
         mek: mek.clone(),
         blob_store,
         snapshot_manager,
+        skill_loader: Arc::clone(&skill_loader),
     });
 
     // 14. Create broadcast channel for conversation update events
@@ -203,6 +212,7 @@ async fn main() -> Result<()> {
         confirmation_sender,
         shared_permission_mode,
         broadcast_tx,
+        skill_loader,
     );
 
     // 19. Bind to Unix domain socket

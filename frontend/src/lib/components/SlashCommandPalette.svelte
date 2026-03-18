@@ -1,25 +1,40 @@
 <script lang="ts">
+	import type { SkillInfo } from '$lib/types';
+
 	interface Command {
 		name: string;
 		description: string;
+		isSkill?: boolean;
 	}
 
 	interface Props {
 		query: string;
 		onExecute: (command: string) => void;
+		onPrefill: (command: string) => void;
 		onClose: () => void;
+		skills?: SkillInfo[];
 	}
 
-	const COMMANDS: Command[] = [
+	const BUILTIN_COMMANDS: Command[] = [
 		{ name: '/help', description: 'Show available commands' },
 		{ name: '/info', description: 'Show conversation info' },
-		{ name: '/clear', description: 'Clear all messages' }
+		{ name: '/clear', description: 'Clear all messages' },
+		{ name: '/reload-skills', description: 'Reload skills from disk' }
 	];
 
-	let { query, onExecute, onClose }: Props = $props();
+	let { query, onExecute, onPrefill, onClose, skills = [] }: Props = $props();
+
+	const commands = $derived([
+		...BUILTIN_COMMANDS,
+		...skills.map((s) => ({
+			name: `/${s.name}`,
+			description: s.description,
+			isSkill: true
+		}))
+	]);
 
 	const filtered = $derived(
-		COMMANDS.filter((c) => c.name.startsWith(query.length > 0 ? query : '/'))
+		commands.filter((c) => c.name.startsWith(query.length > 0 ? query : '/'))
 	);
 
 	let selectedIndex = $state(0);
@@ -29,8 +44,12 @@
 		selectedIndex = 0;
 	});
 
-	const execute = (command: string) => {
-		onExecute(command);
+	const execute = (command: Command) => {
+		if (command.isSkill) {
+			onPrefill(command.name);
+		} else {
+			onExecute(command.name);
+		}
 	};
 
 	const handleKeydown = (e: KeyboardEvent) => {
@@ -43,7 +62,7 @@
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (filtered[selectedIndex]) {
-				execute(filtered[selectedIndex].name);
+				execute(filtered[selectedIndex]);
 			}
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
@@ -60,7 +79,7 @@
 	>
 		{#each filtered as command, i (command.name)}
 			<button
-				onclick={() => execute(command.name)}
+				onclick={() => execute(command)}
 				class={[
 					'flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors',
 					i === selectedIndex
@@ -69,6 +88,12 @@
 				]}
 			>
 				<span class="font-mono font-medium text-zinc-900 dark:text-zinc-100">{command.name}</span>
+				{#if command.isSkill}
+					<span
+						class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+						>skill</span
+					>
+				{/if}
 				<span class="text-zinc-500 dark:text-zinc-400">{command.description}</span>
 			</button>
 		{/each}

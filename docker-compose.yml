@@ -98,6 +98,8 @@ services:
       SEARXNG_URL: http://searxng:8080
     volumes:
       - sober_sockets:/run/sober
+      - sober_workspaces:/var/lib/sober/workspaces
+      - ${HOME}/.sober:/home/sober/.sober:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,3 +174,4 @@ volumes:
   pgdata:
   qdrant_data:
   sober_sockets:
+  sober_workspaces:

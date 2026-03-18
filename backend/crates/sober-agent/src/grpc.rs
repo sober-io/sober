@@ -8,6 +8,7 @@ use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
+use sober_skill::SkillLoader;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, warn};
@@ -34,6 +35,7 @@ pub struct AgentGrpcService<R: AgentRepos> {
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
     broadcast_tx: ConversationUpdateSender,
+    skill_loader: Arc<SkillLoader>,
 }
 
 impl<R: AgentRepos> AgentGrpcService<R> {
@@ -43,12 +45,14 @@ impl<R: AgentRepos> AgentGrpcService<R> {
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
         broadcast_tx: ConversationUpdateSender,
+        skill_loader: Arc<SkillLoader>,
     ) -> Self {
         Self {
             agent,
             confirmation_sender,
             permission_mode,
             broadcast_tx,
+            skill_loader,
         }
     }
 }
@@ -296,6 +300,96 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             healthy: true,
             version: env!("CARGO_PKG_VERSION").to_owned(),
         }))
+    }
+
+    async fn list_skills(
+        &self,
+        request: Request<proto::ListSkillsRequest>,
+    ) -> Result<Response<proto::ListSkillsResponse>, Status> {
+        let req = request.into_inner();
+        let user_home = sober_workspace::user_home_dir();
+
+        // Resolve workspace path from conversation_id if provided.
+        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .resolve_workspace_dir(conv_id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                std::path::PathBuf::new()
+            }
+        } else {
+            std::path::PathBuf::new()
+        };
+
+        let catalog = self
+            .skill_loader
+            .load(&user_home, &workspace_path)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let skills = catalog
+            .names()
+            .iter()
+            .map(|name| {
+                let entry = catalog.get(name).expect("name from catalog");
+                proto::SkillInfo {
+                    name: entry.frontmatter.name.clone(),
+                    description: entry.frontmatter.description.clone(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(proto::ListSkillsResponse { skills }))
+    }
+
+    async fn reload_skills(
+        &self,
+        request: Request<proto::ReloadSkillsRequest>,
+    ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
+        let req = request.into_inner();
+
+        // Invalidate cache first
+        self.skill_loader.invalidate_cache();
+
+        // Then load fresh
+        let user_home = sober_workspace::user_home_dir();
+
+        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .resolve_workspace_dir(conv_id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                std::path::PathBuf::new()
+            }
+        } else {
+            std::path::PathBuf::new()
+        };
+
+        let catalog = self
+            .skill_loader
+            .load(&user_home, &workspace_path)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let skills = catalog
+            .names()
+            .iter()
+            .map(|name| {
+                let entry = catalog.get(name).expect("name from catalog");
+                proto::SkillInfo {
+                    name: entry.frontmatter.name.clone(),
+                    description: entry.frontmatter.description.clone(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(proto::ReloadSkillsResponse { skills }))
     }
 }
 

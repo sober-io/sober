@@ -82,6 +82,24 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         Ok(tonic::Response::new(proto::SetPermissionModeResponse {}))
     }
 
+    async fn list_skills(
+        &self,
+        _request: tonic::Request<proto::ListSkillsRequest>,
+    ) -> Result<tonic::Response<proto::ListSkillsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ListSkillsResponse {
+            skills: vec![],
+        }))
+    }
+
+    async fn reload_skills(
+        &self,
+        _request: tonic::Request<proto::ReloadSkillsRequest>,
+    ) -> Result<tonic::Response<proto::ReloadSkillsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ReloadSkillsResponse {
+            skills: vec![],
+        }))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,
