@@ -574,14 +574,17 @@ impl<R: AgentRepos> Agent<R> {
         };
 
         // Load skill catalog XML for system prompt injection.
+        // Exclude any skill already activated via slash command so the LLM
+        // doesn't see it in the catalog and redundantly call activate_skill.
         let skill_catalog_xml = {
+            let exclude: Vec<&str> = activated_skill_name.as_deref().into_iter().collect();
             match self
                 .tool_bootstrap
                 .skill_loader
                 .load(&user_home_for_skills, &ws_path_for_skills)
                 .await
             {
-                Ok(catalog) => catalog.to_catalog_xml(),
+                Ok(catalog) => catalog.to_catalog_xml_excluding(&exclude),
                 Err(e) => {
                     warn!(error = %e, "failed to load skill catalog for prompt injection");
                     String::new()
