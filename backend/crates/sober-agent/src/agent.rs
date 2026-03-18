@@ -226,6 +226,7 @@ impl<R: AgentRepos> Agent<R> {
         content: &str,
         conversation_id: ConversationId,
         user_home: &Path,
+        workspace_path: &Path,
     ) -> (String, String) {
         let trimmed = content.trim();
         if !trimmed.starts_with('/') {
@@ -238,11 +239,10 @@ impl<R: AgentRepos> Agent<R> {
             return (content.to_owned(), String::new());
         }
 
-        let empty_ws = PathBuf::new();
         let catalog = match self
             .tool_bootstrap
             .skill_loader
-            .load(user_home, &empty_ws)
+            .load(user_home, workspace_path)
             .await
         {
             Ok(c) => c,
@@ -404,15 +404,8 @@ impl<R: AgentRepos> Agent<R> {
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Intercept skill slash commands (e.g. `/my-skill do something`).
-        //    Uses user-level skills only (workspace not yet resolved).
-        let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
-        let (content, activated_skill_content) = self
-            .intercept_skill_command(content, conversation_id, &user_home_for_skills)
-            .await;
-        let content = &content;
-
-        // 3. Store user message (only for human-driven calls)
+        // 2. Store user message (only for human-driven calls)
+        //    Stored BEFORE slash interception so the raw `/skill-name` text is preserved.
         let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
                 .repos
@@ -500,13 +493,26 @@ impl<R: AgentRepos> Agent<R> {
             None
         };
 
+        // Intercept skill slash commands (e.g. `/my-skill do something`).
+        // Runs after workspace resolution so workspace-level skills are found.
+        let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let ws_path_for_skills = workspace_dir.clone().unwrap_or_default();
+        let (content, activated_skill_content) = self
+            .intercept_skill_command(
+                content,
+                conversation_id,
+                &user_home_for_skills,
+                &ws_path_for_skills,
+            )
+            .await;
+        let content = &content;
+
         // Load skill catalog XML for system prompt injection.
         let skill_catalog_xml = {
-            let ws_path = workspace_dir.clone().unwrap_or_default();
             match self
                 .tool_bootstrap
                 .skill_loader
-                .load(&user_home_for_skills, &ws_path)
+                .load(&user_home_for_skills, &ws_path_for_skills)
                 .await
             {
                 Ok(catalog) => catalog.to_catalog_xml(),
