@@ -20,7 +20,9 @@
 
 	const BUILTIN_COMMANDS = ['/help', '/info', '/clear', '/reload-skills'];
 
-	const showSlashCommands = $derived(value.startsWith('/'));
+	// Show palette only when typing a command prefix, not after selecting one.
+	// e.g. "/" or "/hel" shows palette, but "/test-skill do something" does not.
+	const showSlashCommands = $derived(value.startsWith('/') && !value.includes(' '));
 
 	const handleKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
