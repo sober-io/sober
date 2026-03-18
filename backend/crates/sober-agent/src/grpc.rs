@@ -297,6 +297,14 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             version: env!("CARGO_PKG_VERSION").to_owned(),
         }))
     }
+
+    async fn list_skills(
+        &self,
+        _request: Request<proto::ListSkillsRequest>,
+    ) -> Result<Response<proto::ListSkillsResponse>, Status> {
+        // TODO: wire up to SkillCatalog once agent integration is complete (Task 8).
+        Ok(Response::new(proto::ListSkillsResponse { skills: vec![] }))
+    }
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
