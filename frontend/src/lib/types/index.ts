@@ -189,3 +189,8 @@ export interface ApiError {
 		message: string;
 	};
 }
+
+export interface SkillInfo {
+	name: string;
+	description: string;
+}
