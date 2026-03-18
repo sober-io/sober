@@ -929,7 +929,13 @@ impl<R: AgentRepos> Agent<R> {
                 });
 
                 // Store assistant message with tool calls before executing them.
+                // Persist reasoning_content in metadata so it survives context rebuilds.
                 let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
+                let msg_metadata = choice
+                    .message
+                    .reasoning_content
+                    .as_ref()
+                    .map(|rc| serde_json::json!({ "reasoning_content": rc }));
                 repos
                     .messages()
                     .create(CreateMessage {
@@ -939,7 +945,7 @@ impl<R: AgentRepos> Agent<R> {
                         tool_calls: tool_calls_json,
                         tool_result: None,
                         token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
-                        metadata: None,
+                        metadata: msg_metadata,
                         user_id: Some(user_id),
                     })
                     .await
@@ -1583,10 +1589,18 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
             }
         }
 
+        // Restore reasoning_content from metadata if present (persisted during tool-call storage).
+        let reasoning_content = m
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.get("reasoning_content"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
+
         result.push(LlmMessage {
             role: role.to_owned(),
             content: Some(m.content.clone()),
-            reasoning_content: None,
+            reasoning_content,
             tool_calls,
             tool_call_id,
         });
