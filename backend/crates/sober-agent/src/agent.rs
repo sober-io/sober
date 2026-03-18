@@ -530,18 +530,32 @@ impl<R: AgentRepos> Agent<R> {
         let content = &content;
 
         // 4. Store user message (only for human-driven calls).
-        //    Skip storing when the message is a bare `/skill-name` slash command
-        //    with no additional text — the skill content is injected as system
-        //    context, not as a user message. This prevents the LLM from seeing
-        //    the slash command and trying to call activate_skill redundantly.
-        let user_msg_id = if trigger == TriggerKind::Human && activated_skill_name.is_none() {
+        //    For skill slash commands, store a clean description instead of
+        //    the raw `/skill-name` prefix so the LLM always has a user message.
+        let user_msg_id = if trigger == TriggerKind::Human {
+            let store_content = if let Some(ref skill_name) = activated_skill_name {
+                // Strip `/skill-name ` prefix, keep remaining text.
+                let remaining = content
+                    .strip_prefix('/')
+                    .unwrap_or(content)
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("");
+                if remaining.is_empty() {
+                    format!("Use the {skill_name} skill.")
+                } else {
+                    remaining.to_owned()
+                }
+            } else {
+                content.to_owned()
+            };
             let user_msg = self
                 .repos
                 .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::User,
-                    content: content.to_owned(),
+                    content: store_content,
                     tool_calls: None,
                     tool_result: None,
                     token_count: None,
@@ -551,28 +565,6 @@ impl<R: AgentRepos> Agent<R> {
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
             user_msg.id
-        } else if trigger == TriggerKind::Human {
-            // Skill slash command — store only the remaining text (if any).
-            if !content.starts_with('/') && !content.is_empty() {
-                let user_msg = self
-                    .repos
-                    .messages()
-                    .create(CreateMessage {
-                        conversation_id,
-                        role: MessageRole::User,
-                        content: content.to_owned(),
-                        tool_calls: None,
-                        tool_result: None,
-                        token_count: None,
-                        metadata: None,
-                        user_id: Some(user_id),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-                user_msg.id
-            } else {
-                sober_core::MessageId::new()
-            }
         } else {
             sober_core::MessageId::new()
         };
