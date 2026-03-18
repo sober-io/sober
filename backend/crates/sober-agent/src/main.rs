@@ -77,17 +77,22 @@ async fn main() -> Result<()> {
     ));
 
     // 8. Create Mind with SoulResolver
-    let base_soul_path = std::env::current_dir()
-        .unwrap_or_default()
-        .join("soul")
-        .join("SOUL.md");
+    //
+    // Base soul.md is compiled into the binary — no filesystem path needed.
+    // User layer: ~/.sober/soul.md (optional override).
+    // Workspace layer: not set at startup (resolved per-conversation).
     let user_soul_path = std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|h| h.join(".sõber").join("SOUL.md"));
-    let workspace_soul_path: Option<PathBuf> = None;
+        .map(|h| h.join(".sober").join("soul.md"));
+    let user_instructions_dir = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|h| h.join(".sober"));
 
-    let soul_resolver = SoulResolver::new(base_soul_path, user_soul_path, workspace_soul_path);
-    let mind = Arc::new(Mind::new(soul_resolver));
+    let soul_resolver = SoulResolver::new(user_soul_path, None::<PathBuf>);
+    let mind = Arc::new(
+        Mind::new(soul_resolver, user_instructions_dir.as_deref())
+            .context("failed to initialize mind")?,
+    );
 
     // 9. Resolve workspace and sandbox configuration
     let workspace_root = PathBuf::from(

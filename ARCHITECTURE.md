@@ -97,7 +97,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
 | `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
-| `sober-mind` | Agent identity (SOUL.md), prompt assembly, access masks, trait evolution, injection detection |
+| `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
@@ -200,14 +200,29 @@ group-scoped permissions.
 
 ## Agent Mind — Identity & Prompt Assembly
 
-### SOUL.md Resolution Chain
+### Structured Instruction Directory
 
-The agent's identity is defined by a layered SOUL.md system:
+Base instructions live in `backend/crates/sober-mind/instructions/*.md`, each
+with YAML frontmatter (`category`, `visibility`, `priority`). They are compiled
+into the binary via `include_str!()` — zero runtime I/O for base instructions.
+
+| Category (assembly order) | Description |
+|---------------------------|-------------|
+| `personality` | Identity, values, communication style (`soul.md`) |
+| `guardrail` | Ethics, security rules, safety (`safety.md`) |
+| `behavior` | Memory, reasoning, evolution |
+| `operation` | Tool use, workspace, artifacts, extraction |
+
+Visibility: `public` (all triggers) or `internal` (Admin + Scheduler only).
+
+### soul.md Resolution Chain
+
+The agent's personality (`soul.md`) is layered:
 
 ```
-backend/soul/SOUL.md           (base — shipped with the system)
-  └── ~/.sober/SOUL.md          (user-level overrides/extensions)
-       └── ./.sober/SOUL.md     (workspace/project-level)
+sober-mind/instructions/soul.md  (base — compiled into binary)
+  └── ~/.sober/soul.md            (user-level override)
+       └── ./.sober/soul.md       (workspace/project-level, additive)
 ```
 
 | Layer | Override rules |
@@ -218,26 +233,26 @@ backend/soul/SOUL.md           (base — shipped with the system)
 
 ### Dynamic Prompt Assembly
 
-No hardcoded prompt tiers. One engine composes the system prompt from:
+One engine composes the system prompt from:
 
-1. **Resolved SOUL.md** (base + user + workspace layers)
-2. **Soul layers** (per-user/group BCF adaptations)
-3. **Task context** (what triggered this interaction)
-4. **Access mask** (what the caller can see and do)
-5. **Relevant memory** (scoped BCF retrieval)
+1. **Resolved soul.md** (base + user + workspace layering via `SoulResolver`)
+2. **Soul layers** (per-user/group BCF adaptations, appended after soul.md)
+3. **Instruction files** (filtered by visibility, sorted by category/priority)
+4. **Task context** (what triggered this interaction)
+5. **Tool definitions** (available tools for the current turn)
 
-Access masks vary by trigger:
+Visibility filtering by trigger:
 
-| Trigger | Access |
-|---------|--------|
-| Scheduler / internal | Full — self-reasoning, memory modification, code proposals |
-| Human interaction | Restricted — no internal state, deep requests forwarded to internal tier |
-| Replica delegation | Scoped — only what the delegation grants |
-| Admin (soberctl) | Full read, restricted write |
+| Trigger | public | internal |
+|---------|--------|----------|
+| Human | yes | no |
+| Replica | yes | no |
+| Admin | yes | yes |
+| Scheduler | yes | yes |
 
 ### Trait Evolution
 
-Per-user/group soul layers evolve autonomously. Base SOUL.md changes require
+Per-user/group soul layers evolve autonomously. Base soul.md changes require
 high confidence (consistent pattern across many contexts) or admin approval.
 All proposed changes are audit-logged.
 
@@ -247,7 +262,7 @@ All proposed changes are audit-logged.
 |--------|----------|
 | Memory / soul layers | Free — autonomous |
 | Plugins / skills | Autonomous with sandbox testing + audit pipeline |
-| Base SOUL.md | High confidence auto-adopt OR admin approval |
+| Base soul.md | High confidence auto-adopt OR admin approval |
 | Core crate code | Propose only — diff + reasoning + tests queued for admin |
 
 ---

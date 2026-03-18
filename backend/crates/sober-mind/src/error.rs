@@ -27,6 +27,18 @@ pub enum MindError {
     /// BCF soul layer storage operation failed.
     #[error("Soul layer store failed: {0}")]
     LayerStoreFailed(String),
+
+    /// An instruction file could not be loaded from disk.
+    #[error("Failed to load instruction file: {0}")]
+    InstructionLoadFailed(String),
+
+    /// YAML frontmatter in an instruction file could not be parsed.
+    #[error("Failed to parse instruction frontmatter: {0}")]
+    FrontmatterParseFailed(String),
+
+    /// An `@path` reference in an instruction file could not be resolved.
+    #[error("Failed to resolve @path reference: {0}")]
+    ReferenceResolutionFailed(String),
 }
 
 impl From<MindError> for AppError {
@@ -43,6 +55,11 @@ impl From<MindError> for AppError {
             MindError::LayerStoreFailed(msg) => {
                 AppError::Internal(Box::new(std::io::Error::other(msg)))
             }
+            MindError::InstructionLoadFailed(msg) => {
+                AppError::Internal(Box::new(std::io::Error::other(msg)))
+            }
+            MindError::FrontmatterParseFailed(msg) => AppError::Validation(msg),
+            MindError::ReferenceResolutionFailed(msg) => AppError::Validation(msg),
         }
     }
 }
