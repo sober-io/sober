@@ -17,7 +17,8 @@
 	const BUILTIN_COMMANDS: Command[] = [
 		{ name: '/help', description: 'Show available commands' },
 		{ name: '/info', description: 'Show conversation info' },
-		{ name: '/clear', description: 'Clear all messages' }
+		{ name: '/clear', description: 'Clear all messages' },
+		{ name: '/reload-skills', description: 'Reload skills from disk' }
 	];
 
 	let { query, onExecute, onClose, skills = [] }: Props = $props();

@@ -597,14 +597,14 @@
 		messages = [];
 	};
 
-	const handleSlashCommand = (command: string) => {
+	const handleSlashCommand = async (command: string) => {
 		switch (command) {
 			case '/help':
 				messages.push({
 					id: crypto.randomUUID(),
 					role: 'system',
 					content:
-						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages\n\nType `/` to see available skills.',
+						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages\n- `/reload-skills` — Reload skills from disk\n\nType `/` to see available skills.',
 					thinkingContent: '',
 					streaming: false,
 					thinking: false,
@@ -626,6 +626,33 @@
 				break;
 			case '/clear':
 				showClearConfirm = true;
+				break;
+			case '/reload-skills':
+				try {
+					const reloaded = await skillsService.reload();
+					skills = reloaded;
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'system',
+						content: `Skills reloaded. ${reloaded.length} skill(s) available.`,
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						ephemeral: true
+					});
+				} catch {
+					messages.push({
+						id: crypto.randomUUID(),
+						role: 'system',
+						content: 'Failed to reload skills.',
+						thinkingContent: '',
+						streaming: false,
+						thinking: false,
+						timestamp: fmtTime(),
+						ephemeral: true
+					});
+				}
 				break;
 			default:
 				// Skill command — send as regular message with /skill-name prefix
