@@ -5,7 +5,7 @@
 //! → tool execution → response streaming.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sober_core::config::{LlmConfig, MemoryConfig};
@@ -109,6 +109,10 @@ struct LoopContext<'a, R: AgentRepos> {
     llm_config: &'a Option<LlmConfig>,
     /// Master encryption key for resolving user-stored LLM keys.
     mek: &'a Option<Arc<Mek>>,
+    /// Pre-rendered skill catalog XML for system prompt injection.
+    skill_catalog_xml: String,
+    /// Skill content loaded by slash-command interception (e.g. `/my-skill`).
+    activated_skill_content: String,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -137,6 +141,11 @@ pub struct Agent<R: AgentRepos> {
     /// remember) that are identical across conversations. Built once at
     /// construction and reused every turn.
     static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
+    /// Per-conversation skill activation tracking. Skills activated in one turn
+    /// remain active in subsequent turns of the same conversation.
+    skill_activations: std::sync::RwLock<
+        HashMap<ConversationId, Arc<std::sync::Mutex<sober_skill::SkillActivationState>>>,
+    >,
 }
 
 impl<R: AgentRepos> Agent<R> {
@@ -171,12 +180,107 @@ impl<R: AgentRepos> Agent<R> {
             llm_config,
             tool_bootstrap,
             static_tools,
+            skill_activations: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
     /// Returns a reference to the agent's [`Mind`] instance.
     pub fn mind(&self) -> &Arc<Mind> {
         &self.mind
+    }
+
+    /// Returns the skill activation state for a conversation, creating one if needed.
+    fn skill_activation_state(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Arc<std::sync::Mutex<sober_skill::SkillActivationState>> {
+        // Try read first
+        {
+            let activations = self
+                .skill_activations
+                .read()
+                .expect("skill activations lock");
+            if let Some(state) = activations.get(&conversation_id) {
+                return Arc::clone(state);
+            }
+        }
+        // Create new
+        let mut activations = self
+            .skill_activations
+            .write()
+            .expect("skill activations lock");
+        let state = activations.entry(conversation_id).or_insert_with(|| {
+            Arc::new(std::sync::Mutex::new(
+                sober_skill::SkillActivationState::default(),
+            ))
+        });
+        Arc::clone(state)
+    }
+
+    /// Checks if the message is a skill slash command (e.g. `/my-skill do something`).
+    ///
+    /// If so, activates the skill and returns `(remaining_text, skill_content_xml)`.
+    /// Otherwise returns `(original_content, "")`.
+    async fn intercept_skill_command(
+        &self,
+        content: &str,
+        conversation_id: ConversationId,
+        user_home: &Path,
+    ) -> (String, String) {
+        let trimmed = content.trim();
+        if !trimmed.starts_with('/') {
+            return (content.to_owned(), String::new());
+        }
+
+        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+        let potential_name = &parts[0][1..]; // strip leading /
+        if potential_name.is_empty() {
+            return (content.to_owned(), String::new());
+        }
+
+        let empty_ws = PathBuf::new();
+        let catalog = match self
+            .tool_bootstrap
+            .skill_loader
+            .load(user_home, &empty_ws)
+            .await
+        {
+            Ok(c) => c,
+            Err(_) => return (content.to_owned(), String::new()),
+        };
+
+        let entry = match catalog.get(potential_name) {
+            Some(e) => e,
+            None => return (content.to_owned(), String::new()),
+        };
+
+        // Read and parse SKILL.md
+        let skill_content = match tokio::fs::read_to_string(&entry.path).await {
+            Ok(raw) => match sober_skill::parse_skill_frontmatter(&raw) {
+                Ok((_fm, body)) => {
+                    let activation_state = self.skill_activation_state(conversation_id);
+                    if let Ok(mut state) = activation_state.lock() {
+                        state.activate(potential_name.to_string());
+                    }
+                    format!(
+                        "<skill_content name=\"{potential_name}\">\n{body}\n\n\
+                         Skill directory: {}\n</skill_content>",
+                        entry.base_dir.display(),
+                    )
+                }
+                Err(_) => String::new(),
+            },
+            Err(_) => String::new(),
+        };
+
+        let remaining = parts.get(1).map(|s| s.trim()).unwrap_or("");
+        let user_text = if remaining.is_empty() {
+            format!("I've activated the {potential_name} skill. Please use it.")
+        } else {
+            remaining.to_string()
+        };
+
+        (user_text, skill_content)
     }
 
     /// Builds a [`ToolRegistry`] for the given conversation turn via the
@@ -196,6 +300,7 @@ impl<R: AgentRepos> Agent<R> {
             conversation_id,
             workspace_id,
             workspace_dir,
+            skill_activation_state: Some(self.skill_activation_state(conversation_id)),
         };
         Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools).await)
     }
@@ -299,7 +404,15 @@ impl<R: AgentRepos> Agent<R> {
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Store user message (only for human-driven calls)
+        // 2. Intercept skill slash commands (e.g. `/my-skill do something`).
+        //    Uses user-level skills only (workspace not yet resolved).
+        let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let (content, activated_skill_content) = self
+            .intercept_skill_command(content, conversation_id, &user_home_for_skills)
+            .await;
+        let content = &content;
+
+        // 3. Store user message (only for human-driven calls)
         let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
                 .repos
@@ -387,6 +500,23 @@ impl<R: AgentRepos> Agent<R> {
             None
         };
 
+        // Load skill catalog XML for system prompt injection.
+        let skill_catalog_xml = {
+            let ws_path = workspace_dir.clone().unwrap_or_default();
+            match self
+                .tool_bootstrap
+                .skill_loader
+                .load(&user_home_for_skills, &ws_path)
+                .await
+            {
+                Ok(catalog) => catalog.to_catalog_xml(),
+                Err(e) => {
+                    warn!(error = %e, "failed to load skill catalog for prompt injection");
+                    String::new()
+                }
+            }
+        };
+
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,
@@ -469,6 +599,8 @@ impl<R: AgentRepos> Agent<R> {
                 workspace_dir,
                 llm_config: &llm_config,
                 mek: &mek,
+                skill_catalog_xml,
+                activated_skill_content,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -618,6 +750,12 @@ impl<R: AgentRepos> Agent<R> {
                         .push_str(&format!("## Relevant Memories\n\n{memory_context_text}"));
                 }
 
+                // Prepend skill content from slash-command interception.
+                if !ctx.activated_skill_content.is_empty() {
+                    task_description.push_str(&ctx.activated_skill_content);
+                    task_description.push_str("\n\n");
+                }
+
                 let task_context = TaskContext {
                     description: task_description,
                     recent_messages: loaded_context.recent_messages.clone(),
@@ -627,7 +765,13 @@ impl<R: AgentRepos> Agent<R> {
 
                 let tool_metadata = tool_registry.tool_metadata();
                 let assembled = mind
-                    .assemble(&caller, &task_context, &tool_metadata, "", "")
+                    .assemble(
+                        &caller,
+                        &task_context,
+                        &tool_metadata,
+                        "",
+                        &ctx.skill_catalog_xml,
+                    )
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 

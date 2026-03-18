@@ -88,6 +88,10 @@ pub struct TurnContext {
     pub workspace_id: Option<WorkspaceId>,
     /// Resolved filesystem path for the conversation workspace directory.
     pub workspace_dir: Option<PathBuf>,
+    /// Per-conversation skill activation state. When provided, the
+    /// [`ActivateSkillTool`] reuses this state so that activations persist
+    /// across multiple turns in the same conversation.
+    pub skill_activation_state: Option<Arc<std::sync::Mutex<SkillActivationState>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -219,12 +223,16 @@ impl<R: AgentRepos> ToolBootstrap<R> {
         }
 
         // 4. Skill tool — loaded per-turn from cached catalog.
+        //    Reuses the per-conversation activation state when provided so that
+        //    skills activated in earlier turns remain marked as active.
         let user_home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
         let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
         if let Ok(catalog) = self.skill_loader.load(&user_home, &workspace_path).await
             && !catalog.is_empty()
         {
-            let activation_state = Arc::new(std::sync::Mutex::new(SkillActivationState::default()));
+            let activation_state = ctx.skill_activation_state.clone().unwrap_or_else(|| {
+                Arc::new(std::sync::Mutex::new(SkillActivationState::default()))
+            });
             tools.push(Arc::new(ActivateSkillTool::new(catalog, activation_state)));
         }
 
@@ -243,9 +251,11 @@ mod tests {
             conversation_id: ConversationId::new(),
             workspace_id: None,
             workspace_dir: None,
+            skill_activation_state: None,
         };
         // Sanity: context is constructible without workspace.
         assert!(ctx.workspace_id.is_none());
         assert!(ctx.workspace_dir.is_none());
+        assert!(ctx.skill_activation_state.is_none());
     }
 }
