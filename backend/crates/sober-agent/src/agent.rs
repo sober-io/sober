@@ -183,8 +183,8 @@ impl<R: AgentRepos> Agent<R> {
     /// centralized [`ToolBootstrap`].
     ///
     /// Reuses the pre-built [`static_tools`](Self::static_tools) and adds
-    /// per-conversation tools (shell, secrets, artifacts, snapshots).
-    fn build_turn_tools(
+    /// per-conversation tools (shell, secrets, artifacts, snapshots, skills).
+    async fn build_turn_tools(
         &self,
         user_id: UserId,
         conversation_id: ConversationId,
@@ -197,7 +197,7 @@ impl<R: AgentRepos> Agent<R> {
             workspace_id,
             workspace_dir,
         };
-        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools))
+        Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools).await)
     }
 
     /// Resolves which conversation to deliver job results to.
@@ -417,12 +417,14 @@ impl<R: AgentRepos> Agent<R> {
         }
 
         // 4. Build per-conversation tools via ToolBootstrap.
-        let tool_registry = self.build_turn_tools(
-            user_id,
-            conversation_id,
-            conversation.workspace_id,
-            workspace_dir.clone(),
-        );
+        let tool_registry = self
+            .build_turn_tools(
+                user_id,
+                conversation_id,
+                conversation.workspace_id,
+                workspace_dir.clone(),
+            )
+            .await;
 
         // 5. Create event channel and spawn the agentic loop
         let (event_tx, event_rx) =
@@ -625,7 +627,7 @@ impl<R: AgentRepos> Agent<R> {
 
                 let tool_metadata = tool_registry.tool_metadata();
                 let assembled = mind
-                    .assemble(&caller, &task_context, &tool_metadata, "")
+                    .assemble(&caller, &task_context, &tool_metadata, "", "")
                     .await
                     .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 

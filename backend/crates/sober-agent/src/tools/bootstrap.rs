@@ -22,6 +22,7 @@ use sober_crypto::envelope::Mek;
 use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
 use sober_sandbox::{CommandPolicy, SandboxPolicy};
+use sober_skill::{ActivateSkillTool, SkillActivationState, SkillLoader};
 use sober_workspace::{BlobStore, SnapshotManager};
 
 use super::shell::SharedPermissionMode;
@@ -120,6 +121,8 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub blob_store: Arc<BlobStore>,
     /// Snapshot manager for snapshot and shell auto-snapshot tools.
     pub snapshot_manager: Arc<SnapshotManager>,
+    /// Skill loader for discovering and caching skills from the filesystem.
+    pub skill_loader: Arc<SkillLoader>,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {
@@ -152,7 +155,8 @@ impl<R: AgentRepos> ToolBootstrap<R> {
     /// 1. Shell tool with the correct workspace directory.
     /// 2. Secret tools (if MEK is configured).
     /// 3. Artifact and snapshot tools (if a workspace directory exists).
-    pub fn build(&self, ctx: &TurnContext, static_tools: &[Arc<dyn Tool>]) -> ToolRegistry {
+    /// 4. Skill tool (if any skills are available in the catalog).
+    pub async fn build(&self, ctx: &TurnContext, static_tools: &[Arc<dyn Tool>]) -> ToolRegistry {
         let mut tools: Vec<Arc<dyn Tool>> = static_tools.to_vec();
 
         // 1. Shell tool — use workspace_dir when available, otherwise the default root.
@@ -212,6 +216,16 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             tools.push(Arc::new(CreateSnapshotTool::new(Arc::clone(&snapshot_ctx))));
             tools.push(Arc::new(ListSnapshotsTool::new(Arc::clone(&snapshot_ctx))));
             tools.push(Arc::new(RestoreSnapshotTool::new(snapshot_ctx)));
+        }
+
+        // 4. Skill tool — loaded per-turn from cached catalog.
+        let user_home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
+        if let Ok(catalog) = self.skill_loader.load(&user_home, &workspace_path).await
+            && !catalog.is_empty()
+        {
+            let activation_state = Arc::new(std::sync::Mutex::new(SkillActivationState::default()));
+            tools.push(Arc::new(ActivateSkillTool::new(catalog, activation_state)));
         }
 
         ToolRegistry::with_builtins(tools)
