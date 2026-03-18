@@ -139,7 +139,7 @@ impl Tool for ActivateSkillTool {
                 },
                 "required": ["name"]
             }),
-            context_modifying: true,
+            context_modifying: false,
             internal: false,
         }
     }
@@ -264,7 +264,7 @@ mod tests {
         let meta = tool.metadata();
 
         assert_eq!(meta.name, "activate_skill");
-        assert!(meta.context_modifying);
+        assert!(!meta.context_modifying);
         assert!(!meta.internal);
 
         let schema = &meta.input_schema;
