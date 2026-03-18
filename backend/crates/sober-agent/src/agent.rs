@@ -5,7 +5,7 @@
 //! → tool execution → response streaming.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use sober_core::config::{LlmConfig, MemoryConfig};
@@ -109,19 +109,8 @@ struct LoopContext<'a, R: AgentRepos> {
     llm_config: &'a Option<LlmConfig>,
     /// Master encryption key for resolving user-stored LLM keys.
     mek: &'a Option<Arc<Mek>>,
-    /// XML listing of all available skills, injected into the system prompt so
-    /// the LLM knows which skills exist and can call `activate_skill`.
-    /// Built once per `handle_message()` from the `SkillLoader` cache.
+    /// XML listing of all available skills for system prompt injection.
     skill_catalog_xml: String,
-    /// Full skill body loaded by `/skill-name` slash command interception.
-    /// Injected into the task context so the LLM sees the skill instructions
-    /// immediately without needing to call `activate_skill`. Empty string if
-    /// the message wasn't a slash command.
-    activated_skill_content: String,
-    /// Name of the skill activated via slash command, if any.
-    /// Used to exclude `activate_skill` from tool definitions so the LLM
-    /// doesn't redundantly call it.
-    activated_skill_name: Option<String>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -248,81 +237,6 @@ impl<R: AgentRepos> Agent<R> {
         if let Ok(mut activations) = self.skill_activations.write() {
             activations.remove(&conversation_id);
         }
-    }
-
-    /// Checks if the message is a skill slash command (e.g. `/my-skill do something`).
-    ///
-    /// Returns `(remaining_text, skill_content_xml, activated_skill_name)`.
-    /// If not a skill command, returns `(original_content, "", None)`.
-    async fn intercept_skill_command(
-        &self,
-        content: &str,
-        conversation_id: ConversationId,
-        user_home: &Path,
-        workspace_path: &Path,
-    ) -> (String, String, Option<String>) {
-        let trimmed = content.trim();
-        if !trimmed.starts_with('/') {
-            return (content.to_owned(), String::new(), None);
-        }
-
-        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
-        let potential_name = &parts[0][1..]; // strip leading /
-        if potential_name.is_empty() {
-            return (content.to_owned(), String::new(), None);
-        }
-
-        let catalog = match self
-            .tool_bootstrap
-            .skill_loader
-            .load(user_home, workspace_path)
-            .await
-        {
-            Ok(c) => c,
-            Err(_) => return (content.to_owned(), String::new(), None),
-        };
-
-        let entry = match catalog.get(potential_name) {
-            Some(e) => e,
-            None => return (content.to_owned(), String::new(), None),
-        };
-
-        // Read and parse SKILL.md
-        let skill_content = match tokio::fs::read_to_string(&entry.path).await {
-            Ok(raw) => match sober_skill::parse_skill_frontmatter(&raw) {
-                Ok((_fm, body)) => {
-                    let activation_state = self.skill_activation_state(conversation_id);
-                    if let Ok(mut state) = activation_state.lock() {
-                        state.activate(potential_name.to_string());
-                    }
-                    format!(
-                        "<skill_content name=\"{potential_name}\">\n{body}\n\n\
-                         Skill directory: {}\n</skill_content>",
-                        entry.base_dir.display(),
-                    )
-                }
-                Err(_) => String::new(),
-            },
-            Err(_) => String::new(),
-        };
-
-        let remaining = parts.get(1).map(|s| s.trim()).unwrap_or("");
-
-        // Use the remaining text as the user message. If empty, keep the
-        // original `/skill-name` so the stored message shows what the user typed.
-        let user_text = if remaining.is_empty() {
-            content.to_owned()
-        } else {
-            remaining.to_string()
-        };
-
-        let activated_name = if skill_content.is_empty() {
-            None
-        } else {
-            Some(potential_name.to_owned())
-        };
-
-        (user_text, skill_content, activated_name)
     }
 
     /// Builds a [`ToolRegistry`] for the given conversation turn via the
@@ -513,49 +427,15 @@ impl<R: AgentRepos> Agent<R> {
             None
         };
 
-        // 3. Intercept skill slash commands (e.g. `/my-skill do something`).
-        //    Runs after workspace resolution so workspace-level skills are found.
-        //    The stripped content (without `/skill-name` prefix) is stored in the
-        //    DB so history doesn't contain the raw slash command.
-        let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
-        let ws_path_for_skills = workspace_dir.clone().unwrap_or_default();
-        let (content, activated_skill_content, activated_skill_name) = self
-            .intercept_skill_command(
-                content,
-                conversation_id,
-                &user_home_for_skills,
-                &ws_path_for_skills,
-            )
-            .await;
-        let content = &content;
-
-        // 4. Store user message (only for human-driven calls).
-        //    For skill slash commands, store a clean description instead of
-        //    the raw `/skill-name` prefix so the LLM always has a user message.
+        // 3. Store user message (only for human-driven calls).
         let user_msg_id = if trigger == TriggerKind::Human {
-            let store_content = if let Some(ref skill_name) = activated_skill_name {
-                // Strip `/skill-name ` prefix, keep remaining text.
-                let remaining = content
-                    .strip_prefix('/')
-                    .unwrap_or(content)
-                    .split_once(' ')
-                    .map(|(_, r)| r.trim())
-                    .unwrap_or("");
-                if remaining.is_empty() {
-                    format!("Use the {skill_name} skill.")
-                } else {
-                    remaining.to_owned()
-                }
-            } else {
-                content.to_owned()
-            };
             let user_msg = self
                 .repos
                 .messages()
                 .create(CreateMessage {
                     conversation_id,
                     role: MessageRole::User,
-                    content: store_content,
+                    content: content.to_owned(),
                     tool_calls: None,
                     tool_result: None,
                     token_count: None,
@@ -570,17 +450,16 @@ impl<R: AgentRepos> Agent<R> {
         };
 
         // Load skill catalog XML for system prompt injection.
-        // Exclude any skill already activated via slash command so the LLM
-        // doesn't see it in the catalog and redundantly call activate_skill.
         let skill_catalog_xml = {
-            let exclude: Vec<&str> = activated_skill_name.as_deref().into_iter().collect();
+            let user_home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+            let ws_path = workspace_dir.clone().unwrap_or_default();
             match self
                 .tool_bootstrap
                 .skill_loader
-                .load(&user_home_for_skills, &ws_path_for_skills)
+                .load(&user_home, &ws_path)
                 .await
             {
-                Ok(catalog) => catalog.to_catalog_xml_excluding(&exclude),
+                Ok(catalog) => catalog.to_catalog_xml(),
                 Err(e) => {
                     warn!(error = %e, "failed to load skill catalog for prompt injection");
                     String::new()
@@ -672,8 +551,6 @@ impl<R: AgentRepos> Agent<R> {
                 llm_config: &llm_config,
                 mek: &mek,
                 skill_catalog_xml,
-                activated_skill_content,
-                activated_skill_name,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -823,12 +700,6 @@ impl<R: AgentRepos> Agent<R> {
                         .push_str(&format!("## Relevant Memories\n\n{memory_context_text}"));
                 }
 
-                // Prepend skill content from slash-command interception.
-                if !ctx.activated_skill_content.is_empty() {
-                    task_description.push_str(&ctx.activated_skill_content);
-                    task_description.push_str("\n\n");
-                }
-
                 let task_context = TaskContext {
                     description: task_description,
                     recent_messages: loaded_context.recent_messages.clone(),
@@ -871,11 +742,8 @@ impl<R: AgentRepos> Agent<R> {
 
             // e. Call LLM — exclude tools that shouldn't be available:
             //    - scheduler tool excluded for scheduler-driven calls (prevent job recreation)
-            //    - activate_skill excluded when a skill was slash-activated (already loaded)
             let tool_definitions = if ctx.trigger == TriggerKind::Scheduler {
                 tool_registry.tool_definitions_except(&["scheduler"])
-            } else if ctx.activated_skill_name.is_some() {
-                tool_registry.tool_definitions_except(&["activate_skill"])
             } else {
                 tool_registry.tool_definitions()
             };
