@@ -62,11 +62,14 @@ async fn list_skills(
 async fn reload_skills(
     State(state): State<Arc<AppState>>,
     _auth_user: AuthUser,
+    axum::extract::Query(params): axum::extract::Query<ListSkillsParams>,
 ) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
     let mut client = state.agent_client.clone();
 
     let response = client
-        .reload_skills(proto::ReloadSkillsRequest {})
+        .reload_skills(proto::ReloadSkillsRequest {
+            conversation_id: params.conversation_id,
+        })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 

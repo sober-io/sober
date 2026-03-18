@@ -128,10 +128,11 @@
 		}
 	});
 
-	// Fetch available skills once on mount
+	// Fetch available skills when conversation changes
 	$effect(() => {
+		const id = conversationId;
 		skillsService
-			.list()
+			.list(id || undefined)
 			.then((s) => {
 				skills = s;
 			})
@@ -629,7 +630,7 @@
 				break;
 			case '/reload-skills':
 				try {
-					const reloaded = await skillsService.reload();
+					const reloaded = await skillsService.reload(conversationId || undefined);
 					skills = reloaded;
 					messages.push({
 						id: crypto.randomUUID(),

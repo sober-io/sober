@@ -189,6 +189,22 @@ impl<R: AgentRepos> Agent<R> {
         &self.mind
     }
 
+    /// Resolves the workspace directory path for a conversation.
+    ///
+    /// Returns `None` if the conversation has no workspace or the workspace
+    /// doesn't exist in the database.
+    pub async fn resolve_workspace_dir(&self, conversation_id: ConversationId) -> Option<PathBuf> {
+        let conversation = self
+            .repos
+            .conversations()
+            .get_by_id(conversation_id)
+            .await
+            .ok()?;
+        let ws_id = conversation.workspace_id?;
+        let ws = self.repos.workspaces().get_by_id(ws_id).await.ok()?;
+        Some(PathBuf::from(&ws.root_path))
+    }
+
     /// Returns the skill activation state for a conversation, creating one if needed.
     fn skill_activation_state(
         &self,

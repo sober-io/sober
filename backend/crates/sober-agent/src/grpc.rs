@@ -304,12 +304,27 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
     async fn list_skills(
         &self,
-        _request: Request<proto::ListSkillsRequest>,
+        request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
+        let req = request.into_inner();
         let user_home = std::env::var("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_default();
-        let workspace_path = std::path::PathBuf::new();
+
+        // Resolve workspace path from conversation_id if provided.
+        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .resolve_workspace_dir(conv_id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                std::path::PathBuf::new()
+            }
+        } else {
+            std::path::PathBuf::new()
+        };
 
         let catalog = self
             .skill_loader
@@ -334,8 +349,10 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
     async fn reload_skills(
         &self,
-        _request: Request<proto::ReloadSkillsRequest>,
+        request: Request<proto::ReloadSkillsRequest>,
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
+        let req = request.into_inner();
+
         // Invalidate cache first
         self.skill_loader.invalidate_cache();
 
@@ -343,7 +360,20 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         let user_home = std::env::var("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_default();
-        let workspace_path = std::path::PathBuf::new();
+
+        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .resolve_workspace_dir(conv_id)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                std::path::PathBuf::new()
+            }
+        } else {
+            std::path::PathBuf::new()
+        };
 
         let catalog = self
             .skill_loader
