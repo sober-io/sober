@@ -303,8 +303,11 @@ impl<R: AgentRepos> Agent<R> {
         };
 
         let remaining = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        // Use the remaining text as the user message. If empty, keep the
+        // original `/skill-name` so the stored message shows what the user typed.
         let user_text = if remaining.is_empty() {
-            format!("I've activated the {potential_name} skill. Please use it.")
+            content.to_owned()
         } else {
             remaining.to_string()
         };
@@ -789,7 +792,14 @@ impl<R: AgentRepos> Agent<R> {
                 }
 
                 // Prepend skill content from slash-command interception.
+                // Includes an instruction so the LLM uses the skill directly
+                // without calling activate_skill again.
                 if !ctx.activated_skill_content.is_empty() {
+                    task_description.push_str(
+                        "The following skill was activated by the user via slash command. ",
+                    );
+                    task_description
+                        .push_str("It is already loaded — do NOT call activate_skill for it.\n\n");
                     task_description.push_str(&ctx.activated_skill_content);
                     task_description.push_str("\n\n");
                 }
