@@ -16,7 +16,10 @@ use crate::types::{SkillEntry, SkillSource};
 const MAX_SCAN_DIRS: usize = 2000;
 
 /// Subdirectories within a root where skills are discovered.
-const SKILL_SUBDIRS: &[&str] = &[".sober/skills", ".agents/skills"];
+/// - `.sober/skills` — Sõber-specific convention
+/// - `.agents/skills` — Cross-client interop (Agent Skills spec)
+/// - `skills` — Bare convention (common when skills are created by the agent)
+const SKILL_SUBDIRS: &[&str] = &[".sober/skills", ".agents/skills", "skills"];
 
 struct CachedCatalog {
     catalog: Arc<SkillCatalog>,
