@@ -797,27 +797,36 @@ impl<R: AgentRepos> Agent<R> {
                 });
 
                 // Store assistant message with tool calls before executing them.
-                // Persist reasoning_content in metadata so it survives context rebuilds.
-                let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
-                let msg_metadata = choice
-                    .message
-                    .reasoning_content
-                    .as_ref()
-                    .map(|rc| serde_json::json!({ "reasoning_content": rc }));
-                repos
-                    .messages()
-                    .create(CreateMessage {
-                        conversation_id,
-                        role: MessageRole::Assistant,
-                        content: choice.message.content.clone().unwrap_or_default(),
-                        tool_calls: tool_calls_json,
-                        tool_result: None,
-                        token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
-                        metadata: msg_metadata,
-                        user_id: Some(user_id),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                // Skip DB storage when all tool calls are for internal tools
+                // (e.g. activate_skill) — they stay in-memory only.
+                let all_internal = tool_calls.iter().all(|tc| {
+                    tool_registry
+                        .get_tool(&tc.function.name)
+                        .is_some_and(|t| t.metadata().internal)
+                });
+
+                if !all_internal {
+                    let tool_calls_json = serde_json::to_value(&choice.message.tool_calls).ok();
+                    let msg_metadata = choice
+                        .message
+                        .reasoning_content
+                        .as_ref()
+                        .map(|rc| serde_json::json!({ "reasoning_content": rc }));
+                    repos
+                        .messages()
+                        .create(CreateMessage {
+                            conversation_id,
+                            role: MessageRole::Assistant,
+                            content: choice.message.content.clone().unwrap_or_default(),
+                            tool_calls: tool_calls_json,
+                            tool_result: None,
+                            token_count: usage_stats.as_ref().map(|u| u.total_tokens as i32),
+                            metadata: msg_metadata,
+                            user_id: Some(user_id),
+                        })
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                }
 
                 let (tool_msgs, any_context_modifying, had_errors) =
                     Self::execute_tool_calls_streaming(
@@ -1171,23 +1180,24 @@ impl<R: AgentRepos> Agent<R> {
 
             messages.push(LlmMessage::tool(&tc.id, output.clone()));
 
-            // Store tool result message for audit trail.
-            if let Err(e) = repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::Tool,
-                    content: output.clone(),
-                    tool_calls: None,
-                    tool_result: Some(serde_json::json!({
-                        "tool_call_id": tc.id,
-                        "name": tool_name,
-                    })),
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
+            // Store tool result message for audit trail (skip internal tools).
+            if !tool_internal
+                && let Err(e) = repos
+                    .messages()
+                    .create(CreateMessage {
+                        conversation_id,
+                        role: MessageRole::Tool,
+                        content: output.clone(),
+                        tool_calls: None,
+                        tool_result: Some(serde_json::json!({
+                            "tool_call_id": tc.id,
+                            "name": tool_name,
+                        })),
+                        token_count: None,
+                        metadata: None,
+                        user_id: Some(user_id),
+                    })
+                    .await
             {
                 warn!(
                     tool = %tool_name,
