@@ -130,7 +130,14 @@
 
 	// Fetch available skills once on mount
 	$effect(() => {
-		skillsService.list().then((s) => { skills = s; }).catch(() => { skills = []; });
+		skillsService
+			.list()
+			.then((s) => {
+				skills = s;
+			})
+			.catch(() => {
+				skills = [];
+			});
 	});
 
 	// Reset state when conversation changes

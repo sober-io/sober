@@ -83,7 +83,10 @@
 			>
 				<span class="font-mono font-medium text-zinc-900 dark:text-zinc-100">{command.name}</span>
 				{#if command.isSkill}
-					<span class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">skill</span>
+					<span
+						class="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+						>skill</span
+					>
 				{/if}
 				<span class="text-zinc-500 dark:text-zinc-400">{command.description}</span>
 			</button>

@@ -10,7 +10,13 @@
 		skills?: SkillInfo[];
 	}
 
-	let { onsend, busy = false, value = $bindable(''), onSlashCommand, skills = [] }: Props = $props();
+	let {
+		onsend,
+		busy = false,
+		value = $bindable(''),
+		onSlashCommand,
+		skills = []
+	}: Props = $props();
 
 	const showSlashCommands = $derived(value.startsWith('/'));
 
@@ -47,7 +53,12 @@
 
 <div class="relative border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 	{#if showSlashCommands}
-		<SlashCommandPalette query={value} onExecute={handleSlashExecute} onClose={handleSlashClose} {skills} />
+		<SlashCommandPalette
+			query={value}
+			onExecute={handleSlashExecute}
+			onClose={handleSlashClose}
+			{skills}
+		/>
 	{/if}
 	<div class="flex gap-2 p-4">
 		<textarea
