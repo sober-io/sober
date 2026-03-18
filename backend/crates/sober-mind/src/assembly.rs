@@ -74,7 +74,7 @@ impl Mind {
     /// 3. Get instructions (base+user, optionally + workspace)
     /// 4. Replace soul.md body with resolved soul text + layers
     /// 5. Filter by visibility, sort by category
-    /// 6. Concatenate + tool definitions
+    /// 6. Concatenate + skill catalog + tool definitions
     /// 7. Return assembled messages
     pub async fn assemble(
         &self,
@@ -82,10 +82,11 @@ impl Mind {
         context: &TaskContext,
         tools: &[ToolMetadata],
         soul_layer_text: &str,
+        skill_catalog_xml: &str,
     ) -> Result<Vec<Message>, MindError> {
         // 1. Build system prompt from instruction files
         let system_prompt = self
-            .build_system_prompt(caller, tools, soul_layer_text)
+            .build_system_prompt(caller, tools, soul_layer_text, skill_catalog_xml)
             .await?;
 
         // 2. Assemble message array
@@ -146,12 +147,13 @@ impl Mind {
     ///
     /// Builds system prompt from instruction files — no conversation history.
     /// The task text becomes the sole user message. Intended for scheduled jobs.
+    /// Skills are not injected into autonomous prompts.
     pub async fn assemble_autonomous_prompt(
         &self,
         task: &str,
         caller: &CallerContext,
     ) -> Result<Vec<Message>, MindError> {
-        let system_prompt = self.build_system_prompt(caller, &[], "").await?;
+        let system_prompt = self.build_system_prompt(caller, &[], "", "").await?;
 
         Ok(vec![
             make_system_message(&system_prompt),
@@ -184,6 +186,7 @@ impl Mind {
         caller: &CallerContext,
         tools: &[ToolMetadata],
         soul_layer_text: &str,
+        skill_catalog_xml: &str,
     ) -> Result<String, MindError> {
         // 1. Resolve soul.md chain (layered: base → user → workspace)
         let soul_text = self.soul_resolver.resolve().await?;
@@ -212,6 +215,12 @@ impl Mind {
                 prompt.push_str("\n\n");
             }
             prompt.push_str(&file.body);
+        }
+
+        // 5.5. Inject skill catalog (after instructions, before tools)
+        if !skill_catalog_xml.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(skill_catalog_xml);
         }
 
         // 6. Append tool definitions
@@ -319,7 +328,7 @@ mod tests {
             user_display_names: HashMap::new(),
         };
 
-        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         assert_eq!(messages.len(), 2); // system + task context
         assert_eq!(messages[0].role, MessageRole::System);
         // Should contain soul.md content
@@ -352,7 +361,10 @@ mod tests {
             user_display_names: HashMap::new(),
         };
 
-        let messages = mind.assemble(&caller, &context, &tools, "").await.unwrap();
+        let messages = mind
+            .assemble(&caller, &context, &tools, "", "")
+            .await
+            .unwrap();
         assert_eq!(messages.len(), 1); // system only (no task context)
         assert!(messages[0].content.contains("web_search"));
         assert!(messages[0].content.contains("Search the web."));
@@ -372,7 +384,7 @@ mod tests {
         // Human should not see internal content (reasoning, evolution, internal-tools).
         let human_caller = make_caller(TriggerKind::Human);
         let human_msgs = mind
-            .assemble(&human_caller, &context, &[], "")
+            .assemble(&human_caller, &context, &[], "", "")
             .await
             .unwrap();
         assert!(!human_msgs[0].content.contains("Self-Reasoning"));
@@ -389,7 +401,7 @@ mod tests {
         // Scheduler should see everything.
         let sched_caller = make_caller(TriggerKind::Scheduler);
         let sched_msgs = mind
-            .assemble(&sched_caller, &context, &[], "")
+            .assemble(&sched_caller, &context, &[], "", "")
             .await
             .unwrap();
         assert!(sched_msgs[0].content.contains("Self-Reasoning"));
@@ -415,7 +427,7 @@ mod tests {
         let layer_text = "## Learned Adaptations\n\n- **tone**: formal (confidence: 85%)";
 
         let messages = mind
-            .assemble(&caller, &context, &[], layer_text)
+            .assemble(&caller, &context, &[], layer_text, "")
             .await
             .unwrap();
         assert!(messages[0].content.contains("tone"));
@@ -500,7 +512,7 @@ mod tests {
             user_display_names: HashMap::new(),
         };
 
-        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         // system + 2 messages (Event filtered out)
         assert_eq!(messages.len(), 3);
         assert!(!messages.iter().any(|m| m.role == MessageRole::Event));
@@ -528,7 +540,7 @@ mod tests {
             user_display_names: names,
         };
 
-        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         // system + group context + 3 messages
         assert_eq!(messages.len(), 5);
         assert!(messages[1].content.contains("group conversation"));
@@ -550,7 +562,7 @@ mod tests {
             user_display_names: HashMap::new(),
         };
 
-        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[1].content, "hello");
     }
@@ -566,7 +578,7 @@ mod tests {
             user_display_names: HashMap::new(),
         };
 
-        let messages = mind.assemble(&caller, &context, &[], "").await.unwrap();
+        let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         let prompt = &messages[0].content;
 
         // Personality (soul.md) should come before guardrails (safety.md)
