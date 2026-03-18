@@ -28,11 +28,9 @@ Metric: `sober_mind_injection_detections_total`.
 | `metrics` + `metrics-exporter-prometheus` | In-process metric registry + `/metrics` endpoint | New dependency |
 | Prometheus | Metric scraping & storage | Docker container |
 | Grafana Tempo | Distributed trace storage | Docker container |
-| Grafana Loki | Log aggregation | Docker container, optional |
-| Promtail | Ships container stdout to Loki | Docker container, optional |
 | Grafana | Dashboards, alerting | Docker container |
 
-All backends (Prometheus, Tempo, Loki) are optional consumers. The app writes logs to stdout, exposes `/metrics`, and emits OTEL spans regardless of whether anything collects them. Disabling OTEL export is a config change (unset `OTEL_EXPORTER_OTLP_ENDPOINT`).
+**No Loki/Promtail** — logs stay on stdout. All backends (Prometheus, Tempo) are optional consumers. The app writes logs to stdout, exposes `/metrics`, and emits OTEL spans regardless of whether anything collects them. Disabling OTEL export is a config change (unset `OTEL_EXPORTER_OTLP_ENDPOINT`).
 
 ---
 
@@ -398,24 +396,13 @@ tempo:
     - "4317:4317"   # OTLP gRPC
     - "3200:3200"   # Tempo query
 
-loki:
-  image: grafana/loki
-  ports:
-    - "3100:3100"
-
-promtail:
-  image: grafana/promtail
-  volumes:
-    - /var/log:/var/log
-    - ./infra/promtail/config.yml:/etc/promtail/config.yml
-
 grafana:
   image: grafana/grafana
   volumes:
     - ./infra/grafana/provisioning/:/etc/grafana/provisioning/
     - ./infra/grafana/dashboards/:/var/lib/grafana/dashboards/
   ports:
-    - "3000:3000"
+    - "3001:3000"
   environment:
     - GF_AUTH_ANONYMOUS_ENABLED=true
     - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
@@ -429,7 +416,7 @@ grafana:
 infra/
   grafana/
     provisioning/
-      datasources/datasources.yml    # Prometheus, Tempo, Loki
+      datasources/datasources.yml    # Prometheus, Tempo
       dashboards/dashboards.yml      # Auto-load from /dashboards/
     dashboards/
       generated/                     # Output of dashboard-gen tool
@@ -439,8 +426,6 @@ infra/
     alerts/
       critical.yml
       warning.yml
-  promtail/
-    config.yml
   tempo/
     tempo.yml
 
@@ -473,7 +458,7 @@ backend/crates/
 - [ ] gRPC trace propagation works across api/agent/scheduler boundaries
 - [ ] `/metrics` endpoint serves Prometheus format from each service
 - [ ] `tools/dashboard-gen` generates valid Grafana dashboard JSON from `metrics.toml` files
-- [ ] Docker Compose includes Prometheus, Tempo, Loki, Promtail, Grafana
+- [ ] Docker Compose includes Prometheus, Tempo, Grafana
 - [ ] Grafana auto-loads generated + curated dashboards on startup
 - [ ] Alerting rules provisioned and functional in Grafana/Prometheus
 - [ ] `just dashboards` regenerates all dashboard JSON
