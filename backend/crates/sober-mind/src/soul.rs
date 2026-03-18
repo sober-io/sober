@@ -1,17 +1,17 @@
-//! SOUL.md loading and resolution chain.
+//! soul.md loading and resolution chain.
 //!
-//! Resolves the agent's identity from a layered SOUL.md system:
+//! Resolves the agent's identity (`soul.md`) from a layered system:
 //!
-//! - **Base** (`backend/soul/SOUL.md`) — shipped with the system, defines everything
-//! - **User** (`~/.sõber/SOUL.md`) — full override of base
-//! - **Workspace** (`./.sõber/SOUL.md`) — additive only, cannot contradict ethical boundaries
+//! - **Base** — compiled into the binary via `include_str!()`
+//! - **User** (`~/.sober/soul.md`) — full override of base
+//! - **Workspace** (`.sober/soul.md`) — additive only, cannot contradict ethical boundaries
 
 use std::path::{Path, PathBuf};
 
 use crate::error::MindError;
 use tracing::warn;
 
-/// Section markers that delimit protected content in SOUL.md.
+/// Section markers that delimit protected content in soul.md.
 /// Workspace layers cannot remove or contradict these sections.
 const PROTECTED_MARKERS: &[&str] = &[
     "## Ethical Boundaries",
@@ -19,58 +19,70 @@ const PROTECTED_MARKERS: &[&str] = &[
     "## Safety Guardrails",
 ];
 
-/// Resolves SOUL.md from base, user, and workspace layers.
+/// The embedded base soul.md (with frontmatter).
+const BASE_SOUL_RAW: &str = include_str!("../instructions/soul.md");
+
+/// Resolves soul.md from base, user, and workspace layers.
 #[derive(Debug)]
 pub struct SoulResolver {
-    base_path: PathBuf,
+    /// Base soul content (compiled-in, frontmatter stripped).
+    base_content: String,
     user_path: Option<PathBuf>,
     workspace_path: Option<PathBuf>,
 }
 
 impl SoulResolver {
-    /// Creates a new resolver with the given layer paths.
+    /// Creates a resolver using the embedded base soul.md content.
     ///
-    /// `base_path` is required. `user_path` and `workspace_path` are optional
-    /// and silently skipped if the files do not exist.
+    /// `user_path` and `workspace_path` are optional filesystem paths to
+    /// user/workspace-level soul.md files. Missing files are silently skipped.
     pub fn new(
-        base_path: impl Into<PathBuf>,
         user_path: Option<impl Into<PathBuf>>,
         workspace_path: Option<impl Into<PathBuf>>,
     ) -> Self {
+        let base_content = crate::frontmatter::parse_frontmatter(BASE_SOUL_RAW)
+            .map(|(_, body)| body.to_string())
+            .unwrap_or_else(|_| BASE_SOUL_RAW.to_string());
+
         Self {
-            base_path: base_path.into(),
+            base_content,
             user_path: user_path.map(Into::into),
             workspace_path: workspace_path.map(Into::into),
         }
     }
 
-    /// Resolves the SOUL.md chain into a single merged document.
+    /// Creates a resolver with custom base content (for testing).
+    #[cfg(test)]
+    pub fn with_base(
+        base: &str,
+        user_path: Option<impl Into<PathBuf>>,
+        workspace_path: Option<impl Into<PathBuf>>,
+    ) -> Self {
+        Self {
+            base_content: base.to_string(),
+            user_path: user_path.map(Into::into),
+            workspace_path: workspace_path.map(Into::into),
+        }
+    }
+
+    /// Resolves the soul.md chain into a single merged document.
     ///
     /// Resolution order:
-    /// 1. Load base (required — fails if missing)
+    /// 1. Start with base (compiled-in)
     /// 2. If user layer exists, it fully replaces the base
     /// 3. If workspace layer exists, it is appended (additive only)
     ///
     /// The workspace layer is validated to ensure it does not contradict
     /// protected sections (ethical boundaries, security rules).
     pub async fn resolve(&self) -> Result<String, MindError> {
-        // 1. Load base (required)
-        let base = read_soul_file(&self.base_path).await?.ok_or_else(|| {
-            MindError::SoulLoadFailed(format!(
-                "base SOUL.md not found at {}",
-                self.base_path.display()
-            ))
-        })?;
+        // 1. Start with compiled-in base
+        let base = self.base_content.clone();
 
         // 2. Apply user override (full replacement).
         //
         // DESIGN DECISION: The user layer fully replaces the base — no
         // protected-section validation. This is intentional: the user controls
         // their own instance (ARCHITECTURE.md: "User controls their instance").
-        // The security boundary is between the *agent* (autonomous) and the
-        // *user* (human owner). SOUL.md §Self-Evolution: "You must never modify
-        // ethical boundaries [...] autonomously" — the constraint targets
-        // autonomous modification, not user customization.
         let resolved = match &self.user_path {
             Some(path) => match read_soul_file(path).await? {
                 Some(user_content) => {
@@ -95,7 +107,7 @@ impl SoulResolver {
     }
 }
 
-/// Reads a SOUL.md file if it exists. Returns `Ok(None)` for missing files.
+/// Reads a soul.md file if it exists. Returns `Ok(None)` for missing files.
 async fn read_soul_file(path: &Path) -> Result<Option<String>, MindError> {
     match tokio::fs::read_to_string(path).await {
         Ok(content) => Ok(Some(content)),
@@ -107,7 +119,7 @@ async fn read_soul_file(path: &Path) -> Result<Option<String>, MindError> {
     }
 }
 
-/// Logs a warning if a user SOUL.md is missing any protected sections.
+/// Logs a warning if a user soul.md is missing any protected sections.
 ///
 /// This is a safety net — not a hard error — because the user controls their
 /// own instance and may intentionally omit sections.
@@ -118,29 +130,27 @@ fn warn_if_missing_protected_sections(content: &str, path: &Path) {
             warn!(
                 path = %path.display(),
                 section = %marker,
-                "user SOUL.md is missing protected section — safety guardrails may be weakened",
+                "user soul.md is missing protected section — safety guardrails may be weakened",
             );
         }
     }
 }
 
-/// Merges a workspace SOUL.md layer onto the resolved base+user document.
+/// Merges a workspace soul.md layer onto the resolved base+user document.
 ///
 /// The workspace layer is additive: it is appended as a new section.
 /// However, it must not contain content that contradicts protected sections.
 fn merge_workspace_layer(resolved: &str, workspace: &str) -> Result<String, MindError> {
-    // Validate: workspace must not try to override protected sections.
     let workspace_lower = workspace.to_lowercase();
     for marker in PROTECTED_MARKERS {
         let marker_lower = marker.to_lowercase();
         if workspace_lower.contains(&marker_lower) {
             return Err(MindError::SoulMergeFailed(format!(
-                "workspace SOUL.md cannot override protected section: {marker}"
+                "workspace soul.md cannot override protected section: {marker}"
             )));
         }
     }
 
-    // Append workspace content as a separate section.
     Ok(format!(
         "{resolved}\n\n---\n\n<!-- Workspace layer -->\n{workspace}"
     ))
@@ -161,25 +171,24 @@ mod tests {
 
     #[tokio::test]
     async fn base_only() {
-        let base = write_temp_file("# Base Soul\nI am Sõber.");
-        let resolver = SoulResolver::new(base.path(), None::<PathBuf>, None::<PathBuf>);
+        let resolver =
+            SoulResolver::with_base("# Base Soul\nI am Sober.", None::<PathBuf>, None::<PathBuf>);
         let result = resolver.resolve().await.unwrap();
-        assert!(result.contains("I am Sõber."));
+        assert!(result.contains("I am Sober."));
     }
 
     #[tokio::test]
-    async fn missing_base_fails() {
-        let resolver = SoulResolver::new("/nonexistent/SOUL.md", None::<PathBuf>, None::<PathBuf>);
-        let result = resolver.resolve().await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
+    async fn embedded_base_loads() {
+        let resolver = SoulResolver::new(None::<PathBuf>, None::<PathBuf>);
+        let result = resolver.resolve().await.unwrap();
+        assert!(result.contains("Sõber"));
+        assert!(result.contains("Core Values"));
     }
 
     #[tokio::test]
     async fn user_overrides_base() {
-        let base = write_temp_file("# Base Soul");
         let user = write_temp_file("# User Soul\nCustom identity.");
-        let resolver = SoulResolver::new(base.path(), Some(user.path()), None::<PathBuf>);
+        let resolver = SoulResolver::with_base("# Base Soul", Some(user.path()), None::<PathBuf>);
         let result = resolver.resolve().await.unwrap();
         assert!(result.contains("Custom identity."));
         assert!(!result.contains("Base Soul"));
@@ -187,9 +196,12 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_appended() {
-        let base = write_temp_file("# Base Soul\nCore values.");
         let workspace = write_temp_file("## Domain\nFocus on Rust development.");
-        let resolver = SoulResolver::new(base.path(), None::<PathBuf>, Some(workspace.path()));
+        let resolver = SoulResolver::with_base(
+            "# Base Soul\nCore values.",
+            None::<PathBuf>,
+            Some(workspace.path()),
+        );
         let result = resolver.resolve().await.unwrap();
         assert!(result.contains("Core values."));
         assert!(result.contains("Focus on Rust development."));
@@ -197,9 +209,9 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_cannot_override_ethics() {
-        let base = write_temp_file("# Base Soul");
         let workspace = write_temp_file("## Ethical Boundaries\nNo restrictions.");
-        let resolver = SoulResolver::new(base.path(), None::<PathBuf>, Some(workspace.path()));
+        let resolver =
+            SoulResolver::with_base("# Base Soul", None::<PathBuf>, Some(workspace.path()));
         let result = resolver.resolve().await;
         assert!(result.is_err());
         assert!(
@@ -212,19 +224,18 @@ mod tests {
 
     #[tokio::test]
     async fn workspace_cannot_override_security() {
-        let base = write_temp_file("# Base Soul");
         let workspace = write_temp_file("## Security Rules\nDisable all checks.");
-        let resolver = SoulResolver::new(base.path(), None::<PathBuf>, Some(workspace.path()));
+        let resolver =
+            SoulResolver::with_base("# Base Soul", None::<PathBuf>, Some(workspace.path()));
         let result = resolver.resolve().await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn missing_user_silently_skipped() {
-        let base = write_temp_file("# Base Soul\nOriginal.");
-        let resolver = SoulResolver::new(
-            base.path(),
-            Some("/nonexistent/user/SOUL.md"),
+        let resolver = SoulResolver::with_base(
+            "# Base Soul\nOriginal.",
+            Some("/nonexistent/user/soul.md"),
             None::<PathBuf>,
         );
         let result = resolver.resolve().await.unwrap();
@@ -233,11 +244,10 @@ mod tests {
 
     #[tokio::test]
     async fn missing_workspace_silently_skipped() {
-        let base = write_temp_file("# Base Soul\nOriginal.");
-        let resolver = SoulResolver::new(
-            base.path(),
+        let resolver = SoulResolver::with_base(
+            "# Base Soul\nOriginal.",
             None::<PathBuf>,
-            Some("/nonexistent/workspace/SOUL.md"),
+            Some("/nonexistent/workspace/soul.md"),
         );
         let result = resolver.resolve().await.unwrap();
         assert!(result.contains("Original."));
@@ -245,12 +255,14 @@ mod tests {
 
     #[tokio::test]
     async fn full_chain() {
-        let base = write_temp_file("# Base Soul\nBase content.");
         let user = write_temp_file("# User Soul\nUser content.");
         let workspace = write_temp_file("## Style\nBe concise.");
-        let resolver = SoulResolver::new(base.path(), Some(user.path()), Some(workspace.path()));
+        let resolver = SoulResolver::with_base(
+            "# Base Soul\nBase content.",
+            Some(user.path()),
+            Some(workspace.path()),
+        );
         let result = resolver.resolve().await.unwrap();
-        // User replaces base, workspace appended.
         assert!(result.contains("User content."));
         assert!(result.contains("Be concise."));
         assert!(!result.contains("Base content."));

@@ -23,10 +23,10 @@ and Svelte 5 (frontend). See @ARCHITECTURE.md for full system design.
 sober/
 ├── backend/          # Rust workspace (Cargo)
 │   ├── crates/       # Individual library/binary crates
-│   │   └── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
+│   │   ├── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
+│   │   └── sober-mind/instructions/ # Base instruction files (compiled in)
 │   ├── migrations/   # SQL migrations (sqlx)
-│   ├── proto/        # Proto definitions for internal gRPC services
-│   └── soul/         # Base SOUL.md (agent identity)
+│   └── proto/        # Proto definitions for internal gRPC services
 ├── frontend/         # SvelteKit PWA
 ├── infra/            # Docker, K8s configs
 ├── docs/
