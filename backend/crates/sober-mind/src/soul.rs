@@ -181,7 +181,7 @@ mod tests {
     async fn embedded_base_loads() {
         let resolver = SoulResolver::new(None::<PathBuf>, None::<PathBuf>);
         let result = resolver.resolve().await.unwrap();
-        assert!(result.contains("Sober"));
+        assert!(result.contains("Sõber"));
         assert!(result.contains("Core Values"));
     }
 

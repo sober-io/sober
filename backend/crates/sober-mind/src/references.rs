@@ -29,7 +29,13 @@ impl ReferenceResolver {
     /// - `.md` files are inlined raw
     /// - Other extensions are wrapped in fenced code blocks with the extension as language
     /// - Missing files produce an error
+    ///
+    /// References must be preceded by whitespace or start of line to avoid
+    /// matching email addresses (e.g., `user@example.com`).
     pub fn resolve(&self, content: &str) -> Result<String, MindError> {
+        // Match @path references. The regex itself matches all @path patterns;
+        // we filter out email-like matches (preceded by a word character) in
+        // the loop below.
         let re = Regex::new(r"@([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)").expect("static regex is valid");
 
         let mut result = String::with_capacity(content.len());
@@ -37,9 +43,19 @@ impl ReferenceResolver {
 
         for cap in re.captures_iter(content) {
             let full_match = cap.get(0).expect("match exists");
-            let ref_path = &cap[1];
+            let start = full_match.start();
 
-            result.push_str(&content[last_end..full_match.start()]);
+            // Skip email-like matches: if the character before `@` is
+            // alphanumeric, this is likely an email address, not a reference.
+            if start > 0 {
+                let prev_byte = content.as_bytes()[start - 1];
+                if prev_byte.is_ascii_alphanumeric() || prev_byte == b'_' {
+                    continue;
+                }
+            }
+
+            let ref_path = &cap[1];
+            result.push_str(&content[last_end..start]);
 
             let resolved = self.resolve_single(ref_path)?;
             result.push_str(&resolved);
@@ -51,11 +67,32 @@ impl ReferenceResolver {
         Ok(result)
     }
 
-    /// Resolves a single `@path` reference.
+    /// Resolves a single `@path` reference with path traversal protection.
     fn resolve_single(&self, ref_path: &str) -> Result<String, MindError> {
         let full_path = self.root_dir.join(ref_path);
 
-        let content = std::fs::read_to_string(&full_path).map_err(|e| {
+        // Canonicalize and verify the resolved path stays within root_dir
+        let canonical = full_path.canonicalize().map_err(|e| {
+            MindError::ReferenceResolutionFailed(format!(
+                "failed to resolve @{ref_path} ({}): {e}",
+                full_path.display()
+            ))
+        })?;
+
+        let canonical_root = self.root_dir.canonicalize().map_err(|e| {
+            MindError::ReferenceResolutionFailed(format!(
+                "failed to canonicalize root dir {}: {e}",
+                self.root_dir.display()
+            ))
+        })?;
+
+        if !canonical.starts_with(&canonical_root) {
+            return Err(MindError::ReferenceResolutionFailed(format!(
+                "@{ref_path} resolves outside root directory (path traversal blocked)"
+            )));
+        }
+
+        let content = std::fs::read_to_string(&canonical).map_err(|e| {
             MindError::ReferenceResolutionFailed(format!(
                 "failed to read @{ref_path} ({}): {e}",
                 full_path.display()
@@ -111,17 +148,23 @@ mod tests {
     }
 
     #[test]
-    fn no_references_passes_through() {
+    fn does_not_match_email_addresses() {
         let dir = TempDir::new().unwrap();
         let resolver = ReferenceResolver::new(dir.path());
         let result = resolver
-            .resolve("No refs here, just an email@example")
+            .resolve("Contact user@example.com for help")
             .unwrap();
-        // email@example doesn't match pattern (no extension after @)
-        // Actually, email@example.com would match... let me check
-        // The regex is @([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)
-        // "email@example" doesn't have a dot after @, so no match for just "example"
-        assert_eq!(result, "No refs here, just an email@example");
+        assert_eq!(result, "Contact user@example.com for help");
+    }
+
+    #[test]
+    fn matches_at_start_of_line() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("file.md"), "content").unwrap();
+
+        let resolver = ReferenceResolver::new(dir.path());
+        let result = resolver.resolve("@file.md here").unwrap();
+        assert_eq!(result, "content here");
     }
 
     #[test]
@@ -133,5 +176,34 @@ mod tests {
         let resolver = ReferenceResolver::new(dir.path());
         let result = resolver.resolve("Start @a.md middle @b.md end").unwrap();
         assert_eq!(result, "Start AAA middle BBB end");
+    }
+
+    #[test]
+    fn blocks_path_traversal() {
+        let dir = TempDir::new().unwrap();
+        // Create a file outside the root to ensure it exists but is still blocked
+        let parent = dir.path().parent().unwrap();
+        let target = parent.join("secret.txt");
+        fs::write(&target, "sensitive data").unwrap();
+
+        let resolver = ReferenceResolver::new(dir.path());
+        let result = resolver.resolve("@../secret.txt here");
+        // Clean up
+        let _ = fs::remove_file(&target);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("path traversal blocked"),
+            "expected path traversal error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn no_references_passes_through() {
+        let dir = TempDir::new().unwrap();
+        let resolver = ReferenceResolver::new(dir.path());
+        let result = resolver.resolve("No refs here at all").unwrap();
+        assert_eq!(result, "No refs here at all");
     }
 }

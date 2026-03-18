@@ -233,7 +233,9 @@ impl Mind {
             Some(id) => {
                 // Check cache (read lock)
                 {
-                    let cache = self.workspace_cache.read().expect("cache lock poisoned");
+                    let cache = self.workspace_cache.read().map_err(|_| {
+                        MindError::AssemblyFailed("workspace cache lock poisoned".into())
+                    })?;
                     if let Some(ws_files) = cache.get(&id) {
                         return self
                             .instruction_loader
@@ -259,7 +261,10 @@ impl Mind {
         workspace_dir: &Path,
     ) -> Result<(), MindError> {
         let ws_files = InstructionLoader::load_workspace(workspace_dir)?;
-        let mut cache = self.workspace_cache.write().expect("cache lock poisoned");
+        let mut cache = self
+            .workspace_cache
+            .write()
+            .map_err(|_| MindError::AssemblyFailed("workspace cache lock poisoned".into()))?;
         cache.insert(workspace_id, ws_files);
         Ok(())
     }
@@ -318,7 +323,7 @@ mod tests {
         assert_eq!(messages.len(), 2); // system + task context
         assert_eq!(messages[0].role, MessageRole::System);
         // Should contain soul.md content
-        assert!(messages[0].content.contains("Sober"));
+        assert!(messages[0].content.contains("Sõber"));
         assert!(messages[0].content.contains("Core Values"));
         // Should contain safety content
         assert!(messages[0].content.contains("Ethical Boundaries"));
@@ -378,7 +383,7 @@ mod tests {
                 .contains("Internal Tool Documentation")
         );
         // But should see public content.
-        assert!(human_msgs[0].content.contains("Sober"));
+        assert!(human_msgs[0].content.contains("Sõber"));
         assert!(human_msgs[0].content.contains("Ethical Boundaries"));
 
         // Scheduler should see everything.
@@ -429,7 +434,7 @@ mod tests {
 
         assert_eq!(messages.len(), 2); // system + user
         assert_eq!(messages[0].role, MessageRole::System);
-        assert!(messages[0].content.contains("Sober"));
+        assert!(messages[0].content.contains("Sõber"));
         assert_eq!(messages[1].role, MessageRole::User);
         assert_eq!(messages[1].content, "Run maintenance");
     }
@@ -565,7 +570,7 @@ mod tests {
         let prompt = &messages[0].content;
 
         // Personality (soul.md) should come before guardrails (safety.md)
-        let soul_pos = prompt.find("Sober").unwrap();
+        let soul_pos = prompt.find("Sõber").unwrap();
         let safety_pos = prompt.find("Ethical Boundaries").unwrap();
         assert!(
             soul_pos < safety_pos,

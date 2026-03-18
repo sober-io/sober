@@ -445,7 +445,7 @@ mod tests {
         let soul = files.iter().find(|f| f.filename == "soul.md").unwrap();
         assert_eq!(soul.frontmatter.category, InstructionCategory::Personality);
         assert_eq!(soul.frontmatter.visibility, Visibility::Public);
-        assert!(soul.body.contains("Sober"));
+        assert!(soul.body.contains("Sõber"));
     }
 
     #[test]
