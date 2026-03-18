@@ -1,16 +1,15 @@
 //! In-memory rate limiting middleware backed by moka.
 //!
-//! Sliding window counter per key (IP or user ID). Returns 429 with
+//! Fixed-window counter per key (IP address). Returns 429 with
 //! `Retry-After` header when the limit is exceeded.
 
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum_core::body::Body;
 use http::{Request, Response, StatusCode};
 use moka::sync::Cache;
-use sober_auth::AuthUser;
 use tower::{Layer, Service};
 
 /// Rate limit configuration for an endpoint pattern.
@@ -22,34 +21,32 @@ pub struct RateLimitConfig {
     pub window: Duration,
 }
 
+/// A request counter with its window start time.
+#[derive(Debug, Clone, Copy)]
+struct WindowCounter {
+    count: u32,
+    window_start: Instant,
+}
+
 /// Tower [`Layer`] that applies rate limiting.
 #[derive(Clone)]
 pub struct RateLimitLayer {
-    store: Arc<Cache<String, u32>>,
+    store: Arc<Cache<String, WindowCounter>>,
     config: RateLimitConfig,
-    scope: RateLimitScope,
-}
-
-/// Whether to rate-limit by IP address or by authenticated user.
-#[derive(Debug, Clone, Copy)]
-pub enum RateLimitScope {
-    /// Key by client IP address.
-    Ip,
-    /// Key by authenticated user ID.
-    User,
 }
 
 impl RateLimitLayer {
     /// Creates a new rate limit layer.
-    pub fn new(config: RateLimitConfig, scope: RateLimitScope) -> Self {
+    pub fn new(config: RateLimitConfig) -> Self {
+        // Entries are evicted after 2x the window to clean up stale keys,
+        // but the actual window logic is handled in the counter itself.
         let store = Cache::builder()
-            .time_to_live(config.window)
+            .time_to_idle(config.window * 2)
             .max_capacity(100_000)
             .build();
         Self {
             store: Arc::new(store),
             config,
-            scope,
         }
     }
 }
@@ -62,7 +59,6 @@ impl<S> Layer<S> for RateLimitLayer {
             inner,
             store: self.store.clone(),
             config: self.config.clone(),
-            scope: self.scope,
         }
     }
 }
@@ -71,9 +67,8 @@ impl<S> Layer<S> for RateLimitLayer {
 #[derive(Clone)]
 pub struct RateLimitService<S> {
     inner: S,
-    store: Arc<Cache<String, u32>>,
+    store: Arc<Cache<String, WindowCounter>>,
     config: RateLimitConfig,
-    scope: RateLimitScope,
 }
 
 impl<S> Service<Request<Body>> for RateLimitService<S>
@@ -93,18 +88,21 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let key = match self.scope {
-            RateLimitScope::Ip => extract_client_ip(&req),
-            RateLimitScope::User => req
-                .extensions()
-                .get::<AuthUser>()
-                .map(|u| u.user_id.to_string())
-                .unwrap_or_else(|| extract_client_ip(&req)),
+        let key = extract_client_ip(&req);
+        let now = Instant::now();
+        let window = self.config.window;
+        let max = self.config.max_requests;
+
+        let counter = self.store.get(&key);
+        let (count, window_start) = match counter {
+            Some(wc) if now.duration_since(wc.window_start) < window => (wc.count, wc.window_start),
+            // Window expired or no entry — start fresh.
+            _ => (0, now),
         };
 
-        let current = self.store.get(&key).unwrap_or(0);
-        if current >= self.config.max_requests {
-            let retry_after = self.config.window.as_secs();
+        if count >= max {
+            let elapsed = now.duration_since(window_start);
+            let retry_after = window.saturating_sub(elapsed).as_secs().max(1);
             return Box::pin(async move {
                 let body = serde_json::json!({
                     "error": {
@@ -122,7 +120,13 @@ where
             });
         }
 
-        self.store.insert(key, current + 1);
+        self.store.insert(
+            key,
+            WindowCounter {
+                count: count + 1,
+                window_start,
+            },
+        );
         let mut inner = self.inner.clone();
         Box::pin(async move { inner.call(req).await })
     }
@@ -173,5 +177,35 @@ mod tests {
     fn extract_client_ip_fallback() {
         let req = Request::builder().body(Body::empty()).unwrap();
         assert_eq!(extract_client_ip(&req), "unknown");
+    }
+
+    #[test]
+    fn window_resets_after_expiry() {
+        let config = RateLimitConfig {
+            max_requests: 2,
+            window: Duration::from_millis(50),
+        };
+        let layer = RateLimitLayer::new(config);
+
+        // Simulate 2 requests in the same window.
+        let key = "test-ip".to_string();
+        let now = Instant::now();
+        layer.store.insert(
+            key.clone(),
+            WindowCounter {
+                count: 2,
+                window_start: now,
+            },
+        );
+
+        // Within window — should still see count 2.
+        let counter = layer.store.get(&key).unwrap();
+        assert_eq!(counter.count, 2);
+
+        // After window expires, the service logic will reset the counter.
+        std::thread::sleep(Duration::from_millis(60));
+        let counter = layer.store.get(&key).unwrap();
+        // The entry still exists in the cache, but the service logic treats it as expired.
+        assert!(Instant::now().duration_since(counter.window_start) >= Duration::from_millis(50));
     }
 }

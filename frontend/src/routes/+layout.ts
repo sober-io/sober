@@ -11,9 +11,10 @@ export const load = async () => {
 	} catch (e) {
 		if (e instanceof ApiError && e.status === 401) {
 			auth.setUser(null);
-		} else {
-			auth.setUser(null);
 		}
+		// Non-auth errors (429, 500, network) — keep existing auth state.
+		// The user will see errors on actual data fetches instead of being
+		// silently logged out.
 	} finally {
 		auth.setLoading(false);
 	}

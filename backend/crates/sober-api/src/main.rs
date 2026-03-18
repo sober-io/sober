@@ -9,7 +9,7 @@ use std::time::Duration;
 use http::Method;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use sober_api::admin;
-use sober_api::middleware::rate_limit::{RateLimitConfig, RateLimitLayer, RateLimitScope};
+use sober_api::middleware::rate_limit::{RateLimitConfig, RateLimitLayer};
 use sober_api::routes;
 use sober_api::state::AppState;
 use sober_core::config::{AppConfig, Environment};
@@ -41,13 +41,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Apply global middleware stack (outermost = first to run).
     let cors = build_cors(&config);
-    let rate_limit = RateLimitLayer::new(
-        RateLimitConfig {
-            max_requests: config.server.rate_limit_max_requests,
-            window: Duration::from_secs(config.server.rate_limit_window_secs),
-        },
-        RateLimitScope::User,
-    );
+    let rate_limit = RateLimitLayer::new(RateLimitConfig {
+        max_requests: config.server.rate_limit_max_requests,
+        window: Duration::from_secs(config.server.rate_limit_window_secs),
+    });
 
     let app = app
         .layer(cors)
