@@ -88,9 +88,9 @@ pub struct TurnContext {
     pub workspace_id: Option<WorkspaceId>,
     /// Resolved filesystem path for the conversation workspace directory.
     pub workspace_dir: Option<PathBuf>,
-    /// Per-conversation skill activation state. When provided, the
-    /// [`ActivateSkillTool`] reuses this state so that activations persist
-    /// across multiple turns in the same conversation.
+    /// Tracks which skills have already been activated in this conversation.
+    /// Prevents the same skill from being injected twice across multiple turns.
+    /// NOT the skill cache — that's managed by [`SkillLoader`]'s TTL cache.
     pub skill_activation_state: Option<Arc<std::sync::Mutex<SkillActivationState>>>,
 }
 

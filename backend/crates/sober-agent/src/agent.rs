@@ -109,9 +109,14 @@ struct LoopContext<'a, R: AgentRepos> {
     llm_config: &'a Option<LlmConfig>,
     /// Master encryption key for resolving user-stored LLM keys.
     mek: &'a Option<Arc<Mek>>,
-    /// Pre-rendered skill catalog XML for system prompt injection.
+    /// XML listing of all available skills, injected into the system prompt so
+    /// the LLM knows which skills exist and can call `activate_skill`.
+    /// Built once per `handle_message()` from the `SkillLoader` cache.
     skill_catalog_xml: String,
-    /// Skill content loaded by slash-command interception (e.g. `/my-skill`).
+    /// Full skill body loaded by `/skill-name` slash command interception.
+    /// Injected into the task context so the LLM sees the skill instructions
+    /// immediately without needing to call `activate_skill`. Empty string if
+    /// the message wasn't a slash command.
     activated_skill_content: String,
 }
 
@@ -231,6 +236,14 @@ impl<R: AgentRepos> Agent<R> {
             ))
         });
         Arc::clone(state)
+    }
+
+    /// Removes the skill activation state for a conversation.
+    /// Call when a conversation ends or is deleted.
+    pub fn clear_skill_activations(&self, conversation_id: ConversationId) {
+        if let Ok(mut activations) = self.skill_activations.write() {
+            activations.remove(&conversation_id);
+        }
     }
 
     /// Checks if the message is a skill slash command (e.g. `/my-skill do something`).
@@ -420,30 +433,8 @@ impl<R: AgentRepos> Agent<R> {
             InjectionVerdict::Pass => {}
         }
 
-        // 2. Store user message (only for human-driven calls)
-        //    Stored BEFORE slash interception so the raw `/skill-name` text is preserved.
-        let user_msg_id = if trigger == TriggerKind::Human {
-            let user_msg = self
-                .repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::User,
-                    content: content.to_owned(),
-                    tool_calls: None,
-                    tool_result: None,
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-            user_msg.id
-        } else {
-            sober_core::MessageId::new()
-        };
-
-        // 3. Check agent mode — decide whether to run the LLM pipeline
+        // 2. Resolve conversation and workspace.
+        //    Must happen before slash interception (workspace-level skills need the path).
         let conversation = self
             .repos
             .conversations()
@@ -509,8 +500,10 @@ impl<R: AgentRepos> Agent<R> {
             None
         };
 
-        // Intercept skill slash commands (e.g. `/my-skill do something`).
-        // Runs after workspace resolution so workspace-level skills are found.
+        // 3. Intercept skill slash commands (e.g. `/my-skill do something`).
+        //    Runs after workspace resolution so workspace-level skills are found.
+        //    The stripped content (without `/skill-name` prefix) is stored in the
+        //    DB so history doesn't contain the raw slash command.
         let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
         let ws_path_for_skills = workspace_dir.clone().unwrap_or_default();
         let (content, activated_skill_content) = self
@@ -522,6 +515,28 @@ impl<R: AgentRepos> Agent<R> {
             )
             .await;
         let content = &content;
+
+        // 4. Store user message (only for human-driven calls) using stripped content.
+        let user_msg_id = if trigger == TriggerKind::Human {
+            let user_msg = self
+                .repos
+                .messages()
+                .create(CreateMessage {
+                    conversation_id,
+                    role: MessageRole::User,
+                    content: content.to_owned(),
+                    tool_calls: None,
+                    tool_result: None,
+                    token_count: None,
+                    metadata: None,
+                    user_id: Some(user_id),
+                })
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            user_msg.id
+        } else {
+            sober_core::MessageId::new()
+        };
 
         // Load skill catalog XML for system prompt injection.
         let skill_catalog_xml = {
@@ -539,6 +554,7 @@ impl<R: AgentRepos> Agent<R> {
             }
         };
 
+        // 5. Check agent mode — decide whether to run the LLM pipeline
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,

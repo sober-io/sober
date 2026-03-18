@@ -35,6 +35,9 @@ use tonic::transport::{Endpoint, Server, Uri};
 use tower::service_fn;
 use tracing::{info, warn};
 
+/// TTL for the skill catalog cache. Skills are rescanned after this duration.
+const SKILL_CACHE_TTL_SECS: u64 = 300;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Load .env and configuration
@@ -135,7 +138,9 @@ async fn main() -> Result<()> {
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
     // 13. Create SkillLoader and ToolBootstrap — centralized tool construction for all turns
-    let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(300)));
+    let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(
+        SKILL_CACHE_TTL_SECS,
+    )));
 
     let tool_bootstrap = Arc::new(ToolBootstrap {
         shell: ShellToolConfig {

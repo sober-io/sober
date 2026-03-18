@@ -15,6 +15,9 @@ use crate::types::{SkillEntry, SkillSource};
 
 const MAX_SCAN_DIRS: usize = 2000;
 
+/// Subdirectories within a root where skills are discovered.
+const SKILL_SUBDIRS: &[&str] = &[".sober/skills", ".agents/skills"];
+
 struct CachedCatalog {
     catalog: Arc<SkillCatalog>,
     loaded_at: Instant,
@@ -94,10 +97,8 @@ impl SkillLoader {
         let mut skills = HashMap::new();
 
         // Scan user-level directories first (lower priority)
-        for dir in [
-            user_home.join(".sober/skills"),
-            user_home.join(".agents/skills"),
-        ] {
+        for subdir in SKILL_SUBDIRS {
+            let dir = user_home.join(subdir);
             if dir.is_dir() {
                 self.scan_directory(&dir, SkillSource::User, &mut skills)
                     .await;
@@ -105,10 +106,8 @@ impl SkillLoader {
         }
 
         // Scan workspace-level directories (higher priority — overwrites user)
-        for dir in [
-            workspace_root.join(".sober/skills"),
-            workspace_root.join(".agents/skills"),
-        ] {
+        for subdir in SKILL_SUBDIRS {
+            let dir = workspace_root.join(subdir);
             if dir.is_dir() {
                 self.scan_directory(&dir, SkillSource::Workspace, &mut skills)
                     .await;
