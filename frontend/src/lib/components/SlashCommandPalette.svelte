@@ -10,6 +10,7 @@
 	interface Props {
 		query: string;
 		onExecute: (command: string) => void;
+		onPrefill: (command: string) => void;
 		onClose: () => void;
 		skills?: SkillInfo[];
 	}
@@ -21,7 +22,7 @@
 		{ name: '/reload-skills', description: 'Reload skills from disk' }
 	];
 
-	let { query, onExecute, onClose, skills = [] }: Props = $props();
+	let { query, onExecute, onPrefill, onClose, skills = [] }: Props = $props();
 
 	const commands = $derived([
 		...BUILTIN_COMMANDS,
@@ -43,8 +44,12 @@
 		selectedIndex = 0;
 	});
 
-	const execute = (command: string) => {
-		onExecute(command);
+	const execute = (command: Command) => {
+		if (command.isSkill) {
+			onPrefill(command.name);
+		} else {
+			onExecute(command.name);
+		}
 	};
 
 	const handleKeydown = (e: KeyboardEvent) => {
@@ -57,7 +62,7 @@
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (filtered[selectedIndex]) {
-				execute(filtered[selectedIndex].name);
+				execute(filtered[selectedIndex]);
 			}
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
@@ -74,7 +79,7 @@
 	>
 		{#each filtered as command, i (command.name)}
 			<button
-				onclick={() => execute(command.name)}
+				onclick={() => execute(command)}
 				class={[
 					'flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors',
 					i === selectedIndex

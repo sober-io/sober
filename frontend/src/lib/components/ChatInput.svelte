@@ -18,6 +18,8 @@
 		skills = []
 	}: Props = $props();
 
+	const BUILTIN_COMMANDS = ['/help', '/info', '/clear', '/reload-skills'];
+
 	const showSlashCommands = $derived(value.startsWith('/'));
 
 	const handleKeydown = (e: KeyboardEvent) => {
@@ -31,9 +33,16 @@
 	const submit = () => {
 		const trimmed = value.trim();
 		if (!trimmed) return;
-		if (trimmed.startsWith('/') && onSlashCommand) {
-			// intercept slash commands
-			onSlashCommand(trimmed.split(' ')[0]);
+		if (trimmed.startsWith('/')) {
+			const cmd = trimmed.split(' ')[0];
+			if (BUILTIN_COMMANDS.includes(cmd) && onSlashCommand) {
+				// Built-in command — execute immediately
+				onSlashCommand(cmd);
+				value = '';
+				return;
+			}
+			// Skill slash command — send as regular message to backend
+			onsend(trimmed);
 			value = '';
 			return;
 		}
@@ -46,6 +55,10 @@
 		value = '';
 	};
 
+	const handleSlashPrefill = (command: string) => {
+		value = command + ' ';
+	};
+
 	const handleSlashClose = () => {
 		value = '';
 	};
@@ -56,6 +69,7 @@
 		<SlashCommandPalette
 			query={value}
 			onExecute={handleSlashExecute}
+			onPrefill={handleSlashPrefill}
 			onClose={handleSlashClose}
 			{skills}
 		/>
