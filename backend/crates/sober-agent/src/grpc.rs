@@ -307,9 +307,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
         let req = request.into_inner();
-        let user_home = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
+        let user_home = sober_workspace::user_home_dir();
 
         // Resolve workspace path from conversation_id if provided.
         let workspace_path = if let Some(conv_id_str) = req.conversation_id {
@@ -357,9 +355,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         self.skill_loader.invalidate_cache();
 
         // Then load fresh
-        let user_home = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
+        let user_home = sober_workspace::user_home_dir();
 
         let workspace_path = if let Some(conv_id_str) = req.conversation_id {
             if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {

@@ -20,6 +20,7 @@ pub use blob::BlobStore;
 pub use config::WorkspaceDefaults;
 pub use error::WorkspaceError;
 pub use fs::init_workspace_dir;
+pub use layout::user_home_dir;
 pub use remote::{detect_remote_url, push_branch};
 pub use snapshot::SnapshotManager;
 pub use worktree::{create_git_worktree, list_git_worktrees, remove_git_worktree};

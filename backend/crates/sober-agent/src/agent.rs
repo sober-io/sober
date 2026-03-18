@@ -451,7 +451,7 @@ impl<R: AgentRepos> Agent<R> {
 
         // Load skill catalog XML for system prompt injection.
         let skill_catalog_xml = {
-            let user_home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+            let user_home = sober_workspace::user_home_dir();
             let ws_path = workspace_dir.clone().unwrap_or_default();
             match self
                 .tool_bootstrap

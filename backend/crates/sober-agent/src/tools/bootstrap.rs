@@ -225,7 +225,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
         // 4. Skill tool — loaded per-turn from cached catalog.
         //    Reuses the per-conversation activation state when provided so that
         //    skills activated in earlier turns remain marked as active.
-        let user_home = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let user_home = sober_workspace::user_home_dir();
         let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
         if let Ok(catalog) = self.skill_loader.load(&user_home, &workspace_path).await
             && !catalog.is_empty()
