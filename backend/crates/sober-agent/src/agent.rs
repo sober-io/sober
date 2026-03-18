@@ -525,8 +525,12 @@ impl<R: AgentRepos> Agent<R> {
             .await;
         let content = &content;
 
-        // 4. Store user message (only for human-driven calls) using stripped content.
-        let user_msg_id = if trigger == TriggerKind::Human {
+        // 4. Store user message (only for human-driven calls).
+        //    Skip storing when the message is a bare `/skill-name` slash command
+        //    with no additional text — the skill content is injected as system
+        //    context, not as a user message. This prevents the LLM from seeing
+        //    the slash command and trying to call activate_skill redundantly.
+        let user_msg_id = if trigger == TriggerKind::Human && activated_skill_name.is_none() {
             let user_msg = self
                 .repos
                 .messages()
@@ -543,21 +547,41 @@ impl<R: AgentRepos> Agent<R> {
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
             user_msg.id
+        } else if trigger == TriggerKind::Human {
+            // Skill slash command — store only the remaining text (if any).
+            if !content.starts_with('/') && !content.is_empty() {
+                let user_msg = self
+                    .repos
+                    .messages()
+                    .create(CreateMessage {
+                        conversation_id,
+                        role: MessageRole::User,
+                        content: content.to_owned(),
+                        tool_calls: None,
+                        tool_result: None,
+                        token_count: None,
+                        metadata: None,
+                        user_id: Some(user_id),
+                    })
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                user_msg.id
+            } else {
+                sober_core::MessageId::new()
+            }
         } else {
             sober_core::MessageId::new()
         };
 
         // Load skill catalog XML for system prompt injection.
-        // Exclude any skill that was already activated via slash command.
         let skill_catalog_xml = {
-            let exclude: Vec<&str> = activated_skill_name.as_deref().into_iter().collect();
             match self
                 .tool_bootstrap
                 .skill_loader
                 .load(&user_home_for_skills, &ws_path_for_skills)
                 .await
             {
-                Ok(catalog) => catalog.to_catalog_xml_excluding(&exclude),
+                Ok(catalog) => catalog.to_catalog_xml(),
                 Err(e) => {
                     warn!(error = %e, "failed to load skill catalog for prompt injection");
                     String::new()
@@ -800,14 +824,7 @@ impl<R: AgentRepos> Agent<R> {
                 }
 
                 // Prepend skill content from slash-command interception.
-                // Includes an instruction so the LLM uses the skill directly
-                // without calling activate_skill again.
                 if !ctx.activated_skill_content.is_empty() {
-                    task_description.push_str(
-                        "The following skill was activated by the user via slash command. ",
-                    );
-                    task_description
-                        .push_str("It is already loaded — do NOT call activate_skill for it.\n\n");
                     task_description.push_str(&ctx.activated_skill_content);
                     task_description.push_str("\n\n");
                 }
