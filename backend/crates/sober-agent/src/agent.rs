@@ -248,24 +248,24 @@ impl<R: AgentRepos> Agent<R> {
 
     /// Checks if the message is a skill slash command (e.g. `/my-skill do something`).
     ///
-    /// If so, activates the skill and returns `(remaining_text, skill_content_xml)`.
-    /// Otherwise returns `(original_content, "")`.
+    /// Returns `(remaining_text, skill_content_xml, activated_skill_name)`.
+    /// If not a skill command, returns `(original_content, "", None)`.
     async fn intercept_skill_command(
         &self,
         content: &str,
         conversation_id: ConversationId,
         user_home: &Path,
         workspace_path: &Path,
-    ) -> (String, String) {
+    ) -> (String, String, Option<String>) {
         let trimmed = content.trim();
         if !trimmed.starts_with('/') {
-            return (content.to_owned(), String::new());
+            return (content.to_owned(), String::new(), None);
         }
 
         let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
         let potential_name = &parts[0][1..]; // strip leading /
         if potential_name.is_empty() {
-            return (content.to_owned(), String::new());
+            return (content.to_owned(), String::new(), None);
         }
 
         let catalog = match self
@@ -275,12 +275,12 @@ impl<R: AgentRepos> Agent<R> {
             .await
         {
             Ok(c) => c,
-            Err(_) => return (content.to_owned(), String::new()),
+            Err(_) => return (content.to_owned(), String::new(), None),
         };
 
         let entry = match catalog.get(potential_name) {
             Some(e) => e,
-            None => return (content.to_owned(), String::new()),
+            None => return (content.to_owned(), String::new(), None),
         };
 
         // Read and parse SKILL.md
@@ -312,7 +312,13 @@ impl<R: AgentRepos> Agent<R> {
             remaining.to_string()
         };
 
-        (user_text, skill_content)
+        let activated_name = if skill_content.is_empty() {
+            None
+        } else {
+            Some(potential_name.to_owned())
+        };
+
+        (user_text, skill_content, activated_name)
     }
 
     /// Builds a [`ToolRegistry`] for the given conversation turn via the
@@ -509,7 +515,7 @@ impl<R: AgentRepos> Agent<R> {
         //    DB so history doesn't contain the raw slash command.
         let user_home_for_skills = std::env::var("HOME").map(PathBuf::from).unwrap_or_default();
         let ws_path_for_skills = workspace_dir.clone().unwrap_or_default();
-        let (content, activated_skill_content) = self
+        let (content, activated_skill_content, activated_skill_name) = self
             .intercept_skill_command(
                 content,
                 conversation_id,
@@ -542,14 +548,16 @@ impl<R: AgentRepos> Agent<R> {
         };
 
         // Load skill catalog XML for system prompt injection.
+        // Exclude any skill that was already activated via slash command.
         let skill_catalog_xml = {
+            let exclude: Vec<&str> = activated_skill_name.as_deref().into_iter().collect();
             match self
                 .tool_bootstrap
                 .skill_loader
                 .load(&user_home_for_skills, &ws_path_for_skills)
                 .await
             {
-                Ok(catalog) => catalog.to_catalog_xml(),
+                Ok(catalog) => catalog.to_catalog_xml_excluding(&exclude),
                 Err(e) => {
                     warn!(error = %e, "failed to load skill catalog for prompt injection");
                     String::new()

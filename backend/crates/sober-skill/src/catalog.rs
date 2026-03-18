@@ -46,7 +46,21 @@ impl SkillCatalog {
     ///
     /// Returns an empty string if there are no skills.
     pub fn to_catalog_xml(&self) -> String {
-        if self.skills.is_empty() {
+        self.to_catalog_xml_excluding(&[])
+    }
+
+    /// Generates the catalog XML, excluding skills that are already activated.
+    ///
+    /// Skills in `exclude` are omitted from the listing. Returns an empty
+    /// string if no skills remain after exclusion.
+    pub fn to_catalog_xml_excluding(&self, exclude: &[&str]) -> String {
+        let entries: Vec<_> = self
+            .skills
+            .iter()
+            .filter(|(name, _)| !exclude.contains(&name.as_str()))
+            .collect();
+
+        if entries.is_empty() {
             return String::new();
         }
 
@@ -56,10 +70,10 @@ impl SkillCatalog {
         xml.push_str("with the skill's name to load its full instructions.\n\n");
         xml.push_str("<available_skills>\n");
 
-        let mut entries: Vec<_> = self.skills.iter().collect();
-        entries.sort_by_key(|(name, _)| name.as_str());
+        let mut sorted = entries;
+        sorted.sort_by_key(|(name, _)| name.as_str());
 
-        for (_, entry) in entries {
+        for (_, entry) in sorted {
             xml.push_str(&format!(
                 "  <skill name=\"{}\" path=\"{}\">\n    {}\n  </skill>\n",
                 entry.frontmatter.name,
