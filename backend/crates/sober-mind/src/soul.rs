@@ -19,9 +19,6 @@ const PROTECTED_MARKERS: &[&str] = &[
     "## Safety Guardrails",
 ];
 
-/// The embedded base soul.md (with frontmatter).
-const BASE_SOUL_RAW: &str = include_str!("../instructions/soul.md");
-
 /// Resolves soul.md from base, user, and workspace layers.
 #[derive(Debug)]
 pub struct SoulResolver {
@@ -34,15 +31,19 @@ pub struct SoulResolver {
 impl SoulResolver {
     /// Creates a resolver using the embedded base soul.md content.
     ///
+    /// The base content is sourced from [`EMBEDDED_FILES`](crate::instructions)
+    /// — the single compiled-in copy of all instruction files.
+    ///
     /// `user_path` and `workspace_path` are optional filesystem paths to
     /// user/workspace-level soul.md files. Missing files are silently skipped.
     pub fn new(
         user_path: Option<impl Into<PathBuf>>,
         workspace_path: Option<impl Into<PathBuf>>,
     ) -> Self {
-        let base_content = crate::frontmatter::parse_frontmatter(BASE_SOUL_RAW)
+        let raw = crate::instructions::embedded_soul_raw();
+        let base_content = crate::frontmatter::parse_frontmatter(raw)
             .map(|(_, body)| body.to_string())
-            .unwrap_or_else(|_| BASE_SOUL_RAW.to_string());
+            .unwrap_or_else(|_| raw.to_string());
 
         Self {
             base_content,

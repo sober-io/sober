@@ -73,6 +73,18 @@ struct EmbeddedFile {
     content: &'static str,
 }
 
+/// Returns the raw (unparsed) content of the embedded `soul.md` file.
+///
+/// Used by [`SoulResolver`](crate::soul::SoulResolver) so that `EMBEDDED_FILES`
+/// remains the single source for all compiled-in instruction content.
+pub(crate) fn embedded_soul_raw() -> &'static str {
+    EMBEDDED_FILES
+        .iter()
+        .find(|ef| ef.filename == "soul.md")
+        .expect("soul.md must be in EMBEDDED_FILES")
+        .content
+}
+
 /// All base instruction files, embedded at compile time.
 const EMBEDDED_FILES: &[EmbeddedFile] = &[
     EmbeddedFile {
