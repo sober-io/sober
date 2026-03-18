@@ -118,6 +118,10 @@ struct LoopContext<'a, R: AgentRepos> {
     /// immediately without needing to call `activate_skill`. Empty string if
     /// the message wasn't a slash command.
     activated_skill_content: String,
+    /// Name of the skill activated via slash command, if any.
+    /// Used to exclude `activate_skill` from tool definitions so the LLM
+    /// doesn't redundantly call it.
+    activated_skill_name: Option<String>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -677,6 +681,7 @@ impl<R: AgentRepos> Agent<R> {
                 mek: &mek,
                 skill_catalog_xml,
                 activated_skill_content,
+                activated_skill_name,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -872,10 +877,13 @@ impl<R: AgentRepos> Agent<R> {
                 needs_rebuild = false;
             }
 
-            // e. Call LLM — exclude scheduler tool for scheduler-driven calls
-            //    to prevent the LLM from recreating cancelled jobs.
+            // e. Call LLM — exclude tools that shouldn't be available:
+            //    - scheduler tool excluded for scheduler-driven calls (prevent job recreation)
+            //    - activate_skill excluded when a skill was slash-activated (already loaded)
             let tool_definitions = if ctx.trigger == TriggerKind::Scheduler {
                 tool_registry.tool_definitions_except(&["scheduler"])
+            } else if ctx.activated_skill_name.is_some() {
+                tool_registry.tool_definitions_except(&["activate_skill"])
             } else {
                 tool_registry.tool_definitions()
             };
