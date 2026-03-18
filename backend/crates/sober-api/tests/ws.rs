@@ -91,6 +91,15 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         }))
     }
 
+    async fn reload_skills(
+        &self,
+        _request: tonic::Request<proto::ReloadSkillsRequest>,
+    ) -> Result<tonic::Response<proto::ReloadSkillsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ReloadSkillsResponse {
+            skills: vec![],
+        }))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

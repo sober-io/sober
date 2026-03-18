@@ -331,6 +331,40 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
         Ok(Response::new(proto::ListSkillsResponse { skills }))
     }
+
+    async fn reload_skills(
+        &self,
+        _request: Request<proto::ReloadSkillsRequest>,
+    ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
+        // Invalidate cache first
+        self.skill_loader.invalidate_cache();
+
+        // Then load fresh
+        let user_home = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let workspace_path = std::path::PathBuf::new();
+
+        let catalog = self
+            .skill_loader
+            .load(&user_home, &workspace_path)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let skills = catalog
+            .names()
+            .iter()
+            .map(|name| {
+                let entry = catalog.get(name).expect("name from catalog");
+                proto::SkillInfo {
+                    name: entry.frontmatter.name.clone(),
+                    description: entry.frontmatter.description.clone(),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(proto::ReloadSkillsResponse { skills }))
+    }
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::State;
-use axum::routing::get;
+use axum::routing::{get, post};
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::ApiResponse;
@@ -14,7 +14,9 @@ use crate::state::AppState;
 
 /// Returns the skills routes.
 pub fn routes() -> Router<Arc<AppState>> {
-    Router::new().route("/skills", get(list_skills))
+    Router::new()
+        .route("/skills", get(list_skills))
+        .route("/skills/reload", post(reload_skills))
 }
 
 #[derive(serde::Deserialize)]
@@ -51,6 +53,28 @@ async fn list_skills(
                 "description": s.description,
             })
         })
+        .collect();
+
+    Ok(ApiResponse::new(skills))
+}
+
+/// `POST /api/v1/skills/reload` — invalidate skill cache and return fresh list.
+async fn reload_skills(
+    State(state): State<Arc<AppState>>,
+    _auth_user: AuthUser,
+) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
+    let mut client = state.agent_client.clone();
+
+    let response = client
+        .reload_skills(proto::ReloadSkillsRequest {})
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let skills: Vec<serde_json::Value> = response
+        .into_inner()
+        .skills
+        .into_iter()
+        .map(|s| serde_json::json!({ "name": s.name, "description": s.description }))
         .collect();
 
     Ok(ApiResponse::new(skills))

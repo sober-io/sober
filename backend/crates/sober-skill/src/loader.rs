@@ -35,6 +35,13 @@ impl SkillLoader {
         }
     }
 
+    /// Invalidates all cached catalogs, forcing a rescan on the next `load()` call.
+    pub fn invalidate_cache(&self) {
+        if let Ok(mut cache) = self.cache.write() {
+            cache.clear();
+        }
+    }
+
     /// Returns a skill catalog for the given user home and workspace root.
     ///
     /// Results are cached per `(user_home, workspace_root)` key. The cache

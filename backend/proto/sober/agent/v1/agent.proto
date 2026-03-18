@@ -16,6 +16,7 @@ service AgentService {
   // Subscribe to real-time conversation events from all conversations.
   rpc SubscribeConversationUpdates(SubscribeRequest) returns (stream ConversationUpdate);
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc ReloadSkills(ReloadSkillsRequest) returns (ReloadSkillsResponse);
 }
 
 message ConfirmAck {}
@@ -141,6 +142,12 @@ message SkillInfo {
 }
 
 message ListSkillsResponse {
+  repeated SkillInfo skills = 1;
+}
+
+message ReloadSkillsRequest {}
+
+message ReloadSkillsResponse {
   repeated SkillInfo skills = 1;
 }
 
