@@ -14,7 +14,7 @@ use sober_core::types::repo::{JobRepo, JobRunRepo};
 use sober_core::types::{Job, JobId, JobStatus};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{Instrument, error, info, warn};
 
 use crate::executor::JobExecutorRegistry;
 use crate::grpc::agent_proto;
@@ -122,7 +122,8 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                         continue;
                     }
                     metrics::counter!("sober_scheduler_ticks_total").increment(1);
-                    self.tick().await;
+                    let span = tracing::info_span!("scheduler.tick");
+                    self.tick().instrument(span).await;
                 }
             }
         }
@@ -169,44 +170,31 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
 
             let scheduled_at = job.next_run_at;
 
-            handles.push(tokio::spawn(async move {
-                let job_id = job.id;
-                let job_name = job.name.clone();
-                let job_start = Instant::now();
+            let job_span = tracing::info_span!(
+                "scheduler.job",
+                job.name = %job.name,
+                job.id = %job.id,
+                job.type = job.payload["type"].as_str().unwrap_or("prompt"),
+                otel.status_code = tracing::field::Empty,
+            );
+            handles.push(tokio::spawn(tracing::Instrument::instrument(
+                async move {
+                    let job_id = job.id;
+                    let job_name = job.name.clone();
+                    let job_start = Instant::now();
 
-                // Record scheduling lag (time between scheduled_at and actual execution).
-                let lag_secs =
-                    (Utc::now() - scheduled_at).num_milliseconds().max(0) as f64 / 1000.0;
-                metrics::histogram!(
-                    "sober_scheduler_job_lag_seconds",
-                    "job_name" => job_name.clone(),
-                )
-                .record(lag_secs);
-
-                // Mark job as running
-                if let Err(e) = job_repo.update_status(job_id, JobStatus::Running).await {
-                    error!(job = %job_name, error = %e, "failed to mark job as running");
-                    metrics::counter!(
-                        "sober_scheduler_job_executions_total",
-                        "job_name" => job_name.clone(),
-                        "status" => "error",
-                    )
-                    .increment(1);
+                    // Record scheduling lag (time between scheduled_at and actual execution).
+                    let lag_secs =
+                        (Utc::now() - scheduled_at).num_milliseconds().max(0) as f64 / 1000.0;
                     metrics::histogram!(
-                        "sober_scheduler_job_duration_seconds",
-                        "job_name" => job_name,
+                        "sober_scheduler_job_lag_seconds",
+                        "job_name" => job_name.clone(),
                     )
-                    .record(job_start.elapsed().as_secs_f64());
-                    drop(permit);
-                    return;
-                }
+                    .record(lag_secs);
 
-                // Create a run record
-                let run = match run_repo.create(job_id).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!(job = %job_name, error = %e, "failed to create job run");
-                        let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                    // Mark job as running
+                    if let Err(e) = job_repo.update_status(job_id, JobStatus::Running).await {
+                        error!(job = %job_name, error = %e, "failed to mark job as running");
                         metrics::counter!(
                             "sober_scheduler_job_executions_total",
                             "job_name" => job_name.clone(),
@@ -221,58 +209,83 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                         drop(permit);
                         return;
                     }
-                };
 
-                // Route by payload type
-                let (result_bytes, error_msg) =
-                    route_job(&agent_client, &executor_registry, &job).await;
+                    // Create a run record
+                    let run = match run_repo.create(job_id).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            error!(job = %job_name, error = %e, "failed to create job run");
+                            let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                            metrics::counter!(
+                                "sober_scheduler_job_executions_total",
+                                "job_name" => job_name.clone(),
+                                "status" => "error",
+                            )
+                            .increment(1);
+                            metrics::histogram!(
+                                "sober_scheduler_job_duration_seconds",
+                                "job_name" => job_name,
+                            )
+                            .record(job_start.elapsed().as_secs_f64());
+                            drop(permit);
+                            return;
+                        }
+                    };
 
-                let status_label = if error_msg.is_some() {
-                    "error"
-                } else {
-                    "success"
-                };
-                metrics::counter!(
-                    "sober_scheduler_job_executions_total",
-                    "job_name" => job_name.clone(),
-                    "status" => status_label,
-                )
-                .increment(1);
-                metrics::histogram!(
-                    "sober_scheduler_job_duration_seconds",
-                    "job_name" => job_name.clone(),
-                )
-                .record(job_start.elapsed().as_secs_f64());
+                    // Route by payload type
+                    let (result_bytes, error_msg) =
+                        route_job(&agent_client, &executor_registry, &job).await;
 
-                // Complete the run
-                if let Err(e) = run_repo
-                    .complete(run.id, result_bytes, error_msg.clone(), None)
-                    .await
-                {
-                    error!(job = %job_name, error = %e, "failed to complete job run");
-                }
+                    let status_label = if error_msg.is_some() {
+                        tracing::Span::current().record("otel.status_code", "ERROR");
+                        "error"
+                    } else {
+                        tracing::Span::current().record("otel.status_code", "OK");
+                        "success"
+                    };
+                    metrics::counter!(
+                        "sober_scheduler_job_executions_total",
+                        "job_name" => job_name.clone(),
+                        "status" => status_label,
+                    )
+                    .increment(1);
+                    metrics::histogram!(
+                        "sober_scheduler_job_duration_seconds",
+                        "job_name" => job_name.clone(),
+                    )
+                    .record(job_start.elapsed().as_secs_f64());
 
-                // Update job state
-                let now = Utc::now();
-                let _ = job_repo.mark_last_run(job_id, now).await;
+                    // Complete the run
+                    if let Err(e) = run_repo
+                        .complete(run.id, result_bytes, error_msg.clone(), None)
+                        .await
+                    {
+                        error!(job = %job_name, error = %e, "failed to complete job run");
+                    }
 
-                // Calculate next run
-                if let Ok(schedule) = JobSchedule::parse(&job.schedule)
-                    && let Some(next) = schedule.next_run_after(now)
-                {
-                    let _ = job_repo.update_next_run(job_id, next).await;
-                }
+                    // Update job state
+                    let now = Utc::now();
+                    let _ = job_repo.mark_last_run(job_id, now).await;
 
-                // Only restore to active if the job wasn't cancelled during execution.
-                let current = job_repo.get_by_id(job_id).await;
-                if let Ok(j) = current
-                    && j.status == JobStatus::Running
-                {
-                    let _ = job_repo.update_status(job_id, JobStatus::Active).await;
-                }
+                    // Calculate next run
+                    if let Ok(schedule) = JobSchedule::parse(&job.schedule)
+                        && let Some(next) = schedule.next_run_after(now)
+                    {
+                        let _ = job_repo.update_next_run(job_id, next).await;
+                    }
 
-                drop(permit);
-            }));
+                    // Only restore to active if the job wasn't cancelled during execution.
+                    let current = job_repo.get_by_id(job_id).await;
+                    if let Ok(j) = current
+                        && j.status == JobStatus::Running
+                    {
+                        let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                    }
+
+                    drop(permit);
+                },
+                job_span,
+            )));
         }
 
         // Wait for all spawned tasks
