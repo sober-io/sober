@@ -68,17 +68,97 @@
 		});
 	};
 
+	const parseLlmToolCalls = (toolCalls: unknown): ToolCall[] | undefined => {
+		if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
+		return toolCalls.map(
+			(tc: { id?: string; function?: { name?: string; arguments?: string } }) => {
+				let input: unknown = {};
+				try {
+					if (tc.function?.arguments) input = JSON.parse(tc.function.arguments);
+				} catch {
+					input = tc.function?.arguments ?? '';
+				}
+				return {
+					id: tc.id ?? crypto.randomUUID(),
+					name: tc.function?.name ?? 'unknown',
+					input
+				};
+			}
+		);
+	};
+
+	const extractThinkingContent = (metadata: Record<string, unknown> | undefined): string => {
+		if (!metadata) return '';
+		const rc = metadata.reasoning_content;
+		return typeof rc === 'string' ? rc : '';
+	};
+
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
 		role: m.role === 'tool' ? 'system' : m.role,
 		content: m.content,
-		thinkingContent: '',
-		toolCalls: undefined,
+		thinkingContent: extractThinkingContent(m.metadata),
+		toolCalls: parseLlmToolCalls(m.tool_calls),
 		streaming: false,
 		thinking: false,
 		timestamp: fmtTime(m.created_at),
 		userId: m.user_id
 	});
+
+	const mergeToolResults = (rawMessages: Message[]): ChatMsg[] => {
+		const chatMessages = rawMessages.map(toChat);
+		const merged = new Set<number>();
+
+		// Pass 1: merge tool-role messages into parent assistant by tool_call_id.
+		for (let i = 0; i < rawMessages.length; i++) {
+			const raw = rawMessages[i];
+			if (raw.role !== 'tool' || !raw.tool_result) continue;
+			const result = raw.tool_result as { tool_call_id?: string };
+			if (!result.tool_call_id) continue;
+
+			for (let j = i - 1; j >= 0; j--) {
+				const parent = chatMessages[j];
+				if (parent.role !== 'assistant' || !parent.toolCalls) continue;
+				const tc = parent.toolCalls.find((t) => t.id === result.tool_call_id);
+				if (tc) {
+					tc.output = raw.content;
+					merged.add(i);
+					break;
+				}
+			}
+		}
+
+		// Pass 2: merge follow-up assistant messages into the chain root.
+		// DB stores: assistant(tool_calls) → tool… → assistant(text) per round.
+		// During streaming these are one bubble — reconstruct that here.
+		for (let i = 0; i < chatMessages.length; i++) {
+			if (merged.has(i)) continue;
+			const root = chatMessages[i];
+			if (root.role !== 'assistant' || !root.toolCalls) continue;
+
+			let j = i + 1;
+			while (j < chatMessages.length) {
+				if (merged.has(j)) {
+					j++;
+					continue;
+				}
+				const next = chatMessages[j];
+				if (next.role !== 'assistant') break;
+
+				// Merge continuation assistant (may have more tool calls or final text)
+				if (next.toolCalls) {
+					root.toolCalls = [...root.toolCalls!, ...next.toolCalls];
+				}
+				if (next.content) {
+					root.content = root.content ? root.content + next.content : next.content;
+				}
+				merged.add(j);
+				j++;
+			}
+		}
+
+		return chatMessages.filter((_, i) => !merged.has(i));
+	};
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
@@ -144,7 +224,7 @@
 	// Reset state when conversation changes
 	$effect(() => {
 		void conversationId;
-		messages = data.messages.map(toChat);
+		messages = mergeToolResults(data.messages);
 		allLoaded = data.messages.length < PAGE_SIZE;
 		assistantPhase = 'idle';
 		messageQueue = [];
@@ -229,7 +309,7 @@
 		if (older.length < PAGE_SIZE) allLoaded = true;
 		if (older.length > 0 && container) {
 			const prevHeight = container.scrollHeight;
-			messages = [...older.map(toChat), ...messages];
+			messages = [...mergeToolResults(older), ...messages];
 			// Merge tags from older messages.
 			for (const m of older) {
 				if (m.tags && m.tags.length > 0) {
