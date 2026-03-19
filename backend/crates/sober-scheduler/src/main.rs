@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
-use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool};
+use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool_with_service};
 use sober_memory::MemoryStore;
 use sober_sandbox::SandboxProfile;
 use sober_scheduler::engine::TickEngine;
@@ -41,10 +41,11 @@ async fn main() -> Result<()> {
     let telemetry = sober_core::init_telemetry(config.environment, "sober_scheduler=info");
 
     // 3. Spawn Prometheus metrics HTTP server for scraping
+    const DEFAULT_METRICS_PORT: u16 = 9101;
     let metrics_port: u16 = std::env::var("METRICS_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(9101);
+        .unwrap_or(DEFAULT_METRICS_PORT);
     sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
 
     info!("sober-scheduler starting");
@@ -54,7 +55,7 @@ async fn main() -> Result<()> {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
     };
-    let pool = create_pool(&db_config)
+    let pool = create_pool_with_service(&db_config, "scheduler")
         .await
         .context("failed to connect to PostgreSQL")?;
 

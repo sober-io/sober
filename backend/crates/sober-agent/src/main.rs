@@ -19,7 +19,7 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
+use sober_db::{PgAgentRepos, PgMessageRepo, create_pool_with_service};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
@@ -50,10 +50,11 @@ async fn main() -> Result<()> {
     );
 
     // 3. Spawn Prometheus metrics HTTP server for scraping
+    const DEFAULT_METRICS_PORT: u16 = 9100;
     let metrics_port: u16 = std::env::var("METRICS_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(9100);
+        .unwrap_or(DEFAULT_METRICS_PORT);
     sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
 
     info!("sober-agent starting");
@@ -63,7 +64,7 @@ async fn main() -> Result<()> {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
     };
-    let pool = create_pool(&db_config)
+    let pool = create_pool_with_service(&db_config, "agent")
         .await
         .context("failed to connect to PostgreSQL")?;
 
