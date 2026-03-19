@@ -1979,7 +1979,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_active{job=\"sober-api\"}",
+          "expr": "sober_pg_pool_connections_active{service=\"sober-api\"}",
           "legendFormat": "Active",
           "refId": "A"
         },
@@ -1988,7 +1988,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_idle{job=\"sober-api\"}",
+          "expr": "sober_pg_pool_connections_idle{service=\"sober-api\"}",
           "legendFormat": "Idle",
           "refId": "B"
         }
@@ -2082,7 +2082,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_active{job=\"sober-agent\"}",
+          "expr": "sober_pg_pool_connections_active{service=\"sober-agent\"}",
           "legendFormat": "Active",
           "refId": "A"
         },
@@ -2091,7 +2091,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_idle{job=\"sober-agent\"}",
+          "expr": "sober_pg_pool_connections_idle{service=\"sober-agent\"}",
           "legendFormat": "Idle",
           "refId": "B"
         }
@@ -2185,7 +2185,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_active{job=\"sober-scheduler\"}",
+          "expr": "sober_pg_pool_connections_active{service=\"sober-scheduler\"}",
           "legendFormat": "Active",
           "refId": "A"
         },
@@ -2194,7 +2194,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sober_pg_pool_connections_idle{job=\"sober-scheduler\"}",
+          "expr": "sober_pg_pool_connections_idle{service=\"sober-scheduler\"}",
           "legendFormat": "Idle",
           "refId": "B"
         }
