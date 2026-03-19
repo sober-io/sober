@@ -66,7 +66,7 @@ impl AppState {
             url: config.database.url.clone(),
             max_connections: config.database.max_connections,
         };
-        let db = sober_db::create_pool_with_service(&db_config, "sober-api").await?;
+        let db = sober_db::create_pool(&db_config).await?;
         info!("connected to PostgreSQL");
 
         let agent_client = connect_agent(&config).await?;

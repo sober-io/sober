@@ -23,17 +23,10 @@ pub struct DatabaseConfig {
 /// caller-specified max connections (typically 10 for servers, 1 for CLI).
 ///
 /// Spawns a background task that periodically records pool connection metrics
-/// (`sober_pg_pool_connections_active`, `sober_pg_pool_connections_idle`)
-/// tagged with the given `service_name` for per-service filtering in dashboards.
+/// (`sober_pg_pool_connections_active`, `sober_pg_pool_connections_idle`).
+/// Per-service filtering in dashboards uses the Prometheus `job` label
+/// added automatically by the scrape config.
 pub async fn create_pool(config: &DatabaseConfig) -> Result<PgPool, AppError> {
-    create_pool_with_service(config, "unknown").await
-}
-
-/// Creates a pool with an explicit service label on pool metrics.
-pub async fn create_pool_with_service(
-    config: &DatabaseConfig,
-    service_name: &str,
-) -> Result<PgPool, AppError> {
     let pool = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(Duration::from_secs(5))
@@ -42,15 +35,14 @@ pub async fn create_pool_with_service(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     let pool_for_metrics = pool.clone();
-    let service = service_name.to_owned();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(POOL_METRICS_INTERVAL);
         loop {
             interval.tick().await;
             let active = pool_for_metrics.size() as f64;
             let idle = pool_for_metrics.num_idle() as f64;
-            gauge!("sober_pg_pool_connections_active", "service" => service.clone()).set(active);
-            gauge!("sober_pg_pool_connections_idle", "service" => service.clone()).set(idle);
+            gauge!("sober_pg_pool_connections_active").set(active);
+            gauge!("sober_pg_pool_connections_idle").set(idle);
         }
     });
 

@@ -19,7 +19,7 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{PgAgentRepos, PgMessageRepo, create_pool_with_service};
+use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
     };
-    let pool = create_pool_with_service(&db_config, "sober-agent")
+    let pool = create_pool(&db_config)
         .await
         .context("failed to connect to PostgreSQL")?;
 

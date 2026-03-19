@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
-use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool_with_service};
+use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool};
 use sober_memory::MemoryStore;
 use sober_sandbox::SandboxProfile;
 use sober_scheduler::engine::TickEngine;
@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
     };
-    let pool = create_pool_with_service(&db_config, "sober-scheduler")
+    let pool = create_pool(&db_config)
         .await
         .context("failed to connect to PostgreSQL")?;
 

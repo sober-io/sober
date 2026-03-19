@@ -18,7 +18,7 @@ pub mod pool;
 pub mod repos;
 mod rows;
 
-pub use pool::{DatabaseConfig, create_pool, create_pool_with_service};
+pub use pool::{DatabaseConfig, create_pool};
 pub use repos::{
     PgAgentRepos, PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgConversationUserRepo,
     PgJobRepo, PgJobRunRepo, PgMcpServerRepo, PgMessageRepo, PgRoleRepo, PgSecretRepo,
