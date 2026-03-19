@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use axum::response::IntoResponse;
-use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -80,21 +80,15 @@ pub fn init_telemetry(environment: Environment, default_filter: &str) -> Telemet
         opentelemetry_sdk::propagation::TraceContextPropagator::new(),
     );
 
-    // Prometheus metrics — always active
-    let http_duration_buckets = &[
+    // Prometheus metrics — always active.
+    // Default buckets cover typical HTTP/gRPC latencies. Per-metric overrides
+    // can be added via set_buckets_for_metric if needed.
+    let default_duration_buckets = &[
         0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
     ];
     let prometheus_handle = PrometheusBuilder::new()
-        .set_buckets_for_metric(
-            Matcher::Full("http_request_duration_seconds".to_owned()),
-            http_duration_buckets,
-        )
-        .expect("valid histogram buckets")
-        .set_buckets_for_metric(
-            Matcher::Full("sober_api_request_duration_seconds".to_owned()),
-            http_duration_buckets,
-        )
-        .expect("valid histogram buckets")
+        .set_buckets(default_duration_buckets)
+        .expect("valid default histogram buckets")
         .install_recorder()
         .expect("failed to install Prometheus recorder");
 
