@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
     };
-    let pool = create_pool_with_service(&db_config, "agent")
+    let pool = create_pool_with_service(&db_config, "sober-agent")
         .await
         .context("failed to connect to PostgreSQL")?;
 
