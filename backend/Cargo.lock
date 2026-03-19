@@ -3305,6 +3305,7 @@ dependencies = [
  "hyper-util",
  "metrics",
  "moka",
+ "opentelemetry",
  "prost 0.14.3",
  "serde",
  "serde_json",
@@ -3323,6 +3324,7 @@ dependencies = [
  "tower 0.5.3",
  "tower-http",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
 ]

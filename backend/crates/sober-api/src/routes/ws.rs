@@ -428,20 +428,39 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                     conversation_id: conversation_id.clone(),
                     content,
                 });
-                sober_core::inject_trace_context(request.metadata_mut());
 
                 let conv_id = conversation_id.clone();
                 let error_tx = out_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = agent_client.handle_message(request).await {
-                        let _ = error_tx
-                            .send(ServerWsMessage::ChatError {
-                                conversation_id: conv_id,
-                                error: e.message().to_owned(),
-                            })
-                            .await;
-                    }
-                });
+                let span = tracing::info_span!(
+                    "ws.handle_message",
+                    conversation_id = %conv_id,
+                    otel.kind = "client",
+                );
+                // Inject the new span's trace context into the gRPC metadata
+                // so the agent can link its work to this trace.
+                {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+                    let cx = span.context();
+                    opentelemetry::global::get_text_map_propagator(|p| {
+                        p.inject_context(
+                            &cx,
+                            &mut sober_core::MetadataMapInjector(request.metadata_mut()),
+                        );
+                    });
+                }
+                tokio::spawn(tracing::Instrument::instrument(
+                    async move {
+                        if let Err(e) = agent_client.handle_message(request).await {
+                            let _ = error_tx
+                                .send(ServerWsMessage::ChatError {
+                                    conversation_id: conv_id,
+                                    error: e.message().to_owned(),
+                                })
+                                .await;
+                        }
+                    },
+                    span,
+                ));
             }
             ClientWsMessage::ChatCancel { conversation_id } => {
                 // Cancellation is best-effort in the new model.
