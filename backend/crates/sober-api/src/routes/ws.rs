@@ -423,11 +423,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();
-                let request = proto::HandleMessageRequest {
+                let mut request = tonic::Request::new(proto::HandleMessageRequest {
                     user_id: user_id.to_string(),
                     conversation_id: conversation_id.clone(),
                     content,
-                };
+                });
+                sober_core::inject_trace_context(request.metadata_mut());
 
                 let conv_id = conversation_id.clone();
                 let error_tx = out_tx.clone();

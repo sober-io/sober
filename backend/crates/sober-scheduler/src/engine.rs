@@ -357,12 +357,13 @@ async fn wake_agent(agent_client: &SharedAgentClient, job: &Job, summary: &str) 
         "job_name": job.name,
     });
 
-    let request = agent_proto::WakeRequest {
+    let mut request = tonic::Request::new(agent_proto::WakeRequest {
         reason: "job_result".into(),
         caller_identity: "scheduler".into(),
         target_id: Some(job.id.as_uuid().to_string()),
         payload: Some(serde_json::to_vec(&payload_json).unwrap_or_default()),
-    };
+    });
+    sober_core::inject_trace_context(request.metadata_mut());
 
     let mut client = client.clone();
     if let Err(e) = client.wake_agent(request).await {
@@ -380,7 +381,7 @@ async fn execute_via_agent(
         return (vec![], Some("agent client not connected".into()));
     };
 
-    let request = agent_proto::ExecuteTaskRequest {
+    let mut request = tonic::Request::new(agent_proto::ExecuteTaskRequest {
         task_id: job.id.as_uuid().to_string(),
         task_type: "scheduled_job".into(),
         payload: serde_json::to_vec(&job.payload).unwrap_or_default(),
@@ -388,7 +389,8 @@ async fn execute_via_agent(
         user_id: job.owner_id.map(|id| id.to_string()),
         conversation_id: job.conversation_id.map(|id| id.to_string()),
         workspace_id: job.workspace_id.map(|id| id.to_string()),
-    };
+    });
+    sober_core::inject_trace_context(request.metadata_mut());
 
     let mut client = client.clone();
     match client.execute_task(request).await {

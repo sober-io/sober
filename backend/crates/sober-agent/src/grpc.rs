@@ -68,10 +68,14 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
     type ExecuteTaskStream = ExecuteTaskStream;
     type SubscribeConversationUpdatesStream = SubscribeConversationUpdatesStream;
 
+    #[tracing::instrument(name = "agent.handle_message", skip_all, fields(otel.kind = "server"))]
     async fn handle_message(
         &self,
         request: Request<proto::HandleMessageRequest>,
     ) -> Result<Response<proto::HandleMessageResponse>, Status> {
+        let parent_cx = sober_core::extract_trace_context(request.metadata());
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let _ = tracing::Span::current().set_parent(parent_cx);
         let req = request.into_inner();
 
         let user_id = req
@@ -127,10 +131,14 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         }
     }
 
+    #[tracing::instrument(name = "agent.execute_task", skip_all, fields(otel.kind = "server"))]
     async fn execute_task(
         &self,
         request: Request<proto::ExecuteTaskRequest>,
     ) -> Result<Response<Self::ExecuteTaskStream>, Status> {
+        let parent_cx = sober_core::extract_trace_context(request.metadata());
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let _ = tracing::Span::current().set_parent(parent_cx);
         let req = request.into_inner();
 
         let user_id = req
