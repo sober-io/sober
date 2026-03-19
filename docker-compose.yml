@@ -5,7 +5,7 @@ x-common-env: &common-env
   DATABASE_URL: postgres://sober:sober@postgres:5432/sober
   DATABASE_MAX_CONNECTIONS: "10"
   QDRANT_URL: http://qdrant:6334
-  RUST_LOG: info
+  RUST_LOG: info,tower_http=debug
 
 x-llm-env: &llm-env
   LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
@@ -103,12 +103,10 @@ services:
     ports:
       - "3001:3000"
     volumes:
+      - ./infra/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./infra/grafana/provisioning/:/etc/grafana/provisioning/:ro
       - ./infra/grafana/dashboards/:/var/lib/grafana/dashboards/:ro
       - grafana_data:/var/lib/grafana
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
     depends_on:
       - prometheus
       - tempo

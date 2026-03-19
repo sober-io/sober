@@ -157,8 +157,14 @@ where
         .with_endpoint(&endpoint)
         .build()
     {
-        Ok(e) => e,
-        Err(_) => return (None, None),
+        Ok(e) => {
+            eprintln!("OTEL: OTLP exporter configured for {endpoint}");
+            e
+        }
+        Err(e) => {
+            eprintln!("WARNING: failed to create OTLP exporter: {e}");
+            return (None, None);
+        }
     };
 
     let service_name = std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "sober".to_owned());
