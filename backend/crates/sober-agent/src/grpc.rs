@@ -78,7 +78,18 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         let span = {
             let parent_cx = sober_core::extract_trace_context(request.metadata());
             let _guard = parent_cx.attach();
-            tracing::info_span!("agent.handle_message", otel.kind = "server")
+            tracing::info_span!(
+                "agent.handle_message",
+                otel.kind = "server",
+                rpc.service = "AgentService",
+                rpc.method = "HandleMessage",
+                rpc.system = "grpc",
+                user.id = tracing::field::Empty,
+                conversation.id = tracing::field::Empty,
+                message.length = tracing::field::Empty,
+                trigger = "human",
+                otel.status_code = tracing::field::Empty,
+            )
         };
         let _enter = span.enter();
 
@@ -96,13 +107,13 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .map(ConversationId::from_uuid)
             .map_err(|_| Status::invalid_argument("invalid conversation_id"))?;
 
+        span.record("user.id", user_id.to_string().as_str());
+        span.record("conversation.id", conversation_id.to_string().as_str());
+        span.record("message.length", req.content.len());
+
         let agent = Arc::clone(&self.agent);
         let content = req.content;
 
-        // handle_message stores the user message, spawns the agentic loop
-        // (which publishes to the broadcast channel), and returns the stream.
-        // We consume the stream to drive the loop but don't forward it — events
-        // go through the broadcast channel to SubscribeConversationUpdates.
         match agent
             .handle_message(
                 user_id,
@@ -113,6 +124,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
         {
             Ok(stream) => {
+                span.record("otel.status_code", "OK");
                 // The stream must be consumed to drive the spawned task, but
                 // we don't need its output — the broadcast channel delivers
                 // events. Spawn a drainer task.
@@ -131,7 +143,8 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
                 }))
             }
             Err(e) => {
-                error!(error = %e, "agent handle_message failed");
+                span.record("otel.status_code", "ERROR");
+                error!(error.message = %e, "agent handle_message failed");
                 Err(Status::internal(e.to_string()))
             }
         }
@@ -144,11 +157,25 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         let span = {
             let parent_cx = sober_core::extract_trace_context(request.metadata());
             let _guard = parent_cx.attach();
-            tracing::info_span!("agent.execute_task", otel.kind = "server")
+            tracing::info_span!(
+                "agent.execute_task",
+                otel.kind = "server",
+                rpc.service = "AgentService",
+                rpc.method = "ExecuteTask",
+                rpc.system = "grpc",
+                task.id = tracing::field::Empty,
+                task.type = tracing::field::Empty,
+                caller = tracing::field::Empty,
+                otel.status_code = tracing::field::Empty,
+            )
         };
         let _enter = span.enter();
 
         let req = request.into_inner();
+
+        span.record("task.id", req.task_id.as_str());
+        span.record("task.type", req.task_type.as_str());
+        span.record("caller", req.caller_identity.as_str());
 
         let user_id = req
             .user_id

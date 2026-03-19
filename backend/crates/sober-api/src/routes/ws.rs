@@ -433,8 +433,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 let error_tx = out_tx.clone();
                 let span = tracing::info_span!(
                     "ws.handle_message",
-                    conversation_id = %conv_id,
                     otel.kind = "client",
+                    rpc.service = "AgentService",
+                    rpc.method = "HandleMessage",
+                    rpc.system = "grpc",
+                    user.id = %user_id,
+                    conversation.id = %conv_id,
+                    otel.status_code = tracing::field::Empty,
                 );
                 // Inject the new span's trace context into the gRPC metadata
                 // so the agent can link its work to this trace.
@@ -450,13 +455,24 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 }
                 tokio::spawn(tracing::Instrument::instrument(
                     async move {
-                        if let Err(e) = agent_client.handle_message(request).await {
-                            let _ = error_tx
-                                .send(ServerWsMessage::ChatError {
-                                    conversation_id: conv_id,
-                                    error: e.message().to_owned(),
-                                })
-                                .await;
+                        match agent_client.handle_message(request).await {
+                            Ok(_) => {
+                                tracing::Span::current().record("otel.status_code", "OK");
+                            }
+                            Err(e) => {
+                                tracing::Span::current().record("otel.status_code", "ERROR");
+                                tracing::error!(
+                                    error.message = %e.message(),
+                                    error.type = %e.code(),
+                                    "HandleMessage RPC failed"
+                                );
+                                let _ = error_tx
+                                    .send(ServerWsMessage::ChatError {
+                                        conversation_id: conv_id,
+                                        error: e.message().to_owned(),
+                                    })
+                                    .await;
+                            }
                         }
                     },
                     span,
