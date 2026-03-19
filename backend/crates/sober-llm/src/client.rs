@@ -5,10 +5,11 @@
 //! vLLM, etc.
 
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::Stream;
+use metrics::{counter, histogram};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use sober_core::config::LlmConfig;
@@ -148,6 +149,21 @@ impl OpenAiCompatibleEngine {
         None
     }
 
+    /// Returns a short provider label for metrics (e.g. `"openrouter"`, `"openai"`, `"ollama"`).
+    fn provider_label(&self) -> &str {
+        if self.provider.is_openrouter {
+            "openrouter"
+        } else if self.provider.is_kimi_coding {
+            "kimi"
+        } else if self.base_url.contains("api.openai.com") {
+            "openai"
+        } else if self.base_url.contains("localhost") || self.base_url.contains("127.0.0.1") {
+            "local"
+        } else {
+            "other"
+        }
+    }
+
     /// Handle non-success HTTP responses.
     async fn handle_error_response(response: reqwest::Response) -> LlmError {
         let status = response.status();
@@ -190,6 +206,10 @@ impl LlmEngine for OpenAiCompatibleEngine {
         let url = format!("{}/chat/completions", self.base_url);
         debug!(url = %url, model = %req.model, "sending completion request");
 
+        let provider = self.provider_label();
+        let model = req.model.clone();
+        let start = Instant::now();
+
         let response = self
             .client
             .post(&url)
@@ -199,11 +219,24 @@ impl LlmEngine for OpenAiCompatibleEngine {
             .await?;
 
         if !response.status().is_success() {
+            counter!("sober_llm_request_total", "provider" => provider.to_owned(), "model" => model, "status" => "error").increment(1);
             return Err(Self::handle_error_response(response).await);
         }
 
         let body = response.text().await?;
-        serde_json::from_str(&body).map_err(|e| LlmError::InvalidResponse(e.to_string()))
+        let resp: CompletionResponse =
+            serde_json::from_str(&body).map_err(|e| LlmError::InvalidResponse(e.to_string()))?;
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_llm_request_total", "provider" => provider.to_owned(), "model" => model.clone(), "status" => "success").increment(1);
+        histogram!("sober_llm_request_duration_seconds", "provider" => provider.to_owned(), "model" => model.clone()).record(elapsed);
+
+        if let Some(ref usage) = resp.usage {
+            counter!("sober_llm_tokens_input_total", "provider" => provider.to_owned(), "model" => model.clone()).increment(u64::from(usage.prompt_tokens));
+            counter!("sober_llm_tokens_output_total", "provider" => provider.to_owned(), "model" => model).increment(u64::from(usage.completion_tokens));
+        }
+
+        Ok(resp)
     }
 
     async fn stream(
@@ -218,6 +251,10 @@ impl LlmEngine for OpenAiCompatibleEngine {
         let url = format!("{}/chat/completions", self.base_url);
         debug!(url = %url, model = %req.model, "sending streaming request");
 
+        let provider = self.provider_label().to_owned();
+        let model = req.model.clone();
+        let start = Instant::now();
+
         let response = self
             .client
             .post(&url)
@@ -227,15 +264,22 @@ impl LlmEngine for OpenAiCompatibleEngine {
             .await?;
 
         if !response.status().is_success() {
+            counter!("sober_llm_request_total", "provider" => provider, "model" => model, "status" => "error").increment(1);
             return Err(Self::handle_error_response(response).await);
         }
 
-        Ok(Box::pin(parse_sse_stream(response)))
+        // Wrap the inner stream to record metrics when streaming completes.
+        let inner = parse_sse_stream(response);
+        let metered = crate::streaming::MeteredSseStream::new(inner, provider, model, start);
+        Ok(Box::pin(metered))
     }
 
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
         let url = format!("{}/embeddings", self.base_url);
         debug!(url = %url, model = %self.embedding_model, count = texts.len(), "sending embedding request");
+
+        let provider = self.provider_label().to_owned();
+        let start = Instant::now();
 
         let req = EmbeddingRequest {
             model: self.embedding_model.clone(),
@@ -251,18 +295,27 @@ impl LlmEngine for OpenAiCompatibleEngine {
             .await?;
 
         if response.status() == StatusCode::NOT_FOUND {
+            counter!("sober_llm_embed_request_total", "provider" => provider, "status" => "error")
+                .increment(1);
             return Err(LlmError::Unsupported(
                 "embedding endpoint not available for this provider".to_owned(),
             ));
         }
 
         if !response.status().is_success() {
+            counter!("sober_llm_embed_request_total", "provider" => provider, "status" => "error")
+                .increment(1);
             return Err(Self::handle_error_response(response).await);
         }
 
         let body = response.text().await?;
         let resp: EmbeddingResponse =
             serde_json::from_str(&body).map_err(|e| LlmError::InvalidResponse(e.to_string()))?;
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_llm_embed_request_total", "provider" => provider.clone(), "status" => "success").increment(1);
+        histogram!("sober_llm_embed_request_duration_seconds", "provider" => provider)
+            .record(elapsed);
 
         // Sort by index and extract vectors.
         let mut data = resp.data;

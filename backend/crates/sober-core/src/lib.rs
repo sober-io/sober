@@ -18,7 +18,11 @@ pub mod test_utils;
 pub use admin::{AdminCommand, AdminResponse};
 pub use config::AppConfig;
 pub use error::{ApiErrorBody, AppError};
-pub use telemetry::{MetricsEndpoint, TelemetryGuard, init_telemetry};
+#[cfg(feature = "grpc-telemetry")]
+pub use telemetry::{
+    MetadataMapExtractor, MetadataMapInjector, extract_trace_context, inject_trace_context,
+};
+pub use telemetry::{MetricsEndpoint, TelemetryGuard, init_telemetry, spawn_metrics_server};
 pub use types::*;
 pub use workspace_config::{
     PermissionMode, WorkspaceAgentState, WorkspaceConfig, WorkspaceSandboxConfig,

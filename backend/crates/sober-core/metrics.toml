@@ -1,0 +1,31 @@
+[crate]
+name = "sober-core"
+dashboard_title = "Core / Process"
+
+[[metrics]]
+name = "sober_process_cpu_seconds_total"
+type = "counter"
+help = "Total CPU time consumed"
+labels = []
+group = "Process"
+
+[[metrics]]
+name = "sober_process_resident_memory_bytes"
+type = "gauge"
+help = "Resident memory size in bytes"
+labels = []
+group = "Process"
+
+[[metrics]]
+name = "sober_process_open_fds"
+type = "gauge"
+help = "Number of open file descriptors"
+labels = []
+group = "Process"
+
+[[metrics]]
+name = "sober_process_uptime_seconds"
+type = "gauge"
+help = "Process uptime in seconds"
+labels = []
+group = "Process"

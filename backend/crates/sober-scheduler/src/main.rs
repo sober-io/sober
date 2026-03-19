@@ -37,12 +37,20 @@ async fn main() -> Result<()> {
     // 1. Load .env and configuration
     let config = AppConfig::load_from_env().context("failed to load config")?;
 
-    // 2. Initialise tracing
-    init_tracing(&config);
+    // 2. Initialise telemetry (tracing + metrics + OTel)
+    let telemetry = sober_core::init_telemetry(config.environment, "sober_scheduler=info");
+
+    // 3. Spawn Prometheus metrics HTTP server for scraping
+    const DEFAULT_METRICS_PORT: u16 = 9101;
+    let metrics_port: u16 = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_METRICS_PORT);
+    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
 
     info!("sober-scheduler starting");
 
-    // 3. Connect to PostgreSQL
+    // 4. Connect to PostgreSQL
     let db_config = sober_db::DatabaseConfig {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
@@ -51,21 +59,21 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    // 4. Create repository instances
+    // 5. Create repository instances
     let job_repo = Arc::new(PgJobRepo::new(pool.clone()));
     let run_repo = Arc::new(PgJobRunRepo::new(pool.clone()));
     let session_repo = PgSessionRepo::new(pool);
 
-    // 5. Build job executor registry
+    // 6. Build job executor registry
     let executor_registry = build_executor_registry(&config, session_repo)?;
     let executor_registry = Arc::new(executor_registry);
 
-    // 6. Register system maintenance jobs
+    // 7. Register system maintenance jobs
     if let Err(e) = register_system_jobs(job_repo.as_ref()).await {
         warn!(error = %e, "failed to register system jobs (will retry next startup)");
     }
 
-    // 7. Create tick engine
+    // 8. Create tick engine
     let tick_interval = Duration::from_secs(config.scheduler.tick_interval_secs);
     let max_concurrent = config.scheduler.max_concurrent_jobs as usize;
     let engine = Arc::new(TickEngine::new(
@@ -76,21 +84,21 @@ async fn main() -> Result<()> {
         max_concurrent,
     ));
 
-    // 8. Connect to agent gRPC service (background — retries until available)
+    // 9. Connect to agent gRPC service (background — retries until available)
     let agent_socket = config.scheduler.agent_socket_path.clone();
     let engine_for_agent = Arc::clone(&engine);
     tokio::spawn(async move {
         connect_to_agent(engine_for_agent, &agent_socket).await;
     });
 
-    // 9. Create gRPC service
+    // 10. Create gRPC service
     let grpc_service = SchedulerGrpcService::new(
         Arc::clone(&job_repo),
         Arc::clone(&run_repo),
         Arc::clone(&engine),
     );
 
-    // 10. Bind to Unix domain socket
+    // 11. Bind to Unix domain socket
     let socket_path = config.scheduler.socket_path.clone();
 
     // Remove stale socket file if it exists
@@ -112,7 +120,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 11. Start tick engine in background
+    // 12. Start tick engine in background
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     let engine_for_tick = Arc::clone(&engine);
@@ -120,7 +128,7 @@ async fn main() -> Result<()> {
         engine_for_tick.run(cancel_clone).await;
     });
 
-    // 12. Serve gRPC with graceful shutdown
+    // 13. Serve gRPC with graceful shutdown
     Server::builder()
         .add_service(SchedulerServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
@@ -245,24 +253,6 @@ async fn connect_to_agent(engine: Arc<TickEngine<PgJobRepo, PgJobRunRepo>>, sock
                 );
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
-        }
-    }
-}
-
-/// Initialises the tracing subscriber based on the environment.
-fn init_tracing(config: &AppConfig) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::fmt;
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("sober_scheduler=info"));
-
-    match config.environment {
-        sober_core::config::Environment::Production => {
-            fmt().json().with_env_filter(filter).init();
-        }
-        sober_core::config::Environment::Development => {
-            fmt().pretty().with_env_filter(filter).init();
         }
     }
 }

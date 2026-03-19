@@ -5,7 +5,9 @@
 //! methods for tool and resource operations.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
+use metrics::{counter, histogram};
 use sober_sandbox::{BwrapSandbox, SandboxPolicy};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
@@ -190,17 +192,43 @@ impl McpClient {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolCallResult, McpError> {
+        let start = Instant::now();
+        let server = self
+            .server_info
+            .as_ref()
+            .map_or("unknown", |s| s.name.as_str())
+            .to_owned();
+
         let params = serde_json::json!({
             "name": name,
             "arguments": arguments,
         });
 
-        let response = self.send_request("tools/call", Some(params)).await?;
+        let result = async {
+            let response = self.send_request("tools/call", Some(params)).await?;
+            let result = Self::extract_result(response, "tools/call")?;
+            serde_json::from_value(result)
+                .map_err(|e| McpError::ToolCallFailed(format!("failed to parse tool result: {e}")))
+        }
+        .await;
 
-        let result = Self::extract_result(response, "tools/call")?;
+        let status = if result.is_ok() { "success" } else { "error" };
+        let tool_name = name.to_owned();
+        counter!(
+            "sober_mcp_tool_calls_total",
+            "server" => server.clone(),
+            "tool" => tool_name.clone(),
+            "status" => status,
+        )
+        .increment(1);
+        histogram!(
+            "sober_mcp_tool_call_duration_seconds",
+            "server" => server,
+            "tool" => tool_name,
+        )
+        .record(start.elapsed().as_secs_f64());
 
-        serde_json::from_value(result)
-            .map_err(|e| McpError::ToolCallFailed(format!("failed to parse tool result: {e}")))
+        result
     }
 
     /// List all resources provided by the MCP server.

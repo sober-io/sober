@@ -6,9 +6,11 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::process::Stdio;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::{Stream, stream};
+use metrics::{counter, histogram};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tracing::{debug, info};
@@ -255,6 +257,10 @@ impl LlmEngine for AcpEngine {
         Self::ensure_spawned(&mut state, &self.config).await?;
         let session_id = Self::ensure_session(&mut state).await?;
 
+        let provider = "acp";
+        let model = state.model_id_str.clone();
+        let start = Instant::now();
+
         let transport = state
             .transport
             .as_ref()
@@ -266,11 +272,28 @@ impl LlmEngine for AcpEngine {
             "prompt": prompt
         });
 
-        let (result, notifications) = transport.request("session/prompt", Some(params)).await?;
+        let result = match transport.request("session/prompt", Some(params)).await {
+            Ok(r) => r,
+            Err(e) => {
+                counter!("sober_llm_request_total", "provider" => provider, "model" => model, "status" => "error").increment(1);
+                return Err(e);
+            }
+        };
 
+        let (result, notifications) = result;
         debug!(result = %result, notification_count = notifications.len(), "ACP prompt response");
 
         let (content, usage) = Self::collect_notifications(&notifications);
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_llm_request_total", "provider" => provider, "model" => model.clone(), "status" => "success").increment(1);
+        histogram!("sober_llm_request_duration_seconds", "provider" => provider, "model" => model.clone()).record(elapsed);
+
+        if let Some(ref u) = usage {
+            counter!("sober_llm_tokens_input_total", "provider" => provider, "model" => model.clone()).increment(u64::from(u.prompt_tokens));
+            counter!("sober_llm_tokens_output_total", "provider" => provider, "model" => model)
+                .increment(u64::from(u.completion_tokens));
+        }
 
         let stop_reason = result
             .get("stopReason")

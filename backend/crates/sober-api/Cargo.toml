@@ -12,7 +12,7 @@ name = "sober-api"
 path = "src/main.rs"
 
 [dependencies]
-sober-core = { path = "../sober-core" }
+sober-core = { path = "../sober-core", features = ["grpc-telemetry"] }
 sober-auth = { path = "../sober-auth" }
 sober-db = { path = "../sober-db" }
 anyhow = { workspace = true }
@@ -21,6 +21,7 @@ axum-core = { workspace = true }
 chrono = { workspace = true }
 dotenvy = { workspace = true }
 futures = "0.3"
+metrics = { workspace = true }
 http = { workspace = true }
 hyper = "1"
 hyper-util = { version = "0.1.20", features = ["tokio", "server-auto"] }
@@ -37,7 +38,9 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 tower = { workspace = true }
 tower-http = { version = "0.6.8", features = ["cors", "trace", "request-id", "util"] }
+opentelemetry = { workspace = true }
 tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 

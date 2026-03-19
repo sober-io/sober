@@ -4,6 +4,7 @@
 //! signatures are 64 bytes. All randomness comes from the OS CSPRNG.
 
 use ed25519_dalek::{Signer, Verifier};
+use metrics::counter;
 use rand_core::OsRng;
 
 use crate::error::CryptoError;
@@ -16,6 +17,7 @@ pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 pub fn generate_keypair() -> (SigningKey, VerifyingKey) {
     let signing = SigningKey::generate(&mut OsRng);
     let verifying = signing.verifying_key();
+    counter!("sober_crypto_keypair_generated_total").increment(1);
     (signing, verifying)
 }
 
@@ -24,6 +26,7 @@ pub fn generate_keypair() -> (SigningKey, VerifyingKey) {
 /// The signature is deterministic: the same key and message always
 /// produce the same signature.
 pub fn sign(key: &SigningKey, message: &[u8]) -> Signature {
+    counter!("sober_crypto_sign_total").increment(1);
     key.sign(message)
 }
 
@@ -36,8 +39,12 @@ pub fn verify(
     message: &[u8],
     signature: &Signature,
 ) -> Result<(), CryptoError> {
-    key.verify(message, signature)
-        .map_err(|e| CryptoError::Signature(e.to_string()))
+    let result = key
+        .verify(message, signature)
+        .map_err(|e| CryptoError::Signature(e.to_string()));
+    let result_label = if result.is_ok() { "valid" } else { "invalid" };
+    counter!("sober_crypto_verify_total", "result" => result_label).increment(1);
+    result
 }
 
 #[cfg(test)]

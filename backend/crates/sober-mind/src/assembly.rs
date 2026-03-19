@@ -17,7 +17,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::RwLock;
+use std::time::Instant;
 
+use metrics::histogram;
 use sober_core::types::access::CallerContext;
 use sober_core::types::domain::Message;
 use sober_core::types::enums::{ConversationKind, MessageRole};
@@ -84,6 +86,9 @@ impl Mind {
         soul_layer_text: &str,
         skill_catalog_xml: &str,
     ) -> Result<Vec<Message>, MindError> {
+        let start = Instant::now();
+        let trigger_label = trigger_kind_label(caller.trigger);
+
         // 1. Build system prompt from instruction files
         let system_prompt = self
             .build_system_prompt(caller, tools, soul_layer_text, skill_catalog_xml)
@@ -139,6 +144,16 @@ impl Mind {
                 messages.push(msg.clone());
             }
         }
+
+        // Record assembly duration.
+        histogram!("sober_mind_prompt_assembly_duration_seconds", "trigger" => trigger_label)
+            .record(start.elapsed().as_secs_f64());
+
+        // Estimate token count (~4 chars per token) and record.
+        let total_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+        let estimated_tokens = (total_chars / 4) as f64;
+        histogram!("sober_mind_prompt_token_estimate", "trigger" => trigger_label)
+            .record(estimated_tokens);
 
         Ok(messages)
     }
@@ -276,6 +291,17 @@ impl Mind {
             .map_err(|_| MindError::AssemblyFailed("workspace cache lock poisoned".into()))?;
         cache.insert(workspace_id, ws_files);
         Ok(())
+    }
+}
+
+/// Maps a trigger kind to a static label string for metrics.
+fn trigger_kind_label(trigger: sober_core::types::access::TriggerKind) -> &'static str {
+    use sober_core::types::access::TriggerKind;
+    match trigger {
+        TriggerKind::Human => "human",
+        TriggerKind::Scheduler => "scheduler",
+        TriggerKind::Replica => "replica",
+        TriggerKind::Admin => "admin",
     }
 }
 

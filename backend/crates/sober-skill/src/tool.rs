@@ -1,7 +1,9 @@
 //! The `activate_skill` tool — loads skill instructions into conversation context.
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use metrics::{counter, histogram};
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use tokio::fs;
 
@@ -36,6 +38,8 @@ impl ActivateSkillTool {
         &self,
         input: serde_json::Value,
     ) -> Result<ToolOutput, ToolError> {
+        let start = Instant::now();
+
         let name = input
             .get("name")
             .and_then(|v| v.as_str())
@@ -44,6 +48,9 @@ impl ActivateSkillTool {
         let entry = match self.catalog.get(name) {
             Some(e) => e,
             None => {
+                counter!("sober_skill_activation_total", "status" => "not_found").increment(1);
+                histogram!("sober_skill_activation_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
                 return Ok(ToolOutput {
                     content: format!("Skill not found: {name}"),
                     is_error: true,
@@ -59,6 +66,9 @@ impl ActivateSkillTool {
                 )))
             })?;
             if state.is_activated(name) {
+                counter!("sober_skill_activation_total", "status" => "already_active").increment(1);
+                histogram!("sober_skill_activation_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
                 return Ok(ToolOutput {
                     content: format!("Skill '{name}' is already active in this conversation."),
                     is_error: false,
@@ -67,12 +77,19 @@ impl ActivateSkillTool {
         }
 
         // Read SKILL.md and strip frontmatter
-        let content = fs::read_to_string(&entry.path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("failed to read SKILL.md: {e}")))?;
+        let content = fs::read_to_string(&entry.path).await.map_err(|e| {
+            counter!("sober_skill_activation_total", "status" => "error").increment(1);
+            histogram!("sober_skill_activation_duration_seconds")
+                .record(start.elapsed().as_secs_f64());
+            ToolError::ExecutionFailed(format!("failed to read SKILL.md: {e}"))
+        })?;
 
-        let (_fm, body) = parse_skill_frontmatter(&content)
-            .map_err(|e| ToolError::ExecutionFailed(format!("failed to parse SKILL.md: {e}")))?;
+        let (_fm, body) = parse_skill_frontmatter(&content).map_err(|e| {
+            counter!("sober_skill_activation_total", "status" => "error").increment(1);
+            histogram!("sober_skill_activation_duration_seconds")
+                .record(start.elapsed().as_secs_f64());
+            ToolError::ExecutionFailed(format!("failed to parse SKILL.md: {e}"))
+        })?;
 
         let resources = enumerate_resources(&entry.base_dir).await;
 
@@ -107,6 +124,9 @@ impl ActivateSkillTool {
             })?;
             state.activate(name.to_string());
         }
+
+        counter!("sober_skill_activation_total", "status" => "success").increment(1);
+        histogram!("sober_skill_activation_duration_seconds").record(start.elapsed().as_secs_f64());
 
         Ok(ToolOutput {
             content: result,

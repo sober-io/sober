@@ -1,0 +1,71 @@
+[crate]
+name = "sober-api"
+dashboard_title = "API Gateway"
+
+[[metrics]]
+name = "sober_api_request_total"
+type = "counter"
+help = "Total HTTP requests"
+labels = ["method", "path", "status"]
+group = "HTTP Requests"
+
+[[metrics]]
+name = "sober_api_request_duration_seconds"
+type = "histogram"
+help = "HTTP request latency"
+labels = ["method", "path", "status"]
+group = "HTTP Requests"
+
+[[metrics.alerts]]
+name = "HighP95Latency"
+expr = "histogram_quantile(0.95, rate(sober_api_request_duration_seconds_bucket[5m])) > 1.0"
+severity = "warning"
+description = "95th percentile HTTP latency exceeds 1 second"
+
+[[metrics]]
+name = "sober_api_requests_in_flight"
+type = "gauge"
+help = "Currently processing HTTP requests"
+labels = []
+group = "HTTP Requests"
+
+[[metrics]]
+name = "sober_api_ws_connections_active"
+type = "gauge"
+help = "Active WebSocket connections"
+labels = []
+group = "WebSocket"
+
+[[metrics]]
+name = "sober_api_ws_connections_total"
+type = "counter"
+help = "Total WebSocket connection events"
+labels = ["status"]
+group = "WebSocket"
+
+[[metrics]]
+name = "sober_api_ws_messages_total"
+type = "counter"
+help = "Total WebSocket messages"
+labels = ["direction"]
+group = "WebSocket"
+
+[[metrics]]
+name = "sober_api_rate_limit_hits_total"
+type = "counter"
+help = "Rate limiter rejection count"
+labels = ["path"]
+group = "Rate Limiting"
+
+[[metrics.alerts]]
+name = "HighRateLimitRate"
+expr = "rate(sober_api_rate_limit_hits_total[5m]) > 10"
+severity = "warning"
+description = "Rate limiter rejecting more than 10 requests per second"
+
+[[metrics]]
+name = "sober_api_admin_commands_total"
+type = "counter"
+help = "Admin socket commands executed"
+labels = ["command", "status"]
+group = "Admin"

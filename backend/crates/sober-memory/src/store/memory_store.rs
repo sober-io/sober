@@ -1,8 +1,10 @@
 //! Qdrant-backed memory store for vector storage and hybrid search.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::Utc;
+use metrics::{counter, histogram};
 use qdrant_client::Payload;
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{
@@ -89,6 +91,13 @@ impl MemoryStore {
         user_id: UserId,
         chunk: StoreChunk,
     ) -> Result<uuid::Uuid, MemoryError> {
+        let chunk_type_label = chunk.chunk_type.to_string();
+        let scope_label = if chunk.scope_id == sober_core::ScopeId::GLOBAL {
+            "global"
+        } else {
+            "user"
+        };
+
         let collection = self.collection_for_scope(user_id, chunk.scope_id);
         self.create_collection_if_missing(&collection).await?;
 
@@ -121,6 +130,8 @@ impl MemoryStore {
             .await
             .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
 
+        counter!("sober_memory_chunks_stored_total", "chunk_type" => chunk_type_label, "scope" => scope_label).increment(1);
+
         Ok(point_id)
     }
 
@@ -136,6 +147,14 @@ impl MemoryStore {
         if query.limit == 0 || query.dense_vector.is_empty() {
             return Ok(Vec::new());
         }
+
+        let scope_label = if query.scope_id == sober_core::ScopeId::GLOBAL {
+            "global"
+        } else {
+            "user"
+        };
+        let search_type = "hybrid";
+        let start = Instant::now();
 
         let collection = self.collection_for_scope(user_id, query.scope_id);
 
@@ -191,6 +210,12 @@ impl MemoryStore {
             }
         }
 
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_memory_search_total", "scope" => scope_label, "search_type" => search_type)
+            .increment(1);
+        histogram!("sober_memory_search_duration_seconds", "scope" => scope_label, "search_type" => search_type).record(elapsed);
+        histogram!("sober_memory_search_results_count").record(hits.len() as f64);
+
         Ok(hits)
     }
 
@@ -224,6 +249,7 @@ impl MemoryStore {
     ///
     /// Returns the count of pruned points.
     pub async fn prune(&self, user_id: UserId, config: &MemoryConfig) -> Result<u64, MemoryError> {
+        let start = Instant::now();
         let collection = user_collection_name(user_id);
         let now = Utc::now();
         let mut pruned: u64 = 0;
@@ -283,6 +309,11 @@ impl MemoryStore {
                 None => break,
             }
         }
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_memory_prune_runs_total").increment(1);
+        histogram!("sober_memory_prune_duration_seconds").record(elapsed);
+        counter!("sober_memory_pruned_chunks_total").increment(pruned);
 
         Ok(pruned)
     }

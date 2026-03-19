@@ -19,6 +19,8 @@ serde_json = { workspace = true }
 
 # Observability
 tracing = { workspace = true }
+metrics = { workspace = true }
+tokio = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

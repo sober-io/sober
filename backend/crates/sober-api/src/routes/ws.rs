@@ -227,6 +227,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
     let user_id = auth_user.user_id;
     info!(user_id = %user_id, "WebSocket connected");
 
+    metrics::gauge!("sober_api_ws_connections_active").increment(1);
+    metrics::counter!("sober_api_ws_connections_total", "status" => "opened").increment(1);
+
     // Look up username once for group message attribution.
     let username = {
         let user_repo = sober_db::PgUserRepo::new(state.db.clone());
@@ -260,6 +263,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                     if ws_tx.send(Message::Text(text.into())).await.is_err() {
                         break;
                     }
+                    metrics::counter!("sober_api_ws_messages_total", "direction" => "outbound")
+                        .increment(1);
                 }
                 Err(e) => {
                     error!(error = %e, "failed to serialize WebSocket message");
@@ -276,9 +281,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
             Ok(_) => continue, // Ignore binary, ping, pong.
             Err(e) => {
                 warn!(error = %e, "WebSocket receive error");
+                metrics::counter!("sober_api_ws_connections_total", "status" => "error")
+                    .increment(1);
                 break;
             }
         };
+
+        metrics::counter!("sober_api_ws_messages_total", "direction" => "inbound").increment(1);
 
         // Handle keepalive pings from the client.
         if msg.as_str() == "ping" {
@@ -414,24 +423,60 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();
-                let request = proto::HandleMessageRequest {
+                let mut request = tonic::Request::new(proto::HandleMessageRequest {
                     user_id: user_id.to_string(),
                     conversation_id: conversation_id.clone(),
                     content,
-                };
+                });
 
                 let conv_id = conversation_id.clone();
                 let error_tx = out_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = agent_client.handle_message(request).await {
-                        let _ = error_tx
-                            .send(ServerWsMessage::ChatError {
-                                conversation_id: conv_id,
-                                error: e.message().to_owned(),
-                            })
-                            .await;
-                    }
-                });
+                let span = tracing::info_span!(
+                    "ws.handle_message",
+                    otel.kind = "client",
+                    rpc.service = "AgentService",
+                    rpc.method = "HandleMessage",
+                    rpc.system = "grpc",
+                    user.id = %user_id,
+                    conversation.id = %conv_id,
+                    otel.status_code = tracing::field::Empty,
+                );
+                // Inject the new span's trace context into the gRPC metadata
+                // so the agent can link its work to this trace.
+                {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+                    let cx = span.context();
+                    opentelemetry::global::get_text_map_propagator(|p| {
+                        p.inject_context(
+                            &cx,
+                            &mut sober_core::MetadataMapInjector(request.metadata_mut()),
+                        );
+                    });
+                }
+                tokio::spawn(tracing::Instrument::instrument(
+                    async move {
+                        match agent_client.handle_message(request).await {
+                            Ok(_) => {
+                                tracing::Span::current().record("otel.status_code", "OK");
+                            }
+                            Err(e) => {
+                                tracing::Span::current().record("otel.status_code", "ERROR");
+                                tracing::error!(
+                                    error.message = %e.message(),
+                                    error.type = %e.code(),
+                                    "HandleMessage RPC failed"
+                                );
+                                let _ = error_tx
+                                    .send(ServerWsMessage::ChatError {
+                                        conversation_id: conv_id,
+                                        error: e.message().to_owned(),
+                                    })
+                                    .await;
+                            }
+                        }
+                    },
+                    span,
+                ));
             }
             ClientWsMessage::ChatCancel { conversation_id } => {
                 // Cancellation is best-effort in the new model.
@@ -478,5 +523,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
         .await;
 
     send_task.abort();
+
+    metrics::gauge!("sober_api_ws_connections_active").decrement(1);
+    metrics::counter!("sober_api_ws_connections_total", "status" => "closed").increment(1);
+
     info!(user_id = %user_id, "WebSocket disconnected");
 }

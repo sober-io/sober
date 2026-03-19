@@ -60,6 +60,7 @@ fn system_jobs() -> Vec<SystemJobDef> {
 ///
 /// Called once at scheduler startup. Jobs are identified by name — if a job
 /// with the same name already exists (any status), registration is skipped.
+/// After registration, emits gauge metrics for the total job counts.
 pub async fn register_system_jobs<J: JobRepo>(job_repo: &J) -> Result<(), AppError> {
     // Fetch existing system jobs to check for duplicates.
     let existing = job_repo
@@ -105,5 +106,50 @@ pub async fn register_system_jobs<J: JobRepo>(job_repo: &J) -> Result<(), AppErr
         );
     }
 
+    // Emit gauge metrics for registered jobs.
+    emit_jobs_registered_gauge(job_repo).await;
+
     Ok(())
+}
+
+/// Query all active/paused jobs and emit the `sober_scheduler_jobs_registered` gauge.
+///
+/// Categorizes jobs by schedule type (interval/cron). All jobs are persistent
+/// (DB-backed), so the persistence label is always "persistent".
+pub async fn emit_jobs_registered_gauge<J: JobRepo>(job_repo: &J) {
+    let statuses = ["active".to_owned(), "paused".to_owned()];
+    let all_jobs = match job_repo
+        .list_filtered(None, None, &statuses, None, None, None)
+        .await
+    {
+        Ok(jobs) => jobs,
+        Err(e) => {
+            warn!(error = %e, "failed to query jobs for gauge");
+            return;
+        }
+    };
+
+    let mut interval_count: usize = 0;
+    let mut cron_count: usize = 0;
+
+    for job in &all_jobs {
+        if job.schedule.trim().starts_with("every:") {
+            interval_count += 1;
+        } else {
+            cron_count += 1;
+        }
+    }
+
+    metrics::gauge!(
+        "sober_scheduler_jobs_registered",
+        "type" => "interval",
+        "persistence" => "persistent",
+    )
+    .set(interval_count as f64);
+    metrics::gauge!(
+        "sober_scheduler_jobs_registered",
+        "type" => "cron",
+        "persistence" => "persistent",
+    )
+    .set(cron_count as f64);
 }

@@ -102,27 +102,44 @@ pub fn classify_input_with_config(input: &str, config: &InjectionConfig) -> Inje
     // Check reject patterns first (higher severity).
     for pattern in &config.reject_patterns {
         if pattern.regex.is_match(&normalized) {
-            return InjectionVerdict::Rejected {
+            let verdict = InjectionVerdict::Rejected {
                 reason: format!("{}: {}", pattern.category, pattern.description),
             };
+            record_injection_metric(&verdict);
+            return verdict;
         }
     }
 
     // Check for encoded injection (operates on raw input).
     if let Some(reason) = detect_encoded_injection(input) {
-        return InjectionVerdict::Rejected { reason };
+        let verdict = InjectionVerdict::Rejected { reason };
+        record_injection_metric(&verdict);
+        return verdict;
     }
 
     // Check flag patterns (lower severity).
     for pattern in &config.flag_patterns {
         if pattern.regex.is_match(&normalized) {
-            return InjectionVerdict::Flagged {
+            let verdict = InjectionVerdict::Flagged {
                 reason: format!("{}: {}", pattern.category, pattern.description),
             };
+            record_injection_metric(&verdict);
+            return verdict;
         }
     }
 
     InjectionVerdict::Pass
+}
+
+/// Records a metric for injection detections (Rejected or Flagged).
+fn record_injection_metric(verdict: &InjectionVerdict) {
+    let verdict_label = match verdict {
+        InjectionVerdict::Rejected { .. } => "rejected",
+        InjectionVerdict::Flagged { .. } => "flagged",
+        InjectionVerdict::Pass => return,
+    };
+    metrics::counter!("sober_mind_injection_detections_total", "verdict" => verdict_label)
+        .increment(1);
 }
 
 /// Normalizes input for pattern matching: lowercase, collapse whitespace.

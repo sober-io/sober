@@ -1,0 +1,69 @@
+# sober-scheduler metrics
+#
+# All metrics are recorded via the `metrics` crate (0.24) facade macros.
+# A recorder (e.g. metrics-exporter-prometheus) must be installed at startup
+# for these to be collected.
+
+[group.tick_engine]
+name = "Tick Engine"
+description = "Metrics for the scheduler's periodic tick loop."
+
+[[group.tick_engine.metrics]]
+name = "sober_scheduler_ticks_total"
+type = "counter"
+description = "Total number of ticks executed (excludes ticks skipped while paused)."
+labels = []
+
+[[group.tick_engine.metrics]]
+name = "sober_scheduler_tick_duration_seconds"
+type = "histogram"
+description = "Wall-clock duration of a single tick (query due jobs + execute all)."
+labels = []
+
+[[group.tick_engine.metrics]]
+name = "sober_scheduler_jobs_due_per_tick"
+type = "histogram"
+description = "Number of jobs found due in each tick."
+labels = []
+
+[group.job_execution]
+name = "Job Execution"
+description = "Metrics for individual job routing and execution."
+
+[[group.job_execution.metrics]]
+name = "sober_scheduler_job_executions_total"
+type = "counter"
+description = "Total number of job executions."
+labels = ["job_name", "status"]
+# job_name: e.g. system::memory_pruning, system::session_cleanup
+# status: success, error, timeout
+
+[[group.job_execution.metrics]]
+name = "sober_scheduler_job_duration_seconds"
+type = "histogram"
+description = "Duration of a single job execution (from start to completion)."
+labels = ["job_name"]
+
+[[group.job_execution.metrics]]
+name = "sober_scheduler_job_lag_seconds"
+type = "histogram"
+description = "Delay between a job's scheduled_at time and actual execution start."
+labels = ["job_name"]
+
+[group.state]
+name = "State"
+description = "Gauge metrics reflecting current scheduler state."
+
+[[group.state.metrics]]
+name = "sober_scheduler_jobs_registered"
+type = "gauge"
+description = "Number of registered jobs (active + paused). Updated at startup and after job mutations."
+labels = ["type", "persistence"]
+# type: interval, cron
+# persistence: persistent (all jobs are DB-backed; ephemeral is reserved for future in-memory jobs)
+
+[[group.state.metrics]]
+name = "sober_scheduler_paused"
+type = "gauge"
+description = "Whether the scheduler engine is paused (1) or running (0)."
+labels = []

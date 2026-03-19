@@ -15,11 +15,16 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+# Async runtime (for spawn_metrics_server)
+tokio = { workspace = true }
+
 # HTTP / API
 axum-core = { workspace = true }
 axum = { workspace = true }
 http = { workspace = true }
 
+# gRPC (optional, for trace propagation)
+tonic = { workspace = true, optional = true }
 
 # Configuration
 dotenvy = { workspace = true }
@@ -39,10 +44,10 @@ metrics-exporter-prometheus = { workspace = true }
 sqlx = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 http-body-util = "0.1"
 
 [features]
 default = []
 postgres = ["dep:sqlx"]
+grpc-telemetry = ["dep:tonic"]
 test-utils = []

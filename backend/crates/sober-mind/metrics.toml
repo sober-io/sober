@@ -1,0 +1,24 @@
+[crate]
+name = "sober-mind"
+dashboard_title = "Agent Mind"
+
+[[metrics]]
+name = "sober_mind_prompt_assembly_duration_seconds"
+type = "histogram"
+help = "Time spent assembling the system prompt"
+labels = ["trigger"]
+group = "Prompt Assembly"
+
+[[metrics]]
+name = "sober_mind_prompt_token_estimate"
+type = "histogram"
+help = "Estimated token count of the assembled prompt (~4 chars/token)"
+labels = ["trigger"]
+group = "Prompt Assembly"
+
+[[metrics]]
+name = "sober_mind_injection_detections_total"
+type = "counter"
+help = "Injection detections (rejected or flagged verdicts)"
+labels = ["verdict"]
+group = "Security"

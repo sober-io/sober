@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use metrics::{counter, gauge, histogram};
 use tokio::fs;
 use tracing::{debug, warn};
 
@@ -68,12 +69,16 @@ impl SkillLoader {
             if let Some(cached) = cache.get(&key)
                 && cached.loaded_at.elapsed() < self.ttl
             {
+                counter!("sober_skill_cache_hits_total").increment(1);
                 return Ok(Arc::clone(&cached.catalog));
             }
         }
 
         // Cache miss — rescan
+        counter!("sober_skill_cache_misses_total").increment(1);
+        let scan_start = Instant::now();
         let catalog = Arc::new(self.scan(user_home, workspace_root).await?);
+        histogram!("sober_skill_scan_duration_seconds").record(scan_start.elapsed().as_secs_f64());
 
         // Update cache
         {
@@ -88,6 +93,8 @@ impl SkillLoader {
                 },
             );
         }
+
+        gauge!("sober_skill_catalog_size").set(catalog.len() as f64);
 
         Ok(catalog)
     }
@@ -174,6 +181,11 @@ impl SkillLoader {
                             "skill name collision — overriding with {:?}", source
                         );
                     }
+                    let source_label = match source {
+                        SkillSource::User => "user",
+                        SkillSource::Workspace => "workspace",
+                    };
+                    counter!("sober_skill_discovered_total", "source" => source_label).increment(1);
                     skills.insert(skill_name, entry_val);
                 }
                 Err(e) => {

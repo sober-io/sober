@@ -1,0 +1,57 @@
+# sober-memory metrics catalog
+#
+# All metrics emitted by the sober-memory crate.
+
+[groups.search]
+name = "Search"
+description = "Vector search metrics (hybrid dense + BM25)."
+
+[[groups.search.metrics]]
+name = "sober_memory_search_total"
+type = "counter"
+description = "Total memory search queries."
+labels = ["scope", "search_type"]
+
+[[groups.search.metrics]]
+name = "sober_memory_search_duration_seconds"
+type = "histogram"
+description = "Duration of memory search queries in seconds."
+labels = ["scope", "search_type"]
+
+[[groups.search.metrics]]
+name = "sober_memory_search_results_count"
+type = "histogram"
+description = "Number of results returned per search query."
+labels = []
+
+[groups.storage]
+name = "Storage"
+description = "Memory chunk storage metrics."
+
+[[groups.storage.metrics]]
+name = "sober_memory_chunks_stored_total"
+type = "counter"
+description = "Total memory chunks stored in Qdrant."
+labels = ["chunk_type", "scope"]
+
+[groups.pruning]
+name = "Pruning"
+description = "Memory pruning lifecycle metrics."
+
+[[groups.pruning.metrics]]
+name = "sober_memory_prune_runs_total"
+type = "counter"
+description = "Total pruning runs executed."
+labels = []
+
+[[groups.pruning.metrics]]
+name = "sober_memory_prune_duration_seconds"
+type = "histogram"
+description = "Duration of pruning runs in seconds."
+labels = []
+
+[[groups.pruning.metrics]]
+name = "sober_memory_pruned_chunks_total"
+type = "counter"
+description = "Total memory chunks removed by pruning."
+labels = []

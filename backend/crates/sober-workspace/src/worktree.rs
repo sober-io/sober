@@ -4,6 +4,9 @@
 //! Database tracking lives in `sober-db`.
 
 use std::path::Path;
+use std::time::Instant;
+
+use metrics::{counter, histogram};
 
 use crate::WorkspaceError;
 
@@ -15,7 +18,15 @@ pub fn create_git_worktree(
     worktree_path: &Path,
     branch: &str,
 ) -> Result<(), WorkspaceError> {
-    let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
+    let start = Instant::now();
+
+    let repo = git2::Repository::open(repo_path).map_err(|e| {
+        counter!("sober_workspace_worktree_operations_total", "operation" => "create", "status" => "error")
+            .increment(1);
+        histogram!("sober_workspace_worktree_duration_seconds", "operation" => "create")
+            .record(start.elapsed().as_secs_f64());
+        WorkspaceError::Git(e)
+    })?;
 
     // Derive a worktree name from the branch (replace / with -)
     let wt_name = branch.replace('/', "-");
@@ -40,7 +51,18 @@ pub fn create_git_worktree(
         worktree_path,
         Some(git2::WorktreeAddOptions::new().reference(Some(&branch_ref))),
     )
-    .map_err(WorkspaceError::Git)?;
+    .map_err(|e| {
+        counter!("sober_workspace_worktree_operations_total", "operation" => "create", "status" => "error")
+            .increment(1);
+        histogram!("sober_workspace_worktree_duration_seconds", "operation" => "create")
+            .record(start.elapsed().as_secs_f64());
+        WorkspaceError::Git(e)
+    })?;
+
+    counter!("sober_workspace_worktree_operations_total", "operation" => "create", "status" => "success")
+        .increment(1);
+    histogram!("sober_workspace_worktree_duration_seconds", "operation" => "create")
+        .record(start.elapsed().as_secs_f64());
 
     Ok(())
 }
@@ -50,7 +72,15 @@ pub fn create_git_worktree(
 /// Prunes the worktree reference from the parent repo and removes the
 /// directory from disk.
 pub fn remove_git_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(), WorkspaceError> {
-    let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
+    let start = Instant::now();
+
+    let repo = git2::Repository::open(repo_path).map_err(|e| {
+        counter!("sober_workspace_worktree_operations_total", "operation" => "remove", "status" => "error")
+            .increment(1);
+        histogram!("sober_workspace_worktree_duration_seconds", "operation" => "remove")
+            .record(start.elapsed().as_secs_f64());
+        WorkspaceError::Git(e)
+    })?;
 
     // Find the worktree by matching its path
     let worktrees = repo.worktrees().map_err(WorkspaceError::Git)?;
@@ -63,7 +93,18 @@ pub fn remove_git_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(),
                     .valid(true)
                     .working_tree(true),
             ))
-            .map_err(WorkspaceError::Git)?;
+            .map_err(|e| {
+                counter!("sober_workspace_worktree_operations_total", "operation" => "remove", "status" => "error")
+                    .increment(1);
+                histogram!("sober_workspace_worktree_duration_seconds", "operation" => "remove")
+                    .record(start.elapsed().as_secs_f64());
+                WorkspaceError::Git(e)
+            })?;
+
+            counter!("sober_workspace_worktree_operations_total", "operation" => "remove", "status" => "success")
+                .increment(1);
+            histogram!("sober_workspace_worktree_duration_seconds", "operation" => "remove")
+                .record(start.elapsed().as_secs_f64());
             return Ok(());
         }
     }
@@ -72,6 +113,11 @@ pub fn remove_git_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(),
     if worktree_path.exists() {
         std::fs::remove_dir_all(worktree_path).map_err(WorkspaceError::Filesystem)?;
     }
+
+    counter!("sober_workspace_worktree_operations_total", "operation" => "remove", "status" => "success")
+        .increment(1);
+    histogram!("sober_workspace_worktree_duration_seconds", "operation" => "remove")
+        .record(start.elapsed().as_secs_f64());
 
     Ok(())
 }

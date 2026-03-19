@@ -84,6 +84,13 @@ pub async fn serve_admin_socket(socket_path: &Path, shutdown: tokio::sync::watch
 
 /// Admin health check handler (no auth required).
 async fn admin_health() -> ApiResponse<serde_json::Value> {
+    metrics::counter!(
+        "sober_api_admin_commands_total",
+        "command" => "health",
+        "status" => "ok",
+    )
+    .increment(1);
+
     ApiResponse::new(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),

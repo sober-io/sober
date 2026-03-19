@@ -5,7 +5,9 @@
 //! accumulating too many entries.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
+use metrics::{counter, histogram};
 use sha2::{Digest, Sha256};
 use tokio::fs;
 
@@ -27,28 +29,72 @@ impl BlobStore {
     /// If the blob already exists (same hash), this is a no-op and returns
     /// the existing key.
     pub async fn store(&self, data: &[u8]) -> Result<String, WorkspaceError> {
+        let start = Instant::now();
         let key = hex_sha256(data);
         let path = self.blob_path(&key);
 
         if path.exists() {
+            counter!("sober_workspace_blob_operations_total", "operation" => "store", "status" => "dedup")
+                .increment(1);
+            histogram!("sober_workspace_blob_duration_seconds", "operation" => "store")
+                .record(start.elapsed().as_secs_f64());
             return Ok(key);
         }
 
         let parent = path.parent().expect("blob path always has a parent");
         fs::create_dir_all(parent)
             .await
-            .map_err(WorkspaceError::Filesystem)?;
+            .map_err(|e| {
+                counter!("sober_workspace_blob_operations_total", "operation" => "store", "status" => "error")
+                    .increment(1);
+                histogram!("sober_workspace_blob_duration_seconds", "operation" => "store")
+                    .record(start.elapsed().as_secs_f64());
+                WorkspaceError::Filesystem(e)
+            })?;
         fs::write(&path, data)
             .await
-            .map_err(WorkspaceError::Filesystem)?;
+            .map_err(|e| {
+                counter!("sober_workspace_blob_operations_total", "operation" => "store", "status" => "error")
+                    .increment(1);
+                histogram!("sober_workspace_blob_duration_seconds", "operation" => "store")
+                    .record(start.elapsed().as_secs_f64());
+                WorkspaceError::Filesystem(e)
+            })?;
+
+        counter!("sober_workspace_blob_operations_total", "operation" => "store", "status" => "success")
+            .increment(1);
+        counter!("sober_workspace_blob_bytes_total").increment(data.len() as u64);
+        histogram!("sober_workspace_blob_duration_seconds", "operation" => "store")
+            .record(start.elapsed().as_secs_f64());
 
         Ok(key)
     }
 
     /// Retrieve blob data by key.
     pub async fn retrieve(&self, key: &str) -> Result<Vec<u8>, WorkspaceError> {
+        let start = Instant::now();
         let path = self.blob_path(key);
-        fs::read(&path).await.map_err(WorkspaceError::Filesystem)
+        match fs::read(&path).await {
+            Ok(data) => {
+                counter!("sober_workspace_blob_operations_total", "operation" => "retrieve", "status" => "success")
+                    .increment(1);
+                histogram!("sober_workspace_blob_duration_seconds", "operation" => "retrieve")
+                    .record(start.elapsed().as_secs_f64());
+                Ok(data)
+            }
+            Err(e) => {
+                let status = if e.kind() == std::io::ErrorKind::NotFound {
+                    "not_found"
+                } else {
+                    "error"
+                };
+                counter!("sober_workspace_blob_operations_total", "operation" => "retrieve", "status" => status)
+                    .increment(1);
+                histogram!("sober_workspace_blob_duration_seconds", "operation" => "retrieve")
+                    .record(start.elapsed().as_secs_f64());
+                Err(WorkspaceError::Filesystem(e))
+            }
+        }
     }
 
     /// Check if a blob exists.
@@ -58,12 +104,26 @@ impl BlobStore {
 
     /// Delete a blob by key.
     pub async fn delete(&self, key: &str) -> Result<(), WorkspaceError> {
+        let start = Instant::now();
         let path = self.blob_path(key);
         if path.exists() {
             fs::remove_file(&path)
                 .await
-                .map_err(WorkspaceError::Filesystem)?;
+                .map_err(|e| {
+                    counter!("sober_workspace_blob_operations_total", "operation" => "delete", "status" => "error")
+                        .increment(1);
+                    histogram!("sober_workspace_blob_duration_seconds", "operation" => "delete")
+                        .record(start.elapsed().as_secs_f64());
+                    WorkspaceError::Filesystem(e)
+                })?;
+            counter!("sober_workspace_blob_operations_total", "operation" => "delete", "status" => "success")
+                .increment(1);
+        } else {
+            counter!("sober_workspace_blob_operations_total", "operation" => "delete", "status" => "not_found")
+                .increment(1);
         }
+        histogram!("sober_workspace_blob_duration_seconds", "operation" => "delete")
+            .record(start.elapsed().as_secs_f64());
         Ok(())
     }
 

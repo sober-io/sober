@@ -1,0 +1,38 @@
+[crate]
+name = "sober-crypto"
+dashboard_title = "Cryptography"
+
+[[metrics]]
+name = "sober_crypto_sign_total"
+type = "counter"
+help = "Ed25519 sign operations"
+labels = []
+group = "Signing"
+
+[[metrics]]
+name = "sober_crypto_verify_total"
+type = "counter"
+help = "Ed25519 verify operations"
+labels = ["result"]
+group = "Signing"
+
+[[metrics]]
+name = "sober_crypto_keypair_generated_total"
+type = "counter"
+help = "Ed25519 keypairs generated"
+labels = []
+group = "Signing"
+
+[[metrics]]
+name = "sober_crypto_encrypt_total"
+type = "counter"
+help = "DEK encrypt operations (AES-256-GCM)"
+labels = []
+group = "Encryption"
+
+[[metrics]]
+name = "sober_crypto_decrypt_total"
+type = "counter"
+help = "DEK decrypt operations (AES-256-GCM)"
+labels = []
+group = "Encryption"

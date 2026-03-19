@@ -1,0 +1,31 @@
+[crate]
+name = "sober-mcp"
+dashboard_title = "MCP"
+
+[[metrics]]
+name = "sober_mcp_tool_calls_total"
+type = "counter"
+help = "MCP tool call count"
+labels = ["server", "tool", "status"]
+group = "Tool Calls"
+
+[[metrics]]
+name = "sober_mcp_tool_call_duration_seconds"
+type = "histogram"
+help = "MCP tool call latency"
+labels = ["server", "tool"]
+group = "Tool Calls"
+
+[[metrics]]
+name = "sober_mcp_server_connections_active"
+type = "gauge"
+help = "Active MCP server connections"
+labels = ["server"]
+group = "Connections"
+
+[[metrics]]
+name = "sober_mcp_server_reconnects_total"
+type = "counter"
+help = "Successful MCP server reconnections"
+labels = ["server"]
+group = "Connections"

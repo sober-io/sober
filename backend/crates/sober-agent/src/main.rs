@@ -43,12 +43,23 @@ async fn main() -> Result<()> {
     // 1. Load .env and configuration
     let config = AppConfig::load_from_env().context("failed to load config")?;
 
-    // 2. Initialise tracing
-    init_tracing(&config);
+    // 2. Initialise telemetry (tracing + metrics + OTel)
+    let telemetry = sober_core::init_telemetry(
+        config.environment,
+        "sober_agent=info,sober_mind=info,sober_memory=info",
+    );
+
+    // 3. Spawn Prometheus metrics HTTP server for scraping
+    const DEFAULT_METRICS_PORT: u16 = 9100;
+    let metrics_port: u16 = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_METRICS_PORT);
+    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
 
     info!("sober-agent starting");
 
-    // 3. Connect to PostgreSQL
+    // 4. Connect to PostgreSQL
     let db_config = sober_db::DatabaseConfig {
         url: config.database.url.clone(),
         max_connections: config.database.max_connections,
@@ -57,20 +68,20 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    // 4. Create repository bundle
+    // 5. Create repository bundle
     let repos = Arc::new(PgAgentRepos::new(pool.clone()));
 
-    // 5. Create LLM engine
+    // 6. Create LLM engine
     let llm: Arc<dyn sober_llm::LlmEngine> =
         Arc::new(OpenAiCompatibleEngine::from_config(&config.llm));
 
-    // 6. Create memory store
+    // 7. Create memory store
     let memory = Arc::new(
         MemoryStore::new(&config.qdrant, config.llm.embedding_dim)
             .context("failed to create memory store")?,
     );
 
-    // 7. Create context loader
+    // 8. Create context loader
     //
     // ContextLoader is generic over MessageRepo and needs its own Arc-wrapped
     // instance. PgPool is cheap to clone (internal Arc), so creating a second
@@ -80,7 +91,7 @@ async fn main() -> Result<()> {
         Arc::new(PgMessageRepo::new(pool.clone())),
     ));
 
-    // 8. Create Mind with SoulResolver
+    // 9. Create Mind with SoulResolver
     //
     // Base soul.md is compiled into the binary — no filesystem path needed.
     // User layer: ~/.sober/soul.md (optional override).
@@ -98,7 +109,7 @@ async fn main() -> Result<()> {
             .context("failed to initialize mind")?,
     );
 
-    // 9. Resolve workspace and sandbox configuration
+    // 10. Resolve workspace and sandbox configuration
     let workspace_root = PathBuf::from(
         std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
     );
@@ -117,7 +128,7 @@ async fn main() -> Result<()> {
         .join("snapshots");
     let snapshot_manager = Arc::new(sober_workspace::SnapshotManager::new(snapshot_dir));
 
-    // 10. Load optional MEK for secret encryption
+    // 11. Load optional MEK for secret encryption
     let mek: Option<Arc<Mek>> = config.crypto.master_encryption_key.as_ref().map(|hex| {
         let mek = Mek::from_hex(hex).expect("invalid MASTER_ENCRYPTION_KEY (need 64 hex chars)");
         info!("master encryption key loaded — secret tools enabled");
@@ -127,17 +138,17 @@ async fn main() -> Result<()> {
         info!("no MASTER_ENCRYPTION_KEY set — secret tools disabled");
     }
 
-    // 11. Create blob store for workspace artifacts
+    // 12. Create blob store for workspace artifacts
     let blob_store = Arc::new(BlobStore::new(
         workspace_root
             .join(sober_workspace::SOBER_DIR)
             .join("blobs"),
     ));
 
-    // 12. Create shared scheduler client handle (connected in background later)
+    // 13. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
-    // 13. Create SkillLoader and ToolBootstrap — centralized tool construction for all turns
+    // 14. Create SkillLoader and ToolBootstrap — centralized tool construction for all turns
     let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(
         SKILL_CACHE_TTL_SECS,
     )));
@@ -167,14 +178,14 @@ async fn main() -> Result<()> {
         skill_loader: Arc::clone(&skill_loader),
     });
 
-    // 14. Create broadcast channel for conversation update events
+    // 15. Create broadcast channel for conversation update events
     let (broadcast_tx, _broadcast_rx) = sober_agent::broadcast::create_broadcast_channel();
 
-    // 15. Create confirmation broker
+    // 16. Create confirmation broker
     let (mut confirmation_broker, confirmation_sender) = ConfirmationBroker::new();
     let registrar = confirmation_broker.registrar();
 
-    // 16. Create Agent
+    // 17. Create Agent
     let agent_config = AgentConfig {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
@@ -197,10 +208,10 @@ async fn main() -> Result<()> {
         tool_bootstrap,
     ));
 
-    // 17. Spawn the confirmation broker loop
+    // 18. Spawn the confirmation broker loop
     tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
 
-    // 18. Connect to scheduler gRPC service (background — retries until available)
+    // 19. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     tokio::spawn(async move {
@@ -215,7 +226,7 @@ async fn main() -> Result<()> {
         skill_loader,
     );
 
-    // 19. Bind to Unix domain socket
+    // 20. Bind to Unix domain socket
     let socket_path =
         std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
     let socket_path = PathBuf::from(&socket_path);
@@ -239,7 +250,7 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 20. Serve with graceful shutdown
+    // 21. Serve with graceful shutdown
     Server::builder()
         .add_service(AgentServiceServer::new(grpc_service))
         .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
@@ -316,24 +327,6 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
-        }
-    }
-}
-
-/// Initialises the tracing subscriber based on the environment.
-fn init_tracing(config: &AppConfig) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::fmt;
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("sober_agent=info,sober_mind=info,sober_memory=info"));
-
-    match config.environment {
-        sober_core::config::Environment::Production => {
-            fmt().json().with_env_filter(filter).init();
-        }
-        sober_core::config::Environment::Development => {
-            fmt().pretty().with_env_filter(filter).init();
         }
     }
 }

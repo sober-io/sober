@@ -12,6 +12,7 @@ tokio = { workspace = true, features = ["process", "time", "io-util", "net", "sy
 serde = { workspace = true }
 toml = "1.0.6"
 tracing = { workspace = true }
+metrics = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }

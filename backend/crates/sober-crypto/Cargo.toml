@@ -8,6 +8,7 @@ sober-core = { path = "../sober-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+metrics = { workspace = true }
 
 # Password hashing
 argon2 = { version = "0.5.3", features = ["std"] }

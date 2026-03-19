@@ -62,6 +62,21 @@ lint:
 audit:
     cd backend && cargo audit -q
 
+# Regenerate Grafana dashboards and Prometheus alert rules from metrics.toml files
+dashboards:
+    cd tools/dashboard-gen && cargo run -q -- \
+        --input ../../backend/crates \
+        --dashboards-output ../../infra/grafana/dashboards/generated \
+        --alerts-output ../../infra/prometheus/alerts/generated
+
+# Start observability stack (Prometheus, Tempo, Grafana)
+observability-up:
+    docker compose up -d prometheus tempo grafana
+
+# Stop observability stack
+observability-down:
+    docker compose stop prometheus tempo grafana
+
 # Tag and push a release manually (e.g., just release 0.2.0)
 # Note: PRs merged to main are auto-tagged and released via CI
 release version:
