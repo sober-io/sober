@@ -1,6 +1,7 @@
 # Observability, Metrics & Dashboards Design
 
 **Date:** 2026-03-06
+**Updated:** 2026-03-19
 **Status:** Pending
 **Scope:** Cross-cutting — all crates and services
 
@@ -52,7 +53,7 @@ Additionally, sober-core exports:
 - Standard label constants: `service`, `method`, `status`, `crate`
 - `MetricsEndpoint` axum handler that serves `/metrics` in Prometheus format
 
-**Plan 018 scope:** This plan covers Docker infrastructure (Prometheus, Tempo, Loki,
+**Plan 018 scope:** This plan covers Docker infrastructure (Prometheus, Tempo,
 Grafana), per-crate `metrics.toml` files, the dashboard generation tool, alerting rules,
 and gRPC trace propagation interceptors. The core instrumentation API is already in place
 from plan 003.
@@ -70,7 +71,10 @@ All telemetry config via env vars with sensible defaults:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Tempo endpoint | Unset (disabled) |
 | `OTEL_SERVICE_NAME` | Service identity in traces | Auto-set per binary |
 | `METRICS_LISTEN_ADDR` | Where `/metrics` binds | Same as service port |
-| `OTEL_TRACES_SAMPLER` | Sampling strategy | `always_on` (dev), `parentbased_traceidratio` (prod) |
+| `OTEL_TRACES_SAMPLER` | Sampling strategy | `always_on` |
+
+**Sampling:** Start with 100% (`always_on`) for both dev and prod. Tune later
+once we have data on trace volume and storage costs.
 
 ### Metric Naming Convention
 
@@ -80,7 +84,7 @@ sober_<crate>_<noun>_<unit>
 
 Examples: `sober_api_request_duration_seconds`, `sober_llm_tokens_total`, `sober_memory_search_duration_seconds`.
 
-Labels kept minimal and consistent: `method`, `path`, `status`, `provider`, `model`, `scope`, `job_type`, `tool`, `plugin` — as appropriate per metric.
+Labels kept minimal and consistent: `method`, `path`, `status`, `provider`, `model`, `scope`, `job_type`, `tool`, `plugin`, `source`, `operation` — as appropriate per metric.
 
 ### Metric Registry Files
 
@@ -105,7 +109,40 @@ help = "LLM request latency"
 labels = ["provider", "model"]
 group = "Requests"
 buckets = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+
+  [[metrics.alerts]]
+  name = "LLMLatencyDegraded"
+  severity = "warning"
+  expr = "histogram_quantile(0.95, rate({{name}}_bucket[5m])) > 15"
+  for = "5m"
+  summary = "LLM p95 latency above 15s"
 ```
+
+#### Histogram Bucket Defaults
+
+The dashboard-gen tool applies sensible defaults per metric suffix. `metrics.toml`
+can override with an explicit `buckets` field:
+
+| Suffix | Default buckets |
+|--------|----------------|
+| `_duration_seconds` | `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]` |
+| `_bytes` | `[256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304]` |
+| `_count` / `_per_request` / `_per_tick` | `[1, 2, 5, 10, 20, 50, 100]` |
+
+#### Per-Metric Alert Definitions
+
+Metrics can optionally declare `[[metrics.alerts]]` sections. The dashboard-gen
+tool emits these as Prometheus alerting rules to `infra/prometheus/alerts/generated/`.
+
+Fields:
+- `name` — alert name (must be unique across all metrics.toml files)
+- `severity` — `critical` or `warning`
+- `expr` — PromQL expression; `{{name}}` is replaced with the metric name
+- `for` — duration string (e.g., `"5m"`)
+- `summary` — human-readable description
+
+Cross-metric alerts (e.g., `ServiceDown`) that don't belong to a single crate
+are hand-written in `infra/prometheus/alerts/curated/`.
 
 ---
 
@@ -262,6 +299,38 @@ buckets = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
 - `sober_plugin_audit_runs_total` (counter) — labels: `plugin`, `result` (pass/fail)
 - `sober_plugin_sandbox_violations_total` (counter) — labels: `plugin`, `violation_type`
 
+### `sober-skill` — Skill Discovery & Activation
+
+**Discovery:**
+- `sober_skill_scan_duration_seconds` (histogram) — full filesystem scan latency
+- `sober_skill_cache_hits_total` (counter) — TTL cache hits (no rescan needed)
+- `sober_skill_cache_misses_total` (counter) — cache expired, triggered rescan
+- `sober_skill_discovered_total` (counter) — labels: `source` (user/workspace)
+- `sober_skill_catalog_size` (gauge) — current number of skills in catalog
+
+**Activation:**
+- `sober_skill_activation_total` (counter) — labels: `status` (success/not_found/already_active/error)
+- `sober_skill_activation_duration_seconds` (histogram) — file read + parse + state update
+
+### `sober-workspace` — Blob Store, Snapshots, Git Ops
+
+**Blob store:**
+- `sober_workspace_blob_duration_seconds` (histogram) — labels: `operation` (store/retrieve/delete)
+- `sober_workspace_blob_operations_total` (counter) — labels: `operation`, `status` (success/dedup/not_found/error)
+- `sober_workspace_blob_bytes_total` (counter) — cumulative bytes written
+
+**Snapshots:**
+- `sober_workspace_snapshot_duration_seconds` (histogram) — labels: `operation` (create/restore/prune)
+- `sober_workspace_snapshot_operations_total` (counter) — labels: `operation`, `status`
+- `sober_workspace_snapshots_active` (gauge) — current snapshot count
+
+**Git worktrees:**
+- `sober_workspace_worktree_duration_seconds` (histogram) — labels: `operation` (create/remove)
+- `sober_workspace_worktree_operations_total` (counter) — labels: `operation`, `status`
+
+**Git push:**
+- `sober_workspace_git_push_duration_seconds` (histogram) — labels: `status`
+
 ### `sober-mcp` — MCP Tool Interop
 
 - `sober_mcp_tool_calls_total` (counter) — labels: `server`, `tool`, `status`
@@ -303,7 +372,7 @@ buckets = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
 
 ### Auto-Generated Dashboards
 
-A build tool at `tools/dashboard-gen/` reads `metrics.toml` files from each crate and generates Grafana dashboard JSON. Panel type is derived from metric type:
+A build tool at `tools/dashboard-gen/` reads `metrics.toml` files from each crate and generates Grafana dashboard JSON **and** Prometheus alerting rules. Panel type is derived from metric type:
 
 | Metric type | Panel template |
 |-------------|---------------|
@@ -315,7 +384,8 @@ A build tool at `tools/dashboard-gen/` reads `metrics.toml` files from each crat
 
 Panels grouped by the `group` field in `metrics.toml`. Each crate produces one dashboard. Variable dropdowns generated from label definitions for filtering.
 
-Output: `infra/grafana/dashboards/generated/`
+Dashboard output: `infra/grafana/dashboards/generated/`
+Alert rule output: `infra/prometheus/alerts/generated/`
 
 Regenerate with `just dashboards`.
 
@@ -342,9 +412,20 @@ Auth attempts (success vs failure), injection detections, sandbox violations, pe
 
 ## Alerting Rules
 
-Defined as Prometheus alerting rules in `infra/prometheus/alerts/`. Loaded via Grafana or Alertmanager.
+Two sources of alert rules, both loaded by Prometheus:
 
-### Critical (immediate notification)
+### Generated (from `metrics.toml`)
+
+Per-metric `[[metrics.alerts]]` sections are emitted by the dashboard-gen tool
+to `infra/prometheus/alerts/generated/`. One YAML file per crate. Regenerated
+by `just dashboards`.
+
+### Curated (hand-written)
+
+Cross-metric and infrastructure alerts that don't belong to a single crate live
+in `infra/prometheus/alerts/curated/`. These are not overwritten by the generator.
+
+#### Critical (immediate notification)
 
 | Alert | Condition | For |
 |-------|-----------|-----|
@@ -355,7 +436,7 @@ Defined as Prometheus alerting rules in `infra/prometheus/alerts/`. Loaded via G
 | `InjectionDetected` | `sober_mind_injection_detections_total` rate > 0 | 0m |
 | `SandboxViolation` | `sober_sandbox_policy_violations_total` rate > 0 | 0m |
 
-### Warning (check when convenient)
+#### Warning (check when convenient)
 
 | Alert | Condition | For |
 |-------|-----------|-----|
@@ -367,6 +448,11 @@ Defined as Prometheus alerting rules in `infra/prometheus/alerts/`. Loaded via G
 | `AuthFailureSpike` | Auth failure rate spikes 3x baseline | 5m |
 | `PruningBacklog` | Chunk count growing while prune removes 0 | 30m |
 | `MissedSchedulerJobs` | Missed executions rate > 0 | 5m |
+
+Note: `HighP95Latency` and `LLMLatencyDegraded` can alternatively be defined as
+`[[metrics.alerts]]` in their respective crate `metrics.toml` files. Prefer
+metrics.toml when the alert maps 1:1 to a single metric; use curated for
+cross-metric or infrastructure alerts.
 
 ### Informational (dashboard-only, no notification)
 
@@ -424,15 +510,17 @@ infra/
   prometheus/
     prometheus.yml                   # Scrape config for api, scheduler, agent
     alerts/
-      critical.yml
-      warning.yml
+      generated/                     # Output of dashboard-gen tool (from metrics.toml alerts)
+      curated/
+        critical.yml                 # Cross-metric critical alerts
+        warning.yml                  # Cross-metric warning alerts
   tempo/
     tempo.yml
 
 tools/
   dashboard-gen/
     Cargo.toml
-    src/main.rs                      # Reads metrics.toml, outputs Grafana JSON
+    src/main.rs                      # Reads metrics.toml, outputs Grafana JSON + Prometheus alerts
 
 backend/crates/
   sober-core/metrics.toml
@@ -445,8 +533,11 @@ backend/crates/
   sober-crypto/metrics.toml
   sober-mind/metrics.toml
   sober-plugin/metrics.toml
+  sober-skill/metrics.toml
+  sober-workspace/metrics.toml
   sober-mcp/metrics.toml
   sober-sandbox/metrics.toml
+  sober-db/metrics.toml
 ```
 
 ---
@@ -454,18 +545,19 @@ backend/crates/
 ## Acceptance Criteria
 
 - [ ] `init_telemetry()` in `sober-core` configures tracing, OTEL export, and Prometheus recorder
-- [ ] Each crate has a `metrics.toml` defining its metrics
+- [ ] Each crate has a `metrics.toml` defining its metrics (15 files)
 - [ ] gRPC trace propagation works across api/agent/scheduler boundaries
 - [ ] `/metrics` endpoint serves Prometheus format from each service
 - [ ] `tools/dashboard-gen` generates valid Grafana dashboard JSON from `metrics.toml` files
+- [ ] `tools/dashboard-gen` generates Prometheus alert rule YAML from `[[metrics.alerts]]` sections
 - [ ] Docker Compose includes Prometheus, Tempo, Grafana
 - [ ] Grafana auto-loads generated + curated dashboards on startup
-- [ ] Alerting rules provisioned and functional in Grafana/Prometheus
-- [ ] `just dashboards` regenerates all dashboard JSON
-- [ ] System operates normally when Tempo/Loki/Prometheus are not running (graceful degradation)
+- [ ] Alerting rules (generated + curated) provisioned and functional in Prometheus
+- [ ] `just dashboards` regenerates all dashboard JSON and alert rules
+- [ ] System operates normally when Tempo/Prometheus are not running (graceful degradation)
 
-## Open Questions
+## Resolved Decisions
 
-- Histogram bucket defaults per metric type — define sensible defaults in the dashboard-gen tool or require explicit buckets in `metrics.toml`?
-- Sampling rate for OTEL traces in production — start with 100% and tune later, or set a ratio from the start?
-- Should `metrics.toml` also define alert thresholds, or keep alerts separate in Prometheus YAML?
+- **Histogram bucket defaults:** Dashboard-gen tool applies sensible defaults per metric suffix; `metrics.toml` can override with explicit `buckets` field.
+- **OTEL sampling in production:** Start with `always_on` (100%). Tune later once we have data on trace volume and storage costs.
+- **Alert thresholds in metrics.toml:** Yes — per-metric alerts defined as `[[metrics.alerts]]` in `metrics.toml`, emitted to `infra/prometheus/alerts/generated/` by dashboard-gen. Cross-metric alerts stay hand-written in `infra/prometheus/alerts/curated/`.
