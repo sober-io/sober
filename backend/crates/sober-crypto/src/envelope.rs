@@ -14,6 +14,7 @@
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use metrics::counter;
 use rand_core::{OsRng, RngCore};
 
 use crate::error::CryptoError;
@@ -122,11 +123,13 @@ impl Dek {
 
     /// Encrypt plaintext with a fresh random nonce.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedBlob, CryptoError> {
+        counter!("sober_crypto_encrypt_total").increment(1);
         aes_gcm_encrypt(&self.0, plaintext)
     }
 
     /// Decrypt ciphertext using the nonce from the blob.
     pub fn decrypt(&self, blob: &EncryptedBlob) -> Result<Vec<u8>, CryptoError> {
+        counter!("sober_crypto_decrypt_total").increment(1);
         aes_gcm_decrypt(&self.0, blob)
     }
 }

@@ -1,0 +1,87 @@
+groups:
+  - name: sober_warning
+    rules:
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(sober_api_request_duration_seconds_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency above 5s ({{ $value | humanizeDuration }})"
+          description: "The 95th percentile API request latency has exceeded 5 seconds for 5 minutes."
+
+      - alert: LLMLatencyDegraded
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(sober_llm_request_duration_seconds_bucket[5m]))) > 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM p95 latency above 15s ({{ $value | humanizeDuration }})"
+          description: "The 95th percentile LLM request latency has exceeded 15 seconds for 5 minutes."
+
+      - alert: SchedulerJobLag
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(sober_scheduler_job_lag_seconds_bucket[5m]))) > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduler job lag p95 above 60s"
+          description: "The 95th percentile scheduler job lag has exceeded 60 seconds for 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: |
+          sober_process_resident_memory_bytes / on() group_left() machine_memory_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.job }} ({{ $value | humanizePercentage }})"
+          description: "Process RSS exceeds 80% of available memory for 10 minutes."
+
+      - alert: ConnectionPoolPressure
+        expr: |
+          sober_pg_pool_connections_idle
+          /
+          (sober_pg_pool_connections_active + sober_pg_pool_connections_idle)
+          < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PG connection pool pressure ({{ $value | humanizePercentage }} idle)"
+          description: "Idle connections are less than 10% of the total pool size for 5 minutes."
+
+      - alert: AuthFailureSpike
+        expr: |
+          rate(sober_auth_attempts_total{status="failure"}[5m])
+          > 3 * rate(sober_auth_attempts_total{status="failure"}[1h])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Auth failure rate spiked 3x above baseline"
+          description: "Authentication failure rate over the last 5 minutes is 3x the 1-hour baseline."
+
+      - alert: PruningBacklog
+        expr: |
+          increase(sober_memory_chunks_total[30m]) > 0
+          and
+          increase(sober_memory_pruned_chunks_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory pruning backlog growing"
+          description: "Chunk count is increasing but no chunks have been pruned in 30 minutes."
+
+      - alert: MissedSchedulerJobs
+        expr: rate(sober_scheduler_missed_executions_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduler is missing job executions"
+          description: "The scheduler has been missing job executions for 5 minutes."

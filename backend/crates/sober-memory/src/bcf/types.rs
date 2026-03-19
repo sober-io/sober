@@ -34,6 +34,21 @@ pub enum ChunkType {
     Soul = 6,
 }
 
+impl std::fmt::Display for ChunkType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Fact => "fact",
+            Self::Conversation => "conversation",
+            Self::Embedding => "embedding",
+            Self::Preference => "preference",
+            Self::Skill => "skill",
+            Self::Code => "code",
+            Self::Soul => "soul",
+        };
+        f.write_str(s)
+    }
+}
+
 impl TryFrom<u8> for ChunkType {
     type Error = MemoryError;
 

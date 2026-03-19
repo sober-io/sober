@@ -1,0 +1,17 @@
+[crate]
+name = "sober-db"
+dashboard_title = "Database"
+
+[[metrics]]
+name = "sober_pg_pool_connections_active"
+type = "gauge"
+help = "Active (in-use + idle) connections in the pool"
+labels = []
+group = "Connection Pool"
+
+[[metrics]]
+name = "sober_pg_pool_connections_idle"
+type = "gauge"
+help = "Idle connections in the pool"
+labels = []
+group = "Connection Pool"

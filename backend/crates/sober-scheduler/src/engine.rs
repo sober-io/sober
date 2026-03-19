@@ -6,7 +6,7 @@
 //! [`JobExecutorRegistry`].
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use sober_core::error::AppError;
@@ -116,9 +116,12 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                     break;
                 }
                 _ = tokio::time::sleep(self.tick_interval) => {
+                    metrics::gauge!("sober_scheduler_paused")
+                        .set(if self.is_paused() { 1.0 } else { 0.0 });
                     if self.is_paused() {
                         continue;
                     }
+                    metrics::counter!("sober_scheduler_ticks_total").increment(1);
                     self.tick().await;
                 }
             }
@@ -127,17 +130,25 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
 
     /// Execute a single tick: find and run due jobs.
     async fn tick(&self) {
+        let tick_start = Instant::now();
         let now = Utc::now();
 
         let due_jobs = match self.job_repo.list_due(now).await {
             Ok(jobs) => jobs,
             Err(e) => {
                 error!(error = %e, "failed to query due jobs");
+                metrics::histogram!("sober_scheduler_tick_duration_seconds")
+                    .record(tick_start.elapsed().as_secs_f64());
+                metrics::histogram!("sober_scheduler_jobs_due_per_tick").record(0.0);
                 return;
             }
         };
 
+        metrics::histogram!("sober_scheduler_jobs_due_per_tick").record(due_jobs.len() as f64);
+
         if due_jobs.is_empty() {
+            metrics::histogram!("sober_scheduler_tick_duration_seconds")
+                .record(tick_start.elapsed().as_secs_f64());
             return;
         }
 
@@ -156,13 +167,36 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
             let agent_client = Arc::clone(&self.agent_client);
             let executor_registry = Arc::clone(&self.executor_registry);
 
+            let scheduled_at = job.next_run_at;
+
             handles.push(tokio::spawn(async move {
                 let job_id = job.id;
                 let job_name = job.name.clone();
+                let job_start = Instant::now();
+
+                // Record scheduling lag (time between scheduled_at and actual execution).
+                let lag_secs =
+                    (Utc::now() - scheduled_at).num_milliseconds().max(0) as f64 / 1000.0;
+                metrics::histogram!(
+                    "sober_scheduler_job_lag_seconds",
+                    "job_name" => job_name.clone(),
+                )
+                .record(lag_secs);
 
                 // Mark job as running
                 if let Err(e) = job_repo.update_status(job_id, JobStatus::Running).await {
                     error!(job = %job_name, error = %e, "failed to mark job as running");
+                    metrics::counter!(
+                        "sober_scheduler_job_executions_total",
+                        "job_name" => job_name.clone(),
+                        "status" => "error",
+                    )
+                    .increment(1);
+                    metrics::histogram!(
+                        "sober_scheduler_job_duration_seconds",
+                        "job_name" => job_name,
+                    )
+                    .record(job_start.elapsed().as_secs_f64());
                     drop(permit);
                     return;
                 }
@@ -173,6 +207,17 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                     Err(e) => {
                         error!(job = %job_name, error = %e, "failed to create job run");
                         let _ = job_repo.update_status(job_id, JobStatus::Active).await;
+                        metrics::counter!(
+                            "sober_scheduler_job_executions_total",
+                            "job_name" => job_name.clone(),
+                            "status" => "error",
+                        )
+                        .increment(1);
+                        metrics::histogram!(
+                            "sober_scheduler_job_duration_seconds",
+                            "job_name" => job_name,
+                        )
+                        .record(job_start.elapsed().as_secs_f64());
                         drop(permit);
                         return;
                     }
@@ -181,6 +226,23 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
                 // Route by payload type
                 let (result_bytes, error_msg) =
                     route_job(&agent_client, &executor_registry, &job).await;
+
+                let status_label = if error_msg.is_some() {
+                    "error"
+                } else {
+                    "success"
+                };
+                metrics::counter!(
+                    "sober_scheduler_job_executions_total",
+                    "job_name" => job_name.clone(),
+                    "status" => status_label,
+                )
+                .increment(1);
+                metrics::histogram!(
+                    "sober_scheduler_job_duration_seconds",
+                    "job_name" => job_name.clone(),
+                )
+                .record(job_start.elapsed().as_secs_f64());
 
                 // Complete the run
                 if let Err(e) = run_repo
@@ -217,6 +279,9 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
         for handle in handles {
             let _ = handle.await;
         }
+
+        metrics::histogram!("sober_scheduler_tick_duration_seconds")
+            .record(tick_start.elapsed().as_secs_f64());
     }
 }
 

@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
@@ -527,7 +528,11 @@ impl<R: AgentRepos> Agent<R> {
         let llm_config = self.llm_config.clone();
         let mek = self.mek.clone();
 
+        let trigger_label = format!("{trigger:?}").to_lowercase();
+
         tokio::spawn(async move {
+            let request_start = Instant::now();
+
             let ctx = LoopContext {
                 llm: &llm,
                 mind: &mind,
@@ -553,6 +558,18 @@ impl<R: AgentRepos> Agent<R> {
                 skill_catalog_xml,
             };
             let result = Self::run_loop_streaming(&ctx).await;
+
+            let status_label = if result.is_ok() { "success" } else { "error" };
+            metrics::counter!(
+                "sober_agent_requests_total",
+                "trigger" => trigger_label.clone(),
+                "status" => status_label,
+            )
+            .increment(1);
+            metrics::histogram!("sober_agent_request_duration_seconds",
+                "trigger" => trigger_label,
+            )
+            .record(request_start.elapsed().as_secs_f64());
 
             if let Err(e) = result {
                 let error_msg = e.to_string();
@@ -602,6 +619,7 @@ impl<R: AgentRepos> Agent<R> {
 
         for iteration in 0..config.max_tool_iterations {
             debug!(iteration, "agent loop iteration");
+            metrics::counter!("sober_agent_loop_iterations_total").increment(1);
 
             if needs_rebuild {
                 // a. Embed user message for context retrieval
@@ -1021,9 +1039,13 @@ impl<R: AgentRepos> Agent<R> {
                 }
             }
 
+            metrics::histogram!("sober_agent_loop_iterations_per_request")
+                .record(f64::from(iteration + 1));
             return Ok(());
         }
 
+        metrics::histogram!("sober_agent_loop_iterations_per_request")
+            .record(f64::from(config.max_tool_iterations));
         Err(AgentError::MaxIterationsExceeded(
             config.max_tool_iterations,
         ))
@@ -1117,13 +1139,22 @@ impl<R: AgentRepos> Agent<R> {
                 None
             };
 
+            let tool_start = Instant::now();
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
                     if tool.metadata().context_modifying {
                         any_context_modifying = true;
                     }
                     match tool.execute(tool_input.clone()).await {
-                        Ok(output) => output.content,
+                        Ok(output) => {
+                            metrics::counter!(
+                                "sober_agent_tool_calls_total",
+                                "tool" => tool_name.clone(),
+                                "status" => "success",
+                            )
+                            .increment(1);
+                            output.content
+                        }
                         Err(ToolError::NeedsConfirmation {
                             confirm_id,
                             command,
@@ -1136,6 +1167,14 @@ impl<R: AgentRepos> Agent<R> {
                                 risk_level,
                                 reason,
                             };
+                            // NeedsConfirmation is not an error — count as success
+                            // since the tool correctly identified a dangerous action.
+                            metrics::counter!(
+                                "sober_agent_tool_calls_total",
+                                "tool" => tool_name.clone(),
+                                "status" => "success",
+                            )
+                            .increment(1);
                             Self::handle_confirmation(
                                 &tool,
                                 tool_input,
@@ -1151,15 +1190,32 @@ impl<R: AgentRepos> Agent<R> {
                         }
                         Err(e) => {
                             any_errors = true;
+                            metrics::counter!(
+                                "sober_agent_tool_calls_total",
+                                "tool" => tool_name.clone(),
+                                "status" => "error",
+                            )
+                            .increment(1);
                             format!("Tool error: {e}")
                         }
                     }
                 }
                 None => {
                     any_errors = true;
+                    metrics::counter!(
+                        "sober_agent_tool_calls_total",
+                        "tool" => tool_name.clone(),
+                        "status" => "not_found",
+                    )
+                    .increment(1);
                     format!("Tool not found: {tool_name}")
                 }
             };
+            metrics::histogram!(
+                "sober_agent_tool_call_duration_seconds",
+                "tool" => tool_name.clone(),
+            )
+            .record(tool_start.elapsed().as_secs_f64());
 
             let _ = event_tx
                 .send(Ok(AgentEvent::ToolCallResult {

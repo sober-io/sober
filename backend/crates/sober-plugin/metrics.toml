@@ -1,0 +1,38 @@
+[crate]
+name = "sober-plugin"
+dashboard_title = "Plugin System"
+
+[[metrics]]
+name = "sober_plugin_installed"
+type = "gauge"
+help = "Currently installed plugins"
+labels = []
+group = "Registry"
+
+[[metrics]]
+name = "sober_plugin_executions_total"
+type = "counter"
+help = "Plugin execution count"
+labels = ["plugin", "status"]
+group = "Execution"
+
+[[metrics]]
+name = "sober_plugin_execution_duration_seconds"
+type = "histogram"
+help = "Plugin execution latency"
+labels = ["plugin"]
+group = "Execution"
+
+[[metrics]]
+name = "sober_plugin_audit_runs_total"
+type = "counter"
+help = "Security audit run count"
+labels = ["plugin", "result"]
+group = "Security"
+
+[[metrics]]
+name = "sober_plugin_sandbox_violations_total"
+type = "counter"
+help = "Sandbox policy violations from plugins"
+labels = ["plugin", "violation_type"]
+group = "Security"

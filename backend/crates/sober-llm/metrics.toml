@@ -1,0 +1,60 @@
+# sober-llm metrics catalog
+#
+# All metrics emitted by the sober-llm crate.
+
+[groups.requests]
+name = "Requests"
+description = "LLM completion request metrics across all providers."
+
+[[groups.requests.metrics]]
+name = "sober_llm_request_total"
+type = "counter"
+description = "Total LLM completion requests (streaming and non-streaming)."
+labels = ["provider", "model", "status"]
+
+[[groups.requests.metrics]]
+name = "sober_llm_request_duration_seconds"
+type = "histogram"
+description = "Duration of LLM completion requests in seconds."
+labels = ["provider", "model"]
+
+[groups.tokens]
+name = "Tokens"
+description = "Token usage counters from LLM provider responses."
+
+[[groups.tokens.metrics]]
+name = "sober_llm_tokens_input_total"
+type = "counter"
+description = "Total input (prompt) tokens consumed."
+labels = ["provider", "model"]
+
+[[groups.tokens.metrics]]
+name = "sober_llm_tokens_output_total"
+type = "counter"
+description = "Total output (completion) tokens generated."
+labels = ["provider", "model"]
+
+[groups.embeddings]
+name = "Embeddings"
+description = "Embedding generation request metrics."
+
+[[groups.embeddings.metrics]]
+name = "sober_llm_embed_request_total"
+type = "counter"
+description = "Total embedding generation requests."
+labels = ["provider", "status"]
+
+[[groups.embeddings.metrics]]
+name = "sober_llm_embed_request_duration_seconds"
+type = "histogram"
+description = "Duration of embedding requests in seconds."
+labels = ["provider"]
+
+# -- Alerts --
+
+[[alerts]]
+name = "LLMLatencyDegraded"
+expr = "histogram_quantile(0.95, rate(sober_llm_request_duration_seconds_bucket[5m])) > 15"
+for = "5m"
+severity = "warning"
+description = "95th percentile LLM request latency exceeds 15 seconds for 5 minutes."

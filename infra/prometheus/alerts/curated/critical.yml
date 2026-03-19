@@ -1,0 +1,66 @@
+groups:
+  - name: sober_critical
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"sober-api|sober-agent|sober-scheduler"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is unreachable"
+          description: "{{ $labels.job }} ({{ $labels.instance }}) has been unreachable for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(sober_api_request_total{status=~"5.."}[5m]))
+            /
+            sum(rate(sober_api_request_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate ({{ $value | humanizePercentage }})"
+          description: "More than 5% of API requests are returning 5xx responses."
+
+      - alert: LLMProviderDown
+        expr: |
+          (
+            sum by (provider) (rate(sober_llm_request_total{status="error"}[3m]))
+            /
+            sum by (provider) (rate(sober_llm_request_total[3m]))
+          ) > 0.9
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} error rate > 90%"
+          description: "Provider {{ $labels.provider }} has had a >90% error rate for 3 minutes."
+
+      - alert: DatabaseConnectionExhausted
+        expr: sober_pg_pool_connections_idle == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL connection pool exhausted"
+          description: "No idle connections in the PostgreSQL pool for 2 minutes."
+
+      - alert: InjectionDetected
+        expr: rate(sober_mind_injection_detections_total[1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prompt injection detected"
+          description: "The injection classifier flagged a prompt injection attempt."
+
+      - alert: SandboxViolation
+        expr: rate(sober_sandbox_policy_violations_total[1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sandbox policy violation detected"
+          description: "A sandbox execution violated policy ({{ $labels.violation }})."

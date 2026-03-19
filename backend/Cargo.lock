@@ -3260,6 +3260,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "hyper-util",
+ "metrics",
  "prost 0.14.3",
  "reqwest 0.12.28",
  "serde",
@@ -3301,6 +3302,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "metrics",
  "moka",
  "prost 0.14.3",
  "serde",
@@ -3333,6 +3335,7 @@ dependencies = [
  "chrono",
  "hex",
  "http",
+ "metrics",
  "rand_core 0.6.4",
  "serde",
  "sha2",
@@ -3389,6 +3392,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
+ "tonic 0.14.5",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -3403,6 +3407,7 @@ dependencies = [
  "argon2",
  "ed25519-dalek",
  "hex",
+ "metrics",
  "proptest",
  "rand_core 0.6.4",
  "serde",
@@ -3417,6 +3422,7 @@ name = "sober-db"
 version = "0.10.0"
 dependencies = [
  "chrono",
+ "metrics",
  "serde_json",
  "sober-core",
  "sqlx",
@@ -3433,6 +3439,7 @@ dependencies = [
  "agent-client-protocol-schema",
  "async-trait",
  "futures",
+ "metrics",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -3448,6 +3455,7 @@ name = "sober-mcp"
 version = "0.3.0"
 dependencies = [
  "base64",
+ "metrics",
  "serde",
  "serde_json",
  "sober-core",
@@ -3463,6 +3471,7 @@ name = "sober-memory"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "metrics",
  "qdrant-client",
  "serde",
  "serde_json",
@@ -3478,6 +3487,7 @@ name = "sober-mind"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "metrics",
  "regex",
  "serde",
  "serde_json",
@@ -3501,6 +3511,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "metrics",
  "proptest",
  "serde",
  "serde_json",
@@ -3522,6 +3533,7 @@ dependencies = [
  "cron",
  "dotenvy",
  "hyper-util",
+ "metrics",
  "prost 0.14.3",
  "serde",
  "serde_json",
@@ -3549,6 +3561,7 @@ dependencies = [
 name = "sober-skill"
 version = "0.1.0"
 dependencies = [
+ "metrics",
  "serde",
  "serde_json",
  "serde_yml",
@@ -3587,6 +3600,7 @@ dependencies = [
  "chrono",
  "git2",
  "hex",
+ "metrics",
  "serde",
  "serde_json",
  "sha2",

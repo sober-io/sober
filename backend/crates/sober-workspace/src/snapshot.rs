@@ -4,8 +4,10 @@
 //! a simple rollback mechanism before potentially destructive operations.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use chrono::Utc;
+use metrics::{counter, gauge, histogram};
 use tokio::fs;
 use tokio::process::Command;
 
@@ -40,6 +42,8 @@ impl SnapshotManager {
         workspace_root: &Path,
         label: &str,
     ) -> Result<Snapshot, WorkspaceError> {
+        let start = Instant::now();
+
         fs::create_dir_all(&self.snapshot_dir)
             .await
             .map_err(WorkspaceError::Filesystem)?;
@@ -56,15 +60,30 @@ impl SnapshotManager {
             .arg(".")
             .output()
             .await
-            .map_err(|e| WorkspaceError::Snapshot(format!("tar failed: {e}")))?;
+            .map_err(|e| {
+                counter!("sober_workspace_snapshot_operations_total", "operation" => "create", "status" => "error")
+                    .increment(1);
+                histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "create")
+                    .record(start.elapsed().as_secs_f64());
+                WorkspaceError::Snapshot(format!("tar failed: {e}"))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            counter!("sober_workspace_snapshot_operations_total", "operation" => "create", "status" => "error")
+                .increment(1);
+            histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "create")
+                .record(start.elapsed().as_secs_f64());
             return Err(WorkspaceError::Snapshot(format!(
                 "tar exited {}: {stderr}",
                 output.status
             )));
         }
+
+        counter!("sober_workspace_snapshot_operations_total", "operation" => "create", "status" => "success")
+            .increment(1);
+        histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "create")
+            .record(start.elapsed().as_secs_f64());
 
         Ok(Snapshot {
             path: snap_path,
@@ -79,6 +98,8 @@ impl SnapshotManager {
         snapshot: &Snapshot,
         workspace_root: &Path,
     ) -> Result<(), WorkspaceError> {
+        let start = Instant::now();
+
         let output = Command::new("tar")
             .arg("xf")
             .arg(&snapshot.path)
@@ -86,15 +107,30 @@ impl SnapshotManager {
             .arg(workspace_root)
             .output()
             .await
-            .map_err(|e| WorkspaceError::Snapshot(format!("tar restore failed: {e}")))?;
+            .map_err(|e| {
+                counter!("sober_workspace_snapshot_operations_total", "operation" => "restore", "status" => "error")
+                    .increment(1);
+                histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "restore")
+                    .record(start.elapsed().as_secs_f64());
+                WorkspaceError::Snapshot(format!("tar restore failed: {e}"))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            counter!("sober_workspace_snapshot_operations_total", "operation" => "restore", "status" => "error")
+                .increment(1);
+            histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "restore")
+                .record(start.elapsed().as_secs_f64());
             return Err(WorkspaceError::Snapshot(format!(
                 "tar restore exited {}: {stderr}",
                 output.status
             )));
         }
+
+        counter!("sober_workspace_snapshot_operations_total", "operation" => "restore", "status" => "success")
+            .increment(1);
+        histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "restore")
+            .record(start.elapsed().as_secs_f64());
 
         Ok(())
     }
@@ -134,6 +170,9 @@ impl SnapshotManager {
 
         // Sort by filename (which starts with timestamp) — oldest first
         snapshots.sort_by(|a, b| a.path.cmp(&b.path));
+
+        gauge!("sober_workspace_snapshots_active").set(snapshots.len() as f64);
+
         Ok(snapshots)
     }
 
@@ -141,6 +180,8 @@ impl SnapshotManager {
     ///
     /// Returns the number of snapshots removed.
     pub async fn prune(&self, max_snapshots: u32) -> Result<u32, WorkspaceError> {
+        let start = Instant::now();
+
         let snapshots = self.list().await?;
         let to_remove = snapshots.len().saturating_sub(max_snapshots as usize);
         let mut removed = 0u32;
@@ -151,6 +192,15 @@ impl SnapshotManager {
                 .map_err(WorkspaceError::Filesystem)?;
             removed += 1;
         }
+
+        counter!("sober_workspace_snapshot_operations_total", "operation" => "prune", "status" => "success")
+            .increment(1);
+        histogram!("sober_workspace_snapshot_duration_seconds", "operation" => "prune")
+            .record(start.elapsed().as_secs_f64());
+
+        // Update gauge after pruning
+        let remaining = snapshots.len().saturating_sub(removed as usize);
+        gauge!("sober_workspace_snapshots_active").set(remaining as f64);
 
         Ok(removed)
     }

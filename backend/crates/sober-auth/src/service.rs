@@ -4,7 +4,10 @@
 //! validation, and user management. It depends on repository traits
 //! from `sober-core` and password hashing from `sober-crypto`.
 
+use std::time::Instant;
+
 use chrono::{Duration, Utc};
+use metrics::{counter, histogram};
 use sober_core::error::AppError;
 use sober_core::types::{
     CreateSession, CreateUser, RoleKind, RoleRepo, SessionRepo, User, UserId, UserRepo, UserStatus,
@@ -87,8 +90,17 @@ where
     /// The raw token must never be logged or stored — only the hash is persisted.
     #[instrument(skip(self, password), fields(email = %email))]
     pub async fn login(&self, email: &str, password: &str) -> Result<(String, User), AppError> {
+        let method = "password";
+        let start = Instant::now();
+
         let user = self.users.get_by_email(email).await.map_err(|e| match e {
-            AppError::NotFound(_) => AppError::from(AuthError::InvalidCredentials),
+            AppError::NotFound(_) => {
+                counter!("sober_auth_attempts_total", "method" => method, "status" => "failure")
+                    .increment(1);
+                histogram!("sober_auth_attempt_duration_seconds", "method" => method)
+                    .record(start.elapsed().as_secs_f64());
+                AppError::from(AuthError::InvalidCredentials)
+            }
             other => other,
         })?;
 
@@ -103,10 +115,18 @@ where
         .map_err(|e| AppError::Internal(e.into()))??;
 
         if !valid {
+            counter!("sober_auth_attempts_total", "method" => method, "status" => "failure")
+                .increment(1);
+            histogram!("sober_auth_attempt_duration_seconds", "method" => method)
+                .record(start.elapsed().as_secs_f64());
             return Err(AuthError::InvalidCredentials.into());
         }
 
         if user.status != UserStatus::Active {
+            counter!("sober_auth_attempts_total", "method" => method, "status" => "locked")
+                .increment(1);
+            histogram!("sober_auth_attempt_duration_seconds", "method" => method)
+                .record(start.elapsed().as_secs_f64());
             return Err(AuthError::AccountNotActive.into());
         }
 
@@ -120,6 +140,12 @@ where
             expires_at,
         };
         self.sessions.create(input).await?;
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_auth_attempts_total", "method" => method, "status" => "success")
+            .increment(1);
+        histogram!("sober_auth_attempt_duration_seconds", "method" => method).record(elapsed);
+        counter!("sober_auth_sessions_created_total").increment(1);
 
         tracing::info!(user_id = %user.id, "user logged in");
         Ok((raw_token, user))
@@ -148,12 +174,17 @@ where
     }
 
     /// Invalidates a session by deleting it from the store.
+    ///
+    /// Records `sober_auth_sessions_expired_total` on successful logout.
     #[instrument(skip(self, raw_token))]
     pub async fn logout(&self, raw_token: &str) -> Result<(), AppError> {
         let token_hash =
             token::hash_token(raw_token).map_err(|_| AppError::from(AuthError::SessionNotFound))?;
 
-        self.sessions.delete_by_token_hash(&token_hash).await
+        self.sessions.delete_by_token_hash(&token_hash).await?;
+
+        counter!("sober_auth_sessions_expired_total").increment(1);
+        Ok(())
     }
 
     /// Approves a pending user account by setting its status to `Active`.

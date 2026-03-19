@@ -1,0 +1,56 @@
+[crate]
+name = "sober-skill"
+dashboard_title = "Skill System"
+
+# --- Discovery ---
+
+[[metrics]]
+name = "sober_skill_cache_hits_total"
+type = "counter"
+help = "Skill catalog cache hits"
+labels = []
+group = "Discovery"
+
+[[metrics]]
+name = "sober_skill_cache_misses_total"
+type = "counter"
+help = "Skill catalog cache misses triggering rescan"
+labels = []
+group = "Discovery"
+
+[[metrics]]
+name = "sober_skill_scan_duration_seconds"
+type = "histogram"
+help = "Time to scan filesystem for skills"
+labels = []
+group = "Discovery"
+
+[[metrics]]
+name = "sober_skill_discovered_total"
+type = "counter"
+help = "Skills discovered during scan"
+labels = ["source"]
+group = "Discovery"
+
+[[metrics]]
+name = "sober_skill_catalog_size"
+type = "gauge"
+help = "Current number of skills in the catalog"
+labels = []
+group = "Discovery"
+
+# --- Activation ---
+
+[[metrics]]
+name = "sober_skill_activation_total"
+type = "counter"
+help = "Skill activation attempts"
+labels = ["status"]
+group = "Activation"
+
+[[metrics]]
+name = "sober_skill_activation_duration_seconds"
+type = "histogram"
+help = "Skill activation latency"
+labels = []
+group = "Activation"

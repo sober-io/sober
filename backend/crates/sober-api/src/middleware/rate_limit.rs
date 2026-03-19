@@ -101,6 +101,17 @@ where
         };
 
         if count >= max {
+            let path = req
+                .uri()
+                .path_and_query()
+                .map(|pq| pq.path().to_owned())
+                .unwrap_or_else(|| "unknown".to_owned());
+            metrics::counter!(
+                "sober_api_rate_limit_hits_total",
+                "path" => path,
+            )
+            .increment(1);
+
             let elapsed = now.duration_since(window_start);
             let retry_after = window.saturating_sub(elapsed).as_secs().max(1);
             return Box::pin(async move {

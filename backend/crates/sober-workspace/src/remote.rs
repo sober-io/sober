@@ -1,6 +1,9 @@
 //! Git remote operations.
 
 use std::path::Path;
+use std::time::Instant;
+
+use metrics::histogram;
 
 use crate::WorkspaceError;
 
@@ -40,6 +43,8 @@ pub fn push_branch(
     branch: &str,
     remote_name: Option<&str>,
 ) -> Result<(), WorkspaceError> {
+    let start = Instant::now();
+
     let repo = git2::Repository::open(repo_path).map_err(WorkspaceError::Git)?;
     let name = remote_name.unwrap_or("origin");
     let mut remote = repo.find_remote(name).map_err(WorkspaceError::Git)?;
@@ -61,7 +66,14 @@ pub fn push_branch(
 
     remote
         .push(&[&refspec], Some(&mut push_options))
-        .map_err(WorkspaceError::Git)?;
+        .map_err(|e| {
+            histogram!("sober_workspace_git_push_duration_seconds", "status" => "error")
+                .record(start.elapsed().as_secs_f64());
+            WorkspaceError::Git(e)
+        })?;
+
+    histogram!("sober_workspace_git_push_duration_seconds", "status" => "success")
+        .record(start.elapsed().as_secs_f64());
 
     Ok(())
 }

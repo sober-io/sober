@@ -94,6 +94,9 @@ impl AppState {
 }
 
 /// Connects to the agent gRPC service over a Unix domain socket.
+///
+/// The returned client includes an interceptor that injects W3C TraceContext
+/// headers into every outgoing request for cross-service trace propagation.
 async fn connect_agent(config: &AppConfig) -> Result<AgentClient, AppError> {
     let socket_path = config.scheduler.agent_socket_path.clone();
 

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use metrics::{counter, gauge};
 use sober_core::types::McpServerId;
 use sober_sandbox::SandboxPolicy;
 use tokio::sync::Mutex;
@@ -124,6 +125,7 @@ impl McpPool {
 
                     let client = Arc::new(Mutex::new(client));
 
+                    let server_label = run_config.name.clone();
                     self.servers.insert(
                         id,
                         ServerEntry {
@@ -136,6 +138,8 @@ impl McpPool {
                         },
                     );
 
+                    gauge!("sober_mcp_server_connections_active", "server" => server_label)
+                        .increment(1.0);
                     info!(server_id = %id, "MCP server connected and initialized");
                 }
                 Err(e) => {
@@ -292,6 +296,12 @@ impl McpPool {
                         last_failure: std::time::Instant::now(),
                     };
 
+                    gauge!(
+                        "sober_mcp_server_connections_active",
+                        "server" => entry.run_config.name.clone(),
+                    )
+                    .decrement(1.0);
+
                     // Shut down the client.
                     if let Some(client) = entry.client.take() {
                         let mut c = client.lock().await;
@@ -402,6 +412,13 @@ impl McpPool {
                 if let Some(entry) = self.servers.get_mut(server_id) {
                     entry.state = ServerState::Connected;
                     entry.client = Some(client);
+
+                    let server_label = entry.run_config.name.clone();
+                    counter!("sober_mcp_server_reconnects_total", "server" => server_label.clone())
+                        .increment(1);
+                    gauge!("sober_mcp_server_connections_active", "server" => server_label)
+                        .increment(1.0);
+
                     info!(server_id = %server_id, "reconnection successful");
                 }
 
@@ -427,6 +444,13 @@ impl McpPool {
     pub async fn shutdown(&mut self) {
         for entry in self.servers.values_mut() {
             if let Some(client) = entry.client.take() {
+                if matches!(entry.state, ServerState::Connected) {
+                    gauge!(
+                        "sober_mcp_server_connections_active",
+                        "server" => entry.run_config.name.clone(),
+                    )
+                    .decrement(1.0);
+                }
                 let mut c = client.lock().await;
                 c.shutdown().await;
             }

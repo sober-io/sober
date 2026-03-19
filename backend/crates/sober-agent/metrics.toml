@@ -1,0 +1,81 @@
+# sober-agent metrics
+#
+# All metrics are recorded via the `metrics` crate (0.24) facade macros.
+# A recorder (e.g. metrics-exporter-prometheus) must be installed at startup
+# for these to be collected.
+
+[group.agent_loop]
+name = "Agent Loop"
+description = "Metrics for the top-level agent request handling and LLM reasoning loop."
+
+[[group.agent_loop.metrics]]
+name = "sober_agent_requests_total"
+type = "counter"
+description = "Total number of agent requests handled."
+labels = ["trigger", "status"]
+# trigger: human, scheduler, replica, admin
+# status: success, error
+
+[[group.agent_loop.metrics]]
+name = "sober_agent_request_duration_seconds"
+type = "histogram"
+description = "Wall-clock duration of a full agent request (from spawn to completion)."
+labels = ["trigger"]
+# trigger: human, scheduler, replica, admin
+
+[[group.agent_loop.metrics]]
+name = "sober_agent_loop_iterations_total"
+type = "counter"
+description = "Total number of agentic loop iterations across all requests."
+labels = []
+
+[[group.agent_loop.metrics]]
+name = "sober_agent_loop_iterations_per_request"
+type = "histogram"
+description = "Number of loop iterations consumed by a single request."
+labels = []
+
+[group.tool_execution]
+name = "Tool Execution"
+description = "Metrics for individual tool call execution within the agent loop."
+
+[[group.tool_execution.metrics]]
+name = "sober_agent_tool_calls_total"
+type = "counter"
+description = "Total number of tool calls executed."
+labels = ["tool", "status"]
+# tool: tool name (e.g. shell, web_search, recall)
+# status: success, error, not_found
+
+[[group.tool_execution.metrics]]
+name = "sober_agent_tool_call_duration_seconds"
+type = "histogram"
+description = "Duration of individual tool call execution."
+labels = ["tool"]
+# tool: tool name
+
+# --- Deferred metrics (not yet implemented) ---
+#
+# The following metrics are planned but depend on features not yet built:
+#
+# [group.replica]
+# name = "Replica Management"
+#
+# sober_agent_replicas_spawned_total (counter)
+#   - Total replicas spawned. Labels: parent_id.
+#   - Requires: replica lifecycle implementation.
+#
+# sober_agent_replica_delegation_duration_seconds (histogram)
+#   - Time to delegate and receive result from a replica.
+#   - Requires: replica delegation protocol.
+#
+# [group.task]
+# name = "Task Execution"
+#
+# sober_agent_tasks_received_total (counter)
+#   - Tasks received from scheduler via ExecuteTask RPC. Labels: task_type.
+#   - Requires: richer task type taxonomy.
+#
+# sober_agent_task_duration_seconds (histogram)
+#   - Duration of scheduled task execution. Labels: task_type.
+#   - Requires: distinct task-handling path.

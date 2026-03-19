@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use metrics::{counter, histogram};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
@@ -111,8 +112,9 @@ impl BwrapSandbox {
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
+        let profile = self.policy.name.clone();
 
-        match result {
+        let outcome = match result {
             Ok(Ok(output)) => Ok(SandboxResult {
                 exit_code: output.status.code().unwrap_or(-1),
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -132,7 +134,41 @@ impl BwrapSandbox {
                 );
                 Err(SandboxError::Timeout { seconds: max_secs })
             }
+        };
+
+        // Record execution metrics.
+        let status = match &outcome {
+            Ok(r) if r.exit_code == 0 => "success",
+            Ok(_) => "success", // non-zero exit is still a completed execution
+            Err(SandboxError::Timeout { .. }) => "timeout",
+            Err(SandboxError::PolicyResolutionFailed(_)) => "denied",
+            Err(_) => "error",
+        };
+        counter!(
+            "sober_sandbox_executions_total",
+            "profile" => profile.clone(),
+            "status" => status,
+        )
+        .increment(1);
+        histogram!(
+            "sober_sandbox_execution_duration_seconds",
+            "profile" => profile.clone(),
+        )
+        .record(start.elapsed().as_secs_f64());
+
+        // Record policy violations for denied network requests.
+        if let Ok(ref result) = outcome {
+            for domain in &result.denied_network_requests {
+                counter!(
+                    "sober_sandbox_policy_violations_total",
+                    "profile" => profile.clone(),
+                    "violation" => format!("network_denied:{domain}"),
+                )
+                .increment(1);
+            }
         }
+
+        outcome
     }
 
     /// Spawn a long-running sandboxed process with piped stdin/stdout.

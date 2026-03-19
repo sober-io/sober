@@ -1,0 +1,74 @@
+[crate]
+name = "sober-workspace"
+dashboard_title = "Workspace"
+
+# --- Blob Store ---
+
+[[metrics]]
+name = "sober_workspace_blob_duration_seconds"
+type = "histogram"
+help = "Blob store operation latency"
+labels = ["operation"]
+group = "Blob Store"
+
+[[metrics]]
+name = "sober_workspace_blob_operations_total"
+type = "counter"
+help = "Blob store operation count"
+labels = ["operation", "status"]
+group = "Blob Store"
+
+[[metrics]]
+name = "sober_workspace_blob_bytes_total"
+type = "counter"
+help = "Cumulative bytes written to blob store"
+labels = []
+group = "Blob Store"
+
+# --- Snapshots ---
+
+[[metrics]]
+name = "sober_workspace_snapshot_duration_seconds"
+type = "histogram"
+help = "Snapshot operation latency"
+labels = ["operation"]
+group = "Snapshots"
+
+[[metrics]]
+name = "sober_workspace_snapshot_operations_total"
+type = "counter"
+help = "Snapshot operation count"
+labels = ["operation", "status"]
+group = "Snapshots"
+
+[[metrics]]
+name = "sober_workspace_snapshots_active"
+type = "gauge"
+help = "Number of active snapshots on disk"
+labels = []
+group = "Snapshots"
+
+# --- Git Worktrees ---
+
+[[metrics]]
+name = "sober_workspace_worktree_duration_seconds"
+type = "histogram"
+help = "Git worktree operation latency"
+labels = ["operation"]
+group = "Git Worktrees"
+
+[[metrics]]
+name = "sober_workspace_worktree_operations_total"
+type = "counter"
+help = "Git worktree operation count"
+labels = ["operation", "status"]
+group = "Git Worktrees"
+
+# --- Git Push ---
+
+[[metrics]]
+name = "sober_workspace_git_push_duration_seconds"
+type = "histogram"
+help = "Git push latency"
+labels = ["status"]
+group = "Git Push"

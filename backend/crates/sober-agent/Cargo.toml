@@ -12,7 +12,7 @@ name = "sober_agent"
 path = "src/lib.rs"
 
 [dependencies]
-sober-core = { path = "../sober-core" }
+sober-core = { path = "../sober-core", features = ["grpc-telemetry"] }
 sober-crypto = { path = "../sober-crypto" }
 sober-db = { path = "../sober-db" }
 sober-mind = { path = "../sober-mind" }
@@ -41,6 +41,7 @@ futures = "0.3"
 tokio-stream = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tower = { workspace = true }
+metrics = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

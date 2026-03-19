@@ -28,6 +28,9 @@ x-mcp-env: &mcp-env
 x-crypto-env: &crypto-env
   MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
 
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
+
 services:
   # ---------------------------------------------------------------------------
   # Infrastructure
@@ -69,6 +72,48 @@ services:
       - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   # ---------------------------------------------------------------------------
+  # Observability
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts/:/etc/prometheus/alerts/:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
+
+  tempo:
+    image: grafana/tempo
+    ports:
+      - "4317:4317"
+      - "3200:3200"
+    volumes:
+      - ./infra/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    command:
+      - -config.file=/etc/tempo/tempo.yml
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./infra/grafana/provisioning/:/etc/grafana/provisioning/:ro
+      - ./infra/grafana/dashboards/:/var/lib/grafana/dashboards/:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    depends_on:
+      - prometheus
+      - tempo
+
+  # ---------------------------------------------------------------------------
   # Database migrations (run-once init container)
   # ---------------------------------------------------------------------------
   migrate:
@@ -90,12 +135,16 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.agent
     privileged: true
+    ports:
+      - "9100:9100"
     environment:
-      <<: [*common-env, *llm-env, *memory-env, *mcp-env, *crypto-env]
+      <<: [*common-env, *llm-env, *memory-env, *mcp-env, *crypto-env, *otel-env]
       AGENT_SOCKET_PATH: /run/sober/agent.sock
       SANDBOX_PROFILE: unrestricted
       ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
       SEARXNG_URL: http://searxng:8080
+      OTEL_SERVICE_NAME: sober-agent
+      METRICS_PORT: "9100"
     volumes:
       - sober_sockets:/run/sober
       - sober_workspaces:/var/lib/sober/workspaces
@@ -120,13 +169,14 @@ services:
     ports:
       - "3000:3000"
     environment:
-      <<: [*common-env, *llm-env, *memory-env, *mcp-env]
+      <<: [*common-env, *llm-env, *memory-env, *mcp-env, *otel-env]
       HOST: "0.0.0.0"
       PORT: "3000"
       ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
       SESSION_SECRET: docker-dev-secret
       SESSION_TTL_SECONDS: "2592000"
       SEARXNG_URL: http://searxng:8080
+      OTEL_SERVICE_NAME: sober-api
     volumes:
       - sober_sockets:/run/sober
     depends_on:
@@ -142,12 +192,16 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.scheduler
+    ports:
+      - "9101:9101"
     environment:
-      <<: *common-env
+      <<: [*common-env, *otel-env]
       SCHEDULER_TICK_INTERVAL_SECS: "1"
       SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
       SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
       SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+      OTEL_SERVICE_NAME: sober-scheduler
+      METRICS_PORT: "9101"
     volumes:
       - sober_sockets:/run/sober
     depends_on:
@@ -161,11 +215,13 @@ services:
     ports:
       - "8088:8080"
     environment:
+      <<: *otel-env
       HOST: "0.0.0.0"
       PORT: "8080"
       API_UPSTREAM_URL: http://sober-api:3000
       STATIC_DIR: /opt/sober/data/static
       RUST_LOG: sober_web=info
+      OTEL_SERVICE_NAME: sober-web
     depends_on:
       sober-api:
         condition: service_healthy
@@ -175,3 +231,6 @@ volumes:
   qdrant_data:
   sober_sockets:
   sober_workspaces:
+  prometheus_data:
+  tempo_data:
+  grafana_data:

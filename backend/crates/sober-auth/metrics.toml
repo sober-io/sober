@@ -1,0 +1,35 @@
+# sober-auth metrics catalog
+#
+# All metrics emitted by the sober-auth crate.
+
+[groups.authentication]
+name = "Authentication"
+description = "Login and authentication attempt metrics."
+
+[[groups.authentication.metrics]]
+name = "sober_auth_attempts_total"
+type = "counter"
+description = "Total authentication attempts."
+labels = ["method", "status"]
+
+[[groups.authentication.metrics]]
+name = "sober_auth_attempt_duration_seconds"
+type = "histogram"
+description = "Duration of authentication attempts in seconds (includes Argon2 verification)."
+labels = ["method"]
+
+[groups.sessions]
+name = "Sessions"
+description = "Session lifecycle metrics."
+
+[[groups.sessions.metrics]]
+name = "sober_auth_sessions_created_total"
+type = "counter"
+description = "Total sessions created (login and registration flows)."
+labels = []
+
+[[groups.sessions.metrics]]
+name = "sober_auth_sessions_expired_total"
+type = "counter"
+description = "Total sessions invalidated (logout or expiry cleanup)."
+labels = []

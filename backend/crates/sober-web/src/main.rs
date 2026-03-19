@@ -43,7 +43,11 @@ struct ProxyState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    let environment = match std::env::var("SOBER_ENV").as_deref() {
+        Ok("production") => sober_core::config::Environment::Production,
+        _ => sober_core::config::Environment::Development,
+    };
+    let _telemetry = sober_core::init_telemetry(environment, "sober_web=info");
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_owned());
     let port: u16 = std::env::var("PORT")
@@ -255,14 +259,6 @@ async fn serve_embedded(uri: axum::extract::OriginalUri) -> Response {
             .body(Body::from("not found"))
             .unwrap(),
     }
-}
-
-/// Initialises tracing.
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("sober_web=info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
 /// Waits for SIGINT or SIGTERM.

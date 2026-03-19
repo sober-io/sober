@@ -6,7 +6,12 @@
 //! ```
 //! The stream ends with `data: [DONE]\n\n`.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Instant;
+
 use futures::stream::{self, Stream};
+use metrics::{counter, histogram};
 use reqwest::Response;
 use tracing::warn;
 
@@ -57,6 +62,83 @@ pub fn parse_sse_stream(
             }
         },
     )
+}
+
+/// A stream wrapper that records LLM metrics when the inner SSE stream ends.
+///
+/// Tracks token usage from the final chunk (which carries `usage` stats) and
+/// records request duration, token counters, and request total on completion.
+pub struct MeteredSseStream<S> {
+    inner: Pin<Box<S>>,
+    provider: String,
+    model: String,
+    start: Instant,
+    last_usage: Option<crate::types::Usage>,
+    done: bool,
+}
+
+impl<S> MeteredSseStream<S>
+where
+    S: Stream<Item = Result<StreamChunk, LlmError>> + Send,
+{
+    /// Wrap an inner SSE stream with metric recording.
+    pub fn new(inner: S, provider: String, model: String, start: Instant) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            provider,
+            model,
+            start,
+            last_usage: None,
+            done: false,
+        }
+    }
+
+    /// Record accumulated metrics when the stream terminates.
+    fn record_metrics(&self, status: &str) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        counter!("sober_llm_request_total", "provider" => self.provider.clone(), "model" => self.model.clone(), "status" => status.to_owned()).increment(1);
+        histogram!("sober_llm_request_duration_seconds", "provider" => self.provider.clone(), "model" => self.model.clone()).record(elapsed);
+
+        if let Some(ref usage) = self.last_usage {
+            counter!("sober_llm_tokens_input_total", "provider" => self.provider.clone(), "model" => self.model.clone()).increment(u64::from(usage.prompt_tokens));
+            counter!("sober_llm_tokens_output_total", "provider" => self.provider.clone(), "model" => self.model.clone()).increment(u64::from(usage.completion_tokens));
+        }
+    }
+}
+
+impl<S> Stream for MeteredSseStream<S>
+where
+    S: Stream<Item = Result<StreamChunk, LlmError>> + Send,
+{
+    type Item = Result<StreamChunk, LlmError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.done {
+            return Poll::Ready(None);
+        }
+
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                // Capture usage from the final chunk (the last one with usage stats).
+                if chunk.usage.is_some() {
+                    this.last_usage = chunk.usage;
+                }
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(e))) => {
+                this.done = true;
+                this.record_metrics("error");
+                Poll::Ready(Some(Err(e)))
+            }
+            Poll::Ready(None) => {
+                this.done = true;
+                this.record_metrics("success");
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 /// Extract the next complete SSE `data:` payload from the buffer.

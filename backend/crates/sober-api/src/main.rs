@@ -6,12 +6,15 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use axum::routing::get;
 use http::Method;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use sober_api::admin;
+use sober_api::middleware::metrics::HttpMetricsLayer;
 use sober_api::middleware::rate_limit::{RateLimitConfig, RateLimitLayer};
 use sober_api::routes;
 use sober_api::state::AppState;
+use sober_core::MetricsEndpoint;
 use sober_core::config::{AppConfig, Environment};
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -24,7 +27,8 @@ use tracing::info;
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load_from_env()?;
 
-    init_tracing(&config);
+    let telemetry =
+        sober_core::init_telemetry(config.environment, "sober_api=debug,tower_http=debug,info");
 
     let state = AppState::new(config.clone()).await?;
 
@@ -37,7 +41,12 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Build the router with all middleware.
-    let app = routes::build_router(state.clone());
+    let app = routes::build_router(state.clone())
+        .route(
+            "/metrics",
+            get(MetricsEndpoint(telemetry.prometheus.clone())),
+        )
+        .layer(HttpMetricsLayer::new());
 
     // Apply global middleware stack (outermost = first to run).
     let cors = build_cors(&config);
@@ -80,26 +89,6 @@ async fn main() -> anyhow::Result<()> {
     admin_handle.abort();
 
     Ok(())
-}
-
-/// Initializes the tracing subscriber.
-fn init_tracing(config: &AppConfig) {
-    use tracing_subscriber::EnvFilter;
-
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("sober_api=debug,tower_http=debug,info"));
-
-    match config.environment {
-        Environment::Production => {
-            tracing_subscriber::fmt()
-                .json()
-                .with_env_filter(filter)
-                .init();
-        }
-        Environment::Development => {
-            tracing_subscriber::fmt().with_env_filter(filter).init();
-        }
-    }
 }
 
 /// Builds the CORS layer.
