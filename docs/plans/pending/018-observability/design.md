@@ -561,3 +561,4 @@ backend/crates/
 - **Histogram bucket defaults:** Dashboard-gen tool applies sensible defaults per metric suffix; `metrics.toml` can override with explicit `buckets` field.
 - **OTEL sampling in production:** Start with `always_on` (100%). Tune later once we have data on trace volume and storage costs.
 - **Alert thresholds in metrics.toml:** Yes — per-metric alerts defined as `[[metrics.alerts]]` in `metrics.toml`, emitted to `infra/prometheus/alerts/generated/` by dashboard-gen. Cross-metric alerts stay hand-written in `infra/prometheus/alerts/curated/`.
+- **gRPC trace propagation in sober-core:** Feature-gated behind `grpc-telemetry` feature (`dep:tonic`). Only enabled by `sober-api`, `sober-agent`, `sober-scheduler`. Keeps tonic out of sober-core's default dependency tree.

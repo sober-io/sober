@@ -10,17 +10,14 @@ This plan does three things: (1) plumbing — migrate binaries to centralized te
 
 ## Parallel Streams
 
-Five independent streams — no shared file modifications between them:
+Two streams — one sequential (plumbing → instrumentation), one independent (infra + tooling):
 
 | Stream | Scope | Files touched |
 |--------|-------|---------------|
-| **A** | Core telemetry + binary migration + gRPC propagation | `sober-core/`, all 4 binary `main.rs`, `sober-api/src/state.rs` |
-| **B** | Docker infra configs | `docker-compose.yml`, `infra/prometheus/`, `infra/tempo/`, `infra/grafana/` |
-| **C** | Per-crate metric instrumentation + `metrics.toml` | `sober-api/`, `sober-agent/`, `sober-llm/`, `sober-auth/`, `sober-scheduler/`, `sober-memory/`, `sober-mind/`, `sober-crypto/`, `sober-mcp/`, `sober-sandbox/`, `sober-db/`, `sober-skill/`, `sober-workspace/` (library source files + Cargo.toml + metrics.toml) |
-| **D** | Dashboard + alert generator tool | `tools/dashboard-gen/` |
-| **E** | Justfile + plan lifecycle | `justfile`, `docs/plans/` |
+| **A** | Core telemetry + binary migration + gRPC propagation → per-crate metric instrumentation + `metrics.toml` | `sober-core/`, all 4 binary `main.rs`, `sober-api/src/state.rs`, all library crate source files + `Cargo.toml` + `metrics.toml` |
+| **B** | Docker infra configs + dashboard/alert generator tool + justfile + plan lifecycle | `docker-compose.yml`, `infra/`, `tools/dashboard-gen/`, `justfile`, `docs/plans/` |
 
-**Dependency:** Stream A must complete before C (binaries need init_telemetry before metrics are useful). Streams B, D, E are fully independent.
+**Dependency:** Within Stream A, core telemetry migration (A1-A8) must complete before per-crate instrumentation (A9-A22). Stream B is fully independent.
 
 ---
 
@@ -63,17 +60,20 @@ pub fn spawn_metrics_server(handle: PrometheusHandle, port: u16) {
 Add `tokio` dep to sober-core Cargo.toml (for spawn + TcpListener).
 Export from `lib.rs`: `pub use telemetry::spawn_metrics_server;`
 
-### A3. Add gRPC trace propagation
+### A3. Add gRPC trace propagation (feature-gated)
 
 **File:** `backend/crates/sober-core/src/telemetry.rs` (append to existing module)
 
-**Dependency:** Add `tonic = { workspace = true }` to `sober-core/Cargo.toml`
+**Dependency:** Add `tonic = { workspace = true, optional = true }` to `sober-core/Cargo.toml`
+**Feature:** Add `grpc-telemetry = ["dep:tonic"]` to `[features]` in `sober-core/Cargo.toml`
 
-Add:
+All gRPC propagation types and functions are gated behind `#[cfg(feature = "grpc-telemetry")]`:
 - `MetadataMapInjector` — implements `opentelemetry::propagation::Injector` for tonic `MetadataMap`
 - `MetadataMapExtractor` — implements `opentelemetry::propagation::Extractor`
 - `inject_trace_context(metadata: &mut MetadataMap)` — injects current span context
 - `extract_trace_context(metadata: &MetadataMap)` — extracts and sets parent context
+
+Enable the feature in crates that need it: `sober-api`, `sober-agent`, `sober-scheduler` (add `sober-core = { path = "...", features = ["grpc-telemetry"] }` to their `Cargo.toml`). `sober-web` and `sober-cli` do not enable it.
 
 Also register the global propagator in `init_telemetry()`:
 ```rust
@@ -131,7 +131,7 @@ cd backend && cargo build -q && cargo clippy -q -- -D warnings && cargo test -p 
 
 ---
 
-## Stream B: Docker Infrastructure
+## Stream B: Infrastructure, Tooling & Plan Lifecycle
 
 ### B1. Prometheus
 
@@ -166,15 +166,38 @@ cd backend && cargo build -q && cargo clippy -q -- -D warnings && cargo test -p 
   - Per-service: `OTEL_SERVICE_NAME`, `METRICS_PORT` (agent: 9100, scheduler: 9101)
   - Expose metrics ports for agent + scheduler
 
+### B5. Dashboard + Alert Generator Tool
+
+**Create:** `tools/dashboard-gen/Cargo.toml` (standalone, not in backend workspace)
+**Create:** `tools/dashboard-gen/src/main.rs`
+
+- Parse `metrics.toml` files (serde + toml crate)
+- Generate Grafana dashboard JSON per crate
+- Generate Prometheus alert rule YAML per crate (from `[[metrics.alerts]]` sections)
+- Panel type rules:
+  - `counter` (_total) → rate() timeseries
+  - `histogram` (_seconds, _bytes) → heatmap + p50/p95/p99 timeseries
+  - `gauge` (_active, _registered) → stat + timeseries
+- Histogram bucket defaults per suffix (see design doc), overridable via `buckets` field
+- Template variables from label definitions
+- `{{name}}` placeholder expansion in alert expressions
+- CLI: `--input <crates-dir>` `--dashboards-output <dir>` `--alerts-output <dir>`
+
+### B6. Justfile + Plan Lifecycle
+
+**Modify:** `justfile` — add `dashboards`, `observability-up`, `observability-down` commands
+
+**Move:** `docs/plans/pending/018-observability/` → `docs/plans/active/018-observability/` (first commit)
+
 ---
 
-## Stream C: Per-Crate Metric Instrumentation
+## Stream A (continued): Per-Crate Metric Instrumentation
 
 For each crate: (1) add `metrics = { workspace = true }` to Cargo.toml, (2) add `metrics::counter!()` / `metrics::histogram!()` calls at code paths, (3) create `metrics.toml` declaration file with optional `[[metrics.alerts]]` sections.
 
 Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 
-### C1. sober-api — HTTP/WebSocket Gateway
+### A9. sober-api — HTTP/WebSocket Gateway
 
 **Add `metrics` dep to:** `backend/crates/sober-api/Cargo.toml`
 
@@ -195,7 +218,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 **Admin socket** in admin handler:
 - `sober_api_admin_commands_total` (counter) — labels: command, status
 
-### C2. sober-agent — Orchestration
+### A10. sober-agent — Orchestration
 
 **Add `metrics` dep to:** `backend/crates/sober-agent/Cargo.toml`
 
@@ -213,7 +236,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 
 **Deferred** (features not yet implemented): replica management, task queue metrics.
 
-### C3. sober-llm — LLM Provider
+### A11. sober-llm — LLM Provider
 
 **Add `metrics` dep to:** `backend/crates/sober-llm/Cargo.toml`
 
@@ -232,7 +255,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 
 **Deferred**: cost estimation (requires pricing data), time-to-first-token (requires stream refactor), retry metrics.
 
-### C4. sober-auth — Authentication
+### A12. sober-auth — Authentication
 
 **Add `metrics` dep to:** `backend/crates/sober-auth/Cargo.toml`
 
@@ -249,7 +272,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 **Authorization** in permission check middleware:
 - `sober_auth_permission_checks_total` (counter) — labels: permission, result
 
-### C5. sober-scheduler — Tick Engine
+### A13. sober-scheduler — Tick Engine
 
 **Add `metrics` dep to:** `backend/crates/sober-scheduler/Cargo.toml`
 
@@ -267,7 +290,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 - `sober_scheduler_jobs_registered` (gauge) — labels: type, persistence
 - `sober_scheduler_paused` (gauge)
 
-### C6. sober-memory — Vector Storage
+### A14. sober-memory — Vector Storage
 
 **Add `metrics` dep to:** `backend/crates/sober-memory/Cargo.toml`
 
@@ -286,7 +309,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 
 **Deferred**: BCF encode/decode (not yet implemented), chunk gauge, storage bytes.
 
-### C7. sober-mind — Prompt Assembly
+### A15. sober-mind — Prompt Assembly
 
 **Add `metrics` dep to:** `backend/crates/sober-mind/Cargo.toml`
 
@@ -297,7 +320,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 **Injection detection** in `injection.rs` (`classify_input()`, line 86):
 - `sober_mind_injection_detections_total` (counter) — on Rejected/Flagged verdicts
 
-### C8. sober-crypto — Cryptographic Operations
+### A16. sober-crypto — Cryptographic Operations
 
 **Add `metrics` dep to:** `backend/crates/sober-crypto/Cargo.toml`
 
@@ -312,7 +335,7 @@ Metric names follow design doc convention: `sober_<crate>_<noun>_<unit>`.
 
 Duration histograms deferred — crypto ops are sub-microsecond, histogram overhead may dominate.
 
-### C9. sober-mcp — MCP Tool Interop
+### A17. sober-mcp — MCP Tool Interop
 
 **Add `metrics` dep to:** `backend/crates/sober-mcp/Cargo.toml`
 
@@ -324,7 +347,7 @@ Duration histograms deferred — crypto ops are sub-microsecond, histogram overh
 - `sober_mcp_server_connections_active` (gauge) — labels: server
 - `sober_mcp_server_reconnects_total` (counter) — labels: server
 
-### C10. sober-sandbox — Process Sandboxing
+### A18. sober-sandbox — Process Sandboxing
 
 **Add `metrics` dep to:** `backend/crates/sober-sandbox/Cargo.toml`
 
@@ -335,7 +358,7 @@ Duration histograms deferred — crypto ops are sub-microsecond, histogram overh
 **Policy violations**:
 - `sober_sandbox_policy_violations_total` (counter) — labels: profile, violation
 
-### C11. sober-db — Connection Pool
+### A19. sober-db — Connection Pool
 
 **Add `metrics` dep to:** `backend/crates/sober-db/Cargo.toml`
 
@@ -345,7 +368,7 @@ Duration histograms deferred — crypto ops are sub-microsecond, histogram overh
 
 **Deferred**: per-query instrumentation (too invasive for this plan), Redis (not in use), Qdrant pool metrics.
 
-### C12. sober-skill — Skill Discovery & Activation
+### A20. sober-skill — Skill Discovery & Activation
 
 **Add `metrics` dep to:** `backend/crates/sober-skill/Cargo.toml`
 
@@ -359,7 +382,7 @@ Duration histograms deferred — crypto ops are sub-microsecond, histogram overh
 - `sober_skill_activation_total` (counter) — labels: status (success/not_found/already_active/error)
 - `sober_skill_activation_duration_seconds` (histogram)
 
-### C13. sober-workspace — Blob Store, Snapshots, Git Ops
+### A21. sober-workspace — Blob Store, Snapshots, Git Ops
 
 **Add `metrics` dep to:** `backend/crates/sober-workspace/Cargo.toml`
 
@@ -380,7 +403,7 @@ Duration histograms deferred — crypto ops are sub-microsecond, histogram overh
 **Git push** in `remote.rs` (`push_branch()`, line 38):
 - `sober_workspace_git_push_duration_seconds` (histogram) — labels: status
 
-### C14. metrics.toml files
+### A22. metrics.toml files
 
 Create a `metrics.toml` in each crate root documenting the metrics it emits (input for dashboard + alert generator). Follow the design doc format:
 
@@ -411,33 +434,6 @@ sober-mcp, sober-sandbox, sober-db, sober-plugin (declaration only — no instru
 
 ---
 
-## Stream D: Dashboard + Alert Generator Tool
-
-**Create:** `tools/dashboard-gen/Cargo.toml` (standalone, not in backend workspace)
-**Create:** `tools/dashboard-gen/src/main.rs`
-
-- Parse `metrics.toml` files (serde + toml crate)
-- Generate Grafana dashboard JSON per crate
-- Generate Prometheus alert rule YAML per crate (from `[[metrics.alerts]]` sections)
-- Panel type rules:
-  - `counter` (_total) → rate() timeseries
-  - `histogram` (_seconds, _bytes) → heatmap + p50/p95/p99 timeseries
-  - `gauge` (_active, _registered) → stat + timeseries
-- Histogram bucket defaults per suffix (see design doc), overridable via `buckets` field
-- Template variables from label definitions
-- `{{name}}` placeholder expansion in alert expressions
-- CLI: `--input <crates-dir>` `--dashboards-output <dir>` `--alerts-output <dir>`
-
----
-
-## Stream E: Justfile + Plan Lifecycle
-
-**Modify:** `justfile` — add `dashboards`, `observability-up`, `observability-down` commands
-
-**Move:** `docs/plans/pending/018-observability/` → `docs/plans/active/018-observability/` (first commit)
-
----
-
 ## Verification
 
 1. `cd backend && cargo build -q` — all crates compile
@@ -459,8 +455,8 @@ sober-mcp, sober-sandbox, sober-db, sober-plugin (declaration only — no instru
 
 | File | Action |
 |------|--------|
-| `backend/crates/sober-core/src/telemetry.rs` | Modify: simplify signature, add spawn_metrics_server, add gRPC propagation |
-| `backend/crates/sober-core/Cargo.toml` | Modify: add `tonic`, `tokio` deps |
+| `backend/crates/sober-core/src/telemetry.rs` | Modify: simplify signature, add spawn_metrics_server, add gRPC propagation (feature-gated) |
+| `backend/crates/sober-core/Cargo.toml` | Modify: add `tonic` (optional), `tokio` deps, `grpc-telemetry` feature |
 | `backend/crates/sober-api/src/main.rs` | Modify: replace init_tracing (lines 86-103), mount /metrics |
 | `backend/crates/sober-api/src/state.rs` | Modify: add trace interceptor to agent client (line 97) |
 | `backend/crates/sober-api/src/middleware/` | Modify/Create: HTTP metrics middleware |
