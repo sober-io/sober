@@ -107,6 +107,7 @@
 
 	const mergeToolResults = (rawMessages: Message[]): ChatMsg[] => {
 		const chatMessages = rawMessages.map(toChat);
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local non-reactive usage
 		const merged = new Set<number>();
 
 		// Pass 1: merge tool-role messages into parent assistant by tool_call_id.
