@@ -6,6 +6,7 @@
 pub mod audit;
 pub mod capability;
 pub mod error;
+pub mod host;
 pub mod host_fns;
 pub mod manifest;
 pub mod registry;

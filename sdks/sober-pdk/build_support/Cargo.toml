@@ -1,0 +1,9 @@
+[package]
+name = "sober-pdk-build"
+version = "0.1.0"
+edition = "2024"
+description = "Build-time helper for Sober plugins — reads plugin.toml and emits capability cfg flags"
+license = "MIT"
+
+[dependencies]
+toml = "0.8"
