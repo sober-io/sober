@@ -134,8 +134,10 @@ description = "Pings"
         assert_eq!(manifest.tools[0].name, "do_thing");
 
         let caps = manifest.capabilities.to_capabilities();
-        assert!(caps.contains(&crate::Capability::MemoryRead));
-        assert!(caps.contains(&crate::Capability::Network));
+        assert!(caps.contains(&crate::Capability::MemoryRead { scopes: vec![] }));
+        assert!(caps.contains(&crate::Capability::Network {
+            domains: vec!["api.example.com".into()],
+        }));
     }
 
     #[test]

@@ -13,22 +13,26 @@ use serde::{Deserialize, Serialize};
 
 /// A single capability that a plugin may request.
 ///
+/// Variants that carry restriction data provide the sandbox enforcer with
+/// the exact limits (allowed scopes, domains, paths, tools).  Variants
+/// without config are simple permission flags.
+///
 /// Serialized with a `kind` tag so it can appear in JSON audit logs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Capability {
     /// Read from the memory/context system.
-    MemoryRead,
+    MemoryRead { scopes: Vec<String> },
     /// Write to the memory/context system.
-    MemoryWrite,
+    MemoryWrite { scopes: Vec<String> },
     /// Make outbound network requests.
-    Network,
+    Network { domains: Vec<String> },
     /// Access the filesystem.
-    Filesystem,
+    Filesystem { paths: Vec<String> },
     /// Invoke an LLM provider.
     LlmCall,
     /// Call other tools/plugins.
-    ToolCall,
+    ToolCall { tools: Vec<String> },
     /// Read conversation history.
     ConversationRead,
     /// Expose or collect metrics.
@@ -161,26 +165,53 @@ pub struct CapabilitiesConfig {
 
 impl CapabilitiesConfig {
     /// Resolves the config into a flat list of enabled capabilities.
+    ///
+    /// When a capability has a `WithConfig` variant the restriction data is
+    /// propagated into the corresponding [`Capability`] variant.  Boolean-only
+    /// toggles produce variants with empty restriction vecs.
     pub fn to_capabilities(&self) -> Vec<Capability> {
         let mut caps = Vec::new();
-        if self.memory_read.is_enabled() {
-            caps.push(Capability::MemoryRead);
+
+        if let Cap::WithConfig(ref c) = self.memory_read {
+            caps.push(Capability::MemoryRead {
+                scopes: c.scopes.clone(),
+            });
+        } else if self.memory_read.is_enabled() {
+            caps.push(Capability::MemoryRead { scopes: vec![] });
         }
+
         if self.memory_write.is_enabled() {
-            caps.push(Capability::MemoryWrite);
+            caps.push(Capability::MemoryWrite { scopes: vec![] });
         }
-        if self.network.is_enabled() {
-            caps.push(Capability::Network);
+
+        if let Cap::WithConfig(ref c) = self.network {
+            caps.push(Capability::Network {
+                domains: c.allowed_hosts.clone(),
+            });
+        } else if self.network.is_enabled() {
+            caps.push(Capability::Network { domains: vec![] });
         }
-        if self.filesystem.is_enabled() {
-            caps.push(Capability::Filesystem);
+
+        if let Cap::WithConfig(ref c) = self.filesystem {
+            caps.push(Capability::Filesystem {
+                paths: c.allowed_paths.clone(),
+            });
+        } else if self.filesystem.is_enabled() {
+            caps.push(Capability::Filesystem { paths: vec![] });
         }
+
         if self.llm_call.is_enabled() {
             caps.push(Capability::LlmCall);
         }
-        if self.tool_call.is_enabled() {
-            caps.push(Capability::ToolCall);
+
+        if let Cap::WithConfig(ref c) = self.tool_call {
+            caps.push(Capability::ToolCall {
+                tools: c.allowed_tools.clone(),
+            });
+        } else if self.tool_call.is_enabled() {
+            caps.push(Capability::ToolCall { tools: vec![] });
         }
+
         if self.conversation_read.is_enabled() {
             caps.push(Capability::ConversationRead);
         }
@@ -240,10 +271,11 @@ mod tests {
 
         let caps = config.to_capabilities();
         assert_eq!(caps.len(), 3);
-        assert!(caps.contains(&Capability::MemoryRead));
-        assert!(caps.contains(&Capability::Network));
+        assert!(caps.contains(&Capability::MemoryRead { scopes: vec![] }));
+        assert!(caps.contains(&Capability::Network {
+            domains: vec!["api.example.com".into()]
+        }));
         assert!(caps.contains(&Capability::Metrics));
-        assert!(!caps.contains(&Capability::Filesystem));
     }
 
     #[test]
