@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-20 (revised)
 **Status:** Pending
-**Crates:** `sober-plugin`, `sober-plugin-gen`
+**Crates:** `sober-plugin`, `sober-plugin-gen`, `sober-pdk`
 
 ---
 
@@ -1150,6 +1150,22 @@ pub enum GenError {
 | `tracing` | Structured logging |
 | `thiserror` | Error types |
 
+### sober-pdk
+
+Guest-side SDK for WASM plugin authors. Lives in `backend/crates/sober-pdk/`.
+Compiles to `wasm32-wasi` (not the host target). Part of the workspace but
+excluded from `cargo build --workspace` via `default-members`.
+
+| Crate | Purpose |
+|-------|---------|
+| `extism-pdk` | Raw WASM host/guest plumbing |
+| `serde` / `serde_json` | Input/output serialization |
+| `toml` | Manifest parsing (build.rs) |
+
+Feature-gated modules (`network`, `key_value`, `secret_read`, etc.) are
+set automatically by `build.rs` reading `plugin.toml`. Plugin authors
+never set features manually.
+
 ### Dependency flow
 
 ```
@@ -1166,6 +1182,8 @@ sober-plugin -----> sober-mcp         (MCP execution delegation)
              -----> sober-skill       (skill loading delegation)
              -----> sober-sandbox     (pre-install test execution)
              -----> sober-core        (Tool trait, types)
+
+sober-pdk   -----> extism-pdk         (WASM guest SDK, different target)
 
 sober-plugin-gen -> sober-plugin      (compile + test)
                  -> sober-llm         (LLM generation)
