@@ -1,6 +1,6 @@
 [package]
 name = "sober-plugin"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 
 [dependencies]
@@ -13,6 +13,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["v7"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
+extism = "1.20"
 
 [dev-dependencies]
 pretty_assertions = "1"
