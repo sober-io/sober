@@ -9,12 +9,13 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{
     AgentMode, ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus,
-    MessageRole, UserStatus, WorkspaceState, WorktreeState,
+    MessageRole, PluginKind, PluginOrigin, PluginScope, PluginStatus, UserStatus, WorkspaceState,
+    WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
-    MessageId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId, WorkspaceRepoId,
-    WorktreeId,
+    MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId,
+    WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -478,6 +479,64 @@ pub struct StoredDek {
     pub created_at: DateTime<Utc>,
     /// When the DEK was last rotated.
     pub rotated_at: Option<DateTime<Utc>>,
+}
+
+/// A registered plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Plugin {
+    /// Unique identifier.
+    pub id: PluginId,
+    /// Display name.
+    pub name: String,
+    /// Plugin kind (MCP, Skill, WASM).
+    pub kind: PluginKind,
+    /// Semantic version string.
+    pub version: Option<String>,
+    /// Human-readable description.
+    pub description: Option<String>,
+    /// How this plugin was discovered/installed.
+    pub origin: PluginOrigin,
+    /// Availability scope (system, user, workspace).
+    pub scope: PluginScope,
+    /// The user this plugin belongs to (for user-scoped plugins).
+    pub owner_id: Option<UserId>,
+    /// The workspace this plugin belongs to (for workspace-scoped plugins).
+    pub workspace_id: Option<WorkspaceId>,
+    /// Lifecycle status.
+    pub status: PluginStatus,
+    /// Plugin-specific configuration (JSON).
+    pub config: serde_json::Value,
+    /// The user who installed this plugin.
+    pub installed_by: Option<UserId>,
+    /// When the plugin was installed.
+    pub installed_at: DateTime<Utc>,
+    /// When the plugin was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An audit log entry for a plugin security audit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginAuditLog {
+    /// Unique identifier.
+    pub id: uuid::Uuid,
+    /// The plugin that was audited (None if rejected before creation).
+    pub plugin_id: Option<PluginId>,
+    /// Plugin name at the time of audit.
+    pub plugin_name: String,
+    /// Plugin kind at the time of audit.
+    pub kind: PluginKind,
+    /// Plugin origin at the time of audit.
+    pub origin: PluginOrigin,
+    /// Audit pipeline stages and their results (JSON).
+    pub stages: serde_json::Value,
+    /// Overall verdict (e.g. "approved", "rejected").
+    pub verdict: String,
+    /// Reason for rejection, if applicable.
+    pub rejection_reason: Option<String>,
+    /// When the audit was performed.
+    pub audited_at: DateTime<Utc>,
+    /// The user who triggered the audit (None for agent-initiated).
+    pub audited_by: Option<UserId>,
 }
 
 #[cfg(test)]
