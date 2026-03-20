@@ -173,11 +173,15 @@ CREATE TABLE plugins (
     config         JSONB NOT NULL DEFAULT '{}',
     installed_by   UUID REFERENCES users(id),
     installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-    UNIQUE(name, scope,
-           COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
-           COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000'))
+-- PostgreSQL does not allow function expressions in inline UNIQUE constraints.
+-- Use a unique index instead.
+CREATE UNIQUE INDEX idx_plugins_unique_name ON plugins (
+    name, scope,
+    COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+    COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000')
 );
 ```
 
@@ -192,7 +196,7 @@ CREATE TABLE plugins (
 ```sql
 CREATE TABLE plugin_audit_logs (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    plugin_id        UUID REFERENCES plugins(id),
+    plugin_id        UUID REFERENCES plugins(id) ON DELETE SET NULL,
     plugin_name      TEXT NOT NULL,
     kind             plugin_kind NOT NULL,
     origin           plugin_origin NOT NULL,
@@ -854,7 +858,6 @@ pub enum AuditVerdict {
 ```rust
 pub struct PluginRegistry<P: PluginRepo> {
     db: P,
-    audit: AuditPipeline,
 }
 
 impl<P: PluginRepo> PluginRegistry<P> {
@@ -862,7 +865,9 @@ impl<P: PluginRepo> PluginRegistry<P> {
     pub async fn uninstall(&self, plugin_id: PluginId) -> Result<(), PluginError>;
     pub async fn enable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
     pub async fn disable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
-    pub async fn list(&self, filter: PluginFilter) -> Result<Vec<PluginInfo>, PluginError>;
+    pub async fn list(&self, filter: PluginFilter) -> Result<Vec<Plugin>, PluginError>;
+    pub async fn get(&self, id: PluginId) -> Result<Plugin, PluginError>;
+    pub async fn audit_logs(&self, plugin_id: PluginId, limit: i64) -> Result<Vec<PluginAuditLog>, PluginError>;
 }
 ```
 

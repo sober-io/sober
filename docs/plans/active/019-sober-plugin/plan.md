@@ -290,14 +290,16 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
     ) -> impl Future<Output = Result<Plugin, AppError>> + Send;
 
-    /// Finds a plugin by name, scope, and owner.
+    /// Finds a plugin by name.
+    ///
+    /// **Implementation note:** Simplified from the original design which
+    /// accepted scope/owner_id/workspace_id. Duplicate checking by name alone
+    /// is sufficient for Plan A; scope-aware lookup will be added in Plan C
+    /// when wiring the API (using PluginFilter-based list queries).
     fn get_by_name(
         &self,
         name: &str,
-        scope: PluginScope,
-        owner_id: Option<UserId>,
-        workspace_id: Option<WorkspaceId>,
-    ) -> impl Future<Output = Result<Option<Plugin>, AppError>> + Send;
+    ) -> impl Future<Output = Result<Plugin, AppError>> + Send;
 
     /// Lists plugins with optional filters.
     fn list(
@@ -331,23 +333,31 @@ pub trait PluginRepo: Send + Sync {
         input: CreatePluginAuditLog,
     ) -> impl Future<Output = Result<PluginAuditLog, AppError>> + Send;
 
-    /// Lists audit logs for a plugin.
+    /// Lists audit logs for a plugin, newest first.
     fn list_audit_logs(
         &self,
         plugin_id: PluginId,
+        limit: i64,
     ) -> impl Future<Output = Result<Vec<PluginAuditLog>, AppError>> + Send;
 
-    /// Gets the KV data blob for a plugin.
+    /// Gets a plugin-scoped key-value data entry.
+    ///
+    /// **Implementation note:** Changed from whole-blob to per-key access
+    /// to match the host function design (host_kv_get/set operate on keys).
+    /// The `plugin_kv_data` table still stores a single JSONB blob per plugin,
+    /// but the repo operates on individual keys via PostgreSQL JSONB operators.
     fn get_kv_data(
         &self,
         plugin_id: PluginId,
-    ) -> impl Future<Output = Result<serde_json::Value, AppError>> + Send;
+        key: &str,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, AppError>> + Send;
 
-    /// Upserts the KV data blob for a plugin.
+    /// Sets a plugin-scoped key-value data entry.
     fn set_kv_data(
         &self,
         plugin_id: PluginId,
-        data: serde_json::Value,
+        key: &str,
+        value: serde_json::Value,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 ```
@@ -426,11 +436,14 @@ CREATE TABLE plugins (
     config         JSONB NOT NULL DEFAULT '{}',
     installed_by   UUID REFERENCES users(id),
     installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-    UNIQUE(name, scope,
-           COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
-           COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000'))
+-- PostgreSQL does not allow function expressions in inline UNIQUE constraints.
+CREATE UNIQUE INDEX idx_plugins_unique_name ON plugins (
+    name, scope,
+    COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+    COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000')
 );
 
 CREATE INDEX idx_plugins_owner ON plugins (owner_id) WHERE owner_id IS NOT NULL;
@@ -2018,3 +2031,48 @@ Run: `cargo test --workspace -q`
 - [ ] `cargo clippy -p sober-plugin -q -- -D warnings` reports zero warnings
 - [ ] `cargo test -p sober-plugin -q` passes
 - [ ] `cargo test --workspace -q` passes (no regressions)
+
+---
+
+## Implementation Deviations
+
+The following changes were made during implementation:
+
+### 1. UNIQUE constraint → unique index (migration)
+
+PostgreSQL does not support function expressions (like `COALESCE`) in inline
+`UNIQUE` table constraints. Replaced with `CREATE UNIQUE INDEX idx_plugins_unique_name`
+which provides the same uniqueness guarantee via an expression index.
+
+### 2. `get_by_name` simplified (PluginRepo trait)
+
+**Plan:** `get_by_name(name, scope, owner_id, workspace_id) -> Option<Plugin>`
+**Implemented:** `get_by_name(name) -> Plugin` (returns `NotFound` error if missing)
+
+Rationale: The name-only lookup is sufficient for Plan A's duplicate check in
+`PluginRegistry::install()`. Scope-aware lookup can be added in Plan C when
+wiring the HTTP API, using `PluginFilter`-based list queries for multi-scope
+resolution. The unique index still enforces scope-aware uniqueness at the DB level.
+
+### 3. KV data — per-key access instead of whole-blob (PluginRepo trait)
+
+**Plan:** `get_kv_data(plugin_id) -> Value`, `set_kv_data(plugin_id, data) -> ()`
+**Implemented:** `get_kv_data(plugin_id, key) -> Option<Value>`, `set_kv_data(plugin_id, key, value) -> ()`
+
+Rationale: Matches the host function design (`host_kv_get(key)`, `host_kv_set(key, value)`)
+more directly. The DB still stores a single JSONB blob per plugin; the repo
+operates on individual keys using PostgreSQL's `->` operator and `||` merge.
+
+### 4. `list_audit_logs` takes a `limit` parameter
+
+**Plan:** `list_audit_logs(plugin_id) -> Vec<PluginAuditLog>`
+**Implemented:** `list_audit_logs(plugin_id, limit) -> Vec<PluginAuditLog>`
+
+Rationale: Avoids unbounded result sets for plugins with many audit entries.
+
+### 5. `PluginRegistry` does not hold `AuditPipeline` as a field
+
+**Plan:** `PluginRegistry { db, audit }` with `AuditPipeline` as a field.
+**Implemented:** `PluginRegistry { db }` calling `AuditPipeline::audit()` as a static method.
+
+Rationale: `AuditPipeline` is stateless (no fields); a static method is simpler.
