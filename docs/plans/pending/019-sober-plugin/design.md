@@ -496,12 +496,18 @@ differ by kind.
 
 | Stage | MCP | Skill | WASM |
 |-------|-----|-------|------|
-| **Validate** | Config well-formed | Frontmatter valid | Manifest parses, capabilities well-formed |
-| **Sandbox** | bwrap spawn test | N/A | Extism loads with declared capabilities |
+| **Validate** | Config well-formed (command, args, env shape) | Frontmatter valid | Manifest parses, capabilities well-formed |
+| **Sandbox** | N/A | N/A | Extism loads with declared capabilities |
 | **Capability** | N/A | N/A | Only declared host functions wired |
-| **Test** | Handshake succeeds | N/A | Embedded tests pass in Extism |
+| **Test** | N/A | N/A | Embedded tests pass in Extism |
 | **Static** | N/A | Content check (stub) | AST analysis (stub) |
 | **Behavioral** | N/A | N/A | Runtime monitoring (stub) |
+
+MCP servers only run the **Validate** stage at install time. No spawn or
+handshake test --- MCP servers may depend on runtime conditions (network,
+API keys, env vars) that are unavailable during configuration. Connectivity
+is verified on first use by `McpPool`. If the server fails to start or
+handshake, the error surfaces at execution time.
 
 ### Approval thresholds
 
@@ -509,7 +515,7 @@ differ by kind.
 |--------|------|
 | `System` | Auto-approved (pre-audited, shipped with Sober) |
 | `Agent` | Auto-approved if all stages pass AND capabilities subset of agent's access. Otherwise `PendingApproval`. |
-| `User` | `PendingApproval` after stages pass (user must confirm). `Rejected` if any stage fails. |
+| `User` | WASM: `PendingApproval` after stages pass (user must confirm). MCP/Skill: auto-approved after validation (user explicitly initiated the install). `Rejected` if any stage fails. |
 
 ### Types
 
