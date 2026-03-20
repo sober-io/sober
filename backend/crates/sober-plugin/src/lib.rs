@@ -13,4 +13,4 @@ pub use audit::{AuditPipeline, AuditReport, AuditVerdict, StageResult};
 pub use capability::{Cap, CapabilitiesConfig, Capability};
 pub use error::PluginError;
 pub use manifest::PluginManifest;
-// pub use registry::PluginRegistry;
+pub use registry::PluginRegistry;
