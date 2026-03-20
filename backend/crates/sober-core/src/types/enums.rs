@@ -265,6 +265,82 @@ pub enum ArtifactKind {
     Trace,
 }
 
+/// The kind/type of a plugin.
+///
+/// Maps to the `plugin_kind` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "plugin_kind", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginKind {
+    /// An MCP (Model Context Protocol) server plugin.
+    Mcp,
+    /// A skill plugin (custom agent capability).
+    Skill,
+    /// A WebAssembly sandbox plugin.
+    Wasm,
+}
+
+/// How a plugin was discovered/installed.
+///
+/// Maps to the `plugin_origin` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "plugin_origin", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginOrigin {
+    /// Shipped with the system.
+    System,
+    /// Discovered or installed by the agent autonomously.
+    Agent,
+    /// Installed by a user.
+    User,
+}
+
+/// The scope at which a plugin is available.
+///
+/// Maps to the `plugin_scope` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "plugin_scope", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginScope {
+    /// Available system-wide.
+    System,
+    /// Available to a specific user.
+    User,
+    /// Available within a specific workspace.
+    Workspace,
+}
+
+/// Lifecycle status of a plugin.
+///
+/// Maps to the `plugin_status` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "plugin_status", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginStatus {
+    /// Plugin is active and available for use.
+    Enabled,
+    /// Plugin is installed but not active.
+    Disabled,
+    /// Plugin has failed and is not usable.
+    Failed,
+}
+
 /// Authorization role kind.
 ///
 /// Known roles have dedicated variants for compile-time safety.

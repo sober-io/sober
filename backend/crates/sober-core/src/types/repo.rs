@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::domain::*;
 use super::enums::{
-    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, RoleKind,
-    UserStatus,
+    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, PluginStatus,
+    RoleKind, UserStatus,
 };
 use super::ids::*;
 use super::input::*;
@@ -692,4 +692,67 @@ pub trait SecretRepo: Send + Sync {
         user_id: UserId,
         conversation_id: Option<ConversationId>,
     ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
+}
+
+/// Plugin registry operations.
+pub trait PluginRepo: Send + Sync {
+    /// Creates a new plugin.
+    fn create(&self, input: CreatePlugin) -> impl Future<Output = Result<Plugin, AppError>> + Send;
+
+    /// Finds a plugin by ID.
+    fn get_by_id(&self, id: PluginId) -> impl Future<Output = Result<Plugin, AppError>> + Send;
+
+    /// Finds a plugin by name.
+    fn get_by_name(&self, name: &str) -> impl Future<Output = Result<Plugin, AppError>> + Send;
+
+    /// Lists plugins matching the given filter.
+    fn list(
+        &self,
+        filter: PluginFilter,
+    ) -> impl Future<Output = Result<Vec<Plugin>, AppError>> + Send;
+
+    /// Updates the status of a plugin.
+    fn update_status(
+        &self,
+        id: PluginId,
+        status: PluginStatus,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates the configuration of a plugin.
+    fn update_config(
+        &self,
+        id: PluginId,
+        config: serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes a plugin by ID.
+    fn delete(&self, id: PluginId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Creates a plugin audit log entry.
+    fn create_audit_log(
+        &self,
+        input: CreatePluginAuditLog,
+    ) -> impl Future<Output = Result<PluginAuditLog, AppError>> + Send;
+
+    /// Lists audit log entries for a plugin, newest first.
+    fn list_audit_logs(
+        &self,
+        plugin_id: PluginId,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<PluginAuditLog>, AppError>> + Send;
+
+    /// Gets a plugin-scoped key-value data entry.
+    fn get_kv_data(
+        &self,
+        plugin_id: PluginId,
+        key: &str,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, AppError>> + Send;
+
+    /// Sets a plugin-scoped key-value data entry.
+    fn set_kv_data(
+        &self,
+        plugin_id: PluginId,
+        key: &str,
+        value: serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }

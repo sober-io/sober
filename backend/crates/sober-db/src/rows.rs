@@ -7,13 +7,14 @@ use chrono::{DateTime, Utc};
 use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
     ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus,
-    McpServerId, MessageId, MessageRole, RoleId, ScopeId, SecretId, SessionId, TagId, UserId,
-    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    McpServerId, MessageId, MessageRole, PluginId, PluginKind, PluginOrigin, PluginScope,
+    PluginStatus, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId,
+    WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
-    JobRun, McpServerConfig, Message, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag,
-    User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    JobRun, McpServerConfig, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
+    Session, StoredDek, Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 use uuid::Uuid;
 
@@ -615,6 +616,76 @@ pub(crate) struct ConversationWithUnreadRow {
     pub unread_count: i32,
     pub workspace_name: Option<String>,
     pub workspace_path: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct PluginRow {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: PluginKind,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub origin: PluginOrigin,
+    pub scope: PluginScope,
+    pub owner_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
+    pub status: PluginStatus,
+    pub config: serde_json::Value,
+    pub installed_by: Option<Uuid>,
+    pub installed_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<PluginRow> for Plugin {
+    fn from(row: PluginRow) -> Self {
+        Plugin {
+            id: PluginId::from_uuid(row.id),
+            name: row.name,
+            kind: row.kind,
+            version: row.version,
+            description: row.description,
+            origin: row.origin,
+            scope: row.scope,
+            owner_id: row.owner_id.map(UserId::from_uuid),
+            workspace_id: row.workspace_id.map(WorkspaceId::from_uuid),
+            status: row.status,
+            config: row.config,
+            installed_by: row.installed_by.map(UserId::from_uuid),
+            installed_at: row.installed_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct PluginAuditLogRow {
+    pub id: Uuid,
+    pub plugin_id: Option<Uuid>,
+    pub plugin_name: String,
+    pub kind: PluginKind,
+    pub origin: PluginOrigin,
+    pub stages: serde_json::Value,
+    pub verdict: String,
+    pub rejection_reason: Option<String>,
+    pub audited_at: DateTime<Utc>,
+    pub audited_by: Option<Uuid>,
+}
+
+impl From<PluginAuditLogRow> for PluginAuditLog {
+    fn from(row: PluginAuditLogRow) -> Self {
+        PluginAuditLog {
+            id: row.id,
+            plugin_id: row.plugin_id.map(PluginId::from_uuid),
+            plugin_name: row.plugin_name,
+            kind: row.kind,
+            origin: row.origin,
+            stages: row.stages,
+            verdict: row.verdict,
+            rejection_reason: row.rejection_reason,
+            audited_at: row.audited_at,
+            audited_by: row.audited_by.map(UserId::from_uuid),
+        }
+    }
 }
 
 #[cfg(test)]

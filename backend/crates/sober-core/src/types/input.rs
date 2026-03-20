@@ -7,8 +7,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::enums::{ArtifactKind, ArtifactState};
-use super::ids::{ArtifactId, ConversationId, UserId, WorkspaceId};
+use super::enums::{
+    ArtifactKind, ArtifactState, PluginKind, PluginOrigin, PluginScope, PluginStatus,
+};
+use super::ids::{ArtifactId, ConversationId, PluginId, UserId, WorkspaceId};
 
 /// Input for creating a new user.
 #[derive(Debug, Clone)]
@@ -234,4 +236,69 @@ pub struct UpdateSecret {
     pub encrypted_data: Option<Vec<u8>>,
     /// New priority (`Some(None)` clears the priority).
     pub priority: Option<Option<i32>>,
+}
+
+/// Input for creating a new plugin.
+#[derive(Debug, Clone)]
+pub struct CreatePlugin {
+    /// Display name.
+    pub name: String,
+    /// Plugin kind (MCP, Skill, WASM).
+    pub kind: PluginKind,
+    /// Semantic version string.
+    pub version: Option<String>,
+    /// Human-readable description.
+    pub description: Option<String>,
+    /// How this plugin was discovered/installed.
+    pub origin: PluginOrigin,
+    /// Availability scope (system, user, workspace).
+    pub scope: PluginScope,
+    /// The user this plugin belongs to (for user-scoped plugins).
+    pub owner_id: Option<UserId>,
+    /// The workspace this plugin belongs to (for workspace-scoped plugins).
+    pub workspace_id: Option<WorkspaceId>,
+    /// Initial lifecycle status.
+    pub status: PluginStatus,
+    /// Plugin-specific configuration (JSON).
+    pub config: serde_json::Value,
+    /// The user who installed this plugin.
+    pub installed_by: Option<UserId>,
+}
+
+/// Input for creating a plugin audit log entry.
+#[derive(Debug, Clone)]
+pub struct CreatePluginAuditLog {
+    /// The plugin that was audited (None if rejected before creation).
+    pub plugin_id: Option<PluginId>,
+    /// Plugin name at the time of audit.
+    pub plugin_name: String,
+    /// Plugin kind at the time of audit.
+    pub kind: PluginKind,
+    /// Plugin origin at the time of audit.
+    pub origin: PluginOrigin,
+    /// Audit pipeline stages and their results (JSON).
+    pub stages: serde_json::Value,
+    /// Overall verdict (e.g. "approved", "rejected").
+    pub verdict: String,
+    /// Reason for rejection, if applicable.
+    pub rejection_reason: Option<String>,
+    /// The user who triggered the audit (None for agent-initiated).
+    pub audited_by: Option<UserId>,
+}
+
+/// Filter for querying plugins.
+#[derive(Debug, Clone, Default)]
+pub struct PluginFilter {
+    /// Filter by name (exact match).
+    pub name: Option<String>,
+    /// Filter by plugin kind.
+    pub kind: Option<PluginKind>,
+    /// Filter by scope.
+    pub scope: Option<PluginScope>,
+    /// Filter by owner.
+    pub owner_id: Option<UserId>,
+    /// Filter by workspace.
+    pub workspace_id: Option<WorkspaceId>,
+    /// Filter by status.
+    pub status: Option<PluginStatus>,
 }
