@@ -10,6 +10,7 @@ pub mod host;
 pub mod host_fns;
 pub mod manifest;
 pub mod registry;
+pub mod tool;
 
 pub use audit::{AuditPipeline, AuditReport, AuditVerdict, StageResult};
 pub use capability::{Cap, CapabilitiesConfig, Capability};
