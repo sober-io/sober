@@ -1,127 +1,391 @@
-# 019 --- sober-plugin & sober-plugin-gen
+# 019 --- Unified Plugin System
 
-**Date:** 2026-03-07
-**Status:** Pending (post-v1)
+**Date:** 2026-03-20 (revised)
+**Status:** Pending
 **Crates:** `sober-plugin`, `sober-plugin-gen`
 
 ---
 
 ## Overview
 
-Two crates that provide a WASM-based plugin system for extending the agent's
-capabilities at runtime.
+A unified plugin system that brings all agent extensibility under one registry,
+lifecycle, and audit pipeline. Three plugin kinds --- MCP (external processes),
+Skills (markdown prompt injection), and WASM (compiled in-process modules) ---
+share a single `PluginManager` with type-aware behavior.
 
-- **`sober-plugin`** --- Runtime: plugin registry, Extism WASM host, capability
-  enforcement, progressive audit pipeline, plugin loading and execution.
-- **`sober-plugin-gen`** --- Generation: LLM-powered plugin source generation
-  with test verification, template scaffolding, compilation to WASM, source
-  management via git.
+This is a revision of the original 019 plan. The original designed WASM plugins
+as a standalone system. Since then, `sober-mcp` and `sober-skill` have been
+fully implemented. This revision wraps both under `sober-plugin` and adds WASM
+support, creating one coordinated system.
 
-Plugins are distinct from MCP servers (`sober-mcp`). MCP handles external
-processes communicating over stdio. Plugins are compiled WASM modules running
-inside the Sober process via Extism, with typed host/guest interfaces and
-capability-based isolation.
+**Key changes from original design:**
 
-**Priority:** Post-v1. Nothing on the v1 critical path depends on plugins.
-The agent uses the `Tool` trait (sober-core), MCP tools (sober-mcp), and
-built-in tools without any plugin infrastructure.
+- `sober-plugin` wraps `sober-mcp` and `sober-skill` (does not absorb them)
+- Unified `plugins` DB table replaces `mcp_servers`; skills are registered on
+  filesystem discovery
+- Type-aware audit pipeline with kind-specific stages
+- Self-evolution generates both Skills and WASM plugins (not WASM-only)
+- MCP servers remain human-managed (no agent self-evolution for MCP)
+- Expanded capability set with phased implementation
 
----
-
-## 1. Plugin Origins & Trust
-
-Plugins enter the system from three sources with different trust levels:
-
-| Origin | Description | Approval |
-|--------|-------------|----------|
-| System | Shipped with Sober, read-only | Pre-approved |
-| Agent | Agent identifies a repeated pattern and proposes a plugin | Auto-approve if capabilities are a subset of agent's existing access; otherwise admin approval |
-| User/External | User or admin provides a plugin (source or pre-compiled WASM) | Always requires explicit user approval after audit |
-
-Both agent-generated and user-installed plugins go through the same audit
-pipeline. The difference is the approval threshold.
-
-### Self-evolution
-
-The agent can autonomously propose plugins when it identifies predictable,
-repeated patterns that would be more efficient as deterministic WASM code
-than repeated LLM calls. The agent decides *what* and *why* (using LLM
-reasoning), then delegates the mechanical work to `sober-plugin-gen`. The
-agent proposes a storage scope (user or workspace) based on context; the
-approval step confirms.
+**Priority:** Post-v1. Nothing on the v1 critical path depends on this.
 
 ---
 
-## 2. Storage & Resolution
+## 1. Core Model
 
-### Three-layer plugin storage
+A **plugin** is any extension to the agent's capabilities.
 
-Mirrors the SOUL.md resolution pattern:
+### Plugin kinds
+
+| Kind | Execution | Isolation | Source of Truth |
+|------|-----------|-----------|-----------------|
+| `Mcp` | External process, stdio | bwrap (process sandbox) | PostgreSQL |
+| `Skill` | Prompt injection (markdown) | None needed (read-only text) | Filesystem (DB tracks lifecycle state) |
+| `Wasm` | In-process, Extism | WASM sandbox (capability-based) | PostgreSQL + filesystem |
+
+### Enums
+
+```rust
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginKind { Mcp, Skill, Wasm }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginOrigin { System, Agent, User }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginScope { System, User, Workspace }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginStatus { Installed, Enabled, Disabled, Failed }
+```
+
+### Lifecycle
 
 ```
-system plugins (/usr/share/sober/plugins/) --- read-only, shipped
-  -> user plugins (~/.sober/plugins/)
-    -> workspace plugins (.sober/plugins/)
+DISCOVER --> AUDIT --> INSTALL --> ENABLED <--> DISABLED --> UNINSTALL
 ```
 
-Workspace overrides user, user overrides system. Same-name plugin at a higher
-layer shadows the lower one.
-
-### Filesystem layout
-
-```
-<scope-root>/plugins/
-  <plugin-name>/
-    src/          # git-managed source (Rust or TypeScript)
-    plugin.wasm   # compiled artifact (ephemeral, rebuilt from source)
-```
-
-System plugins omit the `src/` directory --- they ship as pre-compiled WASM.
-
-### Storage backends
-
-| Backend | What | Purpose |
-|---------|------|---------|
-| Git | Plugin source code | Version history, diffs, source of truth |
-| PostgreSQL | Plugin metadata, audit logs | Operational state, queries |
-| Filesystem | Compiled WASM artifacts | Runtime loading (ephemeral, rebuilt from source) |
+All plugin kinds share the same lifecycle. Audit stages differ by kind.
 
 ---
 
-## 3. Plugin Format
+## 2. Crate Architecture
 
-### Manifest (`plugin.toml`)
+```
+sober-plugin (unified registry, lifecycle, audit, WASM host)
+  +-- depends on: sober-mcp     (delegates MCP execution)
+  +-- depends on: sober-skill   (delegates skill loading/activation)
+  +-- depends on: sober-sandbox (WASM pre-install test execution)
+  +-- depends on: sober-core    (Tool trait, AppError, repo traits)
+  +-- new code:   Extism host, capability system, manifest, audit pipeline
+
+sober-plugin-gen (separate crate -- generation factory)
+  +-- depends on: sober-plugin  (compile + test via Extism host)
+  +-- depends on: sober-llm    (LLM-powered code generation)
+  +-- generates:  Skills (markdown) and WASM plugins (Rust source -> compiled)
+```
+
+### Changes to existing crates
+
+| Crate | Change |
+|-------|--------|
+| `sober-core` | Add `PluginRepo` trait, `PluginId`, plugin domain types |
+| `sober-db` | Add `PgPluginRepo`. Migration: create `plugins` table, migrate `mcp_servers` data |
+| `sober-agent` | `ToolBootstrap` uses `PluginManager` instead of direct `McpPool` + `SkillLoader` |
+| `sober-api` | Unified `/api/v1/plugins` routes replace separate MCP and Skill routes |
+| `sober-mcp` | No changes (sober-plugin wraps it) |
+| `sober-skill` | No changes (sober-plugin wraps it) |
+
+### PluginManager
+
+Central coordinating type:
+
+```rust
+pub struct PluginManager<P: PluginRepo> {
+    db: P,
+    mcp_pool: McpPool,
+    skill_loader: SkillLoader,
+    audit: AuditPipeline,
+    // WASM hosts loaded on demand
+}
+```
+
+---
+
+## 3. Database Schema
+
+### plugins table
+
+Replaces `mcp_servers`. Tracks all three plugin kinds.
+
+```sql
+CREATE TYPE plugin_kind AS ENUM ('mcp', 'skill', 'wasm');
+CREATE TYPE plugin_origin AS ENUM ('system', 'agent', 'user');
+CREATE TYPE plugin_scope AS ENUM ('system', 'user', 'workspace');
+CREATE TYPE plugin_status AS ENUM ('installed', 'enabled', 'disabled', 'failed');
+
+CREATE TABLE plugins (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name           TEXT NOT NULL,
+    kind           plugin_kind NOT NULL,
+    version        TEXT,
+    description    TEXT,
+    origin         plugin_origin NOT NULL DEFAULT 'user',
+    scope          plugin_scope NOT NULL,
+    owner_id       UUID REFERENCES users(id),
+    workspace_id   UUID REFERENCES workspaces(id),
+    status         plugin_status NOT NULL DEFAULT 'installed',
+    config         JSONB NOT NULL DEFAULT '{}',
+    installed_by   UUID REFERENCES users(id),
+    installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE(name, scope,
+           COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+           COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000'))
+);
+```
+
+**`config` JSONB by kind:**
+
+- MCP: `{ "command": "...", "args": [...], "env": {...} }`
+- Skill: `{ "path": "/absolute/path/to/SKILL.md" }`
+- WASM: `{ "wasm_hash": "...", "capabilities": [...] }`
+
+### plugin_audit_logs table
+
+```sql
+CREATE TABLE plugin_audit_logs (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plugin_id        UUID REFERENCES plugins(id),
+    plugin_name      TEXT NOT NULL,
+    kind             plugin_kind NOT NULL,
+    origin           plugin_origin NOT NULL,
+    stages           JSONB NOT NULL,
+    verdict          TEXT NOT NULL,
+    rejection_reason TEXT,
+    audited_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    audited_by       UUID REFERENCES users(id)
+);
+```
+
+### Migration strategy
+
+1. Create `plugins` table and `plugin_audit_logs` table
+2. Insert existing `mcp_servers` rows into `plugins` with `kind = 'mcp'`
+3. Drop `mcp_servers` table
+4. Skills are registered on discovery by `PluginManager` (no data migration)
+
+---
+
+## 4. Capability System (WASM only)
+
+Capabilities control which host functions are wired into a WASM plugin's
+Extism instance. No capability declared = no host function available = plugin
+physically cannot perform the action.
+
+MCP and Skill plugins do not use the capability system. MCP has its own
+sandbox policy (bwrap). Skills are read-only prompt text.
+
+### Capability enum
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum Capability {
+    /// Read from vector memory (paginated).
+    MemoryRead { scopes: Vec<String> },
+    /// Write to vector memory.
+    MemoryWrite { scopes: Vec<String> },
+    /// HTTP requests to allowed domains.
+    Network { domains: Vec<String> },
+    /// Read/write workspace files at allowed paths.
+    Filesystem { paths: Vec<PathBuf> },
+    /// Call LLM for reasoning.
+    LlmCall,
+    /// Invoke other registered tools by name.
+    ToolCall { tools: Vec<String> },
+    /// Read conversation messages (paginated).
+    ConversationRead,
+    /// Emit metrics (counters, gauges, histograms).
+    Metrics,
+    /// Read decrypted secrets by name.
+    SecretRead,
+    /// Plugin-local persistent key-value store.
+    KeyValue,
+    /// Schedule future self-invocations.
+    Schedule,
+}
+```
+
+### Host functions
+
+**Always available (no capability gate):**
+
+| Function | Purpose |
+|----------|---------|
+| `host_log(level, message, fields)` | Structured logging into tracing |
+
+**Capability-gated:**
+
+| Capability | Host Function | Signature |
+|-----------|---------------|-----------|
+| `Network` | `host_http_request` | `(method, url, headers, body) -> response` |
+| `ToolCall` | `host_call_tool` | `(tool_name, input_json) -> output` |
+| `SecretRead` | `host_read_secret` | `(name) -> value` |
+| `Metrics` | `host_emit_metric` | `(name, kind, value, labels) -> ()` |
+| `KeyValue` | `host_kv_get` / `host_kv_set` | `(key) -> value` / `(key, value) -> ()` |
+| `MemoryRead` | `host_memory_query` | `(scope, query, cursor, limit) -> Page<MemoryChunk>` |
+| `MemoryWrite` | `host_memory_write` | `(scope, key, value) -> ()` |
+| `ConversationRead` | `host_conversation_read` | `(conversation_id, cursor, limit) -> Page<Message>` |
+| `Schedule` | `host_schedule` | `(cron_or_interval, input_json) -> job_id` |
+| `Filesystem` | `host_fs_read` / `host_fs_write` | `(path) -> bytes` / `(path, bytes) -> ()` |
+| `LlmCall` | `host_llm_complete` | `(prompt, max_tokens) -> text` |
+
+### Paginated responses
+
+```rust
+struct Page<T> {
+    items: Vec<T>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+```
+
+### Metrics declaration in manifest
+
+Plugins with the `Metrics` capability must declare their metrics:
+
+```toml
+[capabilities]
+metrics = true
+
+[[metrics]]
+name = "plugin_items_processed"
+kind = "counter"
+description = "Number of items processed"
+```
+
+The host function validates emitted metrics match the declared set.
+
+### Implementation phases
+
+All capabilities are defined from day one (manifest format is stable).
+Host function implementations are phased:
+
+| Phase | Functional Capabilities |
+|-------|------------------------|
+| Phase 1 | `Network`, `ToolCall`, `SecretRead`, `Metrics`, `KeyValue` |
+| Phase 2 | `MemoryRead`, `MemoryWrite`, `ConversationRead`, `Schedule` |
+| Phase 3 | `Filesystem`, `LlmCall` |
+
+Unimplemented host functions return
+`PluginError::CapabilityDenied("capability not yet connected: ...")`.
+
+### Subset check
+
+Used for agent-origin auto-approval:
+
+```rust
+impl Capability {
+    pub fn is_subset_of(requested: &[Capability], available: &[Capability]) -> bool;
+}
+```
+
+---
+
+## 5. Extism Plugin Host
+
+Extism (built on wasmtime) is the WASM runtime. Handles host/guest boundary
+plumbing, memory allocation, serialization.
+
+```rust
+pub struct PluginHost {
+    manifest: PluginManifest,
+    plugin: extism::Plugin,
+}
+
+impl PluginHost {
+    /// Load WASM bytes, wire host functions for declared capabilities.
+    pub fn load(
+        wasm_bytes: &[u8],
+        manifest: &PluginManifest,
+    ) -> Result<Self, PluginError>;
+
+    /// Call a tool function exported by the plugin.
+    pub fn call_tool(
+        &mut self,
+        tool_name: &str,
+        input: serde_json::Value,
+    ) -> Result<ToolOutput, PluginError>;
+}
+```
+
+### PluginTool
+
+Each `[[tools]]` entry in the manifest becomes a `PluginTool` implementing
+the `Tool` trait from sober-core:
+
+```rust
+pub struct PluginTool {
+    host: Arc<Mutex<PluginHost>>,
+    tool_entry: String,
+    metadata: ToolMetadata,
+}
+
+impl Tool for PluginTool {
+    fn metadata(&self) -> ToolMetadata { ... }
+    fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> { ... }
+}
+```
+
+---
+
+## 6. Plugin Manifest (WASM)
 
 ```toml
 [plugin]
 name = "date-formatter"
 version = "0.1.0"
 description = "Formats dates in Estonian locale"
-origin = "agent"       # or "user", "system"
-scope = "workspace"    # or "user", "system"
+origin = "agent"
+scope = "workspace"
 
 [capabilities]
-memory_read = ["user"]
-network = []
-filesystem = []
+network = ["api.example.com"]
+tool_call = ["web_search"]
+secret_read = true
+metrics = true
+key_value = true
 
 [[tools]]
 name = "format_date"
 description = "Format a date in Estonian locale"
+
+[[metrics]]
+name = "dates_formatted"
+kind = "counter"
+description = "Number of dates formatted"
 ```
 
-### Project structure
-
-```
-my-plugin/
-+-- plugin.toml
-+-- src/
-    +-- lib.rs    # implementation + #[cfg(test)] mod tests
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginManifest {
+    pub plugin: PluginMeta,
+    pub capabilities: CapabilitiesConfig,
+    pub tools: Vec<ToolEntry>,
+    #[serde(default)]
+    pub metrics: Vec<MetricDeclaration>,
+}
 ```
 
 Input schemas are defined in code via derive macros (`schemars::JsonSchema`),
-not as separate files. The derived JSON Schema populates
-`ToolMetadata.input_schema` automatically.
+not as separate files:
 
 ```rust
 #[derive(Deserialize, JsonSchema)]
@@ -133,206 +397,144 @@ pub struct FormatDateInput {
 
 ---
 
-## 4. Capability System
+## 7. Audit Pipeline
 
-### Capability types
+Type-aware progressive audit. All plugins go through audit, but stages
+differ by kind.
 
-```rust
-pub enum Capability {
-    MemoryRead(Vec<ScopeKind>),
-    MemoryWrite(Vec<ScopeKind>),
-    Network(Vec<String>),          // allowed domains
-    Filesystem(Vec<PathBuf>),      // allowed paths
-    LlmCall,                       // can call LLM via host function
-    ToolCall(Vec<String>),         // can invoke other tools by name
-}
-```
+### Stages by kind
 
-Each capability maps to a set of Extism host functions wired into the plugin's
-WASM instance. No capability declared = no host function available = plugin
-physically cannot perform that action.
+| Stage | MCP | Skill | WASM |
+|-------|-----|-------|------|
+| **Validate** | Config well-formed | Frontmatter valid | Manifest parses, capabilities well-formed |
+| **Sandbox** | bwrap spawn test | N/A | Extism loads with declared capabilities |
+| **Capability** | N/A | N/A | Only declared host functions wired |
+| **Test** | Handshake succeeds | N/A | Embedded tests pass in Extism |
+| **Static** | N/A | Content check (stub) | AST analysis (stub) |
+| **Behavioral** | N/A | N/A | Runtime monitoring (stub) |
 
-### Host functions (wired per capability)
+### Approval thresholds
 
-| Capability | Host function | Signature |
-|-----------|---------------|-----------|
-| `MemoryRead` | `host_memory_read` | `(scope, query) -> results` |
-| `MemoryWrite` | `host_memory_write` | `(scope, key, value) -> ok` |
-| `Network` | `host_http_request` | `(method, url, headers, body) -> response` |
-| `LlmCall` | `host_llm_complete` | `(prompt, max_tokens) -> text` |
-| `ToolCall` | `host_call_tool` | `(tool_name, input_json) -> output` |
+| Origin | Rule |
+|--------|------|
+| `System` | Auto-approved (pre-audited, shipped with Sober) |
+| `Agent` | Auto-approved if all stages pass AND capabilities subset of agent's access. Otherwise `PendingApproval`. |
+| `User` | `PendingApproval` after stages pass (user must confirm). `Rejected` if any stage fails. |
 
-WASM modules have no I/O by default --- the WASM sandbox guarantees this.
-Network restrictions are additionally enforced by Extism's `allowed_hosts`
-manifest field and our host function implementation (domain filtering + audit
-logging).
-
----
-
-## 5. Extism Runtime
-
-Extism (built on wasmtime) is the plugin runtime. It handles WASM host/guest
-boundary plumbing, memory allocation, serialization, and provides multi-language
-PDK support (Rust, TypeScript, Go, Python, etc.).
-
-### Plugin host
+### Types
 
 ```rust
-pub struct PluginHost {
-    manifest: PluginManifest,
-    plugin: extism::Plugin,
-}
+pub struct AuditPipeline;
 
-impl PluginHost {
-    pub fn load(
-        wasm_bytes: &[u8],
-        manifest: &PluginManifest,
-    ) -> Result<Self, PluginError>;
-}
-```
-
-### Plugin as Tool
-
-Each `[[tools]]` entry in `plugin.toml` becomes a `Tool` implementation from
-sober-core. The agent sees plugin tools identically to MCP tools or built-in
-tools.
-
-```rust
-pub struct PluginTool {
-    host: Arc<PluginHost>,
-    tool_entry: String,       // exported function name
-    metadata: ToolMetadata,
-}
-
-impl Tool for PluginTool { ... }
-```
-
----
-
-## 6. Audit Pipeline
-
-Progressive stages. Capability enforcement is essential from day one; static
-and behavioral analysis start as pass-through stubs.
-
-### Stages
-
-```
-1. VALIDATE    -> Parse plugin.toml, verify structure, check capability declarations
-2. COMPILE     -> Build source to WASM (skip if pre-compiled)
-3. CAPABILITY  -> Wire only declared host functions, load WASM in Extism
-4. TEST        -> Run embedded #[cfg(test)] tests in sandboxed Extism instance
-5. STATIC      -> (stub) AST-level source analysis for dangerous patterns
-6. BEHAVIORAL  -> (stub) Runtime monitoring during test execution
-```
-
-Stages 1--4 enforced. Stages 5--6 return "approved" until implemented.
-
-### Audit types
-
-```rust
-pub enum AuditVerdict {
-    Approved,
-    Rejected { stage: String, reason: String },
-    PendingApproval { reason: String },
+impl AuditPipeline {
+    pub async fn audit(&self, request: &AuditRequest) -> Result<AuditReport, PluginError>;
 }
 
 pub struct AuditReport {
     pub plugin_name: String,
-    pub plugin_version: String,
+    pub plugin_kind: PluginKind,
     pub origin: PluginOrigin,
     pub stages: Vec<StageResult>,
     pub verdict: AuditVerdict,
     pub timestamp: DateTime<Utc>,
 }
 
-pub enum PluginOrigin {
-    Agent,
-    User,
-    System,
+pub struct StageResult {
+    pub name: String,
+    pub passed: bool,
+    pub details: Option<String>,
+}
+
+pub enum AuditVerdict {
+    Approved,
+    Rejected { stage: String, reason: String },
+    PendingApproval { reason: String },
 }
 ```
 
-Every install attempt produces an audit report stored in PostgreSQL.
-
 ---
 
-## 7. Registry
-
-### Database schema
-
-```sql
-CREATE TYPE plugin_origin AS ENUM ('system', 'agent', 'user');
-CREATE TYPE plugin_scope AS ENUM ('system', 'user', 'workspace');
-CREATE TYPE plugin_status AS ENUM ('installed', 'disabled', 'failed');
-
-CREATE TABLE plugins (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    description TEXT,
-    origin plugin_origin NOT NULL,
-    scope plugin_scope NOT NULL,
-    scope_owner_id UUID,
-    status plugin_status NOT NULL DEFAULT 'installed',
-    capabilities JSONB NOT NULL,
-    wasm_hash TEXT NOT NULL,
-    source_repo TEXT,
-    source_commit TEXT,
-    installed_by UUID REFERENCES users(id),
-    installed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(name, scope, scope_owner_id)
-);
-
-CREATE TABLE plugin_audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    plugin_name TEXT NOT NULL,
-    plugin_version TEXT NOT NULL,
-    origin plugin_origin NOT NULL,
-    stages JSONB NOT NULL,
-    verdict TEXT NOT NULL,
-    rejection_reason TEXT,
-    audited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    audited_by UUID REFERENCES users(id)
-);
-```
-
-### Registry API
+## 8. Plugin Registry
 
 ```rust
-// Generic over PluginRepo (RPITIT traits are not dyn-compatible)
 pub struct PluginRegistry<P: PluginRepo> {
     db: P,
+    audit: AuditPipeline,
 }
 
-impl PluginRegistry {
+impl<P: PluginRepo> PluginRegistry<P> {
     pub async fn install(&self, request: InstallRequest) -> Result<AuditReport, PluginError>;
-    pub async fn uninstall(&self, name: &str, scope: PluginScope) -> Result<(), PluginError>;
-    pub async fn enable(&self, name: &str, scope: PluginScope) -> Result<(), PluginError>;
-    pub async fn disable(&self, name: &str, scope: PluginScope) -> Result<(), PluginError>;
-    pub async fn list(&self, scope: PluginScope) -> Result<Vec<PluginInfo>, PluginError>;
-    pub async fn resolve(&self, name: &str, context: &PluginContext) -> Result<PluginHost, PluginError>;
+    pub async fn uninstall(&self, plugin_id: PluginId) -> Result<(), PluginError>;
+    pub async fn enable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
+    pub async fn disable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
+    pub async fn approve(&self, plugin_id: PluginId) -> Result<(), PluginError>;
+    pub async fn list(&self, filter: PluginFilter) -> Result<Vec<PluginInfo>, PluginError>;
 }
 ```
+
+### Install flow
+
+1. Parse manifest/config for the plugin kind
+2. Compile source to WASM (if WASM kind with source)
+3. Run audit pipeline
+4. If approved: store record in DB, enable
+5. If pending: store record with `installed` status, return report
+6. If rejected: store audit log, return rejection
+
+### Plugin resolution
+
+For WASM plugins, resolution follows scope precedence:
+workspace > user > system (same-name plugin at higher scope shadows lower).
 
 ---
 
-## 8. sober-plugin-gen
+## 9. Self-Evolution
 
-### Two modes
+The agent can autonomously create Skills and WASM plugins.
+`sober-plugin-gen` is the factory crate.
 
-**Template scaffolding** (no LLM):
+### Skill generation
 
-```
-sober plugin new my-plugin --lang rust
-sober plugin new my-plugin --lang typescript
-```
+- Agent identifies a repeated prompt pattern
+- Generates SKILL.md with proper frontmatter and body
+- Written to user/workspace skill directory
+- Registered in `plugins` table via `PluginManager`
+- Origin: `Agent`, approval: auto-approved (low risk)
 
-Produces a valid, compilable skeleton with empty `plugin.toml`, PDK trait impl,
-and empty `#[cfg(test)]` block. User writes the logic manually.
+### WASM generation
 
-**LLM-powered generation:**
+- Agent identifies a repeated deterministic operation
+- Delegates to `sober-plugin-gen` with a `GenerateRequest`
+- Generation pipeline:
+  1. Build prompt from description + PDK trait + manifest format + capabilities
+  2. LLM generates Rust source + tests
+  3. Validate structural correctness
+  4. Compile to WASM (`wasm32-wasip2`)
+  5. Load in Extism, run tests
+  6. If fail: feed errors to LLM, retry (max 3)
+  7. On success: return `GenerateResult`
+- Source committed to workspace git repo (via sober-workspace)
+- Installed through `PluginManager.install()` -> audit pipeline
+- Origin: `Agent`, approval: auto if capabilities subset, otherwise `PendingApproval`
+
+### sober-plugin-gen API
 
 ```rust
+pub struct PluginGenerator {
+    llm: Arc<dyn LlmEngine>,
+}
+
+impl PluginGenerator {
+    /// LLM-powered WASM plugin generation with self-correcting loop.
+    pub async fn generate_wasm(&self, request: GenerateRequest) -> Result<GenerateResult, GenError>;
+
+    /// Generate a Skill (markdown) from description.
+    pub async fn generate_skill(&self, request: SkillGenRequest) -> Result<SkillGenResult, GenError>;
+
+    /// Scaffold a plugin template (no LLM).
+    pub fn scaffold(&self, name: &str, kind: PluginKind) -> Result<PathBuf, GenError>;
+}
+
 pub struct GenerateRequest {
     pub description: String,
     pub suggested_scope: PluginScope,
@@ -340,37 +542,6 @@ pub struct GenerateRequest {
     pub origin: PluginOrigin,
 }
 
-pub struct PluginGenerator {
-    llm: Arc<dyn LlmEngine>, // LlmEngine uses #[async_trait], dyn-compatible
-}
-
-impl PluginGenerator {
-    /// Generate plugin source + tests, compile, verify, return artifact.
-    pub async fn generate(&self, request: GenerateRequest) -> Result<GenerateResult, GenError>;
-
-    /// Scaffold template only, no LLM.
-    pub async fn scaffold(&self, name: &str, lang: Language) -> Result<PathBuf, GenError>;
-}
-```
-
-### Generation pipeline
-
-```
-1. GENERATE   -> LLM produces source + tests from description
-                 (prompt includes PDK trait, capability API, plugin.toml format)
-2. VALIDATE   -> Parse generated source, verify structural correctness
-3. COMPILE    -> Build to WASM via Extism PDK toolchain
-4. TEST       -> Run embedded tests in sandboxed Extism instance
-5. PASS?      -> Yes: return GenerateResult
-                 No: feed errors back to LLM, retry (max 3 attempts)
-6. FAIL       -> Return GenError with last compilation/test errors
-```
-
-The LLM is forced into the correct plugin format --- the prompt provides the
-PDK trait and manifest structure. Generation produces both implementation and
-test cases. Tests verify the plugin does what the description asked for.
-
-```rust
 pub struct GenerateResult {
     pub source_path: PathBuf,
     pub wasm_bytes: Vec<u8>,
@@ -381,16 +552,82 @@ pub struct GenerateResult {
 
 ---
 
-## 9. Error Types
+## 10. Agent Integration
+
+### PluginManager in ToolBootstrap
+
+`ToolBootstrap` switches from direct `McpPool` + `SkillLoader` to
+`PluginManager`:
 
 ```rust
-// sober-plugin
+pub struct ToolBootstrap<R: AgentRepos> {
+    pub plugin_manager: Arc<PluginManager<PgPluginRepo>>,
+    // ... other tool configs unchanged
+}
+```
+
+### tools_for_turn
+
+```rust
+impl<P: PluginRepo> PluginManager<P> {
+    /// Returns all tools from enabled plugins for this turn.
+    pub async fn tools_for_turn(
+        &self,
+        ctx: &PluginContext,
+    ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
+        let mut tools = Vec::new();
+        tools.extend(self.mcp_tools(ctx).await?);
+        if let Some(skill_tool) = self.skill_tool(ctx).await? {
+            tools.push(skill_tool);
+        }
+        tools.extend(self.wasm_tools(ctx).await?);
+        Ok(tools)
+    }
+}
+```
+
+### PluginContext
+
+```rust
+pub struct PluginContext {
+    pub user_id: UserId,
+    pub workspace_id: Option<WorkspaceId>,
+    pub conversation_id: ConversationId,
+    pub skill_activation_state: Option<Arc<Mutex<SkillActivationState>>>,
+}
+```
+
+---
+
+## 11. API Surface
+
+Unified plugin routes:
+
+```
+GET    /api/v1/plugins                  # List (filter by kind, scope)
+POST   /api/v1/plugins                  # Install
+GET    /api/v1/plugins/:id              # Details
+PATCH  /api/v1/plugins/:id              # Update (enable/disable, config)
+DELETE /api/v1/plugins/:id              # Uninstall
+POST   /api/v1/plugins/:id/approve      # Approve pending
+GET    /api/v1/plugins/:id/audit        # Audit report
+POST   /api/v1/plugins/reload           # Re-scan filesystem (skills)
+```
+
+Existing `/api/v1/mcp/servers` and `/api/v1/skills` routes are removed.
+Frontend MCP and Skills pages become filtered views of `/settings/plugins`.
+
+---
+
+## 12. Error Types
+
+```rust
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
     #[error("plugin not found: {0}")]
     NotFound(String),
 
-    #[error("audit rejected: {stage} --- {reason}")]
+    #[error("audit rejected: {stage} -- {reason}")]
     AuditRejected { stage: String, reason: String },
 
     #[error("pending approval: {0}")]
@@ -404,6 +641,12 @@ pub enum PluginError {
 
     #[error("compilation failed: {0}")]
     CompilationFailed(String),
+
+    #[error("manifest invalid: {0}")]
+    ManifestInvalid(String),
+
+    #[error("plugin already exists: {0}")]
+    AlreadyExists(String),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -432,21 +675,28 @@ pub enum GenError {
 }
 ```
 
+`PluginError` maps to `AppError`: `NotFound` -> 404,
+`AuditRejected`/`PendingApproval`/`CapabilityDenied` -> 403,
+`ManifestInvalid` -> 400, `AlreadyExists` -> 409,
+`ExecutionFailed`/`CompilationFailed`/`Internal` -> 500.
+
 ---
 
-## 10. Dependencies
+## 13. Dependencies
 
 ### sober-plugin
 
 | Crate | Purpose |
 |-------|---------|
-| `sober-core` | Tool trait, shared types, config |
+| `sober-core` | Tool trait, shared types, config, repo traits |
+| `sober-mcp` | MCP client/pool delegation |
+| `sober-skill` | Skill loader/catalog delegation |
 | `sober-sandbox` | Pre-install test execution |
 | `extism` | WASM plugin runtime |
-| `serde` / `toml` | Manifest parsing |
+| `serde` / `serde_json` / `toml` | Manifest parsing, config serialization |
+| `schemars` | JSON Schema generation |
 | `tracing` | Structured logging |
 | `thiserror` | Error types |
-| `schemars` | JSON Schema generation from Rust types |
 
 ### sober-plugin-gen
 
@@ -461,30 +711,35 @@ pub enum GenError {
 ### Dependency flow
 
 ```
-sober-agent -----> sober-plugin-gen   (trigger generation)
-            -----> sober-plugin       (register + execute plugins)
+sober-agent -----> sober-plugin       (PluginManager for tool construction)
+            -----> sober-plugin-gen   (trigger generation, post-v1)
 
-sober-cli   -----> sober-plugin-gen   (sober plugin new / generate / build)
-            -----> sober-plugin       (sober plugin install / list / remove)
+sober-cli   -----> sober-plugin       (plugin management commands)
+            -----> sober-plugin-gen   (sober plugin new / generate / build)
 
-sober-plugin-gen -> sober-llm         (LLM-powered generation)
-                 -> sober-plugin      (compile + test via Extism host)
+sober-api   -----> sober-plugin       (REST API routes, proxied via agent)
+
+sober-plugin -----> sober-mcp         (MCP execution delegation)
+             -----> sober-skill       (skill loading delegation)
+             -----> sober-sandbox     (pre-install test execution)
+             -----> sober-core        (Tool trait, types)
+
+sober-plugin-gen -> sober-plugin      (compile + test)
+                 -> sober-llm         (LLM generation)
                  -> sober-core        (shared types)
-
-sober-plugin -----> sober-sandbox     (pre-install test execution)
-             -----> sober-core        (Tool trait, shared types)
 ```
 
 ---
 
-## 11. Impact on Existing Designs
+## 14. Impact on Existing Designs
 
-| Design | Change |
-|--------|--------|
-| **001 v1-design** | No change --- sober-plugin remains a stub in v1 |
-| **003 sober-core** | Add `PluginRepo` trait to repository traits |
-| **005 sober-db** | Add `PgPluginRepo` implementing `PluginRepo` |
-| **009 sober-sandbox** | No change --- already documents plugin sandbox path |
-| **012 sober-agent** | Post-v1: agent gains ability to trigger plugin generation |
-| **014 sober-cli** | Post-v1: CLI gains `sober plugin {new,generate,build,install,list,remove}` |
-| **ARCHITECTURE.md** | Add `sober-plugin-gen` to crate table and dependency flow |
+| Area | Change |
+|------|--------|
+| `sober-core` | Add `PluginRepo` trait, `PluginId`, plugin domain types to `types/` |
+| `sober-db` | Add `PgPluginRepo`. Migration creates `plugins` table, migrates `mcp_servers` |
+| `sober-agent` | `ToolBootstrap` uses `PluginManager` instead of direct `McpPool` + `SkillLoader` |
+| `sober-api` | Unified `/api/v1/plugins` routes. Remove `/api/v1/mcp/servers` and `/api/v1/skills` |
+| `sober-mcp` | No changes (wrapped by sober-plugin) |
+| `sober-skill` | No changes (wrapped by sober-plugin) |
+| Frontend | Unified `/settings/plugins` page with kind filter tabs |
+| gRPC proto | Add plugin management RPCs if agent handles plugin ops |
