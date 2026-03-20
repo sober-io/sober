@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["crates/sober-plugin"]
 resolver = "2"
 
 [workspace.package]
