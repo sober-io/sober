@@ -2049,10 +2049,10 @@ which provides the same uniqueness guarantee via an expression index.
 **Plan:** `get_by_name(name, scope, owner_id, workspace_id) -> Option<Plugin>`
 **Implemented:** `get_by_name(name) -> Plugin` (returns `NotFound` error if missing)
 
-Rationale: The name-only lookup is sufficient for Plan A's duplicate check in
-`PluginRegistry::install()`. Scope-aware lookup can be added in Plan C when
-wiring the HTTP API, using `PluginFilter`-based list queries for multi-scope
-resolution. The unique index still enforces scope-aware uniqueness at the DB level.
+The trait method remains for convenience, but the registry's duplicate check
+was updated to use `list(PluginFilter { name, scope, owner_id, workspace_id })`
+for scope-aware deduplication. A `name: Option<String>` field was added to
+`PluginFilter` and the `PgPluginRepo::list` query to support this.
 
 ### 3. KV data — per-key access instead of whole-blob (PluginRepo trait)
 
@@ -2076,3 +2076,20 @@ Rationale: Avoids unbounded result sets for plugins with many audit entries.
 **Implemented:** `PluginRegistry { db }` calling `AuditPipeline::audit()` as a static method.
 
 Rationale: `AuditPipeline` is stateless (no fields); a static method is simpler.
+
+### 6. `StageResult.details` is `String`, not `Option<String>`
+
+**Plan/design:** `details: Option<String>`
+**Implemented:** `details: String` — always populated with a success or failure message.
+
+Rationale: Always having a message is more useful in audit logs than `None`.
+
+### 7. Capability config field renames
+
+Config structs use more descriptive field names than the design:
+- `NetworkCap`: `domains` → `allowed_hosts`
+- `FilesystemCap`: `paths` → `allowed_paths` (also added `writable: bool`)
+- `ToolCallCap`: `tools` → `allowed_tools`
+
+These are reflected in the `CapabilitiesConfig::to_capabilities()` conversion
+which now propagates restriction data into `Capability` enum variants.

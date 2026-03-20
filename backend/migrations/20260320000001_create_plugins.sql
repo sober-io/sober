@@ -1,5 +1,9 @@
 -- Plugin system tables
 -- Part of plan #019: Unified Plugin System
+--
+-- Note: IDs are generated as v7 UUIDs by the application (Uuid::now_v7()),
+-- not by the DB default (gen_random_uuid() produces v4). The DEFAULT clause
+-- is a fallback for manual inserts only.
 
 CREATE TYPE plugin_kind AS ENUM ('mcp', 'skill', 'wasm');
 CREATE TYPE plugin_origin AS ENUM ('system', 'agent', 'user');
