@@ -370,7 +370,34 @@ impl Capability {
 
 ---
 
-## 5. Extism Plugin Host
+## 5. Bidirectional Tool Interface
+
+WASM plugins have a bidirectional relationship with the agent:
+
+```
+Agent                          WASM Plugin
+  |                                |
+  |-- invoke [[tools]] ---------->|  Agent calls plugin-exported tools
+  |                                |  (plugin appears as Tool trait impl)
+  |                                |
+  |<-- host_call_tool ------------|  Plugin calls agent-registered tools
+  |                                |  (via ToolCall capability)
+```
+
+**Agent → Plugin:** Each `[[tools]]` entry in the manifest becomes a
+`PluginTool` implementing the `Tool` trait. The LLM sees these identically
+to MCP or built-in tools and can call them.
+
+**Plugin → Agent:** With the `ToolCall` capability, a plugin can invoke
+any agent-registered tool via `host_call_tool(name, input)`. This enables
+composition — a plugin can chain existing tools (web_search, recall, etc.)
+into a higher-level operation.
+
+This composition is key to self-evolution: the agent identifies a multi-step
+pattern it keeps repeating, codifies it as a WASM plugin that chains existing
+tools together, and exposes a single deterministic tool for that workflow.
+
+### Extism Plugin Host
 
 Extism (built on wasmtime) is the WASM runtime. Handles host/guest boundary
 plumbing, memory allocation, serialization.
@@ -422,7 +449,7 @@ impl Tool for PluginTool {
 
 ---
 
-## 6. Plugin Manifest (WASM)
+## 6. Plugin Manifest (WASM only)
 
 ```toml
 [plugin]
