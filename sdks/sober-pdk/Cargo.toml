@@ -1,0 +1,28 @@
+[package]
+name = "sober-pdk"
+version = "0.1.0"
+edition = "2024"
+description = "Guest-side SDK for Sober WASM plugin authors"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+extism-pdk = "1.4.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []
+network = []
+key_value = []
+secret_read = []
+tool_call = []
+metrics = []
+memory_read = []
+memory_write = []
+conversation_read = []
+schedule = []
+filesystem = []
+llm_call = []
