@@ -47,28 +47,55 @@ A **plugin** is any extension to the agent's capabilities.
 ### Enums
 
 ```rust
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+// All enums follow the project pattern: Debug, Clone, Copy, PartialEq, Eq,
+// Hash, Serialize, Deserialize + feature-gated sqlx::Type.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(feature = "postgres", sqlx(type_name = "plugin_kind", rename_all = "lowercase"))]
 #[serde(rename_all = "lowercase")]
 pub enum PluginKind { Mcp, Skill, Wasm }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(feature = "postgres", sqlx(type_name = "plugin_origin", rename_all = "lowercase"))]
 #[serde(rename_all = "lowercase")]
 pub enum PluginOrigin { System, Agent, User }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(feature = "postgres", sqlx(type_name = "plugin_scope", rename_all = "lowercase"))]
 #[serde(rename_all = "lowercase")]
 pub enum PluginScope { System, User, Workspace }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(feature = "postgres", sqlx(type_name = "plugin_status", rename_all = "lowercase"))]
 #[serde(rename_all = "lowercase")]
-pub enum PluginStatus { Installed, Enabled, Disabled, Failed }
+pub enum PluginStatus { PendingApproval, Enabled, Disabled, Failed }
 ```
+
+`PluginId` is generated via `define_id!(PluginId)` in `sober-core/src/types/ids.rs`.
 
 ### Lifecycle
 
 ```
-DISCOVER --> AUDIT --> INSTALL --> ENABLED <--> DISABLED --> UNINSTALL
+DISCOVER --> AUDIT --> INSTALL
+                        |
+              +---------+---------+
+              |                   |
+        PendingApproval       Enabled <--> Disabled
+              |
+        [user approves]
+              |
+           Enabled
 ```
+
+- System origin: audit -> auto-approved -> `Enabled`
+- Agent origin: audit passes + capabilities subset -> `Enabled`;
+  otherwise -> `PendingApproval`
+- User origin: audit passes -> `PendingApproval` -> user approves -> `Enabled`;
+  audit fails -> `Failed`
 
 All plugin kinds share the same lifecycle. Audit stages differ by kind.
 
@@ -103,15 +130,16 @@ sober-plugin-gen (separate crate -- generation factory)
 
 ### PluginManager
 
-Central coordinating type:
+Central coordinating type. `McpPool` is per-user (each user has their own
+MCP servers), so the manager creates/caches pools on demand:
 
 ```rust
 pub struct PluginManager<P: PluginRepo> {
     db: P,
-    mcp_pool: McpPool,
+    mcp_pools: RwLock<HashMap<UserId, McpPool>>,  // per-user MCP pools
     skill_loader: SkillLoader,
     audit: AuditPipeline,
-    // WASM hosts loaded on demand
+    wasm_hosts: RwLock<HashMap<PluginId, PluginHost>>,  // loaded on demand
 }
 ```
 
@@ -127,7 +155,7 @@ Replaces `mcp_servers`. Tracks all three plugin kinds.
 CREATE TYPE plugin_kind AS ENUM ('mcp', 'skill', 'wasm');
 CREATE TYPE plugin_origin AS ENUM ('system', 'agent', 'user');
 CREATE TYPE plugin_scope AS ENUM ('system', 'user', 'workspace');
-CREATE TYPE plugin_status AS ENUM ('installed', 'enabled', 'disabled', 'failed');
+CREATE TYPE plugin_status AS ENUM ('pending_approval', 'enabled', 'disabled', 'failed');
 
 CREATE TABLE plugins (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -139,7 +167,7 @@ CREATE TABLE plugins (
     scope          plugin_scope NOT NULL,
     owner_id       UUID REFERENCES users(id),
     workspace_id   UUID REFERENCES workspaces(id),
-    status         plugin_status NOT NULL DEFAULT 'installed',
+    status         plugin_status NOT NULL DEFAULT 'pending_approval',
     config         JSONB NOT NULL DEFAULT '{}',
     installed_by   UUID REFERENCES users(id),
     installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -177,9 +205,29 @@ CREATE TABLE plugin_audit_logs (
 ### Migration strategy
 
 1. Create `plugins` table and `plugin_audit_logs` table
-2. Insert existing `mcp_servers` rows into `plugins` with `kind = 'mcp'`
+2. Migrate existing `mcp_servers` rows into `plugins`:
+   - `kind` = `'mcp'`
+   - `scope` = `'user'`
+   - `owner_id` = `mcp_servers.user_id`
+   - `status` = `CASE WHEN enabled THEN 'enabled' ELSE 'disabled' END`
+   - `config` = `jsonb_build_object('command', command, 'args', args, 'env', env)`
+   - `installed_by` = `mcp_servers.user_id`
+   - `installed_at` = `mcp_servers.created_at`
+   - `updated_at` = `mcp_servers.updated_at`
 3. Drop `mcp_servers` table
-4. Skills are registered on discovery by `PluginManager` (no data migration)
+4. Remove `McpServerRepo` trait from `sober-core` and `PgMcpServerRepo` from
+   `sober-db`. `McpServerId` is also removed. `sober-mcp` does not use
+   `McpServerId` internally (it uses `McpServerRunConfig` for connections).
+5. Skills are registered on discovery by `PluginManager` (no data migration)
+
+### plugin_audit_logs FK behavior
+
+`plugin_id` uses `ON DELETE SET NULL` so audit logs are preserved when plugins
+are uninstalled:
+
+```sql
+plugin_id UUID REFERENCES plugins(id) ON DELETE SET NULL,
+```
 
 ---
 
@@ -196,7 +244,7 @@ sandbox policy (bwrap). Skills are read-only prompt text.
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type")]
+#[serde(tag = "kind")]
 pub enum Capability {
     /// Read from vector memory (paginated).
     MemoryRead { scopes: Vec<String> },
@@ -333,14 +381,19 @@ the `Tool` trait from sober-core:
 
 ```rust
 pub struct PluginTool {
-    host: Arc<Mutex<PluginHost>>,
+    host: Arc<std::sync::Mutex<PluginHost>>,  // std::sync — WASM calls are blocking
     tool_entry: String,
     metadata: ToolMetadata,
 }
 
 impl Tool for PluginTool {
     fn metadata(&self) -> ToolMetadata { ... }
-    fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> { ... }
+    fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> {
+        // WASM execution is synchronous — use spawn_blocking to avoid
+        // blocking the async runtime. Lock is held only during the
+        // blocking call, never across .await points.
+        ...
+    }
 }
 ```
 
@@ -381,6 +434,43 @@ pub struct PluginManifest {
     pub tools: Vec<ToolEntry>,
     #[serde(default)]
     pub metrics: Vec<MetricDeclaration>,
+}
+```
+
+### CapabilitiesConfig
+
+Maps the flat TOML representation to typed `Capability` variants:
+
+```rust
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilitiesConfig {
+    #[serde(default)]
+    pub memory_read: Vec<String>,      // -> Capability::MemoryRead { scopes }
+    #[serde(default)]
+    pub memory_write: Vec<String>,     // -> Capability::MemoryWrite { scopes }
+    #[serde(default)]
+    pub network: Vec<String>,          // -> Capability::Network { domains }
+    #[serde(default)]
+    pub filesystem: Vec<String>,       // -> Capability::Filesystem { paths }
+    #[serde(default)]
+    pub llm_call: bool,                // -> Capability::LlmCall
+    #[serde(default)]
+    pub tool_call: Vec<String>,        // -> Capability::ToolCall { tools }
+    #[serde(default)]
+    pub conversation_read: bool,       // -> Capability::ConversationRead
+    #[serde(default)]
+    pub metrics: bool,                 // -> Capability::Metrics
+    #[serde(default)]
+    pub secret_read: bool,             // -> Capability::SecretRead
+    #[serde(default)]
+    pub key_value: bool,               // -> Capability::KeyValue
+    #[serde(default)]
+    pub schedule: bool,                // -> Capability::Schedule
+}
+
+impl CapabilitiesConfig {
+    /// Convert flat config to typed capability list.
+    pub fn to_capabilities(&self) -> Vec<Capability>;
 }
 ```
 
@@ -477,14 +567,34 @@ impl<P: PluginRepo> PluginRegistry<P> {
 1. Parse manifest/config for the plugin kind
 2. Compile source to WASM (if WASM kind with source)
 3. Run audit pipeline
-4. If approved: store record in DB, enable
-5. If pending: store record with `installed` status, return report
-6. If rejected: store audit log, return rejection
+4. If approved: store record in DB with `status = enabled`
+5. If pending: store record with `status = pending_approval`, return report
+6. If rejected: store audit log only (no plugin record), return rejection
 
 ### Plugin resolution
 
 For WASM plugins, resolution follows scope precedence:
 workspace > user > system (same-name plugin at higher scope shadows lower).
+
+### WASM compilation
+
+WASM plugins are compiled by shelling out to `cargo build`:
+
+```
+cargo build --target wasm32-wasi --release
+```
+
+Target is `wasm32-wasi` (WASI Preview 1), which is the target Extism supports.
+Verify Extism compatibility with `wasm32-wasip2` during implementation; if
+supported, prefer `wasip2` for WASI Preview 2 features.
+
+### Plugin versioning
+
+Upgrading a plugin to a new version replaces the existing record in-place
+(same `id`, updated `version`, `config`, `updated_at`). The old WASM artifact
+is overwritten. Audit logs provide a history trail. There is no side-by-side
+versioning or automatic rollback in v1. If a new version fails audit, the
+install is rejected and the old version remains active.
 
 ---
 
@@ -509,7 +619,7 @@ The agent can autonomously create Skills and WASM plugins.
   1. Build prompt from description + PDK trait + manifest format + capabilities
   2. LLM generates Rust source + tests
   3. Validate structural correctness
-  4. Compile to WASM (`wasm32-wasip2`)
+  4. Compile to WASM (`wasm32-wasi`)
   5. Load in Extism, run tests
   6. If fail: feed errors to LLM, retry (max 3)
   7. On success: return `GenerateResult`
@@ -675,10 +785,14 @@ pub enum GenError {
 }
 ```
 
-`PluginError` maps to `AppError`: `NotFound` -> 404,
-`AuditRejected`/`PendingApproval`/`CapabilityDenied` -> 403,
-`ManifestInvalid` -> 400, `AlreadyExists` -> 409,
-`ExecutionFailed`/`CompilationFailed`/`Internal` -> 500.
+`PluginError` maps to `AppError`:
+- `NotFound` -> 404
+- `AuditRejected` -> 422 Unprocessable Entity (audit failed)
+- `PendingApproval` -> 409 Conflict (action blocked by pending state)
+- `CapabilityDenied` -> 403 Forbidden
+- `ManifestInvalid` -> 400 Bad Request
+- `AlreadyExists` -> 409 Conflict
+- `ExecutionFailed` / `CompilationFailed` / `Internal` -> 500
 
 ---
 
@@ -714,10 +828,11 @@ pub enum GenError {
 sober-agent -----> sober-plugin       (PluginManager for tool construction)
             -----> sober-plugin-gen   (trigger generation, post-v1)
 
-sober-cli   -----> sober-plugin       (plugin management commands)
-            -----> sober-plugin-gen   (sober plugin new / generate / build)
+sober-cli   ---x   (NO direct dep on sober-plugin or sober-plugin-gen)
+                    soberctl uses gRPC to agent for plugin ops at runtime.
+                    sober (offline) does not need plugin management.
 
-sober-api   -----> sober-plugin       (REST API routes, proxied via agent)
+sober-api   -----> sober-core         (plugin types only -- proxies via gRPC to agent)
 
 sober-plugin -----> sober-mcp         (MCP execution delegation)
              -----> sober-skill       (skill loading delegation)
@@ -728,6 +843,14 @@ sober-plugin-gen -> sober-plugin      (compile + test)
                  -> sober-llm         (LLM generation)
                  -> sober-core        (shared types)
 ```
+
+**CLI plugin commands:** `soberctl plugin {list,install,enable,disable,remove}`
+uses the agent's Unix admin socket (gRPC). This keeps `sober-cli` lightweight
+and avoids pulling in Extism/MCP/Skill dependencies.
+
+**API routing:** Plugin API routes in `sober-api` proxy to the agent process
+via gRPC (consistent with how skill routes already work). The `PluginManager`
+lives in the agent process, not the API process.
 
 ---
 
@@ -741,5 +864,5 @@ sober-plugin-gen -> sober-plugin      (compile + test)
 | `sober-api` | Unified `/api/v1/plugins` routes. Remove `/api/v1/mcp/servers` and `/api/v1/skills` |
 | `sober-mcp` | No changes (wrapped by sober-plugin) |
 | `sober-skill` | No changes (wrapped by sober-plugin) |
-| Frontend | Unified `/settings/plugins` page with kind filter tabs |
+| Frontend | Remove `/settings/mcp/` page. New unified `/settings/plugins` page with kind filter tabs (All / MCP / Skills / WASM). Plugin install flow with kind selection, config input, audit status, approval UI. |
 | gRPC proto | Add plugin management RPCs if agent handles plugin ops |
