@@ -721,7 +721,8 @@ Unified plugin routes:
 
 ```
 GET    /api/v1/plugins                  # List (filter by kind, scope)
-POST   /api/v1/plugins                  # Install
+POST   /api/v1/plugins                  # Install (single plugin)
+POST   /api/v1/plugins/import           # Import from config file (batch)
 GET    /api/v1/plugins/:id              # Details
 PATCH  /api/v1/plugins/:id              # Update (enable/disable, config)
 DELETE /api/v1/plugins/:id              # Uninstall
@@ -732,6 +733,35 @@ POST   /api/v1/plugins/reload           # Re-scan filesystem (skills)
 
 Existing `/api/v1/mcp/servers` and `/api/v1/skills` routes are removed.
 Frontend MCP and Skills pages become filtered views of `/settings/plugins`.
+
+### MCP install methods
+
+**Manual form entry:** User provides name, command, args, env via the UI.
+Same as the current MCP settings page. `POST /api/v1/plugins` with
+`kind = "mcp"` and config payload.
+
+**Config file import:** User uploads or pastes a JSON config file compatible
+with Claude Code's `.mcp.json` format:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {}
+    }
+  }
+}
+```
+
+`POST /api/v1/plugins/import` parses the file and creates one plugin record
+per server entry (batch). Returns a list of created plugins with their
+audit results.
+
+**Package/URL install (deferred):** Future enhancement. User provides an npm
+package name, git URL, or Docker image. System resolves the run command and
+creates the plugin record. Not part of this plan.
 
 ---
 
