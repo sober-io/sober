@@ -1152,7 +1152,7 @@ pub enum GenError {
 
 ### sober-pdk
 
-Guest-side SDK for WASM plugin authors. Lives in `backend/crates/sober-pdk/`.
+Guest-side SDK for WASM plugin authors. Lives in `sdks/sober-pdk/`.
 Compiles to `wasm32-wasi` (not the host target). Part of the workspace but
 excluded from `cargo build --workspace` via `default-members`.
 
