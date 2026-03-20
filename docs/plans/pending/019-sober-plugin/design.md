@@ -72,7 +72,7 @@ pub enum PluginScope { System, User, Workspace }
 #[cfg_attr(feature = "postgres", derive(sqlx::Type))]
 #[cfg_attr(feature = "postgres", sqlx(type_name = "plugin_status", rename_all = "lowercase"))]
 #[serde(rename_all = "lowercase")]
-pub enum PluginStatus { PendingApproval, Enabled, Disabled, Failed }
+pub enum PluginStatus { Enabled, Disabled, Failed }
 ```
 
 `PluginId` is generated via `define_id!(PluginId)` in `sober-core/src/types/ids.rs`.
@@ -81,21 +81,23 @@ pub enum PluginStatus { PendingApproval, Enabled, Disabled, Failed }
 
 ```
 DISCOVER --> AUDIT --> INSTALL
-                        |
-              +---------+---------+
-              |                   |
-        PendingApproval       Enabled <--> Disabled
-              |
-        [user approves]
-              |
-           Enabled
+                         |
+                   +-----+-----+
+                   |           |
+                Enabled     Failed
+                   |
+                Disabled
 ```
 
-- System origin: audit -> auto-approved -> `Enabled`
-- Agent origin: audit passes + capabilities subset -> `Enabled`;
-  otherwise -> `PendingApproval`
-- User origin: audit passes -> `PendingApproval` -> user approves -> `Enabled`;
-  audit fails -> `Failed`
+- Audit passes -> `Enabled` (all origins, all scopes)
+- Audit fails -> `Failed`
+- User can toggle `Enabled` <-> `Disabled`
+
+No approval flow. The audit pipeline is the trust gate. If all stages pass
+(validate, sandbox, capability, test), the plugin is enabled immediately.
+This keeps the self-evolution loop low-friction. When behavioral analysis
+(currently a stub) is implemented, it will provide stronger automated
+protection than manual approval ever could.
 
 All plugin kinds share the same lifecycle. Audit stages differ by kind.
 
@@ -155,7 +157,7 @@ Replaces `mcp_servers`. Tracks all three plugin kinds.
 CREATE TYPE plugin_kind AS ENUM ('mcp', 'skill', 'wasm');
 CREATE TYPE plugin_origin AS ENUM ('system', 'agent', 'user');
 CREATE TYPE plugin_scope AS ENUM ('system', 'user', 'workspace');
-CREATE TYPE plugin_status AS ENUM ('pending_approval', 'enabled', 'disabled', 'failed');
+CREATE TYPE plugin_status AS ENUM ('enabled', 'disabled', 'failed');
 
 CREATE TABLE plugins (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -167,7 +169,7 @@ CREATE TABLE plugins (
     scope          plugin_scope NOT NULL,
     owner_id       UUID REFERENCES users(id),
     workspace_id   UUID REFERENCES workspaces(id),
-    status         plugin_status NOT NULL DEFAULT 'pending_approval',
+    status         plugin_status NOT NULL DEFAULT 'enabled',
     config         JSONB NOT NULL DEFAULT '{}',
     installed_by   UUID REFERENCES users(id),
     installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -659,7 +661,8 @@ soberctl plugin install .sober/plugins/date-formatter
 
 # Output:
 # Audit: validate ✓, sandbox ✓, capability ✓, test ✓
-# Plugin "date-formatter" installed and enabled (workspace scope, auto-approved)
+# Audit: validate ✓, sandbox ✓, capability ✓, test ✓
+# Plugin "date-formatter" installed and enabled (workspace scope)
 ```
 
 **5. Use:** The agent now sees `format_date` as a tool and can call it.
@@ -681,7 +684,7 @@ Flow:
    `scope = Workspace` and `origin = Agent`
 3. LLM generates source + tests in `.sober/plugins/<name>/`
 4. Compiles to WASM, runs tests (self-correcting loop, max 3 retries)
-5. Installs via `PluginManager.install()` — workspace-scoped, auto-approved
+5. Installs via `PluginManager.install()` — audit passes, enabled
 6. Agent confirms: "Created plugin `date-formatter` with tool `format_date`.
    It's enabled in this workspace."
 
@@ -713,21 +716,13 @@ API keys, env vars) that are unavailable during configuration. Connectivity
 is verified on first use by `McpPool`. If the server fails to start or
 handshake, the error surfaces at execution time.
 
-### Approval thresholds
+### Audit outcome
 
-| Origin | Scope | Rule |
-|--------|-------|------|
-| `System` | any | Auto-approved (pre-audited, shipped with Sober) |
-| `Agent` | workspace | Auto-approved if all stages pass (workspace-scoped is low blast radius) |
-| `Agent` | user | Auto-approved if capabilities are a subset of agent's existing access. Otherwise `PendingApproval`. |
-| `User` | workspace | WASM: auto-approved after all stages pass (user explicitly initiated in their workspace). MCP/Skill: auto-approved after validation. |
-| `User` | user | WASM: `PendingApproval` after stages pass (affects all workspaces). MCP/Skill: auto-approved after validation. |
-| any | any | `Rejected` if any audit stage fails. |
+- All stages pass -> plugin is **enabled** immediately
+- Any stage fails -> plugin status is **failed**, audit log records the rejection
 
-Workspace-scoped plugins are auto-approved because:
-- They only affect the current workspace, not the user's global environment
-- The user (or agent acting in the user's workspace) explicitly initiated the install
-- It keeps the self-evolution loop low-friction for workspace-local plugins
+No manual approval step. The audit pipeline is the trust gate. Origin and
+scope are recorded for auditability but do not affect the outcome.
 
 ### Types
 
@@ -756,7 +751,6 @@ pub struct StageResult {
 pub enum AuditVerdict {
     Approved,
     Rejected { stage: String, reason: String },
-    PendingApproval { reason: String },
 }
 ```
 
@@ -775,7 +769,6 @@ impl<P: PluginRepo> PluginRegistry<P> {
     pub async fn uninstall(&self, plugin_id: PluginId) -> Result<(), PluginError>;
     pub async fn enable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
     pub async fn disable(&self, plugin_id: PluginId) -> Result<(), PluginError>;
-    pub async fn approve(&self, plugin_id: PluginId) -> Result<(), PluginError>;
     pub async fn list(&self, filter: PluginFilter) -> Result<Vec<PluginInfo>, PluginError>;
 }
 ```
@@ -786,8 +779,7 @@ impl<P: PluginRepo> PluginRegistry<P> {
 2. Compile source to WASM (if WASM kind with source)
 3. Run audit pipeline
 4. If approved: store record in DB with `status = enabled`
-5. If pending: store record with `status = pending_approval`, return report
-6. If rejected: store audit log only (no plugin record), return rejection
+5. If rejected: store audit log only (no plugin record), return rejection
 
 ### Plugin resolution
 
@@ -827,7 +819,7 @@ The agent can autonomously create Skills and WASM plugins.
 - Generates SKILL.md with proper frontmatter and body
 - Written to user/workspace skill directory
 - Registered in `plugins` table via `PluginManager`
-- Origin: `Agent`, approval: auto-approved (low risk)
+- Origin: `Agent`, audit passes -> enabled
 
 ### WASM generation
 
@@ -843,7 +835,7 @@ The agent can autonomously create Skills and WASM plugins.
   7. On success: return `GenerateResult`
 - Source committed to workspace git repo (via sober-workspace)
 - Installed through `PluginManager.install()` -> audit pipeline
-- Origin: `Agent`, approval: auto if capabilities subset, otherwise `PendingApproval`
+- Origin: `Agent`, audit passes -> enabled
 
 ### sober-plugin-gen API
 
@@ -938,7 +930,6 @@ POST   /api/v1/plugins/import           # Import from config file (batch)
 GET    /api/v1/plugins/:id              # Details
 PATCH  /api/v1/plugins/:id              # Update (enable/disable, config)
 DELETE /api/v1/plugins/:id              # Uninstall
-POST   /api/v1/plugins/:id/approve      # Approve pending
 GET    /api/v1/plugins/:id/audit        # Audit report
 POST   /api/v1/plugins/reload           # Re-scan filesystem (skills)
 ```
@@ -988,9 +979,6 @@ pub enum PluginError {
     #[error("audit rejected: {stage} -- {reason}")]
     AuditRejected { stage: String, reason: String },
 
-    #[error("pending approval: {0}")]
-    PendingApproval(String),
-
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
 
@@ -1036,7 +1024,6 @@ pub enum GenError {
 `PluginError` maps to `AppError`:
 - `NotFound` -> 404
 - `AuditRejected` -> 422 Unprocessable Entity (audit failed)
-- `PendingApproval` -> 409 Conflict (action blocked by pending state)
 - `CapabilityDenied` -> 403 Forbidden
 - `ManifestInvalid` -> 400 Bad Request
 - `AlreadyExists` -> 409 Conflict
