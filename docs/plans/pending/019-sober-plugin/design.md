@@ -220,6 +220,31 @@ CREATE TABLE plugin_audit_logs (
    `McpServerId` internally (it uses `McpServerRunConfig` for connections).
 5. Skills are registered on discovery by `PluginManager` (no data migration)
 
+### plugin_kv table
+
+Persistent key-value store for WASM plugins with the `KeyValue` capability.
+Scoped per plugin record — each `plugin_id` gets its own isolated namespace.
+
+```sql
+CREATE TABLE plugin_kv (
+    plugin_id  UUID NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    value      JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (plugin_id, key)
+);
+```
+
+Host functions:
+
+- `host_kv_get(key) -> Option<JsonValue>` — look up by `(calling_plugin_id, key)`
+- `host_kv_set(key, value) -> ()` — upsert `(calling_plugin_id, key, value)`
+- `host_kv_delete(key) -> ()` — remove a key
+- `host_kv_list(prefix) -> Vec<String>` — list keys matching a prefix
+
+The host function injects the calling plugin's `plugin_id` automatically.
+Plugins cannot access another plugin's keys.
+
 ### plugin_audit_logs FK behavior
 
 `plugin_id` uses `ON DELETE SET NULL` so audit logs are preserved when plugins
