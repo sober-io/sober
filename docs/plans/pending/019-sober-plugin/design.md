@@ -571,6 +571,124 @@ pub struct FormatDateInput {
 }
 ```
 
+### Example: Building and Deploying a WASM Plugin
+
+**1. Scaffold:**
+
+```bash
+# In a workspace directory
+soberctl plugin new date-formatter
+```
+
+Produces:
+
+```
+.sober/plugins/date-formatter/
+  +-- plugin.toml
+  +-- src/
+      +-- lib.rs
+```
+
+**2. Write the plugin:**
+
+`plugin.toml`:
+
+```toml
+[plugin]
+name = "date-formatter"
+version = "0.1.0"
+description = "Formats dates in Estonian locale"
+
+[capabilities]
+key_value = true
+
+[[tools]]
+name = "format_date"
+description = "Format a date in Estonian locale"
+```
+
+`src/lib.rs`:
+
+```rust
+use extism_pdk::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct FormatDateInput {
+    date: String,
+    locale: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FormatDateOutput {
+    formatted: String,
+}
+
+#[plugin_fn]
+pub fn format_date(input: Json<FormatDateInput>) -> FnResult<Json<FormatDateOutput>> {
+    let locale = input.0.locale.as_deref().unwrap_or("et-EE");
+    // ... formatting logic ...
+    Ok(Json(FormatDateOutput {
+        formatted: format!("{} ({})", input.0.date, locale),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_with_default_locale() {
+        // ...
+    }
+}
+```
+
+**3. Build:**
+
+```bash
+cd .sober/plugins/date-formatter
+cargo build --target wasm32-wasi --release
+```
+
+**4. Install:**
+
+```bash
+# From the workspace
+soberctl plugin install .sober/plugins/date-formatter
+
+# Output:
+# Audit: validate ✓, sandbox ✓, capability ✓, test ✓
+# Plugin "date-formatter" installed and enabled (workspace scope, auto-approved)
+```
+
+**5. Use:** The agent now sees `format_date` as a tool and can call it.
+
+### Slash Command: /generate-plugin
+
+The agent exposes a `/generate-plugin` slash command that triggers
+`sober-plugin-gen` in the current workspace:
+
+```
+/generate-plugin "formats dates in Estonian locale with support for
+different calendar systems"
+```
+
+Flow:
+
+1. Agent receives the description
+2. Delegates to `PluginGenerator::generate_wasm()` with
+   `scope = Workspace` and `origin = Agent`
+3. LLM generates source + tests in `.sober/plugins/<name>/`
+4. Compiles to WASM, runs tests (self-correcting loop, max 3 retries)
+5. Installs via `PluginManager.install()` — workspace-scoped, auto-approved
+6. Agent confirms: "Created plugin `date-formatter` with tool `format_date`.
+   It's enabled in this workspace."
+
+The same flow happens autonomously when the agent identifies a repeated
+pattern (self-evolution), but `/generate-plugin` lets the user trigger
+it explicitly.
+
 ---
 
 ## 7. Audit Pipeline
@@ -597,11 +715,19 @@ handshake, the error surfaces at execution time.
 
 ### Approval thresholds
 
-| Origin | Rule |
-|--------|------|
-| `System` | Auto-approved (pre-audited, shipped with Sober) |
-| `Agent` | Auto-approved if all stages pass AND capabilities subset of agent's access. Otherwise `PendingApproval`. |
-| `User` | WASM: `PendingApproval` after stages pass (user must confirm). MCP/Skill: auto-approved after validation (user explicitly initiated the install). `Rejected` if any stage fails. |
+| Origin | Scope | Rule |
+|--------|-------|------|
+| `System` | any | Auto-approved (pre-audited, shipped with Sober) |
+| `Agent` | workspace | Auto-approved if all stages pass (workspace-scoped is low blast radius) |
+| `Agent` | user | Auto-approved if capabilities are a subset of agent's existing access. Otherwise `PendingApproval`. |
+| `User` | workspace | WASM: auto-approved after all stages pass (user explicitly initiated in their workspace). MCP/Skill: auto-approved after validation. |
+| `User` | user | WASM: `PendingApproval` after stages pass (affects all workspaces). MCP/Skill: auto-approved after validation. |
+| any | any | `Rejected` if any audit stage fails. |
+
+Workspace-scoped plugins are auto-approved because:
+- They only affect the current workspace, not the user's global environment
+- The user (or agent acting in the user's workspace) explicitly initiated the install
+- It keeps the self-evolution loop low-friction for workspace-local plugins
 
 ### Types
 
