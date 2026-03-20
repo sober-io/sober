@@ -68,11 +68,21 @@ impl<P: PluginRepo> PluginRegistry<P> {
     /// Returns [`PluginError::AlreadyExists`] if a plugin with the same
     /// name is already registered, or propagates database errors.
     pub async fn install(&self, request: InstallRequest) -> Result<AuditReport, PluginError> {
-        // Check for duplicates.
-        match self.db.get_by_name(&request.name).await {
-            Ok(_) => return Err(PluginError::AlreadyExists(request.name)),
-            Err(AppError::NotFound(_)) => {} // expected — no duplicate
-            Err(e) => return Err(PluginError::Internal(e.into())),
+        // Check for duplicates within the same scope.
+        let existing = self
+            .db
+            .list(PluginFilter {
+                name: Some(request.name.clone()),
+                scope: Some(request.scope),
+                owner_id: request.owner_id,
+                workspace_id: request.workspace_id,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| PluginError::Internal(e.into()))?;
+
+        if !existing.is_empty() {
+            return Err(PluginError::AlreadyExists(request.name));
         }
 
         // Run audit pipeline.

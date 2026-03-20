@@ -96,6 +96,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
              AND ($3::uuid IS NULL OR owner_id = $3) \
              AND ($4::uuid IS NULL OR workspace_id = $4) \
              AND ($5::plugin_status IS NULL OR status = $5) \
+             AND ($6::text IS NULL OR name = $6) \
              ORDER BY name ASC"
         ))
         .bind(filter.kind)
@@ -103,6 +104,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
         .bind(filter.owner_id.map(|id| *id.as_uuid()))
         .bind(filter.workspace_id.map(|id| *id.as_uuid()))
         .bind(filter.status)
+        .bind(filter.name)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

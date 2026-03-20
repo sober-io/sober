@@ -289,6 +289,8 @@ pub struct CreatePluginAuditLog {
 /// Filter for querying plugins.
 #[derive(Debug, Clone, Default)]
 pub struct PluginFilter {
+    /// Filter by name (exact match).
+    pub name: Option<String>,
     /// Filter by plugin kind.
     pub kind: Option<PluginKind>,
     /// Filter by scope.
