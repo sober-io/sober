@@ -460,14 +460,14 @@ origin = "agent"
 scope = "workspace"
 
 [capabilities]
-# Vec<String> — value lists the allowed scopes/targets
-memory_read = ["user", "session"]
-memory_write = ["session"]
-network = ["api.example.com", "hooks.slack.com"]
-filesystem = ["/workspace/data", "/workspace/output"]
-tool_call = ["web_search", "recall"]
+# Inline tables — named fields describe what the capability allows
+memory_read = { scopes = ["user", "session"] }
+memory_write = { scopes = ["session"] }
+network = { domains = ["api.example.com", "hooks.slack.com"] }
+filesystem = { paths = ["/workspace/data", "/workspace/output"] }
+tool_call = { tools = ["web_search", "recall"] }
 
-# Boolean — capability is either present or absent
+# Boolean — capability is present with no additional config
 llm_call = true
 conversation_read = true
 metrics = true
@@ -499,37 +499,63 @@ pub struct PluginManifest {
 
 ### CapabilitiesConfig
 
-Maps the flat TOML representation to typed `Capability` variants:
+Each field accepts either `true` (enabled, no config) or an inline table
+with typed fields. Deserialized via an untagged enum:
 
 ```rust
+/// Accepts both `true` and `{ field = ... }` in TOML.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Cap<T: Default> {
+    Enabled(bool),
+    WithConfig(T),
+}
+
+impl<T: Default> Default for Cap<T> {
+    fn default() -> Self { Cap::Enabled(false) }
+}
+
+// Per-capability config structs
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkCap { pub domains: Vec<String> }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryCap { pub scopes: Vec<String> }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FilesystemCap { pub paths: Vec<String> }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ToolCallCap { pub tools: Vec<String> }
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CapabilitiesConfig {
     #[serde(default)]
-    pub memory_read: Vec<String>,      // -> Capability::MemoryRead { scopes }
+    pub memory_read: Cap<MemoryCap>,
     #[serde(default)]
-    pub memory_write: Vec<String>,     // -> Capability::MemoryWrite { scopes }
+    pub memory_write: Cap<MemoryCap>,
     #[serde(default)]
-    pub network: Vec<String>,          // -> Capability::Network { domains }
+    pub network: Cap<NetworkCap>,
     #[serde(default)]
-    pub filesystem: Vec<String>,       // -> Capability::Filesystem { paths }
+    pub filesystem: Cap<FilesystemCap>,
     #[serde(default)]
-    pub llm_call: bool,                // -> Capability::LlmCall
+    pub tool_call: Cap<ToolCallCap>,
     #[serde(default)]
-    pub tool_call: Vec<String>,        // -> Capability::ToolCall { tools }
+    pub llm_call: Cap<()>,
     #[serde(default)]
-    pub conversation_read: bool,       // -> Capability::ConversationRead
+    pub conversation_read: Cap<()>,
     #[serde(default)]
-    pub metrics: bool,                 // -> Capability::Metrics
+    pub metrics: Cap<()>,
     #[serde(default)]
-    pub secret_read: bool,             // -> Capability::SecretRead
+    pub secret_read: Cap<()>,
     #[serde(default)]
-    pub key_value: bool,               // -> Capability::KeyValue
+    pub key_value: Cap<()>,
     #[serde(default)]
-    pub schedule: bool,                // -> Capability::Schedule
+    pub schedule: Cap<()>,
 }
 
 impl CapabilitiesConfig {
-    /// Convert flat config to typed capability list.
+    /// Convert to typed capability list (only enabled capabilities included).
     pub fn to_capabilities(&self) -> Vec<Capability>;
 }
 ```
