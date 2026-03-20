@@ -124,6 +124,7 @@ mod tests {
     }
 
     // Compile-time assertion that PluginTool is Send + Sync.
+    #[allow(dead_code)]
     const _: () = {
         fn assert_send_sync<T: Send + Sync>() {}
         fn check() {

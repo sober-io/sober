@@ -18,3 +18,5 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
+wat = "1"
+tokio = { workspace = true, features = ["rt", "macros"] }
