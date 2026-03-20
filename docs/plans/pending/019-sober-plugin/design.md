@@ -220,30 +220,28 @@ CREATE TABLE plugin_audit_logs (
    `McpServerId` internally (it uses `McpServerRunConfig` for connections).
 5. Skills are registered on discovery by `PluginManager` (no data migration)
 
-### plugin_kv table
+### plugin_kv_data table
 
 Persistent key-value store for WASM plugins with the `KeyValue` capability.
-Scoped per plugin record — each `plugin_id` gets its own isolated namespace.
+One row per plugin — all KV data stored as a single JSONB blob.
 
 ```sql
-CREATE TABLE plugin_kv (
-    plugin_id  UUID NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
-    key        TEXT NOT NULL,
-    value      JSONB NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (plugin_id, key)
+CREATE TABLE plugin_kv_data (
+    plugin_id  UUID PRIMARY KEY REFERENCES plugins(id) ON DELETE CASCADE,
+    data       JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-Host functions:
+Host functions operate on keys within the `data` blob:
 
-- `host_kv_get(key) -> Option<JsonValue>` — look up by `(calling_plugin_id, key)`
-- `host_kv_set(key, value) -> ()` — upsert `(calling_plugin_id, key, value)`
-- `host_kv_delete(key) -> ()` — remove a key
+- `host_kv_get(key) -> Option<JsonValue>` — read `data[key]`
+- `host_kv_set(key, value) -> ()` — set `data[key] = value`
+- `host_kv_delete(key) -> ()` — remove `data[key]`
 - `host_kv_list(prefix) -> Vec<String>` — list keys matching a prefix
 
 The host function injects the calling plugin's `plugin_id` automatically.
-Plugins cannot access another plugin's keys.
+Plugins cannot access another plugin's data.
 
 ### plugin_audit_logs FK behavior
 
@@ -435,16 +433,26 @@ origin = "agent"
 scope = "workspace"
 
 [capabilities]
-network = ["api.example.com"]
-tool_call = ["web_search"]
-secret_read = true
+# Vec<String> — value lists the allowed scopes/targets
+memory_read = ["user", "session"]
+memory_write = ["session"]
+network = ["api.example.com", "hooks.slack.com"]
+filesystem = ["/workspace/data", "/workspace/output"]
+tool_call = ["web_search", "recall"]
+
+# Boolean — capability is either present or absent
+llm_call = true
+conversation_read = true
 metrics = true
+secret_read = true
 key_value = true
+schedule = true
 
 [[tools]]
 name = "format_date"
 description = "Format a date in Estonian locale"
 
+# Required when metrics = true. Undeclared metric names are rejected.
 [[metrics]]
 name = "dates_formatted"
 kind = "counter"
