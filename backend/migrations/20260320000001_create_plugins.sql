@@ -20,11 +20,13 @@ CREATE TABLE plugins (
     config         JSONB NOT NULL DEFAULT '{}',
     installed_by   UUID REFERENCES users(id),
     installed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-    UNIQUE(name, scope,
-           COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
-           COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000'))
+CREATE UNIQUE INDEX idx_plugins_unique_name ON plugins (
+    name, scope,
+    COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+    COALESCE(workspace_id, '00000000-0000-0000-0000-000000000000')
 );
 
 CREATE INDEX idx_plugins_owner ON plugins (owner_id) WHERE owner_id IS NOT NULL;
