@@ -4305,6 +4305,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sober-plugin-gen"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sober-core",
+ "sober-llm",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
 name = "sober-sandbox"
 version = "0.2.0"
 dependencies = [
