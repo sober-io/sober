@@ -7,12 +7,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use sober_core::types::enums::{PluginKind, PluginOrigin, PluginScope, PluginStatus};
+use sober_core::types::enums::{PluginKind, PluginOrigin, PluginScope};
 use sober_core::types::ids::{UserId, WorkspaceId};
-use sober_core::types::input::CreatePlugin;
 use sober_core::types::repo::PluginRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use sober_plugin::PluginManager;
+use sober_plugin::registry::InstallRequest;
 use sober_plugin_gen::PluginGenerator;
 
 /// Built-in tool that generates plugins (WASM or skill) via LLM.
@@ -132,21 +132,21 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
         }
     }
 
-    /// Registers a plugin in the database via the plugin manager's repo.
+    /// Registers a plugin through the audit pipeline and persists it.
     async fn register_plugin(
         &self,
         name: &str,
         description: &str,
         kind: PluginKind,
         config: serde_json::Value,
-    ) -> Result<sober_core::types::domain::Plugin, ToolError> {
+    ) -> Result<(), ToolError> {
         let scope = if self.workspace_id.is_some() {
             PluginScope::Workspace
         } else {
             PluginScope::User
         };
 
-        let create_input = CreatePlugin {
+        let install_req = InstallRequest {
             name: name.to_owned(),
             kind,
             version: Some("0.1.0".to_owned()),
@@ -155,16 +155,27 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             scope,
             owner_id: Some(self.user_id),
             workspace_id: self.workspace_id,
-            status: PluginStatus::Enabled,
             config,
             installed_by: Some(self.user_id),
+            manifest: None,
+            wasm_bytes: None,
         };
 
-        self.plugin_manager
-            .repo()
-            .create(create_input)
+        let report = self
+            .plugin_manager
+            .registry()
+            .install(install_req)
             .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("failed to register plugin: {e}")))
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to register plugin: {e}")))?;
+
+        if !report.is_approved() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "plugin rejected by audit: {}",
+                report.rejection_reason().unwrap_or("unknown")
+            )));
+        }
+
+        Ok(())
     }
 
     /// Generates a WASM plugin and saves it to the workspace.
@@ -215,26 +226,24 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write source: {e}")))?;
 
-        // Register the plugin in the database.
-        let plugin = self
-            .register_plugin(
-                name,
-                description,
-                PluginKind::Wasm,
-                serde_json::json!({
-                    "wasm_path": wasm_path.to_string_lossy(),
-                    "manifest_toml": generated.manifest,
-                }),
-            )
-            .await?;
+        // Register the plugin through the audit pipeline.
+        self.register_plugin(
+            name,
+            description,
+            PluginKind::Wasm,
+            serde_json::json!({
+                "wasm_path": wasm_path.to_string_lossy(),
+                "manifest_toml": generated.manifest,
+            }),
+        )
+        .await?;
 
         Ok(ToolOutput {
             content: format!(
-                "Generated WASM plugin '{name}' (id: {}).\n\
+                "Generated WASM plugin '{name}'.\n\
                  Files saved to: {}\n\
                  Capabilities: {}\n\
-                 Status: enabled",
-                plugin.id,
+                 Status: enabled (audit passed)",
                 plugin_dir.display(),
                 if capabilities.is_empty() {
                     "none".to_owned()
@@ -271,25 +280,23 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write skill file: {e}")))?;
 
-        // Register the skill plugin in the database.
-        let plugin = self
-            .register_plugin(
-                name,
-                description,
-                PluginKind::Skill,
-                serde_json::json!({
-                    "path": skill_path.to_string_lossy(),
-                }),
-            )
-            .await?;
+        // Register the skill through the audit pipeline.
+        self.register_plugin(
+            name,
+            description,
+            PluginKind::Skill,
+            serde_json::json!({
+                "path": skill_path.to_string_lossy(),
+            }),
+        )
+        .await?;
 
         Ok(ToolOutput {
             content: format!(
-                "Generated skill '{name}' (id: {}).\n\
+                "Generated skill '{name}'.\n\
                  Saved to: {}\n\
-                 Status: enabled\n\n\
+                 Status: enabled (audit passed)\n\n\
                  The skill will be available in the next conversation turn.",
-                plugin.id,
                 skill_path.display(),
             ),
             is_error: false,
@@ -309,8 +316,9 @@ mod tests {
     use futures::Stream;
     use sober_core::error::AppError;
     use sober_core::types::domain::{Plugin, PluginAuditLog};
+    use sober_core::types::enums::PluginStatus;
     use sober_core::types::ids::PluginId;
-    use sober_core::types::input::{CreatePluginAuditLog, PluginFilter};
+    use sober_core::types::input::{CreatePlugin, CreatePluginAuditLog, PluginFilter};
     use sober_llm::{
         CompletionRequest, CompletionResponse, EngineCapabilities, LlmEngine, LlmError, Message,
         types::StreamChunk,
@@ -414,9 +422,22 @@ mod tests {
 
         fn create_audit_log(
             &self,
-            _input: CreatePluginAuditLog,
+            input: CreatePluginAuditLog,
         ) -> impl std::future::Future<Output = Result<PluginAuditLog, AppError>> + Send {
-            async { Err(AppError::Internal("not implemented".into())) }
+            async move {
+                Ok(PluginAuditLog {
+                    id: uuid::Uuid::now_v7(),
+                    plugin_id: input.plugin_id,
+                    plugin_name: input.plugin_name,
+                    kind: input.kind,
+                    origin: input.origin,
+                    stages: input.stages,
+                    verdict: input.verdict,
+                    rejection_reason: input.rejection_reason,
+                    audited_at: chrono::Utc::now(),
+                    audited_by: input.audited_by,
+                })
+            }
         }
 
         fn list_audit_logs(
