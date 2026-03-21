@@ -6,6 +6,10 @@
 //! - `compile` — WASM compilation; shells out to `cargo build --target wasm32-wasip1`.
 //! - `generate` — LLM-powered generation with a self-correcting retry loop.
 
+pub mod compile;
 pub mod error;
+pub mod scaffold;
 
+pub use compile::compile;
 pub use error::GenError;
+pub use scaffold::scaffold;
