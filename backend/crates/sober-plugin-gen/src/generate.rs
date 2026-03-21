@@ -19,9 +19,10 @@ use crate::{GenError, compile::compile};
 // Generation constants
 // ---------------------------------------------------------------------------
 
-/// Maximum tokens for WASM plugin generation. Set high (4096) because
-/// generated Rust source includes imports, structs, and full function bodies.
-const WASM_GEN_MAX_TOKENS: u32 = 4096;
+/// Maximum tokens for WASM plugin generation. Must be large enough for
+/// complete Rust source with imports, structs, error handling, and function
+/// bodies. 8192 avoids mid-response truncation that breaks code fences.
+const WASM_GEN_MAX_TOKENS: u32 = 8192;
 
 /// Maximum tokens for skill generation. Skills are markdown documents,
 /// typically shorter than compiled source code.
