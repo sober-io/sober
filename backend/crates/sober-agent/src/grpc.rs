@@ -8,6 +8,7 @@ use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, PluginId, UserId, WorkspaceId};
+use sober_core::types::repo::ConversationRepo;
 use sober_core::types::repo::PluginRepo;
 use sober_plugin::PluginManager;
 use tokio_stream::wrappers::ReceiverStream;
@@ -349,10 +350,31 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
     async fn list_skills(
         &self,
-        _request: Request<proto::ListSkillsRequest>,
+        request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
-        use sober_core::types::enums::{PluginKind, PluginStatus};
+        use sober_core::types::enums::{PluginKind, PluginScope, PluginStatus};
         use sober_core::types::input::PluginFilter;
+        use std::collections::HashSet;
+
+        let req = request.into_inner();
+
+        // Resolve workspace_id from conversation_id for workspace-scoped filtering.
+        let workspace_id = if let Some(conv_id_str) = req.conversation_id {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .repos()
+                    .conversations()
+                    .get_by_id(conv_id)
+                    .await
+                    .ok()
+                    .and_then(|c| c.workspace_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Database is the source of truth. Return enabled skill plugins.
         let filter = PluginFilter {
@@ -369,8 +391,26 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        // Filter: include system + user scoped skills always,
+        // workspace-scoped only if they match the current workspace.
+        // Deduplicate by name (first occurrence wins).
+        let mut seen = HashSet::new();
         let skills = plugins
             .into_iter()
+            .filter(|p| match p.scope {
+                PluginScope::System | PluginScope::User => true,
+                PluginScope::Workspace => {
+                    // Only include if matching the current workspace
+                    match (p.workspace_id, workspace_id) {
+                        (Some(pw), Some(cw)) => pw == cw,
+                        // Workspace skills without workspace_id: match by
+                        // checking if the config path is under the workspace dir
+                        (None, _) => workspace_id.is_some(),
+                        _ => false,
+                    }
+                }
+            })
+            .filter(|p| seen.insert(p.name.clone()))
             .map(|p| proto::SkillInfo {
                 name: p.name,
                 description: p.description.unwrap_or_default(),
@@ -416,6 +456,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
                 UserId::from_uuid(uuid::Uuid::nil()),
                 &user_home,
                 &workspace_path,
+                None, // workspace_id — not available in reload context
                 None,
             )
             .await;

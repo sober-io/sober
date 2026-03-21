@@ -237,6 +237,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 ctx.user_id,
                 &user_home,
                 &workspace_path,
+                ctx.workspace_id,
                 ctx.skill_activation_state.clone(),
             )
             .await

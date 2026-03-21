@@ -445,6 +445,14 @@ mod tests {
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { Ok(()) }
         }
+
+        fn update_scope(
+            &self,
+            _id: PluginId,
+            _scope: sober_core::types::PluginScope,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { Ok(()) }
+        }
     }
 
     // -----------------------------------------------------------------------

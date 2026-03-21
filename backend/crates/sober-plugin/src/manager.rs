@@ -83,6 +83,7 @@ impl<R: PluginRepo> PluginManager<R> {
         user_id: UserId,
         user_home: &Path,
         workspace_dir: &Path,
+        workspace_id: Option<sober_core::types::WorkspaceId>,
         skill_activation_state: Option<Arc<Mutex<SkillActivationState>>>,
     ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
         let filter = PluginFilter {
@@ -126,7 +127,12 @@ impl<R: PluginRepo> PluginManager<R> {
         // Also syncs filesystem skills into the plugins table so they
         // appear in the unified plugins UI.
         if let Ok(skill_tools) = self
-            .skill_tools(user_home, workspace_dir, skill_activation_state)
+            .skill_tools(
+                user_home,
+                workspace_dir,
+                workspace_id,
+                skill_activation_state,
+            )
             .await
         {
             tools.extend(skill_tools);
@@ -177,6 +183,7 @@ impl<R: PluginRepo> PluginManager<R> {
         &self,
         user_home: &Path,
         workspace_dir: &Path,
+        workspace_id: Option<sober_core::types::WorkspaceId>,
         activation_state: Option<Arc<Mutex<SkillActivationState>>>,
     ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
         use sober_core::types::enums::{PluginOrigin, PluginScope};
@@ -221,9 +228,9 @@ impl<R: PluginRepo> PluginManager<R> {
             } else {
                 // New skill — register in the DB.
                 let entry = catalog.get(name).expect("name from catalog");
-                let scope = match entry.source {
-                    sober_skill::SkillSource::User => PluginScope::User,
-                    sober_skill::SkillSource::Workspace => PluginScope::Workspace,
+                let (scope, ws_id) = match entry.source {
+                    sober_skill::SkillSource::User => (PluginScope::User, None),
+                    sober_skill::SkillSource::Workspace => (PluginScope::Workspace, workspace_id),
                 };
                 let input = CreatePlugin {
                     name: entry.frontmatter.name.clone(),
@@ -233,7 +240,7 @@ impl<R: PluginRepo> PluginManager<R> {
                     origin: PluginOrigin::System,
                     scope,
                     owner_id: None,
-                    workspace_id: None,
+                    workspace_id: ws_id,
                     status: PluginStatus::Enabled,
                     config: serde_json::json!({
                         "path": entry.path.to_string_lossy(),
@@ -541,6 +548,14 @@ mod tests {
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { Ok(()) }
         }
+
+        fn update_scope(
+            &self,
+            _id: PluginId,
+            _scope: sober_core::types::PluginScope,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { Ok(()) }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -586,6 +601,7 @@ mod tests {
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
                 None,
+                None,
             )
             .await
             .expect("should succeed");
@@ -607,6 +623,7 @@ mod tests {
                 user_id,
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
+                None,
                 None,
             )
             .await
@@ -634,6 +651,7 @@ mod tests {
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
                 None,
+                None,
             )
             .await
             .expect("should succeed despite bad plugin config");
@@ -658,6 +676,7 @@ mod tests {
                 user_id,
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
+                None,
                 None,
             )
             .await
@@ -718,6 +737,7 @@ mod tests {
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
                 None,
+                None,
             )
             .await
             .expect("should succeed");
@@ -741,6 +761,7 @@ mod tests {
                 different_user,
                 Path::new("/nonexistent-home"),
                 Path::new("/nonexistent"),
+                None,
                 None,
             )
             .await
