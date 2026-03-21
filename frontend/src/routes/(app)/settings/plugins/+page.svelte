@@ -531,7 +531,7 @@
 									{#if mcpConfig.env && Object.keys(mcpConfig.env).length > 0}
 										<div>
 											<span class="font-medium text-zinc-600 dark:text-zinc-400">Env:</span>
-											{#each Object.entries(mcpConfig.env) as [key, value]}
+											{#each Object.entries(mcpConfig.env) as [key, value] (key)}
 												<div class="ml-4">
 													<code class="text-zinc-900 dark:text-zinc-100">{key}={value}</code>
 												</div>
