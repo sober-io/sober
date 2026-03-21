@@ -1,4 +1,4 @@
-//! Skill plugin cleanup executor — removes plugin entries whose skill files
+//! Plugin cleanup executor — removes plugin entries whose skill files
 //! no longer exist on the filesystem.
 
 use sober_core::error::AppError;
@@ -16,19 +16,19 @@ use crate::executor::{ExecutionResult, JobExecutor};
 /// config JSON, and deletes entries where the file is missing.  This handles
 /// skills that were removed from `~/.sober/skills/` or `.sober/skills/`
 /// without going through the plugins API.
-pub struct SkillPluginCleanupExecutor<P: PluginRepo> {
+pub struct PluginCleanupExecutor<P: PluginRepo> {
     plugin_repo: P,
 }
 
-impl<P: PluginRepo> SkillPluginCleanupExecutor<P> {
-    /// Create a new skill plugin cleanup executor.
+impl<P: PluginRepo> PluginCleanupExecutor<P> {
+    /// Create a new plugin cleanup executor.
     pub fn new(plugin_repo: P) -> Self {
         Self { plugin_repo }
     }
 }
 
 #[tonic::async_trait]
-impl<P: PluginRepo + 'static> JobExecutor for SkillPluginCleanupExecutor<P> {
+impl<P: PluginRepo + 'static> JobExecutor for PluginCleanupExecutor<P> {
     async fn execute(&self, _job: &Job) -> Result<ExecutionResult, AppError> {
         let filter = PluginFilter {
             kind: Some(PluginKind::Skill),
@@ -70,7 +70,7 @@ impl<P: PluginRepo + 'static> JobExecutor for SkillPluginCleanupExecutor<P> {
         info!(
             removed,
             total = skill_plugins.len(),
-            "skill plugin cleanup complete"
+            "plugin cleanup complete"
         );
 
         Ok(ExecutionResult {

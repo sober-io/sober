@@ -45,11 +45,11 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
-            name: "system::skill_plugin_cleanup",
+            name: "system::plugin_cleanup",
             schedule: "every: 1h",
             payload: serde_json::json!({
                 "type": "internal",
-                "op": "skill_plugin_cleanup",
+                "op": "plugin_cleanup",
             }),
         },
         SystemJobDef {

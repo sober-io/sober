@@ -19,8 +19,8 @@ use sober_scheduler::engine::TickEngine;
 use sober_scheduler::executor::JobExecutorRegistry;
 use sober_scheduler::executors::artifact::ArtifactExecutor;
 use sober_scheduler::executors::memory_pruning::MemoryPruningExecutor;
+use sober_scheduler::executors::plugin_cleanup::PluginCleanupExecutor;
 use sober_scheduler::executors::session_cleanup::SessionCleanupExecutor;
-use sober_scheduler::executors::skill_plugin_cleanup::SkillPluginCleanupExecutor;
 use sober_scheduler::grpc::SchedulerGrpcService;
 use sober_scheduler::grpc::scheduler_proto::scheduler_service_server::SchedulerServiceServer;
 use sober_scheduler::system_jobs::register_system_jobs;
@@ -188,11 +188,11 @@ fn build_executor_registry(
         .resolve(&std::collections::HashMap::new())
         .context("failed to resolve sandbox policy")?;
 
-    // Skill plugin cleanup executor
+    // Plugin cleanup executor
     let cleanup_plugin_repo = sober_db::PgPluginRepo::new(pool);
     registry.register(
-        "skill_plugin_cleanup",
-        Arc::new(SkillPluginCleanupExecutor::new(cleanup_plugin_repo)),
+        "plugin_cleanup",
+        Arc::new(PluginCleanupExecutor::new(cleanup_plugin_repo)),
     );
 
     registry.register(

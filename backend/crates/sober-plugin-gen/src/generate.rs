@@ -16,6 +16,26 @@ use tokio::fs;
 use crate::{GenError, compile::compile};
 
 // ---------------------------------------------------------------------------
+// Generation constants
+// ---------------------------------------------------------------------------
+
+/// Maximum tokens for WASM plugin generation. Set high (4096) because
+/// generated Rust source includes imports, structs, and full function bodies.
+const WASM_GEN_MAX_TOKENS: u32 = 4096;
+
+/// Maximum tokens for skill generation. Skills are markdown documents,
+/// typically shorter than compiled source code.
+const SKILL_GEN_MAX_TOKENS: u32 = 2048;
+
+/// Low temperature for WASM generation — deterministic code output is
+/// preferred over creative variation to minimize compile failures.
+const WASM_GEN_TEMPERATURE: f32 = 0.2;
+
+/// Slightly higher temperature for skill generation — skills benefit from
+/// more natural language variety while remaining structured.
+const SKILL_GEN_TEMPERATURE: f32 = 0.3;
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -98,8 +118,8 @@ impl PluginGenerator {
                 model: self.model.clone(),
                 messages: messages.clone(),
                 tools: vec![],
-                max_tokens: Some(4096),
-                temperature: Some(0.2),
+                max_tokens: Some(WASM_GEN_MAX_TOKENS),
+                temperature: Some(WASM_GEN_TEMPERATURE),
                 stop: vec![],
                 stream: false,
             };
@@ -173,8 +193,8 @@ impl PluginGenerator {
                 Message::user(skill_user_prompt(name, description)),
             ],
             tools: vec![],
-            max_tokens: Some(2048),
-            temperature: Some(0.3),
+            max_tokens: Some(SKILL_GEN_MAX_TOKENS),
+            temperature: Some(SKILL_GEN_TEMPERATURE),
             stop: vec![],
             stream: false,
         };
@@ -215,10 +235,18 @@ pub fn tool_name(input: String) -> FnResult<String>
 The input is a JSON string. The return value must also be a JSON string.
 
 Available capabilities via `sober_pdk`:
-- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging
-- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` — key-value store
+- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging (always available)
+- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` — key-value store (requires `key_value` capability)
 - `sober_pdk::http::fetch(url, method, headers, body)` — HTTP requests (requires `network` capability)
 - `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability)
+- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability)
+- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` — emit metrics (requires `metrics` capability)
+- `sober_pdk::memory::read(scope, query)` — read from memory/context (requires `memory_read` capability; not yet connected)
+- `sober_pdk::memory::write(scope, data)` — write to memory/context (requires `memory_write` capability; not yet connected)
+- `sober_pdk::conversation::read(id)` — read conversation history (requires `conversation_read` capability; not yet connected)
+- `sober_pdk::schedule::create(spec)` — create scheduled jobs (requires `schedule` capability; not yet connected)
+- `sober_pdk::fs::read(path)` / `write(path, data)` — filesystem access (requires `filesystem` capability; not yet connected)
+- `sober_pdk::llm::call(prompt)` — invoke an LLM provider (requires `llm_call` capability; not yet connected)
 
 Manifest format (`plugin.toml`):
 ```toml
