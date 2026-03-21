@@ -213,21 +213,29 @@ impl<R: PluginRepo> PluginManager<R> {
             .await
             .unwrap_or_default();
 
-        let existing_by_name: HashMap<&str, &Plugin> = existing_skills
-            .iter()
-            .map(|p| (p.name.as_str(), p))
-            .collect();
+        // Key by (name, workspace_id) so the same skill name can exist
+        // in different workspaces without colliding.
+        let existing_by_key: HashMap<(&str, Option<sober_core::types::WorkspaceId>), &Plugin> =
+            existing_skills
+                .iter()
+                .map(|p| ((p.name.as_str(), p.workspace_id), p))
+                .collect();
 
         // Sync: register newly-discovered filesystem skills in the DB.
         let mut disabled_names: Vec<String> = Vec::new();
         for name in catalog.names() {
-            if let Some(db_plugin) = existing_by_name.get(name) {
+            let entry = catalog.get(name).expect("name from catalog");
+            let lookup_ws = match entry.source {
+                sober_skill::SkillSource::Workspace => workspace_id,
+                sober_skill::SkillSource::User => None,
+            };
+
+            if let Some(db_plugin) = existing_by_key.get(&(name, lookup_ws)) {
                 if db_plugin.status == PluginStatus::Disabled {
                     disabled_names.push(name.to_owned());
                 }
             } else {
                 // New skill — register in the DB.
-                let entry = catalog.get(name).expect("name from catalog");
                 let (scope, ws_id) = match entry.source {
                     sober_skill::SkillSource::User => (PluginScope::User, None),
                     sober_skill::SkillSource::Workspace => (PluginScope::Workspace, workspace_id),
