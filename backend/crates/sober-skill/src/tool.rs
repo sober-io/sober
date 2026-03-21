@@ -146,7 +146,10 @@ impl Tool for ActivateSkillTool {
         ToolMetadata {
             name: "activate_skill".to_owned(),
             description: "Load specialized skill instructions into the conversation. \
-                Call when a task matches an available skill's description."
+                IMPORTANT: When the user sends a message starting with '/' (e.g. '/code-review'), \
+                this is a slash command. You MUST call this tool with the skill name (without the \
+                '/' prefix) to activate it. After activation, follow the loaded skill instructions \
+                to handle the user's request. Do NOT treat slash commands as regular questions."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
