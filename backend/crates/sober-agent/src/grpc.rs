@@ -7,11 +7,12 @@ use std::sync::Arc;
 use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
-use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
+use sober_core::types::ids::{ConversationId, PluginId, UserId, WorkspaceId};
+use sober_core::types::repo::PluginRepo;
 use sober_skill::SkillLoader;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::agent::Agent;
 use crate::broadcast::ConversationUpdateSender;
@@ -435,6 +436,278 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
         Ok(Response::new(proto::ReloadSkillsResponse { skills }))
     }
+
+    async fn list_plugins(
+        &self,
+        request: Request<proto::ListPluginsRequest>,
+    ) -> Result<Response<proto::ListPluginsResponse>, Status> {
+        let req = request.into_inner();
+
+        let kind_filter = req
+            .kind
+            .map(|k| parse_plugin_kind(&k))
+            .transpose()
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        let status_filter = req
+            .status
+            .map(|s| parse_plugin_status(&s))
+            .transpose()
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        let filter = sober_core::types::PluginFilter {
+            kind: kind_filter,
+            status: status_filter,
+            ..Default::default()
+        };
+
+        let plugins = self
+            .agent
+            .repos()
+            .plugins()
+            .list(filter)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let plugin_infos = plugins.iter().map(plugin_to_proto).collect();
+
+        Ok(Response::new(proto::ListPluginsResponse {
+            plugins: plugin_infos,
+        }))
+    }
+
+    async fn install_plugin(
+        &self,
+        request: Request<proto::InstallPluginRequest>,
+    ) -> Result<Response<proto::InstallPluginResponse>, Status> {
+        let req = request.into_inner();
+
+        let kind =
+            parse_plugin_kind(&req.kind).map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        let config: serde_json::Value = serde_json::from_str(&req.config)
+            .map_err(|e| Status::invalid_argument(format!("invalid config JSON: {e}")))?;
+
+        let input = sober_core::types::CreatePlugin {
+            name: req.name,
+            kind,
+            version: req.version,
+            description: req.description,
+            origin: sober_core::types::PluginOrigin::User,
+            scope: sober_core::types::PluginScope::System,
+            owner_id: None,
+            workspace_id: None,
+            status: sober_core::types::PluginStatus::Enabled,
+            config,
+            installed_by: None,
+        };
+
+        let plugin = self
+            .agent
+            .repos()
+            .plugins()
+            .create(input)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(plugin_id = %plugin.id, name = %plugin.name, "plugin installed");
+
+        Ok(Response::new(proto::InstallPluginResponse {
+            plugin: Some(plugin_to_proto(&plugin)),
+        }))
+    }
+
+    async fn uninstall_plugin(
+        &self,
+        request: Request<proto::UninstallPluginRequest>,
+    ) -> Result<Response<proto::UninstallPluginResponse>, Status> {
+        let req = request.into_inner();
+
+        let plugin_id = req
+            .plugin_id
+            .parse::<uuid::Uuid>()
+            .map(PluginId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid plugin_id"))?;
+
+        self.agent
+            .repos()
+            .plugins()
+            .delete(plugin_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(%plugin_id, "plugin uninstalled");
+
+        Ok(Response::new(proto::UninstallPluginResponse {}))
+    }
+
+    async fn enable_plugin(
+        &self,
+        request: Request<proto::EnablePluginRequest>,
+    ) -> Result<Response<proto::EnablePluginResponse>, Status> {
+        let req = request.into_inner();
+
+        let plugin_id = req
+            .plugin_id
+            .parse::<uuid::Uuid>()
+            .map(PluginId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid plugin_id"))?;
+
+        self.agent
+            .repos()
+            .plugins()
+            .update_status(plugin_id, sober_core::types::PluginStatus::Enabled)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(%plugin_id, "plugin enabled");
+
+        Ok(Response::new(proto::EnablePluginResponse {}))
+    }
+
+    async fn disable_plugin(
+        &self,
+        request: Request<proto::DisablePluginRequest>,
+    ) -> Result<Response<proto::DisablePluginResponse>, Status> {
+        let req = request.into_inner();
+
+        let plugin_id = req
+            .plugin_id
+            .parse::<uuid::Uuid>()
+            .map(PluginId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid plugin_id"))?;
+
+        self.agent
+            .repos()
+            .plugins()
+            .update_status(plugin_id, sober_core::types::PluginStatus::Disabled)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(%plugin_id, "plugin disabled");
+
+        Ok(Response::new(proto::DisablePluginResponse {}))
+    }
+
+    async fn import_plugins(
+        &self,
+        request: Request<proto::ImportPluginsRequest>,
+    ) -> Result<Response<proto::ImportPluginsResponse>, Status> {
+        let req = request.into_inner();
+
+        let mcp_config: std::collections::HashMap<String, McpServerEntry> =
+            serde_json::from_str(&req.mcp_servers_json)
+                .map_err(|e| Status::invalid_argument(format!("invalid mcpServers JSON: {e}")))?;
+
+        let mut imported = Vec::new();
+
+        for (name, entry) in &mcp_config {
+            let config = serde_json::json!({
+                "command": entry.command,
+                "args": entry.args,
+                "env": entry.env,
+            });
+
+            let input = sober_core::types::CreatePlugin {
+                name: name.clone(),
+                kind: sober_core::types::PluginKind::Mcp,
+                version: None,
+                description: None,
+                origin: sober_core::types::PluginOrigin::User,
+                scope: sober_core::types::PluginScope::System,
+                owner_id: None,
+                workspace_id: None,
+                status: sober_core::types::PluginStatus::Enabled,
+                config,
+                installed_by: None,
+            };
+
+            match self.agent.repos().plugins().create(input).await {
+                Ok(plugin) => {
+                    info!(plugin_id = %plugin.id, name = %plugin.name, "MCP plugin imported");
+                    imported.push(plugin);
+                }
+                Err(e) => {
+                    warn!(name = %name, error = %e, "failed to import MCP plugin");
+                }
+            }
+        }
+
+        let plugin_infos = imported.iter().map(plugin_to_proto).collect();
+
+        Ok(Response::new(proto::ImportPluginsResponse {
+            imported_count: imported.len() as u32,
+            plugins: plugin_infos,
+        }))
+    }
+
+    async fn reload_plugins(
+        &self,
+        _request: Request<proto::ReloadPluginsRequest>,
+    ) -> Result<Response<proto::ReloadPluginsResponse>, Status> {
+        let filter = sober_core::types::PluginFilter {
+            status: Some(sober_core::types::PluginStatus::Enabled),
+            ..Default::default()
+        };
+
+        let active_plugins = self
+            .agent
+            .repos()
+            .plugins()
+            .list(filter)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(count = active_plugins.len(), "plugins reloaded");
+
+        Ok(Response::new(proto::ReloadPluginsResponse {
+            active_count: active_plugins.len() as u32,
+        }))
+    }
+}
+
+/// JSON structure for an MCP server entry from `.mcp.json` format.
+#[derive(Debug, serde::Deserialize)]
+struct McpServerEntry {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::HashMap<String, String>,
+}
+
+/// Converts a domain [`Plugin`] to the proto [`PluginInfo`] representation.
+fn plugin_to_proto(plugin: &sober_core::types::Plugin) -> proto::PluginInfo {
+    proto::PluginInfo {
+        id: plugin.id.to_string(),
+        name: plugin.name.clone(),
+        kind: format!("{:?}", plugin.kind).to_lowercase(),
+        version: plugin.version.clone().unwrap_or_default(),
+        description: plugin.description.clone().unwrap_or_default(),
+        status: format!("{:?}", plugin.status).to_lowercase(),
+        config: plugin.config.to_string(),
+        installed_at: plugin.installed_at.to_rfc3339(),
+    }
+}
+
+/// Parses a string into a [`PluginKind`] enum variant.
+fn parse_plugin_kind(s: &str) -> Result<sober_core::types::PluginKind, String> {
+    match s.to_lowercase().as_str() {
+        "mcp" => Ok(sober_core::types::PluginKind::Mcp),
+        "skill" => Ok(sober_core::types::PluginKind::Skill),
+        "wasm" => Ok(sober_core::types::PluginKind::Wasm),
+        other => Err(format!("unknown plugin kind: {other}")),
+    }
+}
+
+/// Parses a string into a [`PluginStatus`] enum variant.
+fn parse_plugin_status(s: &str) -> Result<sober_core::types::PluginStatus, String> {
+    match s.to_lowercase().as_str() {
+        "enabled" => Ok(sober_core::types::PluginStatus::Enabled),
+        "disabled" => Ok(sober_core::types::PluginStatus::Disabled),
+        "failed" => Ok(sober_core::types::PluginStatus::Failed),
+        other => Err(format!("unknown plugin status: {other}")),
+    }
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
@@ -695,5 +968,136 @@ mod tests {
             }
             other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_plugin_kind_valid() {
+        assert_eq!(
+            parse_plugin_kind("mcp").unwrap(),
+            sober_core::types::PluginKind::Mcp
+        );
+        assert_eq!(
+            parse_plugin_kind("MCP").unwrap(),
+            sober_core::types::PluginKind::Mcp
+        );
+        assert_eq!(
+            parse_plugin_kind("skill").unwrap(),
+            sober_core::types::PluginKind::Skill
+        );
+        assert_eq!(
+            parse_plugin_kind("wasm").unwrap(),
+            sober_core::types::PluginKind::Wasm
+        );
+    }
+
+    #[test]
+    fn parse_plugin_kind_invalid() {
+        assert!(parse_plugin_kind("unknown").is_err());
+        assert!(parse_plugin_kind("").is_err());
+    }
+
+    #[test]
+    fn parse_plugin_status_valid() {
+        assert_eq!(
+            parse_plugin_status("enabled").unwrap(),
+            sober_core::types::PluginStatus::Enabled
+        );
+        assert_eq!(
+            parse_plugin_status("DISABLED").unwrap(),
+            sober_core::types::PluginStatus::Disabled
+        );
+        assert_eq!(
+            parse_plugin_status("failed").unwrap(),
+            sober_core::types::PluginStatus::Failed
+        );
+    }
+
+    #[test]
+    fn parse_plugin_status_invalid() {
+        assert!(parse_plugin_status("unknown").is_err());
+        assert!(parse_plugin_status("").is_err());
+    }
+
+    #[test]
+    fn plugin_to_proto_conversion() {
+        let plugin = sober_core::types::Plugin {
+            id: PluginId::new(),
+            name: "test-plugin".to_owned(),
+            kind: sober_core::types::PluginKind::Mcp,
+            version: Some("1.0.0".to_owned()),
+            description: Some("A test plugin".to_owned()),
+            origin: sober_core::types::PluginOrigin::User,
+            scope: sober_core::types::PluginScope::System,
+            owner_id: None,
+            workspace_id: None,
+            status: sober_core::types::PluginStatus::Enabled,
+            config: serde_json::json!({"command": "test"}),
+            installed_by: None,
+            installed_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let proto_info = plugin_to_proto(&plugin);
+
+        assert_eq!(proto_info.id, plugin.id.to_string());
+        assert_eq!(proto_info.name, "test-plugin");
+        assert_eq!(proto_info.kind, "mcp");
+        assert_eq!(proto_info.version, "1.0.0");
+        assert_eq!(proto_info.description, "A test plugin");
+        assert_eq!(proto_info.status, "enabled");
+        assert!(proto_info.config.contains("command"));
+        assert!(!proto_info.installed_at.is_empty());
+    }
+
+    #[test]
+    fn plugin_to_proto_defaults() {
+        let plugin = sober_core::types::Plugin {
+            id: PluginId::new(),
+            name: "minimal".to_owned(),
+            kind: sober_core::types::PluginKind::Wasm,
+            version: None,
+            description: None,
+            origin: sober_core::types::PluginOrigin::Agent,
+            scope: sober_core::types::PluginScope::User,
+            owner_id: None,
+            workspace_id: None,
+            status: sober_core::types::PluginStatus::Disabled,
+            config: serde_json::json!({}),
+            installed_by: None,
+            installed_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let proto_info = plugin_to_proto(&plugin);
+
+        assert_eq!(proto_info.kind, "wasm");
+        assert_eq!(proto_info.version, "");
+        assert_eq!(proto_info.description, "");
+        assert_eq!(proto_info.status, "disabled");
+    }
+
+    #[test]
+    fn mcp_server_entry_deserialization() {
+        let json = r#"{"test-server": {"command": "node", "args": ["server.js"], "env": {"PORT": "3000"}}}"#;
+        let parsed: std::collections::HashMap<String, McpServerEntry> =
+            serde_json::from_str(json).expect("valid JSON");
+
+        assert_eq!(parsed.len(), 1);
+        let entry = parsed.get("test-server").expect("entry exists");
+        assert_eq!(entry.command, "node");
+        assert_eq!(entry.args, vec!["server.js"]);
+        assert_eq!(entry.env.get("PORT").unwrap(), "3000");
+    }
+
+    #[test]
+    fn mcp_server_entry_defaults() {
+        let json = r#"{"minimal": {"command": "echo"}}"#;
+        let parsed: std::collections::HashMap<String, McpServerEntry> =
+            serde_json::from_str(json).expect("valid JSON");
+
+        let entry = parsed.get("minimal").expect("entry exists");
+        assert_eq!(entry.command, "echo");
+        assert!(entry.args.is_empty());
+        assert!(entry.env.is_empty());
     }
 }

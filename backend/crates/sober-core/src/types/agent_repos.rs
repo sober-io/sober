@@ -1,8 +1,8 @@
 //! Trait bundle for all repository types needed by the agent.
 
 use super::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, McpServerRepo, MessageRepo, SecretRepo, UserRepo,
-    WorkspaceRepo,
+    ArtifactRepo, AuditLogRepo, ConversationRepo, McpServerRepo, MessageRepo, PluginRepo,
+    SecretRepo, UserRepo, WorkspaceRepo,
 };
 
 /// Bundles all repository traits needed by the agent.
@@ -21,6 +21,7 @@ pub trait AgentRepos: Send + Sync + 'static {
     type Audit: AuditLogRepo + Clone;
     type Artifact: ArtifactRepo + Clone;
     type Workspace: WorkspaceRepo;
+    type Plg: PluginRepo;
 
     fn messages(&self) -> &Self::Msg;
     fn conversations(&self) -> &Self::Conv;
@@ -30,4 +31,5 @@ pub trait AgentRepos: Send + Sync + 'static {
     fn audit_log(&self) -> &Self::Audit;
     fn artifacts(&self) -> &Self::Artifact;
     fn workspaces(&self) -> &Self::Workspace;
+    fn plugins(&self) -> &Self::Plg;
 }

@@ -188,6 +188,11 @@ impl<R: AgentRepos> Agent<R> {
         &self.mind
     }
 
+    /// Returns a reference to the agent's repository bundle.
+    pub fn repos(&self) -> &R {
+        &self.repos
+    }
+
     /// Resolves the workspace directory path for a conversation.
     ///
     /// Returns `None` if the conversation has no workspace or the workspace
