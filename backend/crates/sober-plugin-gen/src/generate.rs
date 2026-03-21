@@ -136,12 +136,27 @@ impl PluginGenerator {
                 .and_then(|c| c.message.content.as_deref())
                 .ok_or_else(|| GenError::Generate("LLM returned no content".to_string()))?;
 
-            let source = extract_rust_source(raw);
-            if source.is_empty() {
-                return Err(GenError::Generate(
-                    "LLM did not return a Rust code block".to_string(),
-                ));
-            }
+            let extracted = extract_rust_source(raw);
+            let source = if extracted.is_empty() {
+                tracing::warn!(
+                    attempt,
+                    response_len = raw.len(),
+                    response_prefix = &raw[..raw.len().min(200)],
+                    "LLM response did not contain a fenced Rust code block"
+                );
+                // If the response looks like Rust source (has use/fn keywords),
+                // use it directly — some models omit the code fence.
+                if raw.contains("use ") || raw.contains("fn ") {
+                    tracing::info!("treating unfenced response as raw Rust source");
+                    raw.trim().to_string()
+                } else {
+                    return Err(GenError::Generate(
+                        "LLM did not return a Rust code block".to_string(),
+                    ));
+                }
+            } else {
+                extracted
+            };
 
             fs::write(src_dir.join("src").join("lib.rs"), &source).await?;
 
