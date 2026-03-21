@@ -58,33 +58,6 @@ impl<R: AgentRepos> AgentGrpcService<R> {
     }
 }
 
-impl<R: AgentRepos> AgentGrpcService<R> {
-    /// Returns the names of skill plugins that are disabled.
-    ///
-    /// Skills are system-level or workspace-level (not per-user), so this
-    /// queries all disabled skill plugins regardless of owner.
-    async fn disabled_skill_names(&self) -> Vec<String> {
-        use sober_core::types::enums::{PluginKind, PluginStatus};
-        use sober_core::types::input::PluginFilter;
-
-        let filter = PluginFilter {
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginStatus::Disabled),
-            ..Default::default()
-        };
-
-        self.agent
-            .repos()
-            .plugins()
-            .list(filter)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| p.name)
-            .collect()
-    }
-}
-
 /// Streaming response type for `execute_task`.
 type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
 
@@ -376,45 +349,31 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
     async fn list_skills(
         &self,
-        request: Request<proto::ListSkillsRequest>,
+        _request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
-        let req = request.into_inner();
-        let user_home = sober_workspace::user_home_dir();
+        use sober_core::types::enums::{PluginKind, PluginStatus};
+        use sober_core::types::input::PluginFilter;
 
-        // Resolve workspace path from conversation_id if provided.
-        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
-            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
-                let conv_id = ConversationId::from_uuid(uuid);
-                self.agent
-                    .resolve_workspace_dir(conv_id)
-                    .await
-                    .unwrap_or_default()
-            } else {
-                std::path::PathBuf::new()
-            }
-        } else {
-            std::path::PathBuf::new()
+        // Database is the source of truth. Return enabled skill plugins.
+        let filter = PluginFilter {
+            kind: Some(PluginKind::Skill),
+            status: Some(PluginStatus::Enabled),
+            ..Default::default()
         };
 
-        let skill_loader = self.plugin_manager.skill_loader();
-        let catalog = skill_loader
-            .load(&user_home, &workspace_path)
+        let plugins = self
+            .agent
+            .repos()
+            .plugins()
+            .list(filter)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        // Query disabled skill plugins to exclude from the list.
-        let disabled_names = self.disabled_skill_names().await;
-
-        let skills = catalog
-            .names()
-            .iter()
-            .filter(|name| !disabled_names.contains(&name.to_string()))
-            .map(|name| {
-                let entry = catalog.get(name).expect("name from catalog");
-                proto::SkillInfo {
-                    name: entry.frontmatter.name.clone(),
-                    description: entry.frontmatter.description.clone(),
-                }
+        let skills = plugins
+            .into_iter()
+            .map(|p| proto::SkillInfo {
+                name: p.name,
+                description: p.description.unwrap_or_default(),
             })
             .collect();
 
@@ -425,16 +384,17 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::ReloadSkillsRequest>,
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
+        use sober_core::types::enums::{PluginKind, PluginStatus};
+        use sober_core::types::input::PluginFilter;
+
         let req = request.into_inner();
 
-        let skill_loader = self.plugin_manager.skill_loader();
+        // Invalidate skill cache so next tools_for_turn re-discovers from disk.
+        self.plugin_manager.skill_loader().invalidate_cache();
 
-        // Invalidate cache first
-        skill_loader.invalidate_cache();
-
-        // Then load fresh
+        // Trigger a filesystem re-scan + DB sync by calling tools_for_turn
+        // with a dummy user. This syncs any new/removed skills into the DB.
         let user_home = sober_workspace::user_home_dir();
-
         let workspace_path = if let Some(conv_id_str) = req.conversation_id {
             if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
                 let conv_id = ConversationId::from_uuid(uuid);
@@ -449,24 +409,37 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             std::path::PathBuf::new()
         };
 
-        let catalog = skill_loader
-            .load(&user_home, &workspace_path)
+        // Re-sync filesystem skills into the DB via the plugin manager.
+        let _ = self
+            .plugin_manager
+            .tools_for_turn(
+                UserId::from_uuid(uuid::Uuid::nil()),
+                &user_home,
+                &workspace_path,
+                None,
+            )
+            .await;
+
+        // Return enabled skills from the database.
+        let filter = PluginFilter {
+            kind: Some(PluginKind::Skill),
+            status: Some(PluginStatus::Enabled),
+            ..Default::default()
+        };
+
+        let plugins = self
+            .agent
+            .repos()
+            .plugins()
+            .list(filter)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        // Filter out disabled skills.
-        let disabled_names = self.disabled_skill_names().await;
-
-        let skills = catalog
-            .names()
-            .iter()
-            .filter(|name| !disabled_names.contains(&name.to_string()))
-            .map(|name| {
-                let entry = catalog.get(name).expect("name from catalog");
-                proto::SkillInfo {
-                    name: entry.frontmatter.name.clone(),
-                    description: entry.frontmatter.description.clone(),
-                }
+        let skills = plugins
+            .into_iter()
+            .map(|p| proto::SkillInfo {
+                name: p.name,
+                description: p.description.unwrap_or_default(),
             })
             .collect();
 
