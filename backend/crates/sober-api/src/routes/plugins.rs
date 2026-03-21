@@ -213,6 +213,9 @@ struct UpdatePluginRequest {
     /// Updated configuration (merged with existing).
     #[serde(default)]
     config: Option<serde_json::Value>,
+    /// Promote/demote scope: "system", "user", "workspace".
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 /// `PATCH /api/v1/plugins/:id` — update a plugin (enable/disable, change config).
@@ -252,6 +255,18 @@ async fn update_plugin(
     if let Some(config) = body.config {
         let repo = PgPluginRepo::new(state.db.clone());
         repo.update_config(plugin_id, config).await?;
+    }
+
+    // Handle scope change via DB repo directly.
+    if let Some(scope_str) = body.scope {
+        let scope = match scope_str.as_str() {
+            "system" => sober_core::types::PluginScope::System,
+            "user" => sober_core::types::PluginScope::User,
+            "workspace" => sober_core::types::PluginScope::Workspace,
+            other => return Err(AppError::Validation(format!("unknown scope: {other}"))),
+        };
+        let repo = PgPluginRepo::new(state.db.clone());
+        repo.update_scope(plugin_id, scope).await?;
     }
 
     // Re-fetch via gRPC to return consistent state.
@@ -422,6 +437,7 @@ fn plugin_info_to_json(info: proto::PluginInfo) -> serde_json::Value {
         "version": info.version,
         "description": info.description,
         "status": info.status,
+        "scope": info.scope,
         "config": config,
         "installed_at": info.installed_at,
     })

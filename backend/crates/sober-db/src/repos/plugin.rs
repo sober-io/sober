@@ -243,4 +243,19 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
 
         Ok(())
     }
+
+    async fn update_scope(
+        &self,
+        id: PluginId,
+        scope: sober_core::types::PluginScope,
+    ) -> Result<(), AppError> {
+        sqlx::query("UPDATE plugins SET scope = $1, updated_at = now() WHERE id = $2")
+            .bind(scope)
+            .bind(id.as_uuid())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
 }

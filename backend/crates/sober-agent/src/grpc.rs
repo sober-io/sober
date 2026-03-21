@@ -696,6 +696,7 @@ fn plugin_to_proto(plugin: &sober_core::types::Plugin) -> proto::PluginInfo {
         status: format!("{:?}", plugin.status).to_lowercase(),
         config: plugin.config.to_string(),
         installed_at: plugin.installed_at.to_rfc3339(),
+        scope: format!("{:?}", plugin.scope).to_lowercase(),
     }
 }
 

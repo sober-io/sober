@@ -37,7 +37,10 @@ export const pluginService = {
 			body: JSON.stringify({ mcpServers })
 		}),
 
-	update: (id: string, data: { enabled?: boolean; config?: Record<string, unknown> }) =>
+	update: (
+		id: string,
+		data: { enabled?: boolean; config?: Record<string, unknown>; scope?: string }
+	) =>
 		api<Plugin>(`/plugins/${id}`, {
 			method: 'PATCH',
 			body: JSON.stringify(data)

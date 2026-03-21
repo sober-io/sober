@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::domain::*;
 use super::enums::{
-    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, PluginStatus,
-    RoleKind, UserStatus,
+    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, PluginScope,
+    PluginStatus, RoleKind, UserStatus,
 };
 use super::ids::*;
 use super::input::*;
@@ -729,5 +729,12 @@ pub trait PluginRepo: Send + Sync {
         plugin_id: PluginId,
         key: &str,
         value: serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates the scope of a plugin (system, user, workspace).
+    fn update_scope(
+        &self,
+        id: PluginId,
+        scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 }

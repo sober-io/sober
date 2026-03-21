@@ -189,6 +189,7 @@ message PluginInfo {
   string status = 6;
   string config = 7; // JSON string
   string installed_at = 8;
+  string scope = 9;  // "system", "user", "workspace"
 }
 
 message ListPluginsRequest {

@@ -2,6 +2,7 @@
 
 export type PluginKind = 'mcp' | 'skill' | 'wasm';
 export type PluginStatus = 'enabled' | 'disabled' | 'failed';
+export type PluginScope = 'system' | 'user' | 'workspace';
 
 export interface Plugin {
 	id: string;
@@ -10,6 +11,7 @@ export interface Plugin {
 	version: string;
 	description: string;
 	status: PluginStatus;
+	scope: PluginScope;
 	config: Record<string, unknown>;
 	installed_at: string;
 }

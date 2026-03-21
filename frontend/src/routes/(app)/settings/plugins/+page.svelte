@@ -212,9 +212,26 @@
 		return c as unknown as McpPluginConfig;
 	}
 
-	function isWorkspacePlugin(plugin: Plugin): boolean {
-		const c = plugin.config as Record<string, unknown>;
-		return c?.source === 'Workspace';
+	async function promotePlugin(plugin: Plugin) {
+		error = null;
+		const newScope = plugin.scope === 'workspace' ? 'user' : 'system';
+		try {
+			const updated = await pluginService.update(plugin.id, { scope: newScope });
+			plugins = plugins.map((p) => (p.id === plugin.id ? updated : p));
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Failed to update scope';
+		}
+	}
+
+	async function demotePlugin(plugin: Plugin) {
+		error = null;
+		const newScope = plugin.scope === 'system' ? 'user' : 'workspace';
+		try {
+			const updated = await pluginService.update(plugin.id, { scope: newScope });
+			plugins = plugins.map((p) => (p.id === plugin.id ? updated : p));
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Failed to update scope';
+		}
 	}
 </script>
 
@@ -453,11 +470,16 @@
 										v{plugin.version}
 									</span>
 								{/if}
-								{#if isWorkspacePlugin(plugin)}
+								{#if plugin.scope !== "system"}
 									<span
-										class="inline-flex rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300"
+										class={[
+											'inline-flex rounded-full border px-2 py-0.5 text-xs font-medium',
+											plugin.scope === 'workspace'
+												? 'border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
+												: 'border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+										]}
 									>
-										workspace
+										{plugin.scope}
 									</span>
 								{/if}
 							</div>
@@ -475,6 +497,21 @@
 							>
 								{plugin.status === 'enabled' ? 'Disable' : 'Enable'}
 							</button>
+							{#if plugin.scope === "workspace"}
+								<button
+									onclick={() => promotePlugin(plugin)}
+									class="rounded px-2 py-1 text-xs text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-950"
+								>
+									Promote
+								</button>
+							{:else if plugin.scope === "user"}
+								<button
+									onclick={() => demotePlugin(plugin)}
+									class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+								>
+									Demote
+								</button>
+							{/if}
 							<!-- Audit log -->
 							<button
 								onclick={() => viewAuditLog(plugin.id)}
