@@ -4312,6 +4312,7 @@ dependencies = [
  "serde_json",
  "sober-core",
  "sober-llm",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",

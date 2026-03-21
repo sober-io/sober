@@ -6,15 +6,15 @@
 use chrono::{DateTime, Utc};
 use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
-    ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus,
-    McpServerId, MessageId, MessageRole, PluginId, PluginKind, PluginOrigin, PluginScope,
-    PluginStatus, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId,
-    WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, MessageId,
+    MessageRole, PluginId, PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleId, ScopeId,
+    SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState,
+    WorktreeId, WorktreeState,
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
-    JobRun, McpServerConfig, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
-    Session, StoredDek, Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    JobRun, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
+    Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 use uuid::Uuid;
 
@@ -168,35 +168,6 @@ impl From<MessageRow> for Message {
             user_id: row.user_id.map(UserId::from_uuid),
             metadata: row.metadata,
             created_at: row.created_at,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-pub(crate) struct McpServerRow {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub name: String,
-    pub command: String,
-    pub args: serde_json::Value,
-    pub env: serde_json::Value,
-    pub enabled: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl From<McpServerRow> for McpServerConfig {
-    fn from(row: McpServerRow) -> Self {
-        McpServerConfig {
-            id: McpServerId::from_uuid(row.id),
-            user_id: UserId::from_uuid(row.user_id),
-            name: row.name,
-            command: row.command,
-            args: row.args,
-            env: row.env,
-            enabled: row.enabled,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
         }
     }
 }

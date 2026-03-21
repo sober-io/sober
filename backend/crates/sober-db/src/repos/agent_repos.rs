@@ -4,8 +4,8 @@ use sober_core::types::AgentRepos;
 use sqlx::PgPool;
 
 use super::{
-    PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgMcpServerRepo, PgMessageRepo,
-    PgPluginRepo, PgSecretRepo, PgUserRepo, PgWorkspaceRepo,
+    PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgMessageRepo, PgPluginRepo, PgSecretRepo,
+    PgUserRepo, PgWorkspaceRepo,
 };
 
 /// Bundles all Pg repository implementations required by the agent.
@@ -15,7 +15,6 @@ use super::{
 pub struct PgAgentRepos {
     messages: PgMessageRepo,
     conversations: PgConversationRepo,
-    mcp_servers: PgMcpServerRepo,
     users: PgUserRepo,
     secrets: PgSecretRepo,
     audit_log: PgAuditLogRepo,
@@ -30,7 +29,6 @@ impl PgAgentRepos {
         Self {
             messages: PgMessageRepo::new(pool.clone()),
             conversations: PgConversationRepo::new(pool.clone()),
-            mcp_servers: PgMcpServerRepo::new(pool.clone()),
             users: PgUserRepo::new(pool.clone()),
             secrets: PgSecretRepo::new(pool.clone()),
             audit_log: PgAuditLogRepo::new(pool.clone()),
@@ -44,7 +42,6 @@ impl PgAgentRepos {
 impl AgentRepos for PgAgentRepos {
     type Msg = PgMessageRepo;
     type Conv = PgConversationRepo;
-    type Mcp = PgMcpServerRepo;
     type User = PgUserRepo;
     type Secret = PgSecretRepo;
     type Audit = PgAuditLogRepo;
@@ -58,10 +55,6 @@ impl AgentRepos for PgAgentRepos {
 
     fn conversations(&self) -> &PgConversationRepo {
         &self.conversations
-    }
-
-    fn mcp_servers(&self) -> &PgMcpServerRepo {
-        &self.mcp_servers
     }
 
     fn users(&self) -> &PgUserRepo {

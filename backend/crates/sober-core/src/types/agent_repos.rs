@@ -1,13 +1,13 @@
 //! Trait bundle for all repository types needed by the agent.
 
 use super::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, McpServerRepo, MessageRepo, PluginRepo,
-    SecretRepo, UserRepo, WorkspaceRepo,
+    ArtifactRepo, AuditLogRepo, ConversationRepo, MessageRepo, PluginRepo, SecretRepo, UserRepo,
+    WorkspaceRepo,
 };
 
 /// Bundles all repository traits needed by the agent.
 ///
-/// Avoids an unwieldy generic parameter list on `Agent<Msg, Conv, Mcp, ...>`.
+/// Avoids an unwieldy generic parameter list on `Agent<Msg, Conv, ...>`.
 /// Production uses `PgAgentRepos`; tests can mock individual repos.
 ///
 /// `Clone` bounds on `Secret`, `Audit`, and `Artifact` allow the agent to
@@ -15,7 +15,6 @@ use super::{
 pub trait AgentRepos: Send + Sync + 'static {
     type Msg: MessageRepo;
     type Conv: ConversationRepo;
-    type Mcp: McpServerRepo;
     type User: UserRepo;
     type Secret: SecretRepo + Clone;
     type Audit: AuditLogRepo + Clone;
@@ -25,7 +24,6 @@ pub trait AgentRepos: Send + Sync + 'static {
 
     fn messages(&self) -> &Self::Msg;
     fn conversations(&self) -> &Self::Conv;
-    fn mcp_servers(&self) -> &Self::Mcp;
     fn users(&self) -> &Self::User;
     fn secrets(&self) -> &Self::Secret;
     fn audit_log(&self) -> &Self::Audit;

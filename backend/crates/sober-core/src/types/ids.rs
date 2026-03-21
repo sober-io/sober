@@ -101,11 +101,6 @@ define_id!(
 );
 
 define_id!(
-    /// Unique identifier for a registered MCP server.
-    McpServerId
-);
-
-define_id!(
     /// Unique identifier for a workspace.
     WorkspaceId
 );

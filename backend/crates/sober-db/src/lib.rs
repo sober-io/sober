@@ -21,6 +21,6 @@ mod rows;
 pub use pool::{DatabaseConfig, create_pool};
 pub use repos::{
     PgAgentRepos, PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgConversationUserRepo,
-    PgJobRepo, PgJobRunRepo, PgMcpServerRepo, PgMessageRepo, PgRoleRepo, PgSecretRepo,
-    PgSessionRepo, PgTagRepo, PgUserRepo, PgWorkspaceRepo, PgWorkspaceRepoRepo, PgWorktreeRepo,
+    PgJobRepo, PgJobRunRepo, PgMessageRepo, PgPluginRepo, PgRoleRepo, PgSecretRepo, PgSessionRepo,
+    PgTagRepo, PgUserRepo, PgWorkspaceRepo, PgWorkspaceRepoRepo, PgWorktreeRepo,
 };

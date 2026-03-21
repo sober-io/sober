@@ -432,31 +432,6 @@ pub trait JobRunRepo: Send + Sync {
     ) -> impl Future<Output = Result<Vec<JobRun>, AppError>> + Send;
 }
 
-/// Per-user MCP server configuration operations.
-pub trait McpServerRepo: Send + Sync {
-    /// Lists all MCP server configs for a user.
-    fn list_by_user(
-        &self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<Vec<McpServerConfig>, AppError>> + Send;
-
-    /// Creates a new MCP server configuration.
-    fn create(
-        &self,
-        input: CreateMcpServer,
-    ) -> impl Future<Output = Result<McpServerConfig, AppError>> + Send;
-
-    /// Updates an MCP server configuration.
-    fn update(
-        &self,
-        id: McpServerId,
-        input: UpdateMcpServer,
-    ) -> impl Future<Output = Result<McpServerConfig, AppError>> + Send;
-
-    /// Deletes an MCP server configuration.
-    fn delete(&self, id: McpServerId) -> impl Future<Output = Result<(), AppError>> + Send;
-}
-
 /// Workspace operations.
 pub trait WorkspaceRepo: Send + Sync {
     /// Creates a new workspace.
