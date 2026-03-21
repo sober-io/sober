@@ -8,6 +8,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sober_core::types::enums::{PluginKind, PluginOrigin};
 
+use sober_core::types::ids::PluginId;
+
+use crate::host_fns::{self, HostContext};
 use crate::manifest::PluginManifest;
 
 /// Input to the audit pipeline.
@@ -181,10 +184,22 @@ impl AuditPipeline {
         }
     }
 
+    /// Builds host functions for audit stages from the request's manifest.
+    fn audit_host_functions(request: &AuditRequest) -> Vec<extism::Function> {
+        let capabilities = request
+            .manifest
+            .as_ref()
+            .map(|m| m.capabilities.to_capabilities())
+            .unwrap_or_default();
+        let ctx = HostContext::new(PluginId::new(), capabilities);
+        host_fns::build_host_functions(ctx)
+    }
+
     /// Tries to load the WASM bytes with Extism to verify the module is valid.
     ///
-    /// If `wasm_bytes` is `None`, the stage passes with a note that sandbox
-    /// validation was skipped (the bytes may be loaded later from storage).
+    /// Host functions are wired from the manifest so that plugins importing
+    /// them (e.g. `sober::host_log`) can be instantiated. If `wasm_bytes` is
+    /// `None`, the stage passes with a note.
     fn validate_wasm_sandbox(request: &AuditRequest) -> StageResult {
         let Some(ref wasm_bytes) = request.wasm_bytes else {
             return StageResult {
@@ -196,8 +211,9 @@ impl AuditPipeline {
 
         let wasm = extism::Wasm::data(wasm_bytes.clone());
         let manifest = extism::Manifest::new([wasm]);
+        let functions = Self::audit_host_functions(request);
 
-        match extism::Plugin::new(&manifest, [], true) {
+        match extism::Plugin::new(&manifest, functions, true) {
             Ok(_plugin) => StageResult {
                 name: "sandbox".into(),
                 passed: true,
@@ -241,9 +257,8 @@ impl AuditPipeline {
     /// Runs the embedded `__sober_test` export if present.
     ///
     /// If the WASM module exports a `__sober_test` function, it is called
-    /// with empty input. A return code of `0` means success; any other value
-    /// is treated as a test failure. If the function does not exist, the
-    /// stage passes with a note.
+    /// with empty input. Success means the call returns without error.
+    /// If the function does not exist, the stage passes with a note.
     ///
     /// If `wasm_bytes` is `None`, the stage is skipped.
     fn validate_wasm_test(request: &AuditRequest) -> StageResult {
@@ -257,8 +272,9 @@ impl AuditPipeline {
 
         let wasm = extism::Wasm::data(wasm_bytes.clone());
         let manifest = extism::Manifest::new([wasm]);
+        let functions = Self::audit_host_functions(request);
 
-        let mut plugin = match extism::Plugin::new(&manifest, [], true) {
+        let mut plugin = match extism::Plugin::new(&manifest, functions, true) {
             Ok(p) => p,
             Err(e) => {
                 return StageResult {
