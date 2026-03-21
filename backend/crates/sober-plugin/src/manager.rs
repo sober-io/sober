@@ -123,8 +123,10 @@ impl<R: PluginRepo> PluginManager<R> {
         }
 
         // Add skill activation tool if skills are available.
+        // Also syncs filesystem skills into the plugins table so they
+        // appear in the unified plugins UI.
         if let Ok(skill_tools) = self
-            .skill_tools(user_home, workspace_dir, skill_activation_state)
+            .skill_tools(user_id, user_home, workspace_dir, skill_activation_state)
             .await
         {
             tools.extend(skill_tools);
@@ -167,13 +169,22 @@ impl<R: PluginRepo> PluginManager<R> {
     /// Loads the skill activation tool from the filesystem.
     ///
     /// Skills are discovered by [`SkillLoader`] from the user's home directory
-    /// and the workspace root, not from individual plugin database entries.
+    /// and the workspace root.  After discovery, newly-seen skills are
+    /// registered in the plugins table so they appear in the unified plugins
+    /// UI.  Skills that are disabled in the DB are filtered out of the
+    /// returned catalog.
     async fn skill_tools(
         &self,
+        user_id: UserId,
         user_home: &Path,
         workspace_dir: &Path,
         activation_state: Option<Arc<Mutex<SkillActivationState>>>,
     ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
+        use sober_core::types::enums::{PluginOrigin, PluginScope};
+        use sober_core::types::input::CreatePlugin;
+        use sober_skill::SkillCatalog;
+        use std::collections::HashMap;
+
         let catalog = self
             .skill_loader
             .load(user_home, workspace_dir)
@@ -184,12 +195,92 @@ impl<R: PluginRepo> PluginManager<R> {
             return Ok(vec![]);
         }
 
+        // Query all skill plugins for this user (any status).
+        let all_skill_filter = PluginFilter {
+            kind: Some(PluginKind::Skill),
+            owner_id: Some(user_id),
+            ..Default::default()
+        };
+        let existing_skills = self
+            .plugin_repo
+            .list(all_skill_filter)
+            .await
+            .unwrap_or_default();
+
+        let existing_by_name: HashMap<&str, &Plugin> = existing_skills
+            .iter()
+            .map(|p| (p.name.as_str(), p))
+            .collect();
+
+        // Sync: register newly-discovered filesystem skills in the DB.
+        let mut disabled_names: Vec<String> = Vec::new();
+        for name in catalog.names() {
+            if let Some(db_plugin) = existing_by_name.get(name) {
+                if db_plugin.status == PluginStatus::Disabled {
+                    disabled_names.push(name.to_owned());
+                }
+            } else {
+                // New skill — register in the DB.
+                let entry = catalog.get(name).expect("name from catalog");
+                let scope = match entry.source {
+                    sober_skill::SkillSource::User => PluginScope::User,
+                    sober_skill::SkillSource::Workspace => PluginScope::Workspace,
+                };
+                let input = CreatePlugin {
+                    name: entry.frontmatter.name.clone(),
+                    kind: PluginKind::Skill,
+                    version: None,
+                    description: Some(entry.frontmatter.description.clone()),
+                    origin: PluginOrigin::System,
+                    scope,
+                    owner_id: Some(user_id),
+                    workspace_id: None,
+                    status: PluginStatus::Enabled,
+                    config: serde_json::json!({
+                        "path": entry.path.to_string_lossy(),
+                        "source": format!("{:?}", entry.source),
+                    }),
+                    installed_by: None,
+                };
+                if let Err(e) = self.plugin_repo.create(input).await {
+                    debug!(
+                        skill_name = name,
+                        error = %e,
+                        "failed to register discovered skill in plugins table"
+                    );
+                }
+            }
+        }
+
+        // If no skills are disabled, use the catalog as-is.
+        if disabled_names.is_empty() {
+            let state = activation_state
+                .unwrap_or_else(|| Arc::new(Mutex::new(SkillActivationState::default())));
+            return Ok(vec![Arc::new(ActivateSkillTool::new(catalog, state))]);
+        }
+
+        // Rebuild the catalog without disabled skills.
+        let mut filtered_skills: HashMap<String, sober_skill::SkillEntry> = HashMap::new();
+        for name in catalog.names() {
+            if !disabled_names.contains(&name.to_owned())
+                && let Some(entry) = catalog.get(name)
+            {
+                filtered_skills.insert(name.to_owned(), entry.clone());
+            }
+        }
+
+        if filtered_skills.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let filtered_catalog = Arc::new(SkillCatalog::new(filtered_skills));
         let state = activation_state
             .unwrap_or_else(|| Arc::new(Mutex::new(SkillActivationState::default())));
 
-        let tool = ActivateSkillTool::new(catalog, state);
-
-        Ok(vec![Arc::new(tool)])
+        Ok(vec![Arc::new(ActivateSkillTool::new(
+            filtered_catalog,
+            state,
+        ))])
     }
 
     /// Loads tools from a WASM plugin.
