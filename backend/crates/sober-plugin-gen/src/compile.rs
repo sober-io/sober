@@ -1,6 +1,6 @@
 //! WASM compilation for plugin source directories.
 //!
-//! Shells out to `cargo build --target wasm32-wasi --release` and returns the
+//! Shells out to `cargo build --target wasm32-wasip1 --release` and returns the
 //! compiled `.wasm` bytes.
 
 use std::path::Path;
@@ -11,11 +11,11 @@ use crate::GenError;
 
 /// Compiles a Rust plugin project to WASM.
 ///
-/// Runs `cargo build --target wasm32-wasi --release` in `source_dir`,
+/// Runs `cargo build --target wasm32-wasip1 --release` in `source_dir`,
 /// then reads and returns the compiled `.wasm` file bytes.
 ///
 /// The WASM output is located at:
-/// `source_dir/target/wasm32-wasi/release/<crate_name>.wasm`
+/// `source_dir/target/wasm32-wasip1/release/<crate_name>.wasm`
 ///
 /// The crate name is read from `source_dir/Cargo.toml`. Hyphens in crate
 /// names are converted to underscores in the output filename, matching
@@ -24,7 +24,7 @@ pub async fn compile(source_dir: &Path) -> Result<Vec<u8>, GenError> {
     let crate_name = read_crate_name(source_dir).await?;
 
     let output = Command::new("cargo")
-        .args(["build", "--target", "wasm32-wasi", "--release"])
+        .args(["build", "--target", "wasm32-wasip1", "--release"])
         .current_dir(source_dir)
         .output()
         .await?;
@@ -38,7 +38,7 @@ pub async fn compile(source_dir: &Path) -> Result<Vec<u8>, GenError> {
     let wasm_name = crate_name.replace('-', "_");
     let wasm_path = source_dir
         .join("target")
-        .join("wasm32-wasi")
+        .join("wasm32-wasip1")
         .join("release")
         .join(format!("{wasm_name}.wasm"));
 

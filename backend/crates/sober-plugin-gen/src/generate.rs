@@ -81,7 +81,7 @@ impl PluginGenerator {
     /// 1. Ask the LLM for Rust source that implements the plugin.
     /// 2. Write the source to a temporary directory alongside a `Cargo.toml`
     ///    and `plugin.toml`.
-    /// 3. Compile with `cargo build --target wasm32-wasi --release`.
+    /// 3. Compile with `cargo build --target wasm32-wasip1 --release`.
     /// 4. On compile failure, send the error back to the LLM and retry.
     /// 5. Return the compiled bytes, manifest, and source on success.
     ///
