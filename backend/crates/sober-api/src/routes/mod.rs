@@ -4,9 +4,8 @@ pub mod auth;
 pub mod collaborators;
 pub mod conversations;
 pub mod health;
-pub mod mcp;
 pub mod messages;
-pub mod skills;
+pub mod plugins;
 pub mod tags;
 pub mod users;
 pub mod workspaces;
@@ -68,11 +67,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(conversations::routes())
         .merge(collaborators::routes())
         .merge(messages::routes())
-        .merge(mcp::routes())
+        .merge(plugins::routes())
         .merge(tags::routes())
         .merge(users::routes())
         .merge(workspaces::routes())
-        .merge(skills::routes())
         .merge(ws::routes())
         .layer(auth_layer)
         .with_state(state);
