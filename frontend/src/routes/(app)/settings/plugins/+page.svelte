@@ -437,6 +437,20 @@
 								>
 									{plugin.name}
 								</button>
+								{#if plugin.version}
+									<span class="text-xs text-zinc-400 dark:text-zinc-500">v{plugin.version}</span>
+								{/if}
+								<select
+									value={plugin.scope}
+									onchange={(e) => changeScope(plugin, e.currentTarget.value)}
+									class="rounded border border-zinc-300 bg-transparent px-1 py-0 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+								>
+									{#if plugin.scope === 'workspace'}
+										<option value="workspace">workspace</option>
+									{/if}
+									<option value="user">user</option>
+									<option value="system">system</option>
+								</select>
 								<span
 									class={[
 										'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
@@ -453,23 +467,6 @@
 								>
 									{plugin.status}
 								</span>
-								{#if plugin.version}
-									<span class="text-xs text-zinc-400 dark:text-zinc-500">
-										v{plugin.version}
-									</span>
-								{/if}
-								{#if plugin.scope !== "system"}
-									<span
-										class={[
-											'inline-flex rounded-full border px-2 py-0.5 text-xs font-medium',
-											plugin.scope === 'workspace'
-												? 'border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
-												: 'border-zinc-300 bg-zinc-50 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
-										]}
-									>
-										{plugin.scope}
-									</span>
-								{/if}
 							</div>
 							{#if plugin.description}
 								<p class="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
@@ -485,15 +482,6 @@
 							>
 								{plugin.status === 'enabled' ? 'Disable' : 'Enable'}
 							</button>
-							<select
-								value={plugin.scope}
-								onchange={(e) => changeScope(plugin, e.currentTarget.value)}
-								class="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-							>
-								<option value="workspace">workspace</option>
-								<option value="user">user</option>
-								<option value="system">system</option>
-							</select>
 							<!-- Audit log -->
 							<button
 								onclick={() => viewAuditLog(plugin.id)}
