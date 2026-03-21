@@ -351,6 +351,47 @@ name = "weather"
 description = "Look up weather for a city"
 ```
 
+## Example: a plugin using tool_call, metrics, and all other capabilities
+
+```rust
+use extism_pdk::*;
+use serde_json::{json, Value};
+use sober_pdk::{log, metrics, tool_call};
+// Phase 2+ capabilities (not yet connected — stubs that return errors):
+// use sober_pdk::{memory, conversation, schedule, fs, llm};
+
+#[plugin_fn]
+pub fn summarise_and_store(input: String) -> FnResult<String> {
+    let params: Value = serde_json::from_str(&input)?;
+    let topic = params["topic"].as_str().unwrap_or("general");
+
+    // Call another agent tool (tool_call capability)
+    let search_result = tool_call::invoke("web_search", &json!({
+        "query": topic
+    }).to_string())?;
+
+    // Emit a metric (metrics capability)
+    metrics::counter("summaries_generated");
+
+    // Phase 2+ examples (not yet connected):
+    // memory::write("user", &json!({"key": topic, "value": &search_result}).to_string())?;
+    // let history = conversation::read("current")?;
+    // let analysis = llm::call(&format!("Summarise: {search_result}"))?;
+    // schedule::create("every: 24h", &json!({"topic": topic}).to_string())?;
+    // let data = fs::read("/workspace/data.json")?;
+
+    log::info(&format!("summarised topic: {topic}"));
+
+    Ok(json!({
+        "topic": topic,
+        "summary": search_result
+    }).to_string())
+}
+```
+
+Phase 1 capabilities (functional): `key_value`, `network`, `secret_read`, `tool_call`, `metrics`.
+Phase 2+ capabilities (stubs): `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`.
+
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).
 - Do NOT include Cargo.toml or plugin.toml — those are provided separately.
