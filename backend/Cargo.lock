@@ -4294,6 +4294,8 @@ dependencies = [
  "chrono",
  "dirs",
  "extism",
+ "http",
+ "metrics",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -4304,6 +4306,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "ureq",
  "uuid",
  "wat",
 ]
