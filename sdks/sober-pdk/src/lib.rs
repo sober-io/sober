@@ -2,10 +2,14 @@
 //!
 //! Guest-side SDK for writing Sober plugins as WebAssembly modules.
 //!
-//! Modules are gated behind Cargo features that correspond to capabilities
-//! declared in the plugin's `plugin.toml` manifest. A `build.rs` in each
-//! plugin project reads the manifest and enables the matching features
-//! automatically — plugin authors never set features by hand.
+//! All capability modules are always compiled. Enforcement happens at two
+//! levels instead of compile-time feature gating:
+//!
+//! - **Load-time**: the host only wires host functions for capabilities
+//!   declared in `plugin.toml`. Calling an undeclared capability's host
+//!   function fails at WASM instantiation (unresolved import).
+//! - **Runtime**: host functions check granted capabilities and return
+//!   `CapabilityDenied` if the plugin wasn't granted access.
 //!
 //! # Quick Start
 //!
@@ -26,43 +30,31 @@ pub use extism_pdk::{self, plugin_fn, FnResult, FromBytes, Json, ToBytes};
 pub mod log;
 
 /// HTTP client for outbound network requests.
-#[cfg(feature = "network")]
 pub mod http;
 
 /// Key-value storage for persistent plugin state.
-#[cfg(feature = "key_value")]
 pub mod kv;
 
 /// Read-only access to configured secrets.
-#[cfg(feature = "secret_read")]
 pub mod secret;
 
 /// Invoke other tools registered in the runtime.
-#[cfg(feature = "tool_call")]
 pub mod tool;
 
 /// Emit metrics (counters, gauges, histograms).
-#[cfg(feature = "metrics")]
 pub mod metrics;
 
 /// Read and write access to the Sober memory system.
-///
-/// Enabled by either `memory_read` or `memory_write`.
-#[cfg(any(feature = "memory_read", feature = "memory_write"))]
 pub mod memory;
 
 /// Read access to conversation context.
-#[cfg(feature = "conversation_read")]
 pub mod conversation;
 
 /// Schedule deferred or recurring tasks.
-#[cfg(feature = "schedule")]
 pub mod schedule;
 
 /// Sandboxed filesystem access.
-#[cfg(feature = "filesystem")]
 pub mod filesystem;
 
 /// Invoke LLM completions from within a plugin.
-#[cfg(feature = "llm_call")]
 pub mod llm;

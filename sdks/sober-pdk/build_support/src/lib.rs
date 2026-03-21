@@ -1,8 +1,10 @@
 //! # Sober PDK Build Support
 //!
 //! Build-time helper for Sober plugin authors. Reads a `plugin.toml` manifest
-//! and emits `cargo:rustc-cfg` flags for each declared capability, so the
-//! corresponding PDK modules become available at compile time.
+//! and emits `cargo:rustc-cfg` flags for each declared capability. These flags
+//! are available in the plugin's own code via `#[cfg(feature = "...")]` for
+//! conditional compilation. PDK modules are always compiled — enforcement
+//! happens at load-time and runtime instead.
 //!
 //! # Usage
 //!
