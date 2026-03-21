@@ -212,20 +212,8 @@
 		return c as unknown as McpPluginConfig;
 	}
 
-	async function promotePlugin(plugin: Plugin) {
+	async function changeScope(plugin: Plugin, newScope: string) {
 		error = null;
-		const newScope = plugin.scope === 'workspace' ? 'user' : 'system';
-		try {
-			const updated = await pluginService.update(plugin.id, { scope: newScope });
-			plugins = plugins.map((p) => (p.id === plugin.id ? updated : p));
-		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Failed to update scope';
-		}
-	}
-
-	async function demotePlugin(plugin: Plugin) {
-		error = null;
-		const newScope = plugin.scope === 'system' ? 'user' : 'workspace';
 		try {
 			const updated = await pluginService.update(plugin.id, { scope: newScope });
 			plugins = plugins.map((p) => (p.id === plugin.id ? updated : p));
@@ -497,21 +485,15 @@
 							>
 								{plugin.status === 'enabled' ? 'Disable' : 'Enable'}
 							</button>
-							{#if plugin.scope === "workspace"}
-								<button
-									onclick={() => promotePlugin(plugin)}
-									class="rounded px-2 py-1 text-xs text-cyan-600 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-950"
-								>
-									Promote
-								</button>
-							{:else if plugin.scope === "user"}
-								<button
-									onclick={() => demotePlugin(plugin)}
-									class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-								>
-									Demote
-								</button>
-							{/if}
+							<select
+								value={plugin.scope}
+								onchange={(e) => changeScope(plugin, e.currentTarget.value)}
+								class="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+							>
+								<option value="workspace">workspace</option>
+								<option value="user">user</option>
+								<option value="system">system</option>
+							</select>
 							<!-- Audit log -->
 							<button
 								onclick={() => viewAuditLog(plugin.id)}
