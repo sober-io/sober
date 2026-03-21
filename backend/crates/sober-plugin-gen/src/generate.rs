@@ -390,11 +390,10 @@ pub fn summarise_and_store(input: String) -> FnResult<String> {
 ```
 
 IMPORTANT — current capability status:
-- FUNCTIONAL: `log` (always available — logging only)
-- STUBS (return errors at runtime): `key_value`, `network`, `secret_read`, `tool_call`, `metrics`, `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`
+- FUNCTIONAL: `log` (always available), `key_value` (in-memory), `network` (HTTP via ureq), `metrics` (counter/gauge/histogram)
+- STUBS (return errors at runtime): `secret_read`, `tool_call`, `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`
 
-Only use `log` in generated plugins unless the user explicitly requests a capability.
-If a capability is requested, include it but warn the user it is not yet connected.
+Prefer functional capabilities in generated plugins. If a stub capability is requested, include it but warn the user it is not yet connected.
 
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).
