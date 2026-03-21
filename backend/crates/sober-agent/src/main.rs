@@ -186,6 +186,10 @@ async fn main() -> Result<()> {
         blob_store,
         snapshot_manager,
         plugin_manager: Arc::clone(&plugin_manager),
+        plugin_generator: Some(Arc::new(sober_plugin_gen::PluginGenerator::new(
+            Arc::clone(&llm),
+            config.llm.model.clone(),
+        ))),
     });
 
     // 15. Create broadcast channel for conversation update events

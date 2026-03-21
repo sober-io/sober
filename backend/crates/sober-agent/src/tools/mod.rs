@@ -19,10 +19,12 @@
 //! - [`CreateSnapshotTool`](snapshots::CreateSnapshotTool) — create workspace snapshot
 //! - [`ListSnapshotsTool`](snapshots::ListSnapshotsTool) — list workspace snapshots
 //! - [`RestoreSnapshotTool`](snapshots::RestoreSnapshotTool) — restore from snapshot
+//! - [`GeneratePluginTool`](generate_plugin::GeneratePluginTool) — generate plugins via LLM
 
 pub mod artifacts;
 pub mod bootstrap;
 pub mod fetch_url;
+pub mod generate_plugin;
 pub mod memory;
 pub mod registry;
 pub mod scheduler;
@@ -39,6 +41,7 @@ pub use bootstrap::{
     MemoryToolConfig, SearchToolConfig, ShellToolConfig, ToolBootstrap, TurnContext,
 };
 pub use fetch_url::FetchUrlTool;
+pub use generate_plugin::GeneratePluginTool;
 pub use memory::{RecallTool, RememberTool};
 pub use registry::ToolRegistry;
 pub use scheduler::SchedulerTools;

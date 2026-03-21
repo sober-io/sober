@@ -4051,6 +4051,7 @@ dependencies = [
  "sober-memory",
  "sober-mind",
  "sober-plugin",
+ "sober-plugin-gen",
  "sober-sandbox",
  "sober-skill",
  "sober-workspace",

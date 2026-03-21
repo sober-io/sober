@@ -19,6 +19,7 @@ sober-mind = { path = "../sober-mind" }
 sober-mcp = { path = "../sober-mcp" }
 sober-sandbox = { path = "../sober-sandbox" }
 sober-plugin = { path = "../sober-plugin" }
+sober-plugin-gen = { path = "../sober-plugin-gen" }
 sober-skill = { path = "../sober-skill" }
 sober-workspace = { path = "../sober-workspace" }
 sober-llm = { path = "../sober-llm" }
