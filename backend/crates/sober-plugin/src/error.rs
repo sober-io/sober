@@ -38,6 +38,18 @@ pub enum PluginError {
     #[error("plugin already exists: {0}")]
     AlreadyExists(String),
 
+    /// Plugin configuration is invalid or missing required fields.
+    #[error("plugin config error: {0}")]
+    Config(String),
+
+    /// An MCP subsystem error.
+    #[error("MCP error: {0}")]
+    Mcp(#[from] sober_mcp::McpError),
+
+    /// A skill subsystem error.
+    #[error("skill error: {0}")]
+    Skill(#[from] sober_skill::SkillError),
+
     /// An opaque internal error.
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -53,8 +65,11 @@ impl From<PluginError> for AppError {
             PluginError::AuditRejected { stage, reason } => {
                 AppError::Validation(format!("audit rejected at {stage}: {reason}"))
             }
+            PluginError::Config(msg) => AppError::Validation(msg),
             PluginError::ExecutionFailed(msg) => AppError::Internal(msg.into()),
             PluginError::CompilationFailed(msg) => AppError::Internal(msg.into()),
+            PluginError::Mcp(e) => AppError::Internal(Box::new(e)),
+            PluginError::Skill(e) => AppError::Internal(Box::new(e)),
             PluginError::Internal(e) => AppError::Internal(e.into()),
         }
     }
