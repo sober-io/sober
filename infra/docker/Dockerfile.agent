@@ -12,6 +12,13 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates bubblewrap iputils-ping curl git \
     && rm -rf /var/lib/apt/lists/*
+# Rust toolchain for WASM plugin compilation (generate-plugin tool).
+# Installed as root, used by the sober user via RUSTUP_HOME/CARGO_HOME.
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustup target add wasm32-wasip1 \
+    && chmod -R a+rX ${RUSTUP_HOME} ${CARGO_HOME}
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
 COPY --from=builder /usr/local/bin/sober-agent /usr/local/bin/sober-agent
 RUN mkdir -p /run/sober /var/lib/sober/workspaces/default && chown -R sober:sober /run/sober /var/lib/sober

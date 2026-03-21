@@ -13,11 +13,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, warn};
 
+mod plugins;
+mod tasks;
+
 use crate::agent::Agent;
 use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationSender;
-use crate::grpc_plugins;
-use crate::grpc_tasks;
 use crate::tools::SharedPermissionMode;
 
 /// Generated protobuf types for the agent gRPC service.
@@ -279,7 +280,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             // Try to deserialize as a typed JobPayload; fall back to raw prompt.
             match serde_json::from_slice::<JobPayload>(&payload) {
                 Ok(job_payload) => {
-                    grpc_tasks::execute_typed_payload(
+                    tasks::execute_typed_payload(
                         &agent,
                         job_payload,
                         user_id,
@@ -297,7 +298,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
                         _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
                     };
 
-                    grpc_tasks::execute_prompt_conversational(
+                    tasks::execute_prompt_conversational(
                         &agent,
                         &prompt,
                         user_id,
@@ -404,70 +405,70 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
-        grpc_plugins::handle_list_skills(self, request).await
+        plugins::handle_list_skills(self, request).await
     }
 
     async fn reload_skills(
         &self,
         request: Request<proto::ReloadSkillsRequest>,
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
-        grpc_plugins::handle_reload_skills(self, &self.plugin_manager, request).await
+        plugins::handle_reload_skills(self, &self.plugin_manager, request).await
     }
 
     async fn list_plugins(
         &self,
         request: Request<proto::ListPluginsRequest>,
     ) -> Result<Response<proto::ListPluginsResponse>, Status> {
-        grpc_plugins::handle_list_plugins(self, request).await
+        plugins::handle_list_plugins(self, request).await
     }
 
     async fn install_plugin(
         &self,
         request: Request<proto::InstallPluginRequest>,
     ) -> Result<Response<proto::InstallPluginResponse>, Status> {
-        grpc_plugins::handle_install_plugin(self, request).await
+        plugins::handle_install_plugin(self, request).await
     }
 
     async fn uninstall_plugin(
         &self,
         request: Request<proto::UninstallPluginRequest>,
     ) -> Result<Response<proto::UninstallPluginResponse>, Status> {
-        grpc_plugins::handle_uninstall_plugin(self, request).await
+        plugins::handle_uninstall_plugin(self, request).await
     }
 
     async fn enable_plugin(
         &self,
         request: Request<proto::EnablePluginRequest>,
     ) -> Result<Response<proto::EnablePluginResponse>, Status> {
-        grpc_plugins::handle_enable_plugin(self, request).await
+        plugins::handle_enable_plugin(self, request).await
     }
 
     async fn disable_plugin(
         &self,
         request: Request<proto::DisablePluginRequest>,
     ) -> Result<Response<proto::DisablePluginResponse>, Status> {
-        grpc_plugins::handle_disable_plugin(self, request).await
+        plugins::handle_disable_plugin(self, request).await
     }
 
     async fn import_plugins(
         &self,
         request: Request<proto::ImportPluginsRequest>,
     ) -> Result<Response<proto::ImportPluginsResponse>, Status> {
-        grpc_plugins::handle_import_plugins(self, request).await
+        plugins::handle_import_plugins(self, request).await
     }
 
     async fn reload_plugins(
         &self,
         request: Request<proto::ReloadPluginsRequest>,
     ) -> Result<Response<proto::ReloadPluginsResponse>, Status> {
-        grpc_plugins::handle_reload_plugins(self, request).await
+        plugins::handle_reload_plugins(self, request).await
     }
 
     async fn change_plugin_scope(
         &self,
         request: Request<proto::ChangePluginScopeRequest>,
     ) -> Result<Response<proto::ChangePluginScopeResponse>, Status> {
-        grpc_plugins::handle_change_plugin_scope(self, &self.plugin_manager, request).await
+        plugins::handle_change_plugin_scope(self, &self.plugin_manager, request).await
     }
 }
 
@@ -480,7 +481,7 @@ mod tests {
     #[test]
     fn to_proto_event_text_delta() {
         let event = AgentEvent::TextDelta("hello".to_owned());
-        let proto = grpc_tasks::to_proto_event(event);
+        let proto = tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::TextDelta(td)) => {
                 assert_eq!(td.content, "hello");
@@ -495,7 +496,7 @@ mod tests {
             name: "web_search".to_owned(),
             input: serde_json::json!({"query": "rust"}),
         };
-        let proto = grpc_tasks::to_proto_event(event);
+        let proto = tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::ToolCallStart(tcs)) => {
                 assert_eq!(tcs.name, "web_search");
@@ -515,7 +516,7 @@ mod tests {
             },
             artifact_ref: None,
         };
-        let proto = grpc_tasks::to_proto_event(event);
+        let proto = tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::Done(d)) => {
                 assert_eq!(d.prompt_tokens, 100);
@@ -529,7 +530,7 @@ mod tests {
     #[test]
     fn to_proto_event_error() {
         let event = AgentEvent::Error("something broke".to_owned());
-        let proto = grpc_tasks::to_proto_event(event);
+        let proto = tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::Error(e)) => {
                 assert_eq!(e.message, "something broke");

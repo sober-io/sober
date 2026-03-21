@@ -17,7 +17,7 @@ use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
-use super::grpc::{AgentGrpcService, proto};
+use super::{AgentGrpcService, proto};
 
 // ---------------------------------------------------------------------------
 // JSON deserialization helper
