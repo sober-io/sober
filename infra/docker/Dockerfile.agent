@@ -14,21 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang lld \
     && rm -rf /var/lib/apt/lists/*
 # Rust toolchain for WASM plugin compilation (generate-plugin tool).
-# RUSTUP_HOME is system-wide (read-only toolchain + targets).
-# CARGO_HOME is per-user (writable registry cache + build artifacts).
+# RUSTUP_HOME + toolchain are system-wide and read-only.
+# CARGO_HOME is set per-user so the sober user can download crates.
 ENV RUSTUP_HOME=/usr/local/rustup
-ENV PATH="/usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/local/cargo-bin:${PATH}"
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | CARGO_HOME=/usr/local/cargo sh -s -- -y --default-toolchain stable --profile minimal \
     && rustup target add wasm32-wasip1 \
-    && cp /usr/local/cargo/bin/* /usr/local/cargo-bin/ 2>/dev/null; mkdir -p /usr/local/cargo-bin \
-    && cp /usr/local/cargo/bin/cargo /usr/local/cargo-bin/ \
-    && cp /usr/local/cargo/bin/rustc /usr/local/cargo-bin/ 2>/dev/null || true \
-    && chmod -R a+rX ${RUSTUP_HOME} /usr/local/cargo-bin \
-    && rm -rf /usr/local/cargo
+    && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 RUN useradd --system --create-home --shell /usr/sbin/nologin sober
-ENV CARGO_HOME=/home/sober/.cargo
 COPY --from=builder /usr/local/bin/sober-agent /usr/local/bin/sober-agent
 RUN mkdir -p /run/sober /var/lib/sober/workspaces/default /home/sober/.cargo \
     && chown -R sober:sober /run/sober /var/lib/sober /home/sober
 USER sober
+ENV CARGO_HOME=/home/sober/.cargo
 ENTRYPOINT ["sober-agent"]
