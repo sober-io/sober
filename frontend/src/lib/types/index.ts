@@ -71,17 +71,6 @@ export interface ToolCall {
 	output?: string;
 }
 
-export interface McpServer {
-	id: string;
-	name: string;
-	command: string;
-	args: unknown[];
-	env: Record<string, string>;
-	enabled: boolean;
-	created_at: string;
-	updated_at: string;
-}
-
 export interface ConfirmRequest {
 	confirm_id: string;
 	command: string;
