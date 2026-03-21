@@ -1,7 +1,7 @@
 # 019 --- Unified Plugin System
 
-**Date:** 2026-03-20 (revised)
-**Status:** Pending
+**Date:** 2026-03-21 (revised)
+**Status:** Done
 **Crates:** `sober-plugin`, `sober-plugin-gen`, `sober-pdk`
 
 ---
@@ -132,17 +132,54 @@ sober-plugin-gen (separate crate -- generation factory)
 
 ### PluginManager
 
-Central coordinating type. `McpPool` is per-user (each user has their own
-MCP servers), so the manager creates/caches pools on demand:
+Central coordinating type. Generic over `PluginRepo` for testability.
+Holds a single `McpPool` (behind a tokio Mutex), a shared `SkillLoader`,
+and a WASM host cache.
 
 ```rust
-pub struct PluginManager<P: PluginRepo> {
-    db: P,
-    mcp_pools: RwLock<HashMap<UserId, McpPool>>,  // per-user MCP pools
-    skill_loader: SkillLoader,
-    audit: AuditPipeline,
-    wasm_hosts: RwLock<HashMap<PluginId, PluginHost>>,  // loaded on demand
+pub struct PluginManager<R: PluginRepo> {
+    plugin_repo: R,
+    mcp_pool: tokio::sync::Mutex<McpPool>,
+    skill_loader: Arc<SkillLoader>,
+    wasm_hosts: RwLock<HashMap<PluginId, Arc<Mutex<PluginHost>>>>,
 }
+```
+
+Key behavior:
+- `tools_for_turn()` queries enabled plugins, builds tools from each kind,
+  and **auto-syncs** filesystem skills into the DB
+- Skill sync keys by `(name, workspace_id)` to allow the same skill name
+  in different workspaces without collision
+- Disabled skills are excluded from both the tool catalog and slash command listing
+- MCP connections are managed externally (agent startup); the manager only
+  reads tool adapters from a pre-connected pool
+- WASM hosts are cached by `PluginId` and evicted via `evict_wasm_host()`
+
+### Skill discovery flow
+
+```
+Agent startup
+  └── tools_for_turn(nil_user, user_home, empty_path)
+       └── SkillLoader scans ~/.sober/skills/
+       └── New skills → INSERT into plugins table
+       └── DB is now populated for ListSkills
+
+Conversation turn
+  └── ToolBootstrap::build()
+       └── tools_for_turn(user, user_home, workspace_path, workspace_id)
+            └── SkillLoader scans ~/.sober/skills/ + <workspace>/.sober/skills/
+            └── New workspace skills → INSERT with workspace_id
+            └── Disabled skills → excluded from ActivateSkillTool catalog
+
+ListSkills (slash command palette)
+  └── Queries DB: kind=skill, status=enabled
+  └── Filters: system + user always; workspace only if matching conversation's workspace
+  └── Deduplicates by name
+
+Cleanup job (every 1h)
+  └── Queries all skill plugins
+  └── Checks config.path exists on filesystem
+  └── Deletes entries for removed skill files
 ```
 
 ---
@@ -188,8 +225,8 @@ CREATE UNIQUE INDEX idx_plugins_unique_name ON plugins (
 **`config` JSONB by kind:**
 
 - MCP: `{ "command": "...", "args": [...], "env": {...} }`
-- Skill: `{ "path": "/absolute/path/to/SKILL.md" }`
-- WASM: `{ "wasm_hash": "...", "capabilities": [...] }`
+- Skill: `{ "path": "/absolute/path/to/SKILL.md", "source": "User|Workspace" }`
+- WASM: `{ "wasm_path": "/path/to/plugin.wasm", "manifest_toml": "..." }`
 
 ### plugin_audit_logs table
 

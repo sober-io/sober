@@ -260,10 +260,7 @@
 			class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
 		>
 			{error}
-			<button
-				onclick={() => (error = null)}
-				class="ml-2 font-medium underline hover:no-underline"
-			>
+			<button onclick={() => (error = null)} class="ml-2 font-medium underline hover:no-underline">
 				Dismiss
 			</button>
 		</div>
@@ -307,8 +304,7 @@
 				<div>
 					<label
 						for="plugin-command"
-						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
-						>Command</label
+						class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Command</label
 					>
 					<input
 						id="plugin-command"
@@ -387,9 +383,8 @@
 			<p class="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
 				Paste the contents of your <code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800"
 					>.mcp.json</code
-				> file or just the <code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800"
-					>mcpServers</code
-				> object.
+				>
+				file or just the <code class="rounded bg-zinc-100 px-1 dark:bg-zinc-800">mcpServers</code> object.
 			</p>
 			<textarea
 				bind:value={importJson}
@@ -431,8 +426,7 @@
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
 								<button
-									onclick={() =>
-										(expandedId = expandedId === plugin.id ? null : plugin.id)}
+									onclick={() => (expandedId = expandedId === plugin.id ? null : plugin.id)}
 									class="text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-100"
 								>
 									{plugin.name}
@@ -523,19 +517,12 @@
 							{#if mcpConfig}
 								<div class="space-y-1 text-xs">
 									<div>
-										<span class="font-medium text-zinc-600 dark:text-zinc-400"
-											>Command:</span
-										>
-										<code class="ml-1 text-zinc-900 dark:text-zinc-100"
-											>{mcpConfig.command}</code
-										>
+										<span class="font-medium text-zinc-600 dark:text-zinc-400">Command:</span>
+										<code class="ml-1 text-zinc-900 dark:text-zinc-100">{mcpConfig.command}</code>
 									</div>
 									{#if mcpConfig.args?.length}
 										<div>
-											<span
-												class="font-medium text-zinc-600 dark:text-zinc-400"
-												>Args:</span
-											>
+											<span class="font-medium text-zinc-600 dark:text-zinc-400">Args:</span>
 											<code class="ml-1 text-zinc-900 dark:text-zinc-100"
 												>{JSON.stringify(mcpConfig.args)}</code
 											>
@@ -543,15 +530,10 @@
 									{/if}
 									{#if mcpConfig.env && Object.keys(mcpConfig.env).length > 0}
 										<div>
-											<span
-												class="font-medium text-zinc-600 dark:text-zinc-400"
-												>Env:</span
-											>
+											<span class="font-medium text-zinc-600 dark:text-zinc-400">Env:</span>
 											{#each Object.entries(mcpConfig.env) as [key, value]}
 												<div class="ml-4">
-													<code class="text-zinc-900 dark:text-zinc-100"
-														>{key}={value}</code
-													>
+													<code class="text-zinc-900 dark:text-zinc-100">{key}={value}</code>
 												</div>
 											{/each}
 										</div>
@@ -559,7 +541,11 @@
 								</div>
 							{:else}
 								<pre
-									class="overflow-x-auto text-xs text-zinc-700 dark:text-zinc-300">{JSON.stringify(plugin.config, null, 2)}</pre>
+									class="overflow-x-auto text-xs text-zinc-700 dark:text-zinc-300">{JSON.stringify(
+										plugin.config,
+										null,
+										2
+									)}</pre>
 							{/if}
 							<div class="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
 								Installed: {new Date(plugin.installed_at).toLocaleString()}
@@ -572,9 +558,7 @@
 						<div
 							class="border-t border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/50"
 						>
-							<h3 class="mb-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-								Audit Log
-							</h3>
+							<h3 class="mb-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">Audit Log</h3>
 							{#if auditLoading}
 								<p class="text-xs text-zinc-400">Loading...</p>
 							{:else if auditLogs.length === 0}
