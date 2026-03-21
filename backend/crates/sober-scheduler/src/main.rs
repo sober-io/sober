@@ -20,6 +20,7 @@ use sober_scheduler::executor::JobExecutorRegistry;
 use sober_scheduler::executors::artifact::ArtifactExecutor;
 use sober_scheduler::executors::memory_pruning::MemoryPruningExecutor;
 use sober_scheduler::executors::session_cleanup::SessionCleanupExecutor;
+use sober_scheduler::executors::skill_plugin_cleanup::SkillPluginCleanupExecutor;
 use sober_scheduler::grpc::SchedulerGrpcService;
 use sober_scheduler::grpc::scheduler_proto::scheduler_service_server::SchedulerServiceServer;
 use sober_scheduler::system_jobs::register_system_jobs;
@@ -62,10 +63,10 @@ async fn main() -> Result<()> {
     // 5. Create repository instances
     let job_repo = Arc::new(PgJobRepo::new(pool.clone()));
     let run_repo = Arc::new(PgJobRunRepo::new(pool.clone()));
-    let session_repo = PgSessionRepo::new(pool);
+    let session_repo = PgSessionRepo::new(pool.clone());
 
     // 6. Build job executor registry
-    let executor_registry = build_executor_registry(&config, session_repo)?;
+    let executor_registry = build_executor_registry(&config, session_repo, pool)?;
     let executor_registry = Arc::new(executor_registry);
 
     // 7. Register system maintenance jobs
@@ -146,6 +147,7 @@ async fn main() -> Result<()> {
 fn build_executor_registry(
     config: &AppConfig,
     session_repo: PgSessionRepo,
+    pool: sqlx::PgPool,
 ) -> Result<JobExecutorRegistry> {
     let mut registry = JobExecutorRegistry::new();
 
@@ -185,6 +187,13 @@ fn build_executor_registry(
     let sandbox_policy = sandbox_profile
         .resolve(&std::collections::HashMap::new())
         .context("failed to resolve sandbox policy")?;
+
+    // Skill plugin cleanup executor
+    let cleanup_plugin_repo = sober_db::PgPluginRepo::new(pool);
+    registry.register(
+        "skill_plugin_cleanup",
+        Arc::new(SkillPluginCleanupExecutor::new(cleanup_plugin_repo)),
+    );
 
     registry.register(
         "artifact",

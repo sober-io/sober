@@ -59,6 +59,8 @@ pub enum InternalOp {
     VectorIndexOptimize,
     /// Audit installed plugins for security issues and updates.
     PluginAudit,
+    /// Remove skill plugin entries whose filesystem paths no longer exist.
+    SkillPluginCleanup,
 }
 
 #[cfg(test)]

@@ -6,3 +6,4 @@
 pub mod artifact;
 pub mod memory_pruning;
 pub mod session_cleanup;
+pub mod skill_plugin_cleanup;
