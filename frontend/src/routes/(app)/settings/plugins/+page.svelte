@@ -211,18 +211,43 @@
 		if (typeof c.command !== 'string') return null;
 		return c as unknown as McpPluginConfig;
 	}
+
+	function isWorkspacePlugin(plugin: Plugin): boolean {
+		const c = plugin.config as Record<string, unknown>;
+		return c?.source === 'Workspace';
+	}
 </script>
 
 <div class="mx-auto max-w-3xl p-6">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Plugins</h1>
-		<button
-			onclick={reloadPlugins}
-			class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-		>
-			Reload
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				onclick={() => {
+					showInstallForm = !showInstallForm;
+					showImportForm = false;
+				}}
+				class="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+			>
+				Add MCP
+			</button>
+			<button
+				onclick={() => {
+					showImportForm = !showImportForm;
+					showInstallForm = false;
+				}}
+				class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+			>
+				Import
+			</button>
+			<button
+				onclick={reloadPlugins}
+				class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+			>
+				Reload
+			</button>
+		</div>
 	</div>
 
 	{#if error}
@@ -254,28 +279,6 @@
 				{filter.label}
 			</button>
 		{/each}
-	</div>
-
-	<!-- Action buttons -->
-	<div class="mb-4 flex gap-2">
-		<button
-			onclick={() => {
-				showInstallForm = !showInstallForm;
-				showImportForm = false;
-			}}
-			class="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-		>
-			Add MCP Server
-		</button>
-		<button
-			onclick={() => {
-				showImportForm = !showImportForm;
-				showInstallForm = false;
-			}}
-			class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-		>
-			Import Config
-		</button>
 	</div>
 
 	<!-- Install MCP form -->
@@ -448,6 +451,13 @@
 								{#if plugin.version}
 									<span class="text-xs text-zinc-400 dark:text-zinc-500">
 										v{plugin.version}
+									</span>
+								{/if}
+								{#if isWorkspacePlugin(plugin)}
+									<span
+										class="inline-flex rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300"
+									>
+										workspace
 									</span>
 								{/if}
 							</div>
