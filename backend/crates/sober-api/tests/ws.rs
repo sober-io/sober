@@ -153,6 +153,13 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         }))
     }
 
+    async fn change_plugin_scope(
+        &self,
+        _request: tonic::Request<proto::ChangePluginScopeRequest>,
+    ) -> Result<tonic::Response<proto::ChangePluginScopeResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

@@ -25,6 +25,7 @@ service AgentService {
   rpc DisablePlugin(DisablePluginRequest) returns (DisablePluginResponse);
   rpc ImportPlugins(ImportPluginsRequest) returns (ImportPluginsResponse);
   rpc ReloadPlugins(ReloadPluginsRequest) returns (ReloadPluginsResponse);
+  rpc ChangePluginScope(ChangePluginScopeRequest) returns (ChangePluginScopeResponse);
 }
 
 message ConfirmAck {}
@@ -244,4 +245,15 @@ message ReloadPluginsRequest {}
 
 message ReloadPluginsResponse {
   uint32 active_count = 1;
+}
+
+message ChangePluginScopeRequest {
+  string plugin_id = 1;
+  string new_scope = 2;  // "system", "user", "workspace"
+  // Required when moving TO workspace scope — identifies the target workspace.
+  optional string workspace_id = 3;
+}
+
+message ChangePluginScopeResponse {
+  PluginInfo plugin = 1;
 }

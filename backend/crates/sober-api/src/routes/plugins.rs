@@ -257,16 +257,16 @@ async fn update_plugin(
         repo.update_config(plugin_id, config).await?;
     }
 
-    // Handle scope change via DB repo directly.
+    // Handle scope change via agent gRPC (moves files on disk).
     if let Some(scope_str) = body.scope {
-        let scope = match scope_str.as_str() {
-            "system" => sober_core::types::PluginScope::System,
-            "user" => sober_core::types::PluginScope::User,
-            "workspace" => sober_core::types::PluginScope::Workspace,
-            other => return Err(AppError::Validation(format!("unknown scope: {other}"))),
-        };
-        let repo = PgPluginRepo::new(state.db.clone());
-        repo.update_scope(plugin_id, scope).await?;
+        client
+            .change_plugin_scope(proto::ChangePluginScopeRequest {
+                plugin_id: id_str.clone(),
+                new_scope: scope_str,
+                workspace_id: None, // TODO: pass from request when moving to workspace
+            })
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
     }
 
     // Re-fetch via gRPC to return consistent state.

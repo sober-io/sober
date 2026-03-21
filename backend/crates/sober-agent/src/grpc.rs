@@ -8,8 +8,7 @@ use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, PluginId, UserId, WorkspaceId};
-use sober_core::types::repo::ConversationRepo;
-use sober_core::types::repo::PluginRepo;
+use sober_core::types::repo::{ConversationRepo, PluginRepo, WorkspaceRepo};
 use sober_plugin::PluginManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -714,6 +713,163 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             active_count: active_plugins.len() as u32,
         }))
     }
+
+    async fn change_plugin_scope(
+        &self,
+        request: Request<proto::ChangePluginScopeRequest>,
+    ) -> Result<Response<proto::ChangePluginScopeResponse>, Status> {
+        let req = request.into_inner();
+
+        let plugin_id = req
+            .plugin_id
+            .parse::<uuid::Uuid>()
+            .map(PluginId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid plugin_id"))?;
+
+        let new_scope = match req.new_scope.as_str() {
+            "system" => sober_core::types::PluginScope::System,
+            "user" => sober_core::types::PluginScope::User,
+            "workspace" => sober_core::types::PluginScope::Workspace,
+            other => return Err(Status::invalid_argument(format!("unknown scope: {other}"))),
+        };
+
+        let new_workspace_id = req
+            .workspace_id
+            .map(|s| {
+                s.parse::<uuid::Uuid>()
+                    .map(WorkspaceId::from_uuid)
+                    .map_err(|_| Status::invalid_argument("invalid workspace_id"))
+            })
+            .transpose()?;
+
+        // Fetch the plugin.
+        let plugin = self
+            .agent
+            .repos()
+            .plugins()
+            .get_by_id(plugin_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        // Move files on disk for skill plugins.
+        if plugin.kind == sober_core::types::PluginKind::Skill
+            && let Some(src_path) = plugin.config.get("path").and_then(|v| v.as_str())
+        {
+            let src = std::path::Path::new(src_path);
+
+            // Determine destination directory.
+            let user_home = sober_workspace::user_home_dir();
+            let dest_dir = match new_scope {
+                sober_core::types::PluginScope::User => user_home.join(".sober").join("skills"),
+                sober_core::types::PluginScope::Workspace => {
+                    // Resolve workspace root from workspace_id.
+                    let ws_id = new_workspace_id.ok_or_else(|| {
+                        Status::invalid_argument(
+                            "workspace_id required when moving to workspace scope",
+                        )
+                    })?;
+                    let ws = self
+                        .agent
+                        .repos()
+                        .workspaces()
+                        .get_by_id(ws_id)
+                        .await
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                    std::path::PathBuf::from(&ws.root_path)
+                        .join(".sober")
+                        .join("skills")
+                }
+                sober_core::types::PluginScope::System => {
+                    return Err(Status::invalid_argument(
+                        "cannot move skill files to system scope (system skills are compiled in)",
+                    ));
+                }
+            };
+
+            if src.exists() {
+                // Determine if src is a file (skill.md) or directory (skill-name/).
+                let (dest_path, new_config_path) = if src.is_dir() {
+                    let dir_name = src
+                        .file_name()
+                        .ok_or_else(|| Status::internal("invalid source path"))?;
+                    let dest = dest_dir.join(dir_name);
+                    let config_path = dest.join("SKILL.md").to_string_lossy().to_string();
+                    (dest, config_path)
+                } else {
+                    let file_name = src
+                        .file_name()
+                        .ok_or_else(|| Status::internal("invalid source path"))?;
+                    let dest = dest_dir.join(file_name);
+                    let config_path = dest.to_string_lossy().to_string();
+                    (dest, config_path)
+                };
+
+                // Create destination directory.
+                tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| {
+                    Status::internal(format!("failed to create destination directory: {e}"))
+                })?;
+
+                // Move: copy source to dest, then remove source.
+                // Use the parent directory for directory moves.
+                if src.is_dir() {
+                    copy_dir_recursive(src, &dest_path).await.map_err(|e| {
+                        Status::internal(format!("failed to copy skill directory: {e}"))
+                    })?;
+                    tokio::fs::remove_dir_all(src).await.map_err(|e| {
+                        Status::internal(format!("failed to remove source directory: {e}"))
+                    })?;
+                } else {
+                    tokio::fs::copy(src, &dest_path)
+                        .await
+                        .map_err(|e| Status::internal(format!("failed to copy skill file: {e}")))?;
+                    tokio::fs::remove_file(src).await.map_err(|e| {
+                        Status::internal(format!("failed to remove source file: {e}"))
+                    })?;
+                }
+
+                // Update config with new path.
+                let mut config = plugin.config.clone();
+                config["path"] = serde_json::Value::String(new_config_path);
+                config["source"] = serde_json::Value::String(format!("{new_scope:?}"));
+                self.agent
+                    .repos()
+                    .plugins()
+                    .update_config(plugin_id, config)
+                    .await
+                    .map_err(|e| Status::internal(e.to_string()))?;
+            }
+        }
+        // Update scope and workspace_id in DB.
+        self.agent
+            .repos()
+            .plugins()
+            .update_scope(plugin_id, new_scope)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        // Invalidate skill cache so next load picks up the new location.
+        self.plugin_manager.skill_loader().invalidate_cache();
+
+        // Re-fetch and return.
+        let updated = self
+            .agent
+            .repos()
+            .plugins()
+            .get_by_id(plugin_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(
+            %plugin_id,
+            name = %updated.name,
+            scope = ?new_scope,
+            "plugin scope changed"
+        );
+
+        Ok(Response::new(proto::ChangePluginScopeResponse {
+            plugin: Some(plugin_to_proto(&updated)),
+        }))
+    }
 }
 
 /// JSON structure for an MCP server entry from `.mcp.json` format.
@@ -759,6 +915,25 @@ fn parse_plugin_status(s: &str) -> Result<sober_core::types::PluginStatus, Strin
         "failed" => Ok(sober_core::types::PluginStatus::Failed),
         other => Err(format!("unknown plugin status: {other}")),
     }
+}
+
+/// Recursively copies a directory and its contents.
+async fn copy_dir_recursive(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    tokio::fs::create_dir_all(dst).await?;
+    let mut entries = tokio::fs::read_dir(src).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type().await?.is_dir() {
+            Box::pin(copy_dir_recursive(&src_path, &dst_path)).await?;
+        } else {
+            tokio::fs::copy(&src_path, &dst_path).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
