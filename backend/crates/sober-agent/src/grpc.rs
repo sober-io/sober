@@ -58,6 +58,51 @@ impl<R: AgentRepos> AgentGrpcService<R> {
     }
 }
 
+/// Resolved workspace context from a conversation ID.
+struct WorkspaceContext {
+    workspace_id: Option<WorkspaceId>,
+    workspace_dir: std::path::PathBuf,
+}
+
+impl<R: AgentRepos> AgentGrpcService<R> {
+    /// Resolves workspace ID and directory from an optional conversation ID string.
+    async fn resolve_workspace_context(&self, conversation_id: Option<&str>) -> WorkspaceContext {
+        let Some(conv_id_str) = conversation_id else {
+            return WorkspaceContext {
+                workspace_id: None,
+                workspace_dir: std::path::PathBuf::new(),
+            };
+        };
+
+        let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() else {
+            return WorkspaceContext {
+                workspace_id: None,
+                workspace_dir: std::path::PathBuf::new(),
+            };
+        };
+
+        let conv_id = ConversationId::from_uuid(uuid);
+        let workspace_id = self
+            .agent
+            .repos()
+            .conversations()
+            .get_by_id(conv_id)
+            .await
+            .ok()
+            .and_then(|c| c.workspace_id);
+        let workspace_dir = self
+            .agent
+            .resolve_workspace_dir(conv_id)
+            .await
+            .unwrap_or_default();
+
+        WorkspaceContext {
+            workspace_id,
+            workspace_dir,
+        }
+    }
+}
+
 /// Streaming response type for `execute_task`.
 type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
 
@@ -356,24 +401,9 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         use std::collections::HashSet;
 
         let req = request.into_inner();
-
-        // Resolve workspace_id from conversation_id for workspace-scoped filtering.
-        let workspace_id = if let Some(conv_id_str) = req.conversation_id.as_deref() {
-            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
-                let conv_id = ConversationId::from_uuid(uuid);
-                self.agent
-                    .repos()
-                    .conversations()
-                    .get_by_id(conv_id)
-                    .await
-                    .ok()
-                    .and_then(|c| c.workspace_id)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let ws = self
+            .resolve_workspace_context(req.conversation_id.as_deref())
+            .await;
 
         // Database is the source of truth. Return enabled skill plugins.
         let filter = PluginFilter {
@@ -398,7 +428,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .into_iter()
             .filter(|p| match p.scope {
                 PluginScope::System | PluginScope::User => true,
-                PluginScope::Workspace => match (p.workspace_id, workspace_id) {
+                PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
                     (Some(pw), Some(cw)) => pw == cw,
                     _ => false,
                 },
@@ -423,46 +453,18 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
         let req = request.into_inner();
 
-        // Invalidate skill cache so next tools_for_turn re-discovers from disk.
+        // Invalidate skill cache so next load re-discovers from disk.
         self.plugin_manager.skill_loader().invalidate_cache();
 
-        // Resolve workspace context from conversation_id.
-        let (workspace_id, workspace_path) =
-            if let Some(conv_id_str) = req.conversation_id.as_deref() {
-                if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
-                    let conv_id = ConversationId::from_uuid(uuid);
-                    let ws_id = self
-                        .agent
-                        .repos()
-                        .conversations()
-                        .get_by_id(conv_id)
-                        .await
-                        .ok()
-                        .and_then(|c| c.workspace_id);
-                    let ws_dir = self
-                        .agent
-                        .resolve_workspace_dir(conv_id)
-                        .await
-                        .unwrap_or_default();
-                    (ws_id, ws_dir)
-                } else {
-                    (None, std::path::PathBuf::new())
-                }
-            } else {
-                (None, std::path::PathBuf::new())
-            };
+        let ws = self
+            .resolve_workspace_context(req.conversation_id.as_deref())
+            .await;
 
-        // Re-sync filesystem skills into the DB via the plugin manager.
+        // Re-sync filesystem skills into the DB.
         let user_home = sober_workspace::user_home_dir();
         let _ = self
             .plugin_manager
-            .tools_for_turn(
-                UserId::from_uuid(uuid::Uuid::nil()),
-                &user_home,
-                &workspace_path,
-                workspace_id,
-                None,
-            )
+            .sync_filesystem_skills(&user_home, &ws.workspace_dir, ws.workspace_id)
             .await;
 
         // Return enabled skills from the database, filtered by workspace scope.
@@ -485,7 +487,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .into_iter()
             .filter(|p| match p.scope {
                 PluginScope::System | PluginScope::User => true,
-                PluginScope::Workspace => match (p.workspace_id, workspace_id) {
+                PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
                     (Some(pw), Some(cw)) => pw == cw,
                     _ => false,
                 },

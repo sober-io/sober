@@ -169,13 +169,7 @@ async fn main() -> Result<()> {
     {
         let user_home = sober_workspace::user_home_dir();
         let _ = plugin_manager
-            .tools_for_turn(
-                sober_core::UserId::from_uuid(uuid::Uuid::nil()),
-                &user_home,
-                &std::path::PathBuf::new(),
-                None,
-                None,
-            )
+            .sync_filesystem_skills(&user_home, &std::path::PathBuf::new(), None)
             .await;
         info!("startup skill sync complete");
     }

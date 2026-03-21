@@ -172,23 +172,20 @@ impl<R: PluginRepo> PluginManager<R> {
         Ok(tools)
     }
 
-    /// Loads the skill activation tool from the filesystem.
+    /// Syncs filesystem skills into the plugins table.
     ///
-    /// Skills are discovered by [`SkillLoader`] from the user's home directory
-    /// and the workspace root.  After discovery, newly-seen skills are
-    /// registered in the plugins table so they appear in the unified plugins
-    /// UI.  Skills that are disabled in the DB are filtered out of the
-    /// returned catalog.
-    async fn skill_tools(
+    /// Scans `user_home` and `workspace_dir` for skill files, registers any
+    /// newly-discovered skills in the DB, and returns the names of skills
+    /// that are disabled. Call this from agent startup or reload — it is
+    /// also called internally by [`tools_for_turn`](Self::tools_for_turn).
+    pub async fn sync_filesystem_skills(
         &self,
         user_home: &Path,
         workspace_dir: &Path,
         workspace_id: Option<sober_core::types::WorkspaceId>,
-        activation_state: Option<Arc<Mutex<SkillActivationState>>>,
-    ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
+    ) -> Result<Vec<String>, PluginError> {
         use sober_core::types::enums::{PluginOrigin, PluginScope};
         use sober_core::types::input::CreatePlugin;
-        use sober_skill::SkillCatalog;
         use std::collections::HashMap;
 
         let catalog = self
@@ -201,8 +198,7 @@ impl<R: PluginRepo> PluginManager<R> {
             return Ok(vec![]);
         }
 
-        // Query all skill plugins (any status). Skills are system/workspace
-        // level, not per-user.
+        // Query all skill plugins (any status).
         let all_skill_filter = PluginFilter {
             kind: Some(PluginKind::Skill),
             ..Default::default()
@@ -221,7 +217,6 @@ impl<R: PluginRepo> PluginManager<R> {
                 .map(|p| ((p.name.as_str(), p.workspace_id), p))
                 .collect();
 
-        // Sync: register newly-discovered filesystem skills in the DB.
         let mut disabled_names: Vec<String> = Vec::new();
         for name in catalog.names() {
             let entry = catalog.get(name).expect("name from catalog");
@@ -264,6 +259,38 @@ impl<R: PluginRepo> PluginManager<R> {
                     );
                 }
             }
+        }
+
+        Ok(disabled_names)
+    }
+
+    /// Loads the skill activation tool from the filesystem.
+    ///
+    /// Calls [`sync_filesystem_skills`](Self::sync_filesystem_skills) to
+    /// register new skills and identify disabled ones, then builds the
+    /// [`ActivateSkillTool`] excluding disabled skills.
+    async fn skill_tools(
+        &self,
+        user_home: &Path,
+        workspace_dir: &Path,
+        workspace_id: Option<sober_core::types::WorkspaceId>,
+        activation_state: Option<Arc<Mutex<SkillActivationState>>>,
+    ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
+        use sober_skill::SkillCatalog;
+        use std::collections::HashMap;
+
+        let disabled_names = self
+            .sync_filesystem_skills(user_home, workspace_dir, workspace_id)
+            .await?;
+
+        let catalog = self
+            .skill_loader
+            .load(user_home, workspace_dir)
+            .await
+            .map_err(PluginError::Skill)?;
+
+        if catalog.is_empty() {
+            return Ok(vec![]);
         }
 
         // If no skills are disabled, use the catalog as-is.

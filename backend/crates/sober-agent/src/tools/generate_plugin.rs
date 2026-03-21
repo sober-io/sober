@@ -278,7 +278,7 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
                 description,
                 PluginKind::Skill,
                 serde_json::json!({
-                    "skill_path": skill_path.to_string_lossy(),
+                    "path": skill_path.to_string_lossy(),
                 }),
             )
             .await?;
