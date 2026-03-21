@@ -461,7 +461,8 @@ impl<R: AgentRepos> Agent<R> {
             let ws_path = workspace_dir.clone().unwrap_or_default();
             match self
                 .tool_bootstrap
-                .skill_loader
+                .plugin_manager
+                .skill_loader()
                 .load(&user_home, &ws_path)
                 .await
             {

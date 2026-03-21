@@ -9,7 +9,7 @@ use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, PluginId, UserId, WorkspaceId};
 use sober_core::types::repo::PluginRepo;
-use sober_skill::SkillLoader;
+use sober_plugin::PluginManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
@@ -36,7 +36,7 @@ pub struct AgentGrpcService<R: AgentRepos> {
     confirmation_sender: ConfirmationSender,
     permission_mode: SharedPermissionMode,
     broadcast_tx: ConversationUpdateSender,
-    skill_loader: Arc<SkillLoader>,
+    plugin_manager: Arc<PluginManager<R::Plg>>,
 }
 
 impl<R: AgentRepos> AgentGrpcService<R> {
@@ -46,14 +46,14 @@ impl<R: AgentRepos> AgentGrpcService<R> {
         confirmation_sender: ConfirmationSender,
         permission_mode: SharedPermissionMode,
         broadcast_tx: ConversationUpdateSender,
-        skill_loader: Arc<SkillLoader>,
+        plugin_manager: Arc<PluginManager<R::Plg>>,
     ) -> Self {
         Self {
             agent,
             confirmation_sender,
             permission_mode,
             broadcast_tx,
-            skill_loader,
+            plugin_manager,
         }
     }
 }
@@ -369,8 +369,8 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             std::path::PathBuf::new()
         };
 
-        let catalog = self
-            .skill_loader
+        let skill_loader = self.plugin_manager.skill_loader();
+        let catalog = skill_loader
             .load(&user_home, &workspace_path)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -396,8 +396,10 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
         let req = request.into_inner();
 
+        let skill_loader = self.plugin_manager.skill_loader();
+
         // Invalidate cache first
-        self.skill_loader.invalidate_cache();
+        skill_loader.invalidate_cache();
 
         // Then load fresh
         let user_home = sober_workspace::user_home_dir();
@@ -416,8 +418,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             std::path::PathBuf::new()
         };
 
-        let catalog = self
-            .skill_loader
+        let catalog = skill_loader
             .load(&user_home, &workspace_path)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;

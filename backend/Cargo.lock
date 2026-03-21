@@ -4050,6 +4050,7 @@ dependencies = [
  "sober-mcp",
  "sober-memory",
  "sober-mind",
+ "sober-plugin",
  "sober-sandbox",
  "sober-skill",
  "sober-workspace",
