@@ -27,6 +27,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/plugins/{id}", patch(update_plugin))
         .route("/plugins/{id}", delete(uninstall_plugin))
         .route("/plugins/{id}/audit", get(list_audit_logs))
+        // Skill discovery routes (used by the slash command palette)
+        .route("/skills", get(list_skills))
+        .route("/skills/reload", post(reload_skills))
 }
 
 /// Query parameters for `GET /api/v1/plugins`.
@@ -337,6 +340,73 @@ async fn list_audit_logs(
 
     Ok(ApiResponse::new(entries))
 }
+
+// ---------------------------------------------------------------------------
+// Skill discovery routes (slash command palette)
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct ListSkillsParams {
+    conversation_id: Option<String>,
+}
+
+/// `GET /api/v1/skills` — list available skills.
+///
+/// Proxies to the agent's `ListSkills` gRPC RPC. Returns skill names and
+/// descriptions for frontend slash command registration.
+async fn list_skills(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(params): Query<ListSkillsParams>,
+) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
+    let mut client = state.agent_client.clone();
+
+    let response = client
+        .list_skills(proto::ListSkillsRequest {
+            user_id: auth_user.user_id.to_string(),
+            conversation_id: params.conversation_id,
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let skills: Vec<serde_json::Value> = response
+        .into_inner()
+        .skills
+        .into_iter()
+        .map(|s| serde_json::json!({ "name": s.name, "description": s.description }))
+        .collect();
+
+    Ok(ApiResponse::new(skills))
+}
+
+/// `POST /api/v1/skills/reload` — invalidate skill cache and return fresh list.
+async fn reload_skills(
+    State(state): State<Arc<AppState>>,
+    _auth_user: AuthUser,
+    Query(params): Query<ListSkillsParams>,
+) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
+    let mut client = state.agent_client.clone();
+
+    let response = client
+        .reload_skills(proto::ReloadSkillsRequest {
+            conversation_id: params.conversation_id,
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let skills: Vec<serde_json::Value> = response
+        .into_inner()
+        .skills
+        .into_iter()
+        .map(|s| serde_json::json!({ "name": s.name, "description": s.description }))
+        .collect();
+
+    Ok(ApiResponse::new(skills))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /// Converts a proto `PluginInfo` message to a JSON value for API responses.
 fn plugin_info_to_json(info: proto::PluginInfo) -> serde_json::Value {
