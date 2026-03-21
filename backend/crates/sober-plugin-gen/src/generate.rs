@@ -281,13 +281,84 @@ name = "tool-name"
 description = "..."
 ```
 
+## Full example: a plugin using logging, HTTP, key-value, and secrets
+
+```rust
+use extism_pdk::*;
+use serde_json::{json, Value};
+use sober_pdk::{http, kv, log, secrets};
+
+/// Fetches weather data for a city, caches it, and returns the result.
+#[plugin_fn]
+pub fn weather(input: String) -> FnResult<String> {
+    // Parse JSON input
+    let params: Value = serde_json::from_str(&input)?;
+    let city = params["city"]
+        .as_str()
+        .ok_or_else(|| Error::msg("missing 'city' field"))?;
+
+    log::info(&format!("weather lookup for: {city}"));
+
+    // Check cache first (key_value capability)
+    let cache_key = format!("weather:{city}");
+    if let Some(cached) = kv::get(&cache_key)? {
+        log::info("cache hit");
+        return Ok(cached);
+    }
+
+    // Read API key from secrets (secret_read capability)
+    let api_key = secrets::get("WEATHER_API_KEY")?
+        .ok_or_else(|| Error::msg("WEATHER_API_KEY secret not configured"))?;
+
+    // Fetch from API (network capability)
+    let url = format!("https://api.weather.example/v1?city={city}&key={api_key}");
+    let response = http::get(&url)?;
+
+    if response.status != 200 {
+        log::error(&format!("API returned status {}", response.status));
+        return Ok(json!({
+            "error": format!("API error: HTTP {}", response.status)
+        }).to_string());
+    }
+
+    let result = json!({
+        "city": city,
+        "data": serde_json::from_str::<Value>(&response.body)
+            .unwrap_or(json!({"raw": response.body}))
+    }).to_string();
+
+    // Cache for next time (key_value capability)
+    kv::set(&cache_key, &result)?;
+
+    Ok(result)
+}
+```
+
+The corresponding `plugin.toml` for this example:
+```toml
+[plugin]
+name = "weather"
+version = "0.1.0"
+description = "Fetches and caches weather data"
+
+[capabilities]
+key_value = true
+network = true
+secret_read = true
+
+[[tools]]
+name = "weather"
+description = "Look up weather for a city"
+```
+
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).
 - Do NOT include Cargo.toml or plugin.toml — those are provided separately.
 - Use `serde_json` to parse inputs and build outputs.
 - Handle errors gracefully; return a JSON error object on failure.
 - No `unsafe` blocks.
-- No `.unwrap()` — use `?` or explicit error handling."#
+- No `.unwrap()` — use `?` or explicit error handling.
+- Follow the example above as a structural template."#
         .to_string()
 }
 
