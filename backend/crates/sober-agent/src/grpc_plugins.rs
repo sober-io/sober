@@ -1,13 +1,17 @@
-//! Plugin-related gRPC handler logic, extracted from [`grpc`].
+//! Plugin- and skill-related gRPC handler logic, extracted from [`grpc`].
 //!
 //! These standalone async functions contain the implementation for plugin
-//! management RPCs. The `AgentService` trait impl in `grpc.rs` delegates to
-//! them, keeping the main trait impl focused and the file manageable.
+//! management and skill RPCs. The `AgentService` trait impl in `grpc.rs`
+//! delegates to them, keeping the main trait impl focused and the file
+//! manageable.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use sober_core::types::AgentRepos;
+use sober_core::types::enums::{PluginKind, PluginScope, PluginStatus};
 use sober_core::types::ids::{PluginId, WorkspaceId};
+use sober_core::types::input::PluginFilter;
 use sober_core::types::repo::{PluginRepo, WorkspaceRepo};
 use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
@@ -476,6 +480,112 @@ pub(crate) async fn handle_change_plugin_scope<R: AgentRepos>(
     Ok(Response::new(proto::ChangePluginScopeResponse {
         plugin: Some(plugin_to_proto(&updated)),
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Skill RPC handlers
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn handle_list_skills<R: AgentRepos>(
+    service: &AgentGrpcService<R>,
+    request: Request<proto::ListSkillsRequest>,
+) -> Result<Response<proto::ListSkillsResponse>, Status> {
+    let req = request.into_inner();
+    let ws = service
+        .resolve_workspace_context(req.conversation_id.as_deref())
+        .await;
+
+    // Database is the source of truth. Return enabled skill plugins.
+    let filter = PluginFilter {
+        kind: Some(PluginKind::Skill),
+        status: Some(PluginStatus::Enabled),
+        ..Default::default()
+    };
+
+    let plugins = service
+        .agent()
+        .repos()
+        .plugins()
+        .list(filter)
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+    // Filter: include system + user scoped skills always,
+    // workspace-scoped only if they match the current workspace.
+    // Deduplicate by name (first occurrence wins).
+    let mut seen = HashSet::new();
+    let skills = plugins
+        .into_iter()
+        .filter(|p| match p.scope {
+            PluginScope::System | PluginScope::User => true,
+            PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
+                (Some(pw), Some(cw)) => pw == cw,
+                _ => false,
+            },
+        })
+        .filter(|p| seen.insert(p.name.clone()))
+        .map(|p| proto::SkillInfo {
+            name: p.name,
+            description: p.description.unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(Response::new(proto::ListSkillsResponse { skills }))
+}
+
+pub(crate) async fn handle_reload_skills<R: AgentRepos>(
+    service: &AgentGrpcService<R>,
+    plugin_manager: &Arc<PluginManager<R::Plg>>,
+    request: Request<proto::ReloadSkillsRequest>,
+) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
+    let req = request.into_inner();
+
+    // Invalidate skill cache so next load re-discovers from disk.
+    plugin_manager.skill_loader().invalidate_cache();
+
+    let ws = service
+        .resolve_workspace_context(req.conversation_id.as_deref())
+        .await;
+
+    // Re-sync filesystem skills into the DB.
+    let user_home = sober_workspace::user_home_dir();
+    let _ = plugin_manager
+        .sync_filesystem_skills(&user_home, &ws.workspace_dir, ws.workspace_id)
+        .await;
+
+    // Return enabled skills from the database, filtered by workspace scope.
+    let filter = PluginFilter {
+        kind: Some(PluginKind::Skill),
+        status: Some(PluginStatus::Enabled),
+        ..Default::default()
+    };
+
+    let plugins = service
+        .agent()
+        .repos()
+        .plugins()
+        .list(filter)
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+    let mut seen = HashSet::new();
+    let skills = plugins
+        .into_iter()
+        .filter(|p| match p.scope {
+            PluginScope::System | PluginScope::User => true,
+            PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
+                (Some(pw), Some(cw)) => pw == cw,
+                _ => false,
+            },
+        })
+        .filter(|p| seen.insert(p.name.clone()))
+        .map(|p| proto::SkillInfo {
+            name: p.name,
+            description: p.description.unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(Response::new(proto::ReloadSkillsResponse { skills }))
 }
 
 #[cfg(test)]

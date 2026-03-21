@@ -6,9 +6,8 @@ use std::sync::Arc;
 
 use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
-use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::repo::{ConversationRepo, PluginRepo};
+use sober_core::types::repo::ConversationRepo;
 use sober_plugin::PluginManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -18,7 +17,7 @@ use crate::agent::Agent;
 use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationSender;
 use crate::grpc_plugins;
-use crate::stream::AgentEvent;
+use crate::grpc_tasks;
 use crate::tools::SharedPermissionMode;
 
 /// Generated protobuf types for the agent gRPC service.
@@ -65,14 +64,17 @@ impl<R: AgentRepos> AgentGrpcService<R> {
 }
 
 /// Resolved workspace context from a conversation ID.
-struct WorkspaceContext {
-    workspace_id: Option<WorkspaceId>,
-    workspace_dir: std::path::PathBuf,
+pub(crate) struct WorkspaceContext {
+    pub(crate) workspace_id: Option<WorkspaceId>,
+    pub(crate) workspace_dir: std::path::PathBuf,
 }
 
 impl<R: AgentRepos> AgentGrpcService<R> {
     /// Resolves workspace ID and directory from an optional conversation ID string.
-    async fn resolve_workspace_context(&self, conversation_id: Option<&str>) -> WorkspaceContext {
+    pub(crate) async fn resolve_workspace_context(
+        &self,
+        conversation_id: Option<&str>,
+    ) -> WorkspaceContext {
         let Some(conv_id_str) = conversation_id else {
             return WorkspaceContext {
                 workspace_id: None,
@@ -277,7 +279,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             // Try to deserialize as a typed JobPayload; fall back to raw prompt.
             match serde_json::from_slice::<JobPayload>(&payload) {
                 Ok(job_payload) => {
-                    execute_typed_payload(
+                    grpc_tasks::execute_typed_payload(
                         &agent,
                         job_payload,
                         user_id,
@@ -295,7 +297,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
                         _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
                     };
 
-                    execute_prompt_conversational(
+                    grpc_tasks::execute_prompt_conversational(
                         &agent,
                         &prompt,
                         user_id,
@@ -402,110 +404,14 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::ListSkillsRequest>,
     ) -> Result<Response<proto::ListSkillsResponse>, Status> {
-        use sober_core::types::enums::{PluginKind, PluginScope, PluginStatus};
-        use sober_core::types::input::PluginFilter;
-        use std::collections::HashSet;
-
-        let req = request.into_inner();
-        let ws = self
-            .resolve_workspace_context(req.conversation_id.as_deref())
-            .await;
-
-        // Database is the source of truth. Return enabled skill plugins.
-        let filter = PluginFilter {
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginStatus::Enabled),
-            ..Default::default()
-        };
-
-        let plugins = self
-            .agent
-            .repos()
-            .plugins()
-            .list(filter)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        // Filter: include system + user scoped skills always,
-        // workspace-scoped only if they match the current workspace.
-        // Deduplicate by name (first occurrence wins).
-        let mut seen = HashSet::new();
-        let skills = plugins
-            .into_iter()
-            .filter(|p| match p.scope {
-                PluginScope::System | PluginScope::User => true,
-                PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
-                    (Some(pw), Some(cw)) => pw == cw,
-                    _ => false,
-                },
-            })
-            .filter(|p| seen.insert(p.name.clone()))
-            .map(|p| proto::SkillInfo {
-                name: p.name,
-                description: p.description.unwrap_or_default(),
-            })
-            .collect();
-
-        Ok(Response::new(proto::ListSkillsResponse { skills }))
+        grpc_plugins::handle_list_skills(self, request).await
     }
 
     async fn reload_skills(
         &self,
         request: Request<proto::ReloadSkillsRequest>,
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
-        use sober_core::types::enums::{PluginKind, PluginScope, PluginStatus};
-        use sober_core::types::input::PluginFilter;
-        use std::collections::HashSet;
-
-        let req = request.into_inner();
-
-        // Invalidate skill cache so next load re-discovers from disk.
-        self.plugin_manager.skill_loader().invalidate_cache();
-
-        let ws = self
-            .resolve_workspace_context(req.conversation_id.as_deref())
-            .await;
-
-        // Re-sync filesystem skills into the DB.
-        let user_home = sober_workspace::user_home_dir();
-        let _ = self
-            .plugin_manager
-            .sync_filesystem_skills(&user_home, &ws.workspace_dir, ws.workspace_id)
-            .await;
-
-        // Return enabled skills from the database, filtered by workspace scope.
-        let filter = PluginFilter {
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginStatus::Enabled),
-            ..Default::default()
-        };
-
-        let plugins = self
-            .agent
-            .repos()
-            .plugins()
-            .list(filter)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let mut seen = HashSet::new();
-        let skills = plugins
-            .into_iter()
-            .filter(|p| match p.scope {
-                PluginScope::System | PluginScope::User => true,
-                PluginScope::Workspace => match (p.workspace_id, ws.workspace_id) {
-                    (Some(pw), Some(cw)) => pw == cw,
-                    _ => false,
-                },
-            })
-            .filter(|p| seen.insert(p.name.clone()))
-            .map(|p| proto::SkillInfo {
-                name: p.name,
-                description: p.description.unwrap_or_default(),
-            })
-            .collect();
-
-        Ok(Response::new(proto::ReloadSkillsResponse { skills }))
+        grpc_plugins::handle_reload_skills(self, &self.plugin_manager, request).await
     }
 
     async fn list_plugins(
@@ -565,209 +471,16 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
     }
 }
 
-/// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
-async fn execute_typed_payload<R: AgentRepos>(
-    agent: &Agent<R>,
-    payload: JobPayload,
-    user_id: Option<UserId>,
-    conversation_id: Option<ConversationId>,
-    workspace_id: Option<WorkspaceId>,
-    task_id: &str,
-    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
-) {
-    match payload {
-        JobPayload::Prompt { text, .. } => {
-            // Resolve delivery conversation for the result.
-            let resolved_cid = if let Some(uid) = user_id {
-                agent
-                    .resolve_delivery_conversation(conversation_id, uid, workspace_id)
-                    .await
-            } else {
-                conversation_id
-            };
-
-            // If we have a user + conversation, delegate to the conversational handler.
-            if let (Some(uid), Some(cid)) = (user_id, resolved_cid) {
-                execute_prompt_conversational(agent, &text, Some(uid), Some(cid), task_id, tx)
-                    .await;
-            } else {
-                // No conversation context — use autonomous prompt assembly.
-                // This validates the SOUL.md chain and prompt construction for
-                // system-level scheduled jobs (e.g. trait_evolution_check).
-                let caller = CallerContext {
-                    user_id,
-                    trigger: TriggerKind::Scheduler,
-                    permissions: vec![],
-                    scope_grants: vec![],
-                    workspace_id,
-                };
-                match agent
-                    .mind()
-                    .assemble_autonomous_prompt(&text, &caller)
-                    .await
-                {
-                    Ok(_messages) => {
-                        // TODO: feed messages to LLM engine and stream response
-                        // For now, log that autonomous execution was assembled
-                        tracing::info!(
-                            task_id = %task_id,
-                            "autonomous prompt assembled (LLM execution not yet wired)"
-                        );
-                        send_done_stub(tx).await;
-                    }
-                    Err(e) => {
-                        let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
-                        let _ = tx.send(Ok(proto_event)).await;
-                    }
-                }
-            }
-        }
-        JobPayload::Artifact {
-            blob_ref,
-            artifact_type,
-            ..
-        } => {
-            error!(
-                task_id = %task_id,
-                blob_ref = %blob_ref,
-                artifact_type = ?artifact_type,
-                "artifact execution not yet implemented — requires BwrapSandbox integration"
-            );
-            let proto_event = to_proto_event(AgentEvent::Error(
-                "Artifact execution is not yet implemented".into(),
-            ));
-            let _ = tx.send(Ok(proto_event)).await;
-        }
-        JobPayload::Internal { operation } => {
-            error!(
-                task_id = %task_id,
-                operation = ?operation,
-                "internal operation not yet implemented — requires crate-level execution APIs"
-            );
-            let proto_event = to_proto_event(AgentEvent::Error(format!(
-                "Internal operation {:?} is not yet implemented",
-                operation
-            )));
-            let _ = tx.send(Ok(proto_event)).await;
-        }
-    }
-}
-
-/// Executes a prompt payload by delegating to `handle_message` with conversation context.
-async fn execute_prompt_conversational<R: AgentRepos>(
-    agent: &Agent<R>,
-    prompt: &str,
-    user_id: Option<UserId>,
-    conversation_id: Option<ConversationId>,
-    task_id: &str,
-    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
-) {
-    let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
-        agent
-            .handle_message(
-                uid,
-                cid,
-                prompt,
-                sober_core::types::access::TriggerKind::Scheduler,
-            )
-            .await
-    } else {
-        // No conversation context — emit Done immediately.
-        send_done_stub(tx).await;
-        return;
-    };
-
-    match result {
-        Ok(mut stream) => {
-            use futures::StreamExt;
-            while let Some(event_result) = stream.next().await {
-                let proto_event = match event_result {
-                    Ok(event) => to_proto_event(event),
-                    Err(e) => to_proto_event(AgentEvent::Error(e.to_string())),
-                };
-                if tx.send(Ok(proto_event)).await.is_err() {
-                    break;
-                }
-            }
-        }
-        Err(e) => {
-            error!(error = %e, task_id = %task_id, "task execution failed");
-            let proto_event = to_proto_event(AgentEvent::Error(e.to_string()));
-            let _ = tx.send(Ok(proto_event)).await;
-        }
-    }
-}
-
-/// Sends a no-op Done event (zero tokens, no artifact).
-async fn send_done_stub(tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>) {
-    let done = to_proto_event(AgentEvent::Done {
-        message_id: sober_core::MessageId::new(),
-        usage: crate::stream::Usage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-        },
-        artifact_ref: None,
-    });
-    let _ = tx.send(Ok(done)).await;
-}
-
-/// Converts an [`AgentEvent`] to its proto representation.
-fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
-    use proto::agent_event::Event;
-
-    let inner = match event {
-        AgentEvent::TextDelta(content) => Event::TextDelta(proto::TextDelta { content }),
-        AgentEvent::ToolCallStart { name, input } => Event::ToolCallStart(proto::ToolCallStart {
-            name,
-            input_json: input.to_string(),
-            internal: false,
-        }),
-        AgentEvent::ToolCallResult { name, output } => {
-            Event::ToolCallResult(proto::ToolCallResult {
-                name,
-                output,
-                internal: false,
-            })
-        }
-        AgentEvent::Done {
-            message_id,
-            usage,
-            artifact_ref,
-        } => Event::Done(proto::Done {
-            message_id: message_id.to_string(),
-            prompt_tokens: usage.prompt_tokens,
-            completion_tokens: usage.completion_tokens,
-            artifact_ref: artifact_ref.unwrap_or_default(),
-        }),
-        AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
-        AgentEvent::ConfirmRequest {
-            confirm_id,
-            command,
-            risk_level,
-            affects,
-            reason,
-        } => Event::ConfirmRequest(proto::ConfirmRequest {
-            confirm_id,
-            command,
-            risk_level,
-            affects,
-            reason,
-        }),
-        AgentEvent::Error(message) => Event::Error(proto::Error { message }),
-    };
-
-    proto::AgentEvent { event: Some(inner) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::AgentEvent;
     use sober_core::MessageId;
 
     #[test]
     fn to_proto_event_text_delta() {
         let event = AgentEvent::TextDelta("hello".to_owned());
-        let proto = to_proto_event(event);
+        let proto = grpc_tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::TextDelta(td)) => {
                 assert_eq!(td.content, "hello");
@@ -782,7 +495,7 @@ mod tests {
             name: "web_search".to_owned(),
             input: serde_json::json!({"query": "rust"}),
         };
-        let proto = to_proto_event(event);
+        let proto = grpc_tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::ToolCallStart(tcs)) => {
                 assert_eq!(tcs.name, "web_search");
@@ -802,7 +515,7 @@ mod tests {
             },
             artifact_ref: None,
         };
-        let proto = to_proto_event(event);
+        let proto = grpc_tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::Done(d)) => {
                 assert_eq!(d.prompt_tokens, 100);
@@ -816,7 +529,7 @@ mod tests {
     #[test]
     fn to_proto_event_error() {
         let event = AgentEvent::Error("something broke".to_owned());
-        let proto = to_proto_event(event);
+        let proto = grpc_tasks::to_proto_event(event);
         match proto.event {
             Some(proto::agent_event::Event::Error(e)) => {
                 assert_eq!(e.message, "something broke");
