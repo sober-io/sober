@@ -398,16 +398,10 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .into_iter()
             .filter(|p| match p.scope {
                 PluginScope::System | PluginScope::User => true,
-                PluginScope::Workspace => {
-                    // Only include if matching the current workspace
-                    match (p.workspace_id, workspace_id) {
-                        (Some(pw), Some(cw)) => pw == cw,
-                        // Workspace skills without workspace_id: match by
-                        // checking if the config path is under the workspace dir
-                        (None, _) => workspace_id.is_some(),
-                        _ => false,
-                    }
-                }
+                PluginScope::Workspace => match (p.workspace_id, workspace_id) {
+                    (Some(pw), Some(cw)) => pw == cw,
+                    _ => false,
+                },
             })
             .filter(|p| seen.insert(p.name.clone()))
             .map(|p| proto::SkillInfo {
@@ -423,44 +417,55 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::ReloadSkillsRequest>,
     ) -> Result<Response<proto::ReloadSkillsResponse>, Status> {
-        use sober_core::types::enums::{PluginKind, PluginStatus};
+        use sober_core::types::enums::{PluginKind, PluginScope, PluginStatus};
         use sober_core::types::input::PluginFilter;
+        use std::collections::HashSet;
 
         let req = request.into_inner();
 
         // Invalidate skill cache so next tools_for_turn re-discovers from disk.
         self.plugin_manager.skill_loader().invalidate_cache();
 
-        // Trigger a filesystem re-scan + DB sync by calling tools_for_turn
-        // with a dummy user. This syncs any new/removed skills into the DB.
-        let user_home = sober_workspace::user_home_dir();
-        let workspace_path = if let Some(conv_id_str) = req.conversation_id {
-            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
-                let conv_id = ConversationId::from_uuid(uuid);
-                self.agent
-                    .resolve_workspace_dir(conv_id)
-                    .await
-                    .unwrap_or_default()
+        // Resolve workspace context from conversation_id.
+        let (workspace_id, workspace_path) =
+            if let Some(conv_id_str) = req.conversation_id.as_deref() {
+                if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                    let conv_id = ConversationId::from_uuid(uuid);
+                    let ws_id = self
+                        .agent
+                        .repos()
+                        .conversations()
+                        .get_by_id(conv_id)
+                        .await
+                        .ok()
+                        .and_then(|c| c.workspace_id);
+                    let ws_dir = self
+                        .agent
+                        .resolve_workspace_dir(conv_id)
+                        .await
+                        .unwrap_or_default();
+                    (ws_id, ws_dir)
+                } else {
+                    (None, std::path::PathBuf::new())
+                }
             } else {
-                std::path::PathBuf::new()
-            }
-        } else {
-            std::path::PathBuf::new()
-        };
+                (None, std::path::PathBuf::new())
+            };
 
         // Re-sync filesystem skills into the DB via the plugin manager.
+        let user_home = sober_workspace::user_home_dir();
         let _ = self
             .plugin_manager
             .tools_for_turn(
                 UserId::from_uuid(uuid::Uuid::nil()),
                 &user_home,
                 &workspace_path,
-                None, // workspace_id — not available in reload context
+                workspace_id,
                 None,
             )
             .await;
 
-        // Return enabled skills from the database.
+        // Return enabled skills from the database, filtered by workspace scope.
         let filter = PluginFilter {
             kind: Some(PluginKind::Skill),
             status: Some(PluginStatus::Enabled),
@@ -475,8 +480,17 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        let mut seen = HashSet::new();
         let skills = plugins
             .into_iter()
+            .filter(|p| match p.scope {
+                PluginScope::System | PluginScope::User => true,
+                PluginScope::Workspace => match (p.workspace_id, workspace_id) {
+                    (Some(pw), Some(cw)) => pw == cw,
+                    _ => false,
+                },
+            })
+            .filter(|p| seen.insert(p.name.clone()))
             .map(|p| proto::SkillInfo {
                 name: p.name,
                 description: p.description.unwrap_or_default(),

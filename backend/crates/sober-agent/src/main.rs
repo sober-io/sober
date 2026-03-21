@@ -163,6 +163,23 @@ async fn main() -> Result<()> {
         Arc::clone(&skill_loader),
     ));
 
+    // Sync user-level skills from filesystem into the plugins table on startup.
+    // This ensures ListSkills returns data immediately without waiting for a
+    // conversation turn or manual reload.
+    {
+        let user_home = sober_workspace::user_home_dir();
+        let _ = plugin_manager
+            .tools_for_turn(
+                sober_core::UserId::from_uuid(uuid::Uuid::nil()),
+                &user_home,
+                &std::path::PathBuf::new(),
+                None,
+                None,
+            )
+            .await;
+        info!("startup skill sync complete");
+    }
+
     let tool_bootstrap = Arc::new(ToolBootstrap {
         shell: ShellToolConfig {
             command_policy,
