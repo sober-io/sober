@@ -357,44 +357,23 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
         let req = request.into_inner();
 
-        // Resolve workspace from conversation_id.
-        let (workspace_id, workspace_path) =
-            if let Some(conv_id_str) = req.conversation_id.as_deref() {
-                if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
-                    let conv_id = ConversationId::from_uuid(uuid);
-                    let ws_id = self
-                        .agent
-                        .repos()
-                        .conversations()
-                        .get_by_id(conv_id)
-                        .await
-                        .ok()
-                        .and_then(|c| c.workspace_id);
-                    let ws_dir = self
-                        .agent
-                        .resolve_workspace_dir(conv_id)
-                        .await
-                        .unwrap_or_default();
-                    (ws_id, ws_dir)
-                } else {
-                    (None, std::path::PathBuf::new())
-                }
+        // Resolve workspace_id from conversation_id for workspace-scoped filtering.
+        let workspace_id = if let Some(conv_id_str) = req.conversation_id.as_deref() {
+            if let Ok(uuid) = conv_id_str.parse::<uuid::Uuid>() {
+                let conv_id = ConversationId::from_uuid(uuid);
+                self.agent
+                    .repos()
+                    .conversations()
+                    .get_by_id(conv_id)
+                    .await
+                    .ok()
+                    .and_then(|c| c.workspace_id)
             } else {
-                (None, std::path::PathBuf::new())
-            };
-
-        // Sync filesystem skills into the DB before querying.
-        let user_home = sober_workspace::user_home_dir();
-        let _ = self
-            .plugin_manager
-            .tools_for_turn(
-                UserId::from_uuid(uuid::Uuid::nil()),
-                &user_home,
-                &workspace_path,
-                workspace_id,
-                None,
-            )
-            .await;
+                None
+            }
+        } else {
+            None
+        };
 
         // Database is the source of truth. Return enabled skill plugins.
         let filter = PluginFilter {
