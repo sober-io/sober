@@ -155,6 +155,7 @@ message ListSkillsResponse {
 
 message ReloadSkillsRequest {
   optional string conversation_id = 1;
+  optional string user_id = 2;
 }
 
 message ReloadSkillsResponse {

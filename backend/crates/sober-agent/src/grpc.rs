@@ -58,6 +58,33 @@ impl<R: AgentRepos> AgentGrpcService<R> {
     }
 }
 
+impl<R: AgentRepos> AgentGrpcService<R> {
+    /// Returns the names of skill plugins that are disabled.
+    ///
+    /// Skills are system-level or workspace-level (not per-user), so this
+    /// queries all disabled skill plugins regardless of owner.
+    async fn disabled_skill_names(&self) -> Vec<String> {
+        use sober_core::types::enums::{PluginKind, PluginStatus};
+        use sober_core::types::input::PluginFilter;
+
+        let filter = PluginFilter {
+            kind: Some(PluginKind::Skill),
+            status: Some(PluginStatus::Disabled),
+            ..Default::default()
+        };
+
+        self.agent
+            .repos()
+            .plugins()
+            .list(filter)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    }
+}
+
 /// Streaming response type for `execute_task`.
 type ExecuteTaskStream = ReceiverStream<Result<proto::AgentEvent, Status>>;
 
@@ -375,9 +402,13 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        // Query disabled skill plugins to exclude from the list.
+        let disabled_names = self.disabled_skill_names().await;
+
         let skills = catalog
             .names()
             .iter()
+            .filter(|name| !disabled_names.contains(&name.to_string()))
             .map(|name| {
                 let entry = catalog.get(name).expect("name from catalog");
                 proto::SkillInfo {
@@ -423,9 +454,13 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        // Filter out disabled skills.
+        let disabled_names = self.disabled_skill_names().await;
+
         let skills = catalog
             .names()
             .iter()
+            .filter(|name| !disabled_names.contains(&name.to_string()))
             .map(|name| {
                 let entry = catalog.get(name).expect("name from catalog");
                 proto::SkillInfo {

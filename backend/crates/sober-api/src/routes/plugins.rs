@@ -382,7 +382,7 @@ async fn list_skills(
 /// `POST /api/v1/skills/reload` — invalidate skill cache and return fresh list.
 async fn reload_skills(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
     Query(params): Query<ListSkillsParams>,
 ) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
     let mut client = state.agent_client.clone();
@@ -390,6 +390,7 @@ async fn reload_skills(
     let response = client
         .reload_skills(proto::ReloadSkillsRequest {
             conversation_id: params.conversation_id,
+            user_id: Some(auth_user.user_id.to_string()),
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

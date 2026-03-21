@@ -126,7 +126,7 @@ impl<R: PluginRepo> PluginManager<R> {
         // Also syncs filesystem skills into the plugins table so they
         // appear in the unified plugins UI.
         if let Ok(skill_tools) = self
-            .skill_tools(user_id, user_home, workspace_dir, skill_activation_state)
+            .skill_tools(user_home, workspace_dir, skill_activation_state)
             .await
         {
             tools.extend(skill_tools);
@@ -175,7 +175,6 @@ impl<R: PluginRepo> PluginManager<R> {
     /// returned catalog.
     async fn skill_tools(
         &self,
-        user_id: UserId,
         user_home: &Path,
         workspace_dir: &Path,
         activation_state: Option<Arc<Mutex<SkillActivationState>>>,
@@ -195,10 +194,10 @@ impl<R: PluginRepo> PluginManager<R> {
             return Ok(vec![]);
         }
 
-        // Query all skill plugins for this user (any status).
+        // Query all skill plugins (any status). Skills are system/workspace
+        // level, not per-user.
         let all_skill_filter = PluginFilter {
             kind: Some(PluginKind::Skill),
-            owner_id: Some(user_id),
             ..Default::default()
         };
         let existing_skills = self
@@ -233,7 +232,7 @@ impl<R: PluginRepo> PluginManager<R> {
                     description: Some(entry.frontmatter.description.clone()),
                     origin: PluginOrigin::System,
                     scope,
-                    owner_id: Some(user_id),
+                    owner_id: None,
                     workspace_id: None,
                     status: PluginStatus::Enabled,
                     config: serde_json::json!({
