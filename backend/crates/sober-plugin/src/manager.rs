@@ -29,6 +29,7 @@ use tracing::{debug, warn};
 use crate::error::PluginError;
 use crate::host::PluginHost;
 use crate::manifest::PluginManifest;
+use crate::registry::{InstallRequest, PluginRegistry};
 use crate::tool::PluginTool;
 
 /// Unified plugin manager that collects tools from MCP, Skill, and WASM plugins.
@@ -41,7 +42,7 @@ use crate::tool::PluginTool;
 /// [`McpPool::connect_servers`] before calling [`tools_for_turn`](Self::tools_for_turn).
 /// This keeps sandbox-related concerns out of the plugin crate.
 pub struct PluginManager<R: PluginRepo> {
-    plugin_repo: R,
+    registry: PluginRegistry<R>,
     mcp_pool: tokio::sync::Mutex<McpPool>,
     skill_loader: Arc<SkillLoader>,
     /// WASM hosts cached by plugin ID.  Uses `std::sync::RwLock` because
@@ -57,11 +58,16 @@ impl<R: PluginRepo> PluginManager<R> {
     /// will not initiate new connections.
     pub fn new(plugin_repo: R, mcp_pool: McpPool, skill_loader: Arc<SkillLoader>) -> Self {
         Self {
-            plugin_repo,
+            registry: PluginRegistry::new(plugin_repo),
             mcp_pool: tokio::sync::Mutex::new(mcp_pool),
             skill_loader,
             wasm_hosts: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Returns a reference to the plugin registry.
+    pub fn registry(&self) -> &PluginRegistry<R> {
+        &self.registry
     }
 
     /// Returns all tools for a single conversation turn.
@@ -91,11 +97,7 @@ impl<R: PluginRepo> PluginManager<R> {
             owner_id: Some(user_id),
             ..Default::default()
         };
-        let plugins = self
-            .plugin_repo
-            .list(filter)
-            .await
-            .map_err(|e| PluginError::Internal(e.into()))?;
+        let plugins = self.registry.list(filter).await?;
 
         let mut tools: Vec<Arc<dyn Tool>> = Vec::new();
 
@@ -185,7 +187,6 @@ impl<R: PluginRepo> PluginManager<R> {
         workspace_id: Option<sober_core::types::WorkspaceId>,
     ) -> Result<Vec<String>, PluginError> {
         use sober_core::types::enums::{PluginOrigin, PluginScope};
-        use sober_core::types::input::CreatePlugin;
         use std::collections::HashMap;
 
         let catalog = self
@@ -204,7 +205,7 @@ impl<R: PluginRepo> PluginManager<R> {
             ..Default::default()
         };
         let existing_skills = self
-            .plugin_repo
+            .registry
             .list(all_skill_filter)
             .await
             .unwrap_or_default();
@@ -230,12 +231,12 @@ impl<R: PluginRepo> PluginManager<R> {
                     disabled_names.push(name.to_owned());
                 }
             } else {
-                // New skill — register in the DB.
+                // New skill — install through the audit pipeline.
                 let (scope, ws_id) = match entry.source {
                     sober_skill::SkillSource::User => (PluginScope::User, None),
                     sober_skill::SkillSource::Workspace => (PluginScope::Workspace, workspace_id),
                 };
-                let input = CreatePlugin {
+                let install_req = InstallRequest {
                     name: entry.frontmatter.name.clone(),
                     kind: PluginKind::Skill,
                     version: None,
@@ -244,19 +245,32 @@ impl<R: PluginRepo> PluginManager<R> {
                     scope,
                     owner_id: None,
                     workspace_id: ws_id,
-                    status: PluginStatus::Enabled,
                     config: serde_json::json!({
                         "path": entry.path.to_string_lossy(),
                         "source": format!("{:?}", entry.source),
                     }),
                     installed_by: None,
+                    manifest: None,
+                    wasm_bytes: None,
                 };
-                if let Err(e) = self.plugin_repo.create(input).await {
-                    debug!(
-                        skill_name = name,
-                        error = %e,
-                        "failed to register discovered skill in plugins table"
-                    );
+                match self.registry.install(install_req).await {
+                    Ok(report) => {
+                        debug!(
+                            skill_name = name,
+                            verdict = ?report.verdict,
+                            "skill audit complete"
+                        );
+                    }
+                    Err(PluginError::AlreadyExists(_)) => {
+                        // Race condition — another sync registered it first.
+                    }
+                    Err(e) => {
+                        debug!(
+                            skill_name = name,
+                            error = %e,
+                            "failed to register discovered skill"
+                        );
+                    }
                 }
             }
         }
@@ -431,7 +445,7 @@ impl<R: PluginRepo> PluginManager<R> {
 
     /// Returns a reference to the plugin repository.
     pub fn repo(&self) -> &R {
-        &self.plugin_repo
+        self.registry.repo()
     }
 
     /// Returns a reference to the skill loader.

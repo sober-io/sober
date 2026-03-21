@@ -58,6 +58,14 @@ impl<P: PluginRepo> PluginRegistry<P> {
         Self { db }
     }
 
+    /// Returns a reference to the underlying repository.
+    ///
+    /// Use for operations not covered by the registry API (e.g. `update_config`,
+    /// `update_scope`, `get_kv_data`).
+    pub fn repo(&self) -> &P {
+        &self.db
+    }
+
     /// Installs a plugin after running it through the audit pipeline.
     ///
     /// Returns the audit report. If approved, the plugin is persisted and
