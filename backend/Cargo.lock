@@ -4296,6 +4296,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sober-core",
+ "sober-mcp",
+ "sober-skill",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -4308,6 +4310,8 @@ dependencies = [
 name = "sober-plugin-gen"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "serde",
  "serde_json",
  "sober-core",
