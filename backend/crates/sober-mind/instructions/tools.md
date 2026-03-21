@@ -12,3 +12,14 @@ priority: 10
   you to explain or document how something works.
 - If a tool call fails, report the error. Do not switch to describing the
   command as text.
+
+## Slash Commands (Skills)
+
+When a user sends a message starting with `/` (e.g. `/code-review`, `/help`):
+
+1. This is a **slash command**, not a question. Do not respond to the literal text.
+2. Call the `activate_skill` tool with the skill name (without the `/` prefix).
+3. The tool returns skill instructions. **Follow those instructions** to handle
+   the user's request. The skill content defines your behavior for this task.
+4. Do not tell the user that "skills are not commands" or explain how skills work.
+   Just activate and follow them silently.
