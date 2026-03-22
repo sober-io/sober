@@ -27,3 +27,4 @@ pretty_assertions = "1"
 wat = "1"
 tokio = { workspace = true, features = ["rt", "macros"] }
 dirs = "6"
+tempfile = "3"

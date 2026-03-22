@@ -20,8 +20,10 @@
 //! - `host_kv_*` — plugin-scoped key-value storage (DB-backed with in-memory fallback, `KeyValue` capability)
 //! - `host_http_request` — outbound HTTP via `ureq` (`Network` capability, domain-restricted)
 //! - `host_emit_metric` — counter/gauge/histogram emission via `metrics` crate (`Metrics` capability)
+//! - `host_fs_read` — sandboxed file read via `std::fs` (`Filesystem` capability, path-restricted)
+//! - `host_fs_write` — sandboxed file write via `std::fs` (`Filesystem` capability, path-restricted)
 //!
-//! Remaining host functions (secrets, tool calls, memory, filesystem, LLM,
+//! Remaining host functions (secrets, tool calls, memory, LLM,
 //! scheduling, conversation) return "not yet connected" stub errors until
 //! the backing services are wired in.
 
@@ -329,16 +331,20 @@ pub(crate) struct ScheduleRequest {
 
 /// Input for `host_fs_read`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct FsReadRequest {
     pub path: String,
 }
 
 /// Input for `host_fs_write`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct FsWriteRequest {
     pub path: String,
+    pub content: String,
+}
+
+/// Output for `host_fs_read`.
+#[derive(Debug, Serialize)]
+pub(crate) struct FsReadResponse {
     pub content: String,
 }
 

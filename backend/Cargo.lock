@@ -4303,6 +4303,7 @@ dependencies = [
  "sober-mcp",
  "sober-skill",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
