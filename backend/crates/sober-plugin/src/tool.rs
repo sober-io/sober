@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata};
+use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 
 use crate::host::PluginHost;
 
@@ -61,18 +61,23 @@ impl Tool for PluginTool {
         let tool_name = self.tool_name.clone();
 
         Box::pin(async move {
-            // Use spawn_blocking since WASM execution is synchronous.
-            // The Mutex lock is acquired and released entirely within
-            // the blocking closure — never held across an await point.
-            tokio::task::spawn_blocking(move || {
-                let mut host = host.lock().map_err(|e| {
-                    ToolError::ExecutionFailed(format!("plugin host lock poisoned: {e}"))
-                })?;
-                host.call_tool(&tool_name, input)
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+            let result = tokio::task::spawn_blocking(move || {
+                let mut host = host
+                    .lock()
+                    .map_err(|e| format!("plugin host lock poisoned: {e}"))?;
+                host.call_tool(&tool_name, input).map_err(|e| e.to_string())
             })
             .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("spawn_blocking failed: {e}")))?
+            .map_err(|e| format!("spawn_blocking failed: {e}"))
+            .and_then(|r| r);
+
+            match result {
+                Ok(output) => Ok(output),
+                Err(msg) => Ok(ToolOutput {
+                    content: format!("Plugin execution failed: {msg}"),
+                    is_error: true,
+                }),
+            }
         })
     }
 }
