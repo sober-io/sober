@@ -165,7 +165,7 @@ impl KvBackend for PgKvBackend {
         let pool = self.pool.clone();
         let key = key.to_owned();
         Box::pin(async move {
-            let row: Option<(serde_json::Value,)> =
+            let row: Option<(Option<serde_json::Value>,)> =
                 sqlx::query_as("SELECT data->$2 FROM plugin_kv_data WHERE plugin_id = $1")
                     .bind(plugin_id.as_uuid())
                     .bind(&key)
@@ -173,7 +173,7 @@ impl KvBackend for PgKvBackend {
                     .await
                     .map_err(|e| format!("kv get failed: {e}"))?;
 
-            Ok(row.and_then(|(v,)| if v.is_null() { None } else { Some(v) }))
+            Ok(row.and_then(|(v,)| v))
         })
     }
 

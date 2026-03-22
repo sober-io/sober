@@ -210,7 +210,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
         plugin_id: PluginId,
         key: &str,
     ) -> Result<Option<serde_json::Value>, AppError> {
-        let row: Option<(serde_json::Value,)> =
+        let row: Option<(Option<serde_json::Value>,)> =
             sqlx::query_as("SELECT data->$2 FROM plugin_kv_data WHERE plugin_id = $1")
                 .bind(plugin_id.as_uuid())
                 .bind(key)
@@ -218,7 +218,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
                 .await
                 .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.and_then(|(v,)| if v.is_null() { None } else { Some(v) }))
+        Ok(row.and_then(|(v,)| v))
     }
 
     async fn set_kv_data(
