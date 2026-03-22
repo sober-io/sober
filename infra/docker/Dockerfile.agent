@@ -3,6 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY backend/ backend/
+COPY sdks/ sdks/
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/build/backend/target,id=sober-agent-target \
     cd backend && cargo build --release -p sober-agent \
@@ -24,6 +25,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 RUN useradd --system --create-home --shell /usr/sbin/nologin sober
 COPY --from=builder /usr/local/bin/sober-agent /usr/local/bin/sober-agent
+# PDK crate for WASM plugin compilation.
+COPY --from=builder /build/sdks/sober-pdk /usr/local/share/sober/sdks/sober-pdk
 RUN mkdir -p /run/sober /var/lib/sober/workspaces/default /home/sober/.cargo \
     && chown -R sober:sober /run/sober /var/lib/sober /home/sober
 USER sober

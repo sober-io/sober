@@ -239,9 +239,9 @@ impl PluginGenerator {
 fn wasm_system_prompt() -> String {
     r#"You are an expert Rust developer who writes Sõber WASM plugins.
 
-A Sõber WASM plugin is a Rust `cdylib` crate that uses `extism-pdk`.
-Each exported tool function must be annotated with `#[plugin_fn]` and
-have the signature:
+A Sõber WASM plugin is a Rust `cdylib` crate that uses the `extism-pdk` and
+`sober-pdk` crates. Each exported tool function must be annotated with
+`#[plugin_fn]` and have the signature:
 
 ```rust
 use extism_pdk::*;
@@ -252,17 +252,16 @@ pub fn tool_name(input: String) -> FnResult<String>
 
 The input is a JSON string. The return value must also be a JSON string.
 
-Host functions are called via Extism's `host_fn!` mechanism — they are
-injected automatically at runtime. The plugin communicates with the host
-by reading/writing JSON through the WASM boundary.
+Available capabilities via `sober_pdk`:
+- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging (always available)
+- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` — key-value store (requires `key_value` capability)
+- `sober_pdk::http::fetch(url, method, headers, body)` — HTTP requests (requires `network` capability)
+- `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability; stub)
+- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability; stub)
+- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` — emit metrics (requires `metrics` capability)
 
-Available dependencies (add to Cargo.toml):
-- `extism-pdk = "1"` — WASM plugin SDK (always required)
-- `serde = { version = "1", features = ["derive"] }` — serialization
-- `serde_json = "1"` — JSON handling
-
-Do NOT use `sober-pdk` — it is not available as a published crate.
-Use `extism-pdk` directly for all plugin functionality.
+IMPORTANT: `sober-pdk` is already included in Cargo.toml — do NOT add it manually.
+The Cargo.toml is generated automatically with the correct path dependency.
 
 Manifest format (`plugin.toml`):
 ```toml
@@ -286,32 +285,40 @@ description = "..."
 ```rust
 use extism_pdk::*;
 use serde_json::{json, Value};
+use sober_pdk::{log, kv};
 
-/// Converts text to uppercase and returns statistics.
+/// Fetches a greeting, caches it, and returns the result.
 #[plugin_fn]
-pub fn transform(input: String) -> FnResult<String> {
-    // Parse JSON input
+pub fn greet(input: String) -> FnResult<String> {
     let params: Value = serde_json::from_str(&input)?;
-    let text = params["text"]
+    let name = params["name"]
         .as_str()
-        .ok_or_else(|| Error::msg("missing 'text' field"))?;
+        .ok_or_else(|| Error::msg("missing 'name' field"))?;
 
-    let upper = text.to_uppercase();
-    let word_count = text.split_whitespace().count();
+    log::info(&format!("greeting: {name}"));
 
-    Ok(json!({
-        "result": upper,
-        "word_count": word_count,
-        "char_count": text.len()
-    }).to_string())
+    // Check cache
+    let cache_key = format!("greeting:{name}");
+    if let Some(cached) = kv::get(&cache_key)? {
+        log::info("cache hit");
+        return Ok(cached);
+    }
+
+    let result = json!({
+        "message": format!("Hello, {name}!"),
+        "cached": false
+    }).to_string();
+
+    kv::set(&cache_key, &result)?;
+    Ok(result)
 }
 ```
 
-Note: Capabilities (KV, HTTP, metrics, etc.) are provided as host functions
-injected at runtime — they are NOT Rust crate imports. Currently only `log`,
-`kv` (in-memory), `network` (HTTP), and `metrics` are functional. Other
-capabilities return stub errors. Do NOT import `sober_pdk` — it is not
-available as a dependency. Use only `extism-pdk`, `serde`, and `serde_json`.
+IMPORTANT — current capability status:
+- FUNCTIONAL: `log` (always available), `key_value` (in-memory), `network` (HTTP via ureq), `metrics` (counter/gauge/histogram)
+- STUBS (return errors at runtime): `secret_read`, `tool_call`, `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`
+
+Prefer functional capabilities. If a stub capability is requested, include it but warn the user it is not yet connected.
 
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).
@@ -365,6 +372,7 @@ fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String
 }
 
 fn cargo_toml(name: &str) -> String {
+    let pdk = crate::scaffold::pdk_path();
     format!(
         r#"[package]
 name = "sober-plugin-{name}"
@@ -375,6 +383,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+sober-pdk = {{ path = "{pdk}" }}
 extism-pdk = "1"
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
