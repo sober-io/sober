@@ -277,13 +277,14 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("skill generation failed: {e}")))?;
 
-        // Save skill markdown to .sober/skills/<name>.md
-        let skills_dir = workspace_dir.join(".sober").join("skills");
-        tokio::fs::create_dir_all(&skills_dir)
+        // Save skill markdown to .sober/skills/<name>/SKILL.md
+        // SkillLoader expects this directory structure for discovery.
+        let skill_dir = workspace_dir.join(".sober").join("skills").join(name);
+        tokio::fs::create_dir_all(&skill_dir)
             .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("failed to create skills dir: {e}")))?;
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to create skill dir: {e}")))?;
 
-        let skill_path = skills_dir.join(format!("{name}.md"));
+        let skill_path = skill_dir.join("SKILL.md");
         tokio::fs::write(&skill_path, &skill_content)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write skill file: {e}")))?;
@@ -718,7 +719,8 @@ mod tests {
             .path()
             .join(".sober")
             .join("skills")
-            .join("summariser.md");
+            .join("summariser")
+            .join("SKILL.md");
         assert!(skill_path.exists(), "skill file should exist");
 
         // Check that the plugin was registered by querying the repo.
