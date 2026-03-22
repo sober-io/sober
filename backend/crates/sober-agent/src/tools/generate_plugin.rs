@@ -154,12 +154,23 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             .and_then(|v| v.as_str())
             .unwrap_or("skill");
 
-        match kind {
+        let result = match kind {
             "wasm" => self.generate_wasm(name, description, &input).await,
             "skill" => self.generate_skill(name, description).await,
             other => Err(ToolError::InvalidInput(format!(
                 "unknown plugin kind '{other}', expected 'wasm' or 'skill'"
             ))),
+        };
+
+        // Convert execution errors into is_error outputs so the LLM
+        // reports the failure to the user instead of trying alternatives.
+        match result {
+            Ok(output) => Ok(output),
+            Err(ToolError::InvalidInput(msg)) => Err(ToolError::InvalidInput(msg)),
+            Err(e) => Ok(ToolOutput {
+                content: format!("Plugin generation failed: {e}"),
+                is_error: true,
+            }),
         }
     }
 
@@ -341,10 +352,13 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             };
             let report = AuditPipeline::audit(&audit_request);
             if !report.is_approved() {
-                return Err(ToolError::ExecutionFailed(format!(
-                    "regenerated plugin rejected by audit: {}",
-                    report.rejection_reason().unwrap_or("unknown")
-                )));
+                return Ok(ToolOutput {
+                    content: format!(
+                        "Plugin regeneration failed: rejected by audit — {}",
+                        report.rejection_reason().unwrap_or("unknown")
+                    ),
+                    is_error: true,
+                });
             }
 
             // Evict the stale WASM host BEFORE updating config.  If config
