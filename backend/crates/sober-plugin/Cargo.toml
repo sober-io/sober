@@ -8,6 +8,7 @@ sober-core = { path = "../sober-core" }
 sober-llm = { path = "../sober-llm" }
 sober-mcp = { path = "../sober-mcp" }
 sober-skill = { path = "../sober-skill" }
+sober-workspace = { path = "../sober-workspace" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

@@ -250,11 +250,19 @@ impl<R: AgentRepos> ToolBootstrap<R> {
 
         // 5. Generate-plugin tool — available when a plugin generator is configured.
         if let Some(generator) = &self.plugin_generator {
+            // Provide the artifact repo when a workspace context is active so that
+            // generated WASM binaries are tracked as workspace artifacts.
+            let artifact_repo: Option<Arc<R::Artifact>> = ctx
+                .workspace_id
+                .map(|_| Arc::new(self.repos.artifacts().clone()));
             tools.push(Arc::new(GeneratePluginTool::new(
                 Arc::clone(generator),
                 Arc::clone(&self.plugin_manager),
+                Arc::clone(&self.blob_store),
+                artifact_repo,
                 ctx.workspace_dir.clone(),
                 ctx.workspace_id,
+                Some(ctx.conversation_id),
                 ctx.user_id,
             )));
         }

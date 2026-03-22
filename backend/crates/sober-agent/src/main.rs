@@ -25,7 +25,8 @@ use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
-use sober_plugin::PluginManager;
+use sober_plugin::backends::PgKvBackend;
+use sober_plugin::{PluginManager, WasmServices};
 use sober_sandbox::{CommandPolicy, SandboxProfile};
 use sober_skill::SkillLoader;
 use sober_workspace::BlobStore;
@@ -157,11 +158,23 @@ async fn main() -> Result<()> {
 
     let mcp_pool = McpPool::new(McpConfig::default());
     let plugin_repo = PgPluginRepo::new(pool.clone());
-    let plugin_manager = Arc::new(PluginManager::new(
-        plugin_repo,
-        mcp_pool,
-        Arc::clone(&skill_loader),
-    ));
+    let wasm_services = WasmServices {
+        kv_backend: Some(Arc::new(PgKvBackend::new(pool.clone()))),
+        llm_engine: Some(Arc::clone(&llm)),
+        // Remaining backends (secrets, memory, conversation, schedule,
+        // tool_executor) require more complex wiring and will be connected
+        // incrementally in follow-up tasks.
+        ..WasmServices::default()
+    };
+    let plugin_manager = Arc::new(
+        PluginManager::new(
+            plugin_repo,
+            mcp_pool,
+            Arc::clone(&skill_loader),
+            Some(Arc::clone(&blob_store)),
+        )
+        .with_wasm_services(wasm_services),
+    );
 
     // Sync user-level skills from filesystem into the plugins table on startup.
     // This ensures ListSkills returns data immediately without waiting for a

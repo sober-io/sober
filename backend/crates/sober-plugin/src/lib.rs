@@ -17,6 +17,6 @@ pub mod tool;
 pub use audit::{AuditPipeline, AuditReport, AuditVerdict, StageResult};
 pub use capability::{Cap, CapabilitiesConfig, Capability};
 pub use error::PluginError;
-pub use manager::PluginManager;
+pub use manager::{PluginManager, WasmServices};
 pub use manifest::PluginManifest;
 pub use registry::PluginRegistry;
