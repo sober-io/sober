@@ -400,7 +400,7 @@ fn compile_error_prompt(error: &str) -> String {
 }
 
 fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String {
-    let safe_desc = description.replace('"', "'");
+    let safe_desc = description.replace('"', "");
     let mut lines = vec![
         "[plugin]".to_string(),
         format!("name = \"{name}\""),
