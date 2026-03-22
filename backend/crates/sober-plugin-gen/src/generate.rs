@@ -260,10 +260,18 @@ use extism_pdk::*;
 pub fn tool_name(input: String) -> FnResult<String>
 ```
 
-CRITICAL NAMING RULES:
-1. The `[[tools]] name` in the manifest and the `#[plugin_fn]` function name MUST be IDENTICAL. Use snake_case for both.
-2. The tool name describes what the tool DOES, NOT the plugin name. Example: plugin "hello-world" → tool name "greet", function `pub fn greet(...)`.
-3. Keep `description` fields short (under 80 chars). Never put double quotes inside TOML string values.
+CRITICAL — TOOL NAMING:
+The `[[tools]] name` in the manifest MUST EXACTLY match the `#[plugin_fn]` function name.
+The tool name is the ACTION the tool performs — NEVER the plugin name.
+
+Example: plugin "hello-world" that greets people:
+  Manifest:  [[tools]]  name = "greet"       ← action verb, NOT "hello_world"
+  Code:      pub fn greet(input: String)      ← SAME as manifest name
+
+WRONG: [[tools]] name = "hello_world" with pub fn greet(...) — WILL BREAK AT RUNTIME.
+RIGHT: [[tools]] name = "greet" with pub fn greet(...) — names match.
+
+Keep `description` fields short (under 80 chars). Never put double quotes inside TOML string values.
 
 The input is a JSON string. The return value must also be a JSON string.
 
@@ -304,12 +312,28 @@ filesystem = true                        # or: filesystem = { paths = ["/workspa
 llm_inference = true
 
 [[tools]]
-name = "tool-name"
-description = "..."
+name = "greet"                           # MUST match the #[plugin_fn] fn name exactly
+description = "Greets a person by name"
 ```
 
-## Full example plugin
+## Full example: plugin "hello-world" with tool "greet"
 
+Manifest (`plugin.toml`):
+```toml
+[plugin]
+name = "hello-world"
+version = "0.1.0"
+description = "A greeting plugin"
+
+[capabilities]
+key_value = true
+
+[[tools]]
+name = "greet"
+description = "Greets a person by name"
+```
+
+Code (`src/lib.rs`) — note `fn greet` matches `name = "greet"` above:
 ```rust
 use extism_pdk::*;
 use serde_json::{json, Value};
