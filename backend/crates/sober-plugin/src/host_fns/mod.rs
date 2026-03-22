@@ -17,7 +17,7 @@
 //! The following host functions are fully operational:
 //!
 //! - `host_log` — structured logging (always available, no capability gate)
-//! - `host_kv_*` — plugin-scoped key-value storage (in-memory, `KeyValue` capability)
+//! - `host_kv_*` — plugin-scoped key-value storage (DB-backed with in-memory fallback, `KeyValue` capability)
 //! - `host_http_request` — outbound HTTP via `ureq` (`Network` capability, domain-restricted)
 //! - `host_emit_metric` — counter/gauge/histogram emission via `metrics` crate (`Metrics` capability)
 //!
@@ -74,8 +74,10 @@ pub struct HostContext {
     pub plugin_id: PluginId,
     /// Capabilities granted to this plugin (resolved from its manifest).
     pub capabilities: Vec<Capability>,
-    /// In-memory KV store for Phase 1 (replaced by DB-backed store later).
+    /// In-memory KV store fallback (used when `db_pool` is `None`).
     pub kv_store: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+    /// Database pool for persistent operations. `None` in tests or offline mode.
+    pub db_pool: Option<sqlx::PgPool>,
     /// Tokio runtime handle for bridging async operations from synchronous
     /// host function calls.  `None` in test mode or when no runtime is available.
     pub runtime_handle: Option<tokio::runtime::Handle>,
@@ -91,9 +93,17 @@ impl HostContext {
             plugin_id,
             capabilities,
             kv_store: Arc::new(Mutex::new(HashMap::new())),
+            db_pool: None,
             runtime_handle: None,
             user_id: None,
         }
+    }
+
+    /// Sets the database pool for persistent KV storage.
+    #[must_use]
+    pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.db_pool = Some(pool);
+        self
     }
 
     /// Sets the tokio runtime handle for async bridging.
@@ -437,7 +447,7 @@ pub fn build_host_functions(ctx: HostContext) -> Vec<Function> {
     let functions = vec![
         // Always available
         ("host_log", host_log_impl as HostFn),
-        // Phase 1 — KeyValue (functional with in-memory store)
+        // Phase 1 — KeyValue (DB-backed with in-memory fallback)
         ("host_kv_get", host_kv_get_impl as HostFn),
         ("host_kv_set", host_kv_set_impl as HostFn),
         ("host_kv_delete", host_kv_delete_impl as HostFn),
@@ -901,6 +911,7 @@ mod tests {
     #[test]
     fn host_context_new_defaults() {
         let ctx = test_context(vec![]);
+        assert!(ctx.db_pool.is_none());
         assert!(ctx.runtime_handle.is_none());
         assert!(ctx.user_id.is_none());
     }
