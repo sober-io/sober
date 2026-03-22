@@ -57,7 +57,7 @@ pub(crate) fn host_call_tool_impl(
         None => return not_yet_connected_error(plugin, outputs, "host_call_tool"),
     };
 
-    // Drop the lock before blocking on async to avoid starving other host calls.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     let result = data

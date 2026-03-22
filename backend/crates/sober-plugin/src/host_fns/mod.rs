@@ -75,6 +75,51 @@ use self::tool_call::host_call_tool_impl;
 // HostContext — shared state available to all host functions
 // ---------------------------------------------------------------------------
 
+// ## Lock discipline: the drop-reacquire pattern
+//
+// Host functions that call async backends follow a strict two-phase lock
+// protocol to avoid deadlocks:
+//
+// **Phase 1 — setup (locked):** Acquire the `HostContext` lock, check the
+// required capability, clone the backend `Arc` and any scalar fields needed
+// by the future (e.g. `user_id`), then *explicitly drop* the guard.
+//
+// **Phase 2 — execute (unlocked):** Reacquire the lock solely to call
+// `block_on_async`, which drives the async future to completion on the
+// stored Tokio runtime handle.
+//
+// ```text
+// let data = user_data.get()?;
+// let backend = {
+//     let ctx = data.lock()?;
+//     check_capability(&ctx)?;
+//     Arc::clone(&ctx.some_backend.as_ref().unwrap())
+//     // guard drops here
+// };
+// // Lock is released — future can progress without holding it.
+// let result = data.lock()?.block_on_async(backend.operation())?;
+// ```
+//
+// **Why not hold the lock across `block_on_async`?**
+//
+// `block_on_async` calls `handle.block_on(future)`, which may internally
+// poll other tasks on the Tokio runtime. If another task tries to acquire
+// the same `HostContext` lock (e.g. a concurrent host call), it would
+// deadlock. Dropping the lock before blocking prevents this.
+//
+// **Why not extract a helper?**
+//
+// The natural refactor — a `run_async_op(user_data, |ctx| future)` closure —
+// does not compile because backend trait methods return
+// `Pin<Box<dyn Future + Send + '_>>` where `'_` ties the future's lifetime
+// to `&self` (the `Arc` clone inside the closure). Once the closure returns,
+// the local `Arc` is dropped, invalidating the future. Owning the `Arc`
+// before calling the trait method (and moving it into the closure) would
+// require `Arc::into_raw` / unsafe, which is not worth it for 3 lines saved.
+//
+// The pattern is three lines; keep it explicit in each host function so
+// the intent and the safety contract are immediately visible.
+
 /// Shared context passed to all host functions via Extism's `UserData` mechanism.
 ///
 /// Carries the plugin identity and granted capabilities so that each host

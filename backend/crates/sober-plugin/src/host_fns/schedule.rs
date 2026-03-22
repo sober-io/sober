@@ -36,7 +36,7 @@ pub(crate) fn host_schedule_impl(
 
     let plugin_id = ctx.plugin_id;
 
-    // Drop the lock before blocking on async to avoid starving other host calls.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     let job_id = data

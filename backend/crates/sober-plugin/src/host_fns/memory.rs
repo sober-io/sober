@@ -67,7 +67,7 @@ pub(crate) fn host_memory_query_impl(
         }
     };
 
-    // Drop lock before blocking on async to avoid starving other host calls.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     let results = data
@@ -135,7 +135,7 @@ pub(crate) fn host_memory_write_impl(
         }
     };
 
-    // Drop lock before blocking on async to avoid starving other host calls.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     data.lock()

@@ -39,7 +39,7 @@ pub(crate) fn host_read_secret_impl(
         None => return Err(extism::Error::msg("no user context")),
     };
 
-    // Drop the lock before blocking on async to avoid starving other host calls.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     let value = data

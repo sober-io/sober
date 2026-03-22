@@ -365,7 +365,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                         .update_state(old_id, ArtifactState::Archived)
                         .await
                 {
-                    tracing::warn!(
+                    tracing::error!(
                         plugin_name = name,
                         artifact_id = %old_id,
                         error = %e,
@@ -396,7 +396,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                                 .add_relation(new_artifact.id, old_id, ArtifactRelation::Supersedes)
                                 .await
                         {
-                            tracing::warn!(
+                            tracing::error!(
                                 plugin_name = name,
                                 error = %e,
                                 "failed to add supersedes relation between artifacts"
@@ -404,7 +404,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(
+                        tracing::error!(
                             plugin_name = name,
                             blob_key = %blob_key,
                             error = %e,
@@ -459,10 +459,10 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                     ..Default::default()
                 };
 
-                // Non-fatal: log a warning if artifact creation fails, but don't
+                // Non-fatal: log an error if artifact creation fails, but don't
                 // fail the whole tool invocation — the plugin is already registered.
                 if let Err(e) = artifact_repo.create(create_input).await {
-                    tracing::warn!(
+                    tracing::error!(
                         plugin_name = name,
                         blob_key = %blob_key,
                         error = %e,

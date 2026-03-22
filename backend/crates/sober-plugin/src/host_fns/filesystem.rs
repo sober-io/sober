@@ -114,6 +114,29 @@ pub(crate) fn host_fs_write_impl(
 
     let target = Path::new(&req.path);
 
+    // Check path restrictions BEFORE creating any directories or files.
+    // We validate against the raw (non-canonicalized) path first to prevent
+    // directory creation as a side effect of denied writes.
+    if !allowed_paths.is_empty() {
+        // Use the parent (if it exists on disk) to get a canonical prefix,
+        // otherwise fall back to the raw path for prefix checking.
+        let check_path = target
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .map(|p| p.join(target.file_name().unwrap_or_default()))
+            .unwrap_or_else(|| target.to_path_buf());
+
+        if !is_path_allowed(&check_path, &allowed_paths) {
+            let err = HostError {
+                error: format!(
+                    "filesystem: path {:?} is not within any allowed path",
+                    req.path
+                ),
+            };
+            return write_output(plugin, outputs, &err);
+        }
+    }
+
     // Create parent directories if they don't exist so we can canonicalize
     // the full path afterwards.
     if let Some(parent) = target.parent()
@@ -130,8 +153,6 @@ pub(crate) fn host_fs_write_impl(
     }
 
     // Canonicalize the parent directory and reconstruct the full target path.
-    // We can't canonicalize the file itself before writing it (it may not exist
-    // yet), so we canonicalize the parent and append the file name.
     let canonical = match canonicalize_write_target(target) {
         Ok(p) => p,
         Err(e) => {
@@ -142,7 +163,7 @@ pub(crate) fn host_fs_write_impl(
         }
     };
 
-    // Enforce path restrictions when the list is non-empty.
+    // Re-check against canonical path (catches symlink traversal).
     if !allowed_paths.is_empty() && !is_path_allowed(&canonical, &allowed_paths) {
         let err = HostError {
             error: format!(

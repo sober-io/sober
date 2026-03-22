@@ -133,7 +133,7 @@ pub struct CapabilitiesConfig {
     pub memory_read: Cap<MemoryCap>,
     /// Write to memory/context.
     #[serde(default)]
-    pub memory_write: Cap<bool>,
+    pub memory_write: Cap<MemoryCap>,
     /// Outbound network access.
     #[serde(default)]
     pub network: Cap<NetworkCap>,
@@ -180,7 +180,11 @@ impl CapabilitiesConfig {
             caps.push(Capability::MemoryRead { scopes: vec![] });
         }
 
-        if self.memory_write.is_enabled() {
+        if let Cap::WithConfig(ref c) = self.memory_write {
+            caps.push(Capability::MemoryWrite {
+                scopes: c.scopes.clone(),
+            });
+        } else if self.memory_write.is_enabled() {
             caps.push(Capability::MemoryWrite { scopes: vec![] });
         }
 
@@ -276,6 +280,34 @@ mod tests {
             domains: vec!["api.example.com".into()]
         }));
         assert!(caps.contains(&Capability::Metrics));
+    }
+
+    #[test]
+    fn memory_write_with_scopes() {
+        let config = CapabilitiesConfig {
+            memory_write: Cap::WithConfig(MemoryCap {
+                scopes: vec!["user".into()],
+            }),
+            ..Default::default()
+        };
+
+        let caps = config.to_capabilities();
+        assert_eq!(caps.len(), 1);
+        assert!(caps.contains(&Capability::MemoryWrite {
+            scopes: vec!["user".into()]
+        }));
+    }
+
+    #[test]
+    fn memory_write_bool_true_gives_empty_scopes() {
+        let config = CapabilitiesConfig {
+            memory_write: Cap::Enabled(true),
+            ..Default::default()
+        };
+
+        let caps = config.to_capabilities();
+        assert_eq!(caps.len(), 1);
+        assert!(caps.contains(&Capability::MemoryWrite { scopes: vec![] }));
     }
 
     #[test]

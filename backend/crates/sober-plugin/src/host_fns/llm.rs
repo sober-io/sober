@@ -46,8 +46,7 @@ pub(crate) fn host_llm_complete_impl(
         stream: false,
     };
 
-    // Bridge the async call through the stored runtime handle.
-    // Drop the ctx lock before blocking so other host calls aren't starved.
+    // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
 
     let response = data
