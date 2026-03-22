@@ -87,6 +87,8 @@ pub struct HostContext {
     /// User ID for scoped operations (memory, conversation, etc.).
     /// `None` when the plugin is invoked outside a user context (e.g. system jobs).
     pub user_id: Option<UserId>,
+    /// LLM engine for completion requests.  `None` when no LLM provider is configured.
+    pub llm_engine: Option<Arc<dyn sober_llm::LlmEngine>>,
 }
 
 impl fmt::Debug for HostContext {
@@ -97,6 +99,14 @@ impl fmt::Debug for HostContext {
             .field("kv_backend", &"<dyn KvBackend>")
             .field("runtime_handle", &self.runtime_handle.is_some())
             .field("user_id", &self.user_id)
+            .field(
+                "llm_engine",
+                if self.llm_engine.is_some() {
+                    &"<LlmEngine>"
+                } else {
+                    &"<none>"
+                },
+            )
             .finish()
     }
 }
@@ -114,6 +124,7 @@ impl HostContext {
             kv_backend: Arc::new(InMemoryKvBackend::new()),
             runtime_handle: None,
             user_id: None,
+            llm_engine: None,
         }
     }
 
@@ -135,6 +146,13 @@ impl HostContext {
     #[must_use]
     pub fn with_user_id(mut self, user_id: UserId) -> Self {
         self.user_id = Some(user_id);
+        self
+    }
+
+    /// Sets the LLM engine for completion requests.
+    #[must_use]
+    pub fn with_llm_engine(mut self, engine: Arc<dyn sober_llm::LlmEngine>) -> Self {
+        self.llm_engine = Some(engine);
         self
     }
 
@@ -366,13 +384,18 @@ pub(crate) struct FsReadResponse {
 
 /// Input for `host_llm_complete`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub(crate) struct LlmCompleteRequest {
     pub prompt: String,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+}
+
+/// Output for `host_llm_complete`.
+#[derive(Debug, Serialize)]
+pub(crate) struct LlmCompleteResponse {
+    pub text: String,
 }
 
 /// Generic error envelope returned to plugins.
