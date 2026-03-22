@@ -260,6 +260,11 @@ use extism_pdk::*;
 pub fn tool_name(input: String) -> FnResult<String>
 ```
 
+CRITICAL NAMING RULES:
+1. The `[[tools]] name` in the manifest and the `#[plugin_fn]` function name MUST be IDENTICAL. Use snake_case for both.
+2. The tool name describes what the tool DOES, NOT the plugin name. Example: plugin "hello-world" → tool name "greet", function `pub fn greet(...)`.
+3. Keep `description` fields short (under 80 chars). Never put double quotes inside TOML string values.
+
 The input is a JSON string. The return value must also be a JSON string.
 
 Available capabilities via `sober_pdk`:
