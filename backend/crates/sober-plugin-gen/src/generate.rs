@@ -286,21 +286,24 @@ Keep `description` fields short (under 80 chars). Never put double quotes inside
 
 The input is a JSON string. The return value must also be a JSON string.
 
-Available capabilities via `sober_pdk`:
-- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging (always available)
-- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` / `list(prefix)` — key-value store (requires `key_value` capability)
-- `sober_pdk::http::fetch(url, method, headers, body)` — HTTP requests (requires `network` capability)
-- `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability)
-- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability)
-- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` / `histogram(name, value)` — emit metrics (requires `metrics` capability)
-- `sober_pdk::memory::query(query, scope, limit)` / `write(content, scope, metadata)` — vector memory (requires `memory_read` / `memory_write` capability)
-- `sober_pdk::conversation::read(conversation_id, limit)` — read conversation history (requires `conversation_read` capability)
-- `sober_pdk::schedule::add(cron_or_interval, payload)` — schedule a job (requires `schedule` capability)
-- `sober_pdk::fs::read(path)` / `write(path, content)` — sandboxed file I/O (requires `filesystem` capability)
-- `sober_pdk::llm::complete(prompt, model, max_tokens)` — LLM text completion (requires `llm_inference` capability)
+IMPORTANT: NEVER use `extism_pdk::http` or any other `extism_pdk` I/O module directly.
+ALL I/O goes through `sober_pdk` modules. Extism's built-in HTTP is disabled and will crash.
+Only use `extism_pdk::*` for `plugin_fn`, `FnResult`, `Error`, and `Json`.
 
-IMPORTANT: `sober-pdk` is already included in Cargo.toml — do NOT add it manually.
-The Cargo.toml is generated automatically with the correct path dependency.
+Available capabilities via `sober_pdk`:
+- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — always available
+- `sober_pdk::kv::get(key)` / `set(key, &value)` / `delete(key)` / `list(prefix)` — requires `key_value`
+- `sober_pdk::http::get(url, &headers)` / `post(url, &headers, body)` / `request(method, url, &headers, body)` — requires `network`
+- `sober_pdk::secret::read(name)` — requires `secret_read`
+- `sober_pdk::tool::call(tool_name, input_json)` — requires `tool_call`
+- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` / `histogram(name, value)` — requires `metrics`
+- `sober_pdk::memory::query(query, scope, limit)` / `write(content, scope, metadata)` — requires `memory_read` / `memory_write`
+- `sober_pdk::conversation::read(conversation_id, limit)` — requires `conversation_read`
+- `sober_pdk::schedule::add(cron_expr, &payload)` — requires `schedule`
+- `sober_pdk::fs::read(path)` / `write(path, content)` — requires `filesystem`
+- `sober_pdk::llm::complete(prompt, model, max_tokens)` — requires `llm_inference`
+
+`sober-pdk` is already in Cargo.toml — do NOT add it manually.
 
 Manifest format (`plugin.toml`):
 ```toml
