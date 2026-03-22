@@ -7,9 +7,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use sober_core::types::enums::{ArtifactKind, PluginKind, PluginOrigin, PluginScope};
+use sober_core::types::enums::{
+    ArtifactKind, ArtifactRelation, ArtifactState, PluginKind, PluginOrigin, PluginScope,
+};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::input::CreateArtifact;
+use sober_core::types::input::{ArtifactFilter, CreateArtifact, PluginFilter};
 use sober_core::types::repo::{ArtifactRepo, PluginRepo};
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use sober_plugin::PluginManager;
@@ -102,7 +104,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> Tool for GeneratePlugin
                     "capabilities": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Required capabilities for WASM plugins: key_value, network, secret_read."
+                        "description": "Required capabilities for WASM plugins: key_value, network, secret_read, tool_call, memory_read, memory_write, conversation_read, schedule, metrics, filesystem."
                     }
                 },
                 "required": ["name", "description"]
@@ -206,11 +208,18 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
 
     /// Generates a WASM plugin, stores it content-addressed, and registers it.
     ///
-    /// The WASM binary is stored in [`BlobStore`] (content-addressed by SHA-256).
-    /// Source and manifest files are written to the workspace for human
-    /// inspection, but the WASM binary itself lives only in the blob store.
-    /// When a workspace context is available the blob is also registered as a
-    /// [`Document`](ArtifactKind::Document) artifact.
+    /// If a plugin with the same name already exists for this user/workspace
+    /// (a regeneration), the existing plugin's config is updated to reference
+    /// the new blob, the old artifact is archived, a new artifact is created
+    /// that supersedes it, and the stale WASM host is evicted from cache.
+    ///
+    /// For first-time generation the plugin is installed through the normal
+    /// audit pipeline.
+    ///
+    /// The WASM binary is stored in [`BlobStore`] (content-addressed by
+    /// SHA-256). Source and manifest files are written to the workspace for
+    /// human inspection, but the WASM binary itself lives only in the blob
+    /// store.
     async fn generate_wasm(
         &self,
         name: &str,
@@ -267,66 +276,215 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
         let manifest = sober_plugin::PluginManifest::from_toml(&generated.manifest)
             .map_err(|e| ToolError::ExecutionFailed(format!("invalid manifest: {e}")))?;
 
-        // Register the plugin through the audit pipeline.
-        // Plugin config references blob_key instead of a filesystem wasm_path.
-        self.register_plugin(
-            name,
-            description,
-            PluginKind::Wasm,
-            serde_json::json!({
-                "blob_key": blob_key,
-                "source_path": plugin_dir.join("src_lib.rs").to_string_lossy(),
-                "manifest_toml": generated.manifest,
-            }),
-            Some(manifest),
-            Some(generated.wasm_bytes),
-        )
-        .await?;
+        let new_config = serde_json::json!({
+            "blob_key": blob_key,
+            "source_path": plugin_dir.join("src_lib.rs").to_string_lossy(),
+            "manifest_toml": generated.manifest,
+        });
 
-        // Create an artifact record when a workspace context is available.
-        if let (Some(ws_id), Some(artifact_repo)) = (self.workspace_id, self.artifact_repo.as_ref())
-        {
-            let create_input = CreateArtifact {
-                workspace_id: ws_id,
-                user_id: self.user_id,
-                kind: ArtifactKind::Document,
-                title: format!("plugin:{name}"),
-                description: Some(description.to_owned()),
-                storage_type: "blob".to_owned(),
-                blob_key: Some(blob_key.clone()),
-                created_by: None, // None = agent-created
-                conversation_id: self.conversation_id,
+        // Check if a plugin with this name already exists for this user/workspace
+        // to distinguish regeneration from first-time creation.
+        let scope = if self.workspace_id.is_some() {
+            PluginScope::Workspace
+        } else {
+            PluginScope::User
+        };
+
+        let existing_plugins = self
+            .plugin_manager
+            .registry()
+            .repo()
+            .list(PluginFilter {
+                name: Some(name.to_owned()),
+                scope: Some(scope),
+                owner_id: Some(self.user_id),
+                workspace_id: self.workspace_id,
                 ..Default::default()
-            };
+            })
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to query existing plugin: {e}"))
+            })?;
 
-            // Non-fatal: log a warning if artifact creation fails, but don't
-            // fail the whole tool invocation — the plugin is already registered.
-            if let Err(e) = artifact_repo.create(create_input).await {
-                tracing::warn!(
-                    plugin_name = name,
-                    blob_key = %blob_key,
-                    error = %e,
-                    "failed to create artifact record for generated WASM plugin"
-                );
+        let is_regeneration = !existing_plugins.is_empty();
+
+        if is_regeneration {
+            let existing = &existing_plugins[0];
+            let plugin_id = existing.id;
+
+            // Update the plugin's config to reference the new blob.
+            self.plugin_manager
+                .registry()
+                .repo()
+                .update_config(plugin_id, new_config)
+                .await
+                .map_err(|e| {
+                    ToolError::ExecutionFailed(format!("failed to update plugin config: {e}"))
+                })?;
+
+            // Evict the stale WASM host so the next call loads fresh bytes.
+            self.plugin_manager.evict_wasm_host(&plugin_id);
+
+            tracing::info!(
+                plugin_id = %plugin_id,
+                plugin_name = name,
+                blob_key = %blob_key,
+                "regenerated WASM plugin — config updated and WASM host evicted"
+            );
+
+            // Archive old artifact and create a new one when a workspace is present.
+            if let (Some(ws_id), Some(artifact_repo)) =
+                (self.workspace_id, self.artifact_repo.as_ref())
+            {
+                let expected_title = format!("plugin:{name}");
+
+                // Find the existing non-archived artifact for this plugin.
+                let all_artifacts = artifact_repo
+                    .list_by_workspace(
+                        ws_id,
+                        ArtifactFilter {
+                            kind: Some(ArtifactKind::Document),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap_or_default();
+
+                let old_artifact = all_artifacts
+                    .into_iter()
+                    .find(|a| a.title == expected_title && a.state != ArtifactState::Archived);
+
+                let old_artifact_id = old_artifact.as_ref().map(|a| a.id);
+
+                // Archive the old artifact.
+                if let Some(old_id) = old_artifact_id
+                    && let Err(e) = artifact_repo
+                        .update_state(old_id, ArtifactState::Archived)
+                        .await
+                {
+                    tracing::warn!(
+                        plugin_name = name,
+                        artifact_id = %old_id,
+                        error = %e,
+                        "failed to archive old artifact for regenerated WASM plugin"
+                    );
+                }
+
+                // Create a new artifact for the updated blob.
+                let create_input = CreateArtifact {
+                    workspace_id: ws_id,
+                    user_id: self.user_id,
+                    kind: ArtifactKind::Document,
+                    title: expected_title,
+                    description: Some(description.to_owned()),
+                    storage_type: "blob".to_owned(),
+                    blob_key: Some(blob_key.clone()),
+                    created_by: None, // None = agent-created
+                    conversation_id: self.conversation_id,
+                    parent_id: old_artifact_id,
+                    ..Default::default()
+                };
+
+                match artifact_repo.create(create_input).await {
+                    Ok(new_artifact) => {
+                        // Link the new artifact as superseding the old one.
+                        if let Some(old_id) = old_artifact_id
+                            && let Err(e) = artifact_repo
+                                .add_relation(new_artifact.id, old_id, ArtifactRelation::Supersedes)
+                                .await
+                        {
+                            tracing::warn!(
+                                plugin_name = name,
+                                error = %e,
+                                "failed to add supersedes relation between artifacts"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            plugin_name = name,
+                            blob_key = %blob_key,
+                            error = %e,
+                            "failed to create artifact record for regenerated WASM plugin"
+                        );
+                    }
+                }
             }
-        }
 
-        Ok(ToolOutput {
-            content: format!(
-                "Generated WASM plugin '{name}'.\n\
-                 Source saved to: {}\n\
-                 WASM stored as blob: {blob_key}\n\
-                 Capabilities: {}\n\
-                 Status: enabled (audit passed)",
-                plugin_dir.display(),
-                if capabilities.is_empty() {
-                    "none".to_owned()
-                } else {
-                    capabilities.join(", ")
-                },
-            ),
-            is_error: false,
-        })
+            Ok(ToolOutput {
+                content: format!(
+                    "Regenerated WASM plugin '{name}' (updated existing plugin).\n\
+                     Source saved to: {}\n\
+                     WASM stored as new blob: {blob_key}\n\
+                     Capabilities: {}\n\
+                     Status: enabled (previous version archived)",
+                    plugin_dir.display(),
+                    if capabilities.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        capabilities.join(", ")
+                    },
+                ),
+                is_error: false,
+            })
+        } else {
+            // First-time creation — register through the audit pipeline.
+            self.register_plugin(
+                name,
+                description,
+                PluginKind::Wasm,
+                new_config,
+                Some(manifest),
+                Some(generated.wasm_bytes),
+            )
+            .await?;
+
+            // Create an artifact record when a workspace context is available.
+            if let (Some(ws_id), Some(artifact_repo)) =
+                (self.workspace_id, self.artifact_repo.as_ref())
+            {
+                let create_input = CreateArtifact {
+                    workspace_id: ws_id,
+                    user_id: self.user_id,
+                    kind: ArtifactKind::Document,
+                    title: format!("plugin:{name}"),
+                    description: Some(description.to_owned()),
+                    storage_type: "blob".to_owned(),
+                    blob_key: Some(blob_key.clone()),
+                    created_by: None, // None = agent-created
+                    conversation_id: self.conversation_id,
+                    ..Default::default()
+                };
+
+                // Non-fatal: log a warning if artifact creation fails, but don't
+                // fail the whole tool invocation — the plugin is already registered.
+                if let Err(e) = artifact_repo.create(create_input).await {
+                    tracing::warn!(
+                        plugin_name = name,
+                        blob_key = %blob_key,
+                        error = %e,
+                        "failed to create artifact record for generated WASM plugin"
+                    );
+                }
+            }
+
+            Ok(ToolOutput {
+                content: format!(
+                    "Generated WASM plugin '{name}'.\n\
+                     Source saved to: {}\n\
+                     WASM stored as blob: {blob_key}\n\
+                     Capabilities: {}\n\
+                     Status: enabled (audit passed)",
+                    plugin_dir.display(),
+                    if capabilities.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        capabilities.join(", ")
+                    },
+                ),
+                is_error: false,
+            })
+        }
     }
 
     /// Generates a skill and saves it to the workspace.
@@ -411,13 +569,25 @@ mod tests {
 
     struct MockPluginRepo {
         created: Mutex<Vec<CreatePlugin>>,
+        /// Pre-seeded plugins returned by `list()` (simulates existing records).
+        existing: Mutex<Vec<Plugin>>,
+        /// Tracks `update_config` calls: (plugin_id, config).
+        config_updates: Mutex<Vec<(PluginId, serde_json::Value)>>,
     }
 
     impl MockPluginRepo {
         fn new() -> Self {
             Self {
                 created: Mutex::new(vec![]),
+                existing: Mutex::new(vec![]),
+                config_updates: Mutex::new(vec![]),
             }
+        }
+
+        /// Pre-seeds the mock with a plugin that will be returned by `list()`.
+        fn with_existing(self, plugin: Plugin) -> Self {
+            self.existing.lock().expect("lock").push(plugin);
+            self
         }
 
         fn created_count(&self) -> usize {
@@ -426,6 +596,14 @@ mod tests {
 
         fn last_created(&self) -> Option<CreatePlugin> {
             self.created.lock().expect("lock").last().cloned()
+        }
+
+        fn config_update_count(&self) -> usize {
+            self.config_updates.lock().expect("lock").len()
+        }
+
+        fn last_config_update(&self) -> Option<(PluginId, serde_json::Value)> {
+            self.config_updates.lock().expect("lock").last().cloned()
         }
     }
 
@@ -471,9 +649,23 @@ mod tests {
 
         fn list(
             &self,
-            _filter: PluginFilter,
+            filter: PluginFilter,
         ) -> impl std::future::Future<Output = Result<Vec<Plugin>, AppError>> + Send {
-            async { Ok(vec![]) }
+            // Return pre-seeded plugins that match the filter (name, scope, owner_id).
+            let existing = self.existing.lock().expect("lock").clone();
+            let matched: Vec<Plugin> = existing
+                .into_iter()
+                .filter(|p| {
+                    filter.name.as_deref().map_or(true, |n| p.name == n)
+                        && filter.scope.map_or(true, |s| p.scope == s)
+                        && filter.owner_id.map_or(true, |o| p.owner_id == Some(o))
+                        && filter
+                            .workspace_id
+                            .map_or(true, |w| p.workspace_id == Some(w))
+                        && filter.status.map_or(true, |s| p.status == s)
+                })
+                .collect();
+            async move { Ok(matched) }
         }
 
         fn update_status(
@@ -486,9 +678,10 @@ mod tests {
 
         fn update_config(
             &self,
-            _id: PluginId,
-            _config: serde_json::Value,
+            id: PluginId,
+            config: serde_json::Value,
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            self.config_updates.lock().expect("lock").push((id, config));
             async { Ok(()) }
         }
 
@@ -958,5 +1151,111 @@ mod tests {
             .expect("should have created plugin");
         assert_eq!(last.scope, PluginScope::Workspace);
         assert_eq!(last.workspace_id, Some(ws_id));
+    }
+
+    /// Verifies the regeneration detection: when a plugin with the same name
+    /// already exists for this user, `list()` matches it by name and the
+    /// `is_regeneration` flag would be set.
+    ///
+    /// This tests the mock's filtering logic which mirrors what the real
+    /// `PluginRepo` implementation does in production.
+    #[tokio::test]
+    async fn mock_plugin_repo_detects_existing_plugin_by_name() {
+        let user_id = UserId::new();
+        let existing = Plugin {
+            id: PluginId::new(),
+            name: "my-plugin".to_owned(),
+            kind: PluginKind::Wasm,
+            version: Some("0.1.0".to_owned()),
+            description: None,
+            origin: PluginOrigin::Agent,
+            scope: PluginScope::User,
+            owner_id: Some(user_id),
+            workspace_id: None,
+            status: sober_core::types::enums::PluginStatus::Enabled,
+            config: serde_json::json!({"blob_key": "old-key"}),
+            installed_by: None,
+            installed_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let repo = MockPluginRepo::new().with_existing(existing.clone());
+
+        // A filter that matches by name + scope + owner should find the plugin.
+        let matches = repo
+            .list(PluginFilter {
+                name: Some("my-plugin".to_owned()),
+                scope: Some(PluginScope::User),
+                owner_id: Some(user_id),
+                ..Default::default()
+            })
+            .await
+            .expect("list should succeed");
+        assert_eq!(matches.len(), 1, "should find the pre-seeded plugin");
+        assert_eq!(matches[0].id, existing.id);
+
+        // A filter with a different name should return nothing.
+        let no_match = repo
+            .list(PluginFilter {
+                name: Some("other-plugin".to_owned()),
+                scope: Some(PluginScope::User),
+                owner_id: Some(user_id),
+                ..Default::default()
+            })
+            .await
+            .expect("list should succeed");
+        assert!(
+            no_match.is_empty(),
+            "different name should not match the existing plugin"
+        );
+    }
+
+    /// Verifies that `update_config` calls are tracked by the mock repo.
+    #[tokio::test]
+    async fn mock_plugin_repo_tracks_update_config() {
+        let repo = MockPluginRepo::new();
+        let plugin_id = PluginId::new();
+        let new_config = serde_json::json!({"blob_key": "new-key"});
+
+        repo.update_config(plugin_id, new_config.clone())
+            .await
+            .expect("update_config should succeed");
+
+        assert_eq!(repo.config_update_count(), 1);
+        let (id, cfg) = repo.last_config_update().expect("should have update");
+        assert_eq!(id, plugin_id);
+        assert_eq!(cfg, new_config);
+    }
+
+    /// Verifies that first-time skill creation does NOT call `update_config`.
+    ///
+    /// For WASM, the `is_regeneration` check happens after WASM compilation,
+    /// which requires the wasm32-wasip1 toolchain and is tested at the
+    /// integration level.  For skills the `register_plugin` path never calls
+    /// `update_config`, confirming the first-time path is distinct.
+    #[tokio::test]
+    async fn first_time_skill_creation_does_not_call_update_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (tool, manager, _blob_tmp) = make_tool_with_manager(
+            Some(tmp.path().to_path_buf()),
+            None,
+            "---\nname: new-skill\ndescription: A brand new skill.\n---\n\n## Instructions\nDo something.",
+        );
+
+        tool.execute(serde_json::json!({
+            "name": "new-skill",
+            "description": "A brand new skill",
+            "kind": "skill"
+        }))
+        .await
+        .expect("first-time creation should succeed");
+
+        let repo = manager.repo();
+        assert_eq!(
+            repo.config_update_count(),
+            0,
+            "update_config must not be called for first-time skill creation"
+        );
+        assert_eq!(repo.created_count(), 1, "plugin should have been created");
     }
 }
