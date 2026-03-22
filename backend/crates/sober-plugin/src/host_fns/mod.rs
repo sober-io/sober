@@ -17,7 +17,7 @@
 //! The following host functions are fully operational:
 //!
 //! - `host_log` — structured logging (always available, no capability gate)
-//! - `host_kv_*` — plugin-scoped key-value storage (DB-backed with in-memory fallback, `KeyValue` capability)
+//! - `host_kv_*` — plugin-scoped key-value storage (via `KvBackend` trait, `KeyValue` capability)
 //! - `host_http_request` — outbound HTTP via `ureq` (`Network` capability, domain-restricted)
 //! - `host_emit_metric` — counter/gauge/histogram emission via `metrics` crate (`Metrics` capability)
 //! - `host_fs_read` — sandboxed file read via `std::fs` (`Filesystem` capability, path-restricted)
@@ -40,12 +40,15 @@ mod secrets;
 mod tool_call;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::fmt;
+use std::sync::Arc;
 
 use extism::{CurrentPlugin, Function, PTR, UserData, Val};
 use serde::{Deserialize, Serialize};
 use sober_core::types::ids::{PluginId, UserId};
 
+use crate::backends::InMemoryKvBackend;
+use crate::backends::KvBackend;
 use crate::capability::Capability;
 
 use self::conversation::host_conversation_read_impl;
@@ -70,16 +73,14 @@ use self::tool_call::host_call_tool_impl;
 /// function can enforce permission checks.  The optional `runtime_handle`
 /// enables host functions to bridge into async code (e.g. calling services
 /// that require a tokio runtime).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HostContext {
     /// Identity of the plugin instance these functions belong to.
     pub plugin_id: PluginId,
     /// Capabilities granted to this plugin (resolved from its manifest).
     pub capabilities: Vec<Capability>,
-    /// In-memory KV store fallback (used when `db_pool` is `None`).
-    pub kv_store: Arc<Mutex<HashMap<String, serde_json::Value>>>,
-    /// Database pool for persistent operations. `None` in tests or offline mode.
-    pub db_pool: Option<sqlx::PgPool>,
+    /// Backend for plugin-scoped key-value storage.
+    pub kv_backend: Arc<dyn KvBackend>,
     /// Tokio runtime handle for bridging async operations from synchronous
     /// host function calls.  `None` in test mode or when no runtime is available.
     pub runtime_handle: Option<tokio::runtime::Handle>,
@@ -88,23 +89,38 @@ pub struct HostContext {
     pub user_id: Option<UserId>,
 }
 
+impl fmt::Debug for HostContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HostContext")
+            .field("plugin_id", &self.plugin_id)
+            .field("capabilities", &self.capabilities)
+            .field("kv_backend", &"<dyn KvBackend>")
+            .field("runtime_handle", &self.runtime_handle.is_some())
+            .field("user_id", &self.user_id)
+            .finish()
+    }
+}
+
 impl HostContext {
     /// Creates a new host context for the given plugin.
+    ///
+    /// Defaults to [`InMemoryKvBackend`] for KV storage.  Use
+    /// [`with_kv_backend`](Self::with_kv_backend) to supply a
+    /// database-backed implementation.
     pub fn new(plugin_id: PluginId, capabilities: Vec<Capability>) -> Self {
         Self {
             plugin_id,
             capabilities,
-            kv_store: Arc::new(Mutex::new(HashMap::new())),
-            db_pool: None,
+            kv_backend: Arc::new(InMemoryKvBackend::new()),
             runtime_handle: None,
             user_id: None,
         }
     }
 
-    /// Sets the database pool for persistent KV storage.
+    /// Sets the KV backend for plugin-scoped key-value storage.
     #[must_use]
-    pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
-        self.db_pool = Some(pool);
+    pub fn with_kv_backend(mut self, backend: Arc<dyn KvBackend>) -> Self {
+        self.kv_backend = backend;
         self
     }
 
@@ -453,7 +469,7 @@ pub fn build_host_functions(ctx: HostContext) -> Vec<Function> {
     let functions = vec![
         // Always available
         ("host_log", host_log_impl as HostFn),
-        // Phase 1 — KeyValue (DB-backed with in-memory fallback)
+        // Phase 1 — KeyValue (via KvBackend trait)
         ("host_kv_get", host_kv_get_impl as HostFn),
         ("host_kv_set", host_kv_set_impl as HostFn),
         ("host_kv_delete", host_kv_delete_impl as HostFn),
@@ -627,27 +643,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn kv_store_shared_between_get_and_set() {
+    #[tokio::test]
+    async fn kv_backend_shared_between_get_and_set() {
         let ctx = test_context(vec![Capability::KeyValue]);
+        let backend = Arc::clone(&ctx.kv_backend);
+        let pid = ctx.plugin_id;
 
-        // Insert via the shared store directly to verify structure
-        {
-            let kv = ctx.kv_store.lock().expect("lock");
-            assert!(kv.is_empty());
-        }
+        // Initially empty
+        let val = backend.get(pid, "test_key").await.expect("get");
+        assert!(val.is_none());
 
         // Insert a value
-        {
-            let mut kv = ctx.kv_store.lock().expect("lock");
-            kv.insert("test_key".into(), serde_json::json!("test_value"));
-        }
+        backend
+            .set(pid, "test_key", serde_json::json!("test_value"))
+            .await
+            .expect("set");
 
         // Verify it's readable
-        {
-            let kv = ctx.kv_store.lock().expect("lock");
-            assert_eq!(kv.get("test_key"), Some(&serde_json::json!("test_value")));
-        }
+        let val = backend.get(pid, "test_key").await.expect("get");
+        assert_eq!(val, Some(serde_json::json!("test_value")));
     }
 
     #[test]
@@ -917,7 +931,7 @@ mod tests {
     #[test]
     fn host_context_new_defaults() {
         let ctx = test_context(vec![]);
-        assert!(ctx.db_pool.is_none());
+        // kv_backend defaults to InMemoryKvBackend (always present)
         assert!(ctx.runtime_handle.is_none());
         assert!(ctx.user_id.is_none());
     }

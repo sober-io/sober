@@ -1,8 +1,10 @@
 //! Host functions: plugin-scoped key-value storage.
 //!
-//! When a database pool and runtime handle are available, operations are
-//! persisted to the `plugin_kv_data` table (JSONB per plugin).  Otherwise
-//! the in-memory `HashMap` fallback is used (tests, offline mode).
+//! Operations are delegated to the [`KvBackend`] attached to the
+//! [`HostContext`].  In production this is typically a [`PgKvBackend`];
+//! in tests/offline mode it defaults to [`InMemoryKvBackend`].
+
+use std::sync::Arc;
 
 use extism::{CurrentPlugin, UserData, Val};
 
@@ -13,7 +15,7 @@ use super::{
 
 /// Reads a value from plugin-scoped key-value storage.
 ///
-/// Requires the `KeyValue` capability.  Tries DB first, falls back to in-memory.
+/// Requires the `KeyValue` capability.
 pub(crate) fn host_kv_get_impl(
     plugin: &mut CurrentPlugin,
     inputs: &[Val],
@@ -30,36 +32,11 @@ pub(crate) fn host_kv_get_impl(
         return capability_denied_error(plugin, outputs, "key_value");
     }
 
-    // Try DB first — clone what we need, drop lock, then block_on
-    if ctx.db_pool.is_some() && ctx.runtime_handle.is_some() {
-        let plugin_id = ctx.plugin_id;
-        let pool = ctx.db_pool.clone().expect("checked above");
-        let handle = ctx.runtime_handle.clone().expect("checked above");
-        let key = req.key.clone();
-        drop(ctx);
-
-        let result = handle.block_on(async {
-            sqlx::query_as::<_, (serde_json::Value,)>(
-                "SELECT data->$2 FROM plugin_kv_data WHERE plugin_id = $1",
-            )
-            .bind(plugin_id.as_uuid())
-            .bind(&key)
-            .fetch_optional(&pool)
-            .await
-        });
-        let value = result
-            .map_err(|e| extism::Error::msg(format!("kv get failed: {e}")))?
-            .and_then(|(v,)| if v.is_null() { None } else { Some(v) });
-        let resp = KvGetResponse { value };
-        return write_output(plugin, outputs, &resp);
-    }
-
-    // Fallback to in-memory
-    let kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    let value = kv.get(&req.key).cloned();
+    let backend = Arc::clone(&ctx.kv_backend);
+    let plugin_id = ctx.plugin_id;
+    let value = ctx
+        .block_on_async(backend.get(plugin_id, &req.key))?
+        .map_err(extism::Error::msg)?;
 
     let resp = KvGetResponse { value };
     write_output(plugin, outputs, &resp)
@@ -67,7 +44,7 @@ pub(crate) fn host_kv_get_impl(
 
 /// Writes a value to plugin-scoped key-value storage.
 ///
-/// Requires the `KeyValue` capability.  Tries DB first, falls back to in-memory.
+/// Requires the `KeyValue` capability.
 pub(crate) fn host_kv_set_impl(
     plugin: &mut CurrentPlugin,
     inputs: &[Val],
@@ -84,42 +61,10 @@ pub(crate) fn host_kv_set_impl(
         return capability_denied_error(plugin, outputs, "key_value");
     }
 
-    // Try DB first — clone what we need, drop lock, then block_on
-    if ctx.db_pool.is_some() && ctx.runtime_handle.is_some() {
-        let plugin_id = ctx.plugin_id;
-        let pool = ctx.db_pool.clone().expect("checked above");
-        let handle = ctx.runtime_handle.clone().expect("checked above");
-        let key = req.key.clone();
-        let value = req.value.clone();
-        drop(ctx);
-
-        handle
-            .block_on(async {
-                sqlx::query(
-                    "INSERT INTO plugin_kv_data (plugin_id, data, updated_at) \
-                     VALUES ($1, jsonb_build_object($2::text, $3), now()) \
-                     ON CONFLICT (plugin_id) DO UPDATE \
-                     SET data = plugin_kv_data.data || jsonb_build_object($2::text, $3), \
-                         updated_at = now()",
-                )
-                .bind(plugin_id.as_uuid())
-                .bind(&key)
-                .bind(&value)
-                .execute(&pool)
-                .await
-            })
-            .map_err(|e| extism::Error::msg(format!("kv set failed: {e}")))?;
-
-        let ok = HostOk { ok: true };
-        return write_output(plugin, outputs, &ok);
-    }
-
-    // Fallback to in-memory
-    let mut kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    kv.insert(req.key, req.value);
+    let backend = Arc::clone(&ctx.kv_backend);
+    let plugin_id = ctx.plugin_id;
+    ctx.block_on_async(backend.set(plugin_id, &req.key, req.value))?
+        .map_err(extism::Error::msg)?;
 
     let ok = HostOk { ok: true };
     write_output(plugin, outputs, &ok)
@@ -127,7 +72,7 @@ pub(crate) fn host_kv_set_impl(
 
 /// Deletes a key from plugin-scoped key-value storage.
 ///
-/// Requires the `KeyValue` capability.  Tries DB first, falls back to in-memory.
+/// Requires the `KeyValue` capability.
 pub(crate) fn host_kv_delete_impl(
     plugin: &mut CurrentPlugin,
     inputs: &[Val],
@@ -144,37 +89,10 @@ pub(crate) fn host_kv_delete_impl(
         return capability_denied_error(plugin, outputs, "key_value");
     }
 
-    // Try DB first — clone what we need, drop lock, then block_on
-    if ctx.db_pool.is_some() && ctx.runtime_handle.is_some() {
-        let plugin_id = ctx.plugin_id;
-        let pool = ctx.db_pool.clone().expect("checked above");
-        let handle = ctx.runtime_handle.clone().expect("checked above");
-        let key = req.key.clone();
-        drop(ctx);
-
-        handle
-            .block_on(async {
-                sqlx::query(
-                    "UPDATE plugin_kv_data SET data = data - $2, updated_at = now() \
-                     WHERE plugin_id = $1",
-                )
-                .bind(plugin_id.as_uuid())
-                .bind(&key)
-                .execute(&pool)
-                .await
-            })
-            .map_err(|e| extism::Error::msg(format!("kv delete failed: {e}")))?;
-
-        let ok = HostOk { ok: true };
-        return write_output(plugin, outputs, &ok);
-    }
-
-    // Fallback to in-memory
-    let mut kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    kv.remove(&req.key);
+    let backend = Arc::clone(&ctx.kv_backend);
+    let plugin_id = ctx.plugin_id;
+    ctx.block_on_async(backend.delete(plugin_id, &req.key))?
+        .map_err(extism::Error::msg)?;
 
     let ok = HostOk { ok: true };
     write_output(plugin, outputs, &ok)
@@ -182,7 +100,7 @@ pub(crate) fn host_kv_delete_impl(
 
 /// Lists keys in plugin-scoped key-value storage, optionally filtered by prefix.
 ///
-/// Requires the `KeyValue` capability.  Tries DB first, falls back to in-memory.
+/// Requires the `KeyValue` capability.
 pub(crate) fn host_kv_list_impl(
     plugin: &mut CurrentPlugin,
     inputs: &[Val],
@@ -199,49 +117,11 @@ pub(crate) fn host_kv_list_impl(
         return capability_denied_error(plugin, outputs, "key_value");
     }
 
-    // Try DB first — clone what we need, drop lock, then block_on
-    if ctx.db_pool.is_some() && ctx.runtime_handle.is_some() {
-        let plugin_id = ctx.plugin_id;
-        let pool = ctx.db_pool.clone().expect("checked above");
-        let handle = ctx.runtime_handle.clone().expect("checked above");
-        let prefix = req.prefix.clone();
-        drop(ctx);
-
-        let rows: Vec<(String,)> = handle
-            .block_on(async {
-                sqlx::query_as(
-                    "SELECT k FROM plugin_kv_data, jsonb_object_keys(data) AS k \
-                     WHERE plugin_id = $1",
-                )
-                .bind(plugin_id.as_uuid())
-                .fetch_all(&pool)
-                .await
-            })
-            .map_err(|e| extism::Error::msg(format!("kv list failed: {e}")))?;
-
-        let mut keys: Vec<String> = rows.into_iter().map(|(k,)| k).collect();
-        if let Some(prefix) = &prefix {
-            keys.retain(|k| k.starts_with(prefix.as_str()));
-        }
-
-        let resp = KvListResponse { keys };
-        return write_output(plugin, outputs, &resp);
-    }
-
-    // Fallback to in-memory
-    let kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-
-    let keys: Vec<String> = match &req.prefix {
-        Some(prefix) => kv
-            .keys()
-            .filter(|k| k.starts_with(prefix.as_str()))
-            .cloned()
-            .collect(),
-        None => kv.keys().cloned().collect(),
-    };
+    let backend = Arc::clone(&ctx.kv_backend);
+    let plugin_id = ctx.plugin_id;
+    let keys = ctx
+        .block_on_async(backend.list_keys(plugin_id, req.prefix.as_deref()))?
+        .map_err(extism::Error::msg)?;
 
     let resp = KvListResponse { keys };
     write_output(plugin, outputs, &resp)

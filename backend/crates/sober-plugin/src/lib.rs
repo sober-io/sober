@@ -4,6 +4,7 @@
 //! with type-aware lifecycle and audit pipeline.
 
 pub mod audit;
+pub mod backends;
 pub mod capability;
 pub mod error;
 pub mod host;
