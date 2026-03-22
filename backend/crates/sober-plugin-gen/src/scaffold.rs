@@ -38,6 +38,7 @@ pub fn scaffold(name: &str, output_dir: &Path) -> Result<(), GenError> {
 }
 
 fn plugin_toml(name: &str) -> String {
+    let fn_name = name.replace('-', "_");
     format!(
         r#"[plugin]
 name = "{name}"
@@ -53,7 +54,7 @@ description = "A Sõber plugin"
 # metrics = true
 
 [[tools]]
-name = "{name}"
+name = "{fn_name}"
 description = "TODO: describe what this tool does"
 "#
     )
@@ -79,13 +80,14 @@ serde_json = "1"
 }
 
 fn lib_rs(name: &str) -> String {
+    let fn_name = name.replace('-', "_");
     format!(
         r#"use extism_pdk::*;
 use sober_pdk::log;
 
 #[plugin_fn]
-pub fn {name}(input: String) -> FnResult<String> {{
-    log::info(&format!("{name} called with: {{input}}"));
+pub fn {fn_name}(input: String) -> FnResult<String> {{
+    log::info(&format!("{fn_name} called with: {{input}}"));
     Ok(serde_json::json!({{
         "result": "TODO: implement {name}"
     }})

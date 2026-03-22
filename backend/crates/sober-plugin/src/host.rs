@@ -96,8 +96,16 @@ impl PluginHost {
         tool_name: &str,
         input: serde_json::Value,
     ) -> Result<ToolOutput, PluginError> {
+        // Normalize: WASM exports use underscores (Rust convention).
+        let export_name = tool_name.replace('-', "_");
+
         // Verify the tool is declared in the manifest.
-        if !self.manifest.tools.iter().any(|t| t.name == tool_name) {
+        if !self
+            .manifest
+            .tools
+            .iter()
+            .any(|t| t.name == tool_name || t.name == export_name)
+        {
             return Err(PluginError::ExecutionFailed(format!(
                 "tool not found in manifest: {tool_name}"
             )));
@@ -108,10 +116,10 @@ impl PluginHost {
             PluginError::ExecutionFailed(format!("input serialization failed: {e}"))
         })?;
 
-        // Call the exported WASM function.
+        // Call the exported WASM function using the underscore name.
         let output: String = self
             .plugin
-            .call(tool_name, &input_str)
+            .call(&export_name, &input_str)
             .map_err(|e| PluginError::ExecutionFailed(format!("WASM call failed: {e}")))?;
 
         Ok(ToolOutput {
