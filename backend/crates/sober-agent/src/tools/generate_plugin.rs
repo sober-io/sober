@@ -312,6 +312,12 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             let existing = &existing_plugins[0];
             let plugin_id = existing.id;
 
+            // Evict the stale WASM host BEFORE updating config.  If config
+            // update fails, the next load simply re-reads the old blob (still
+            // valid).  The reverse order risks serving stale cached bytes
+            // while config already points to the new blob.
+            self.plugin_manager.evict_wasm_host(&plugin_id);
+
             // Update the plugin's config to reference the new blob.
             self.plugin_manager
                 .registry()
@@ -321,9 +327,6 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 .map_err(|e| {
                     ToolError::ExecutionFailed(format!("failed to update plugin config: {e}"))
                 })?;
-
-            // Evict the stale WASM host so the next call loads fresh bytes.
-            self.plugin_manager.evict_wasm_host(&plugin_id);
 
             tracing::info!(
                 plugin_id = %plugin_id,

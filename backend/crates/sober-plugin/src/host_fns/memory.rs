@@ -67,7 +67,12 @@ pub(crate) fn host_memory_query_impl(
         }
     };
 
-    let results = ctx
+    // Drop lock before blocking on async to avoid starving other host calls.
+    drop(ctx);
+
+    let results = data
+        .lock()
+        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?
         .block_on_async(backend.search(user_id, &req.query, req.scope.as_deref(), req.limit))?
         .map_err(extism::Error::msg)?;
 
@@ -130,13 +135,18 @@ pub(crate) fn host_memory_write_impl(
         }
     };
 
-    ctx.block_on_async(backend.store(
-        user_id,
-        &req.content,
-        req.scope.as_deref(),
-        req.metadata.clone(),
-    ))?
-    .map_err(extism::Error::msg)?;
+    // Drop lock before blocking on async to avoid starving other host calls.
+    drop(ctx);
+
+    data.lock()
+        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?
+        .block_on_async(backend.store(
+            user_id,
+            &req.content,
+            req.scope.as_deref(),
+            req.metadata.clone(),
+        ))?
+        .map_err(extism::Error::msg)?;
 
     write_output(plugin, outputs, &HostOk { ok: true })
 }
