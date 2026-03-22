@@ -404,7 +404,7 @@ impl<R: PluginRepo> PluginManager<R> {
     /// Loads tools from a WASM plugin.
     ///
     /// Checks the host cache first.  On a cache miss, resolves WASM bytes by
-    /// checking the plugin config for `blob_key` (content-addressed BlobStore)
+    /// checking the plugin config for `wasm_blob_key` (content-addressed BlobStore)
     /// and falling back to `wasm_path` (filesystem) when no blob key is
     /// present.  Creates a new [`PluginHost`] and caches it by plugin ID.
     /// Returns a [`PluginTool`] for each tool declared in the manifest.
@@ -430,19 +430,19 @@ impl<R: PluginRepo> PluginManager<R> {
                         PluginError::Config("WASM plugin missing 'manifest_toml' in config".into())
                     })?;
 
-                // Prefer blob_key (content-addressed) over wasm_path (filesystem).
-                let bytes = if let Some(blob_key) =
-                    plugin.config.get("blob_key").and_then(|v| v.as_str())
+                // Prefer wasm_blob_key (content-addressed) over wasm_path (filesystem).
+                let bytes = if let Some(wasm_blob_key) =
+                    plugin.config.get("wasm_blob_key").and_then(|v| v.as_str())
                 {
                     let store = self.blob_store.as_ref().ok_or_else(|| {
                         PluginError::Config(format!(
-                            "WASM plugin '{}' has blob_key but no blob store is configured",
+                            "WASM plugin '{}' has wasm_blob_key but no blob store is configured",
                             plugin.name
                         ))
                     })?;
-                    store.retrieve(blob_key).await.map_err(|e| {
+                    store.retrieve(wasm_blob_key).await.map_err(|e| {
                         PluginError::ExecutionFailed(format!(
-                            "failed to retrieve WASM blob '{blob_key}' for plugin '{}': {e}",
+                            "failed to retrieve WASM blob '{wasm_blob_key}' for plugin '{}': {e}",
                             plugin.name
                         ))
                     })?
@@ -454,7 +454,7 @@ impl<R: PluginRepo> PluginManager<R> {
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| {
                             PluginError::Config(
-                                "WASM plugin missing both 'blob_key' and 'wasm_path' in config"
+                                "WASM plugin missing both 'wasm_blob_key' and 'wasm_path' in config"
                                     .into(),
                             )
                         })?;

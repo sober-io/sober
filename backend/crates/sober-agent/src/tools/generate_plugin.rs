@@ -255,7 +255,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
 
         // Store WASM bytes content-addressed in BlobStore.
         // The binary lives only here — no filesystem copy of the .wasm file.
-        let blob_key = self
+        let wasm_blob_key = self
             .blob_store
             .store(&generated.wasm_bytes)
             .await
@@ -292,7 +292,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             .map_err(|e| ToolError::ExecutionFailed(format!("invalid manifest: {e}")))?;
 
         let new_config = serde_json::json!({
-            "blob_key": blob_key,
+            "wasm_blob_key": wasm_blob_key,
             "manifest_blob_key": manifest_blob_key,
             "source_path": plugin_dir.join("src_lib.rs").to_string_lossy(),
             "manifest_toml": generated.manifest,
@@ -366,7 +366,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             tracing::info!(
                 plugin_id = %plugin_id,
                 plugin_name = name,
-                blob_key = %blob_key,
+                blob_key = %wasm_blob_key,
                 "regenerated WASM plugin — audit passed, config updated, WASM host evicted"
             );
 
@@ -416,7 +416,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                     title: expected_title,
                     description: Some(description.to_owned()),
                     storage_type: "blob".to_owned(),
-                    blob_key: Some(blob_key.clone()),
+                    blob_key: Some(wasm_blob_key.clone()),
                     created_by: None, // None = agent-created
                     conversation_id: self.conversation_id,
                     parent_id: old_artifact_id,
@@ -441,7 +441,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                     Err(e) => {
                         tracing::error!(
                             plugin_name = name,
-                            blob_key = %blob_key,
+                            blob_key = %wasm_blob_key,
                             error = %e,
                             "failed to create artifact record for regenerated WASM plugin"
                         );
@@ -453,7 +453,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 content: format!(
                     "Regenerated WASM plugin '{name}' (updated existing plugin).\n\
                      Source saved to: {}\n\
-                     WASM stored as new blob: {blob_key}\n\
+                     WASM stored as new blob: {wasm_blob_key}\n\
                      Capabilities: {}\n\
                      Status: enabled (previous version archived)",
                     plugin_dir.display(),
@@ -488,7 +488,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                     title: format!("plugin:{name}"),
                     description: Some(description.to_owned()),
                     storage_type: "blob".to_owned(),
-                    blob_key: Some(blob_key.clone()),
+                    blob_key: Some(wasm_blob_key.clone()),
                     created_by: None, // None = agent-created
                     conversation_id: self.conversation_id,
                     ..Default::default()
@@ -499,7 +499,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 if let Err(e) = artifact_repo.create(create_input).await {
                     tracing::error!(
                         plugin_name = name,
-                        blob_key = %blob_key,
+                        blob_key = %wasm_blob_key,
                         error = %e,
                         "failed to create artifact record for generated WASM plugin"
                     );
@@ -510,7 +510,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 content: format!(
                     "Generated WASM plugin '{name}'.\n\
                      Source saved to: {}\n\
-                     WASM stored as blob: {blob_key}\n\
+                     WASM stored as blob: {wasm_blob_key}\n\
                      Capabilities: {}\n\
                      Status: enabled (audit passed)",
                     plugin_dir.display(),
@@ -1230,7 +1230,7 @@ mod tests {
             owner_id: Some(user_id),
             workspace_id: None,
             status: sober_core::types::enums::PluginStatus::Enabled,
-            config: serde_json::json!({"blob_key": "old-key"}),
+            config: serde_json::json!({"wasm_blob_key": "old-key"}),
             installed_by: None,
             installed_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -1272,7 +1272,7 @@ mod tests {
     async fn mock_plugin_repo_tracks_update_config() {
         let repo = MockPluginRepo::new();
         let plugin_id = PluginId::new();
-        let new_config = serde_json::json!({"blob_key": "new-key"});
+        let new_config = serde_json::json!({"wasm_blob_key": "new-key"});
 
         repo.update_config(plugin_id, new_config.clone())
             .await
