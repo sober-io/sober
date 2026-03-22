@@ -49,6 +49,9 @@ use sober_core::types::ids::{PluginId, UserId};
 
 use crate::backends::InMemoryKvBackend;
 use crate::backends::KvBackend;
+use crate::backends::{
+    ConversationBackend, MemoryBackend, ScheduleBackend, SecretBackend, ToolExecutor,
+};
 use crate::capability::Capability;
 
 use self::conversation::host_conversation_read_impl;
@@ -89,6 +92,16 @@ pub struct HostContext {
     pub user_id: Option<UserId>,
     /// LLM engine for completion requests.  `None` when no LLM provider is configured.
     pub llm_engine: Option<Arc<dyn sober_llm::LlmEngine>>,
+    /// Secret reading backend.  `None` when vault is not configured.
+    pub secret_backend: Option<Arc<dyn SecretBackend>>,
+    /// Memory read/write backend.  `None` when memory store is not configured.
+    pub memory_backend: Option<Arc<dyn MemoryBackend>>,
+    /// Conversation reading backend.  `None` when message store is not configured.
+    pub conversation_backend: Option<Arc<dyn ConversationBackend>>,
+    /// Job scheduling backend.  `None` when scheduler is not connected.
+    pub schedule_backend: Option<Arc<dyn ScheduleBackend>>,
+    /// Tool execution backend.  `None` when tool registry is not available.
+    pub tool_executor: Option<Arc<dyn ToolExecutor>>,
 }
 
 impl fmt::Debug for HostContext {
@@ -107,6 +120,11 @@ impl fmt::Debug for HostContext {
                     &"<none>"
                 },
             )
+            .field("secret_backend", &self.secret_backend.is_some())
+            .field("memory_backend", &self.memory_backend.is_some())
+            .field("conversation_backend", &self.conversation_backend.is_some())
+            .field("schedule_backend", &self.schedule_backend.is_some())
+            .field("tool_executor", &self.tool_executor.is_some())
             .finish()
     }
 }
@@ -125,6 +143,11 @@ impl HostContext {
             runtime_handle: None,
             user_id: None,
             llm_engine: None,
+            secret_backend: None,
+            memory_backend: None,
+            conversation_backend: None,
+            schedule_backend: None,
+            tool_executor: None,
         }
     }
 
@@ -153,6 +176,41 @@ impl HostContext {
     #[must_use]
     pub fn with_llm_engine(mut self, engine: Arc<dyn sober_llm::LlmEngine>) -> Self {
         self.llm_engine = Some(engine);
+        self
+    }
+
+    /// Sets the secret reading backend.
+    #[must_use]
+    pub fn with_secret_backend(mut self, backend: Arc<dyn SecretBackend>) -> Self {
+        self.secret_backend = Some(backend);
+        self
+    }
+
+    /// Sets the memory read/write backend.
+    #[must_use]
+    pub fn with_memory_backend(mut self, backend: Arc<dyn MemoryBackend>) -> Self {
+        self.memory_backend = Some(backend);
+        self
+    }
+
+    /// Sets the conversation reading backend.
+    #[must_use]
+    pub fn with_conversation_backend(mut self, backend: Arc<dyn ConversationBackend>) -> Self {
+        self.conversation_backend = Some(backend);
+        self
+    }
+
+    /// Sets the job scheduling backend.
+    #[must_use]
+    pub fn with_schedule_backend(mut self, backend: Arc<dyn ScheduleBackend>) -> Self {
+        self.schedule_backend = Some(backend);
+        self
+    }
+
+    /// Sets the tool execution backend.
+    #[must_use]
+    pub fn with_tool_executor(mut self, executor: Arc<dyn ToolExecutor>) -> Self {
+        self.tool_executor = Some(executor);
         self
     }
 
@@ -265,21 +323,21 @@ pub(crate) struct HttpResponse {
 
 /// Input for `host_read_secret`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ReadSecretRequest {
     pub name: String,
 }
 
 /// Output for `host_read_secret`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct ReadSecretResponse {
     pub value: String,
 }
 
 /// Input for `host_call_tool`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct CallToolRequest {
     pub tool: String,
     #[serde(default)]
@@ -288,9 +346,30 @@ pub(crate) struct CallToolRequest {
 
 /// Output for `host_call_tool`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct CallToolResponse {
     pub output: serde_json::Value,
+}
+
+/// Output for `host_memory_query`.
+#[derive(Debug, Serialize)]
+#[allow(dead_code)] // will be constructed when backend is wired
+pub(crate) struct MemoryQueryResponse {
+    pub results: Vec<crate::backends::MemoryHit>,
+}
+
+/// Output for `host_conversation_read`.
+#[derive(Debug, Serialize)]
+#[allow(dead_code)] // will be constructed when backend is wired
+pub(crate) struct ConversationReadResponse {
+    pub messages: Vec<crate::backends::ConversationMessage>,
+}
+
+/// Output for `host_schedule`.
+#[derive(Debug, Serialize)]
+#[allow(dead_code)] // will be constructed when backend is wired
+pub(crate) struct ScheduleResponse {
+    pub job_id: String,
 }
 
 /// Input for `host_kv_delete`.
@@ -324,7 +403,7 @@ pub(crate) struct EmitMetricRequest {
 
 /// Input for `host_memory_query`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct MemoryQueryRequest {
     pub query: String,
     #[serde(default)]
@@ -335,7 +414,7 @@ pub(crate) struct MemoryQueryRequest {
 
 /// Input for `host_memory_write`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct MemoryWriteRequest {
     pub content: String,
     #[serde(default)]
@@ -346,7 +425,7 @@ pub(crate) struct MemoryWriteRequest {
 
 /// Input for `host_conversation_read`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ConversationReadRequest {
     pub conversation_id: String,
     #[serde(default)]
@@ -355,7 +434,7 @@ pub(crate) struct ConversationReadRequest {
 
 /// Input for `host_schedule`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ScheduleRequest {
     /// Cron expression or interval (e.g. "*/5 * * * *" or "30s").
     pub schedule: String,

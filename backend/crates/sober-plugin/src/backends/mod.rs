@@ -5,6 +5,16 @@
 //! (production) usage.  Host functions receive a single `Arc<dyn Backend>`
 //! instead of branching on `Option<PgPool>` internally.
 
+pub mod conversation;
 pub mod kv;
+pub mod memory;
+pub mod schedule;
+pub mod secrets;
+pub mod tool_call;
 
+pub use conversation::{ConversationBackend, ConversationMessage};
 pub use kv::{InMemoryKvBackend, KvBackend, PgKvBackend};
+pub use memory::{MemoryBackend, MemoryHit};
+pub use schedule::ScheduleBackend;
+pub use secrets::SecretBackend;
+pub use tool_call::ToolExecutor;
