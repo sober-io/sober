@@ -554,7 +554,9 @@ mod tests {
     }
 
     fn make_tool(workspace_dir: Option<PathBuf>) -> GeneratePluginTool<MockPluginRepo> {
-        let llm = MockLlm::new("# Skill: Test\n\nA test skill.");
+        let llm = MockLlm::new(
+            "---\nname: test\ndescription: A test skill.\n---\n\n## Instructions\nDo the thing.",
+        );
         let generator = Arc::new(PluginGenerator::new(llm, "test-model"));
         let manager = make_manager(MockPluginRepo::new());
         GeneratePluginTool::new(generator, manager, workspace_dir, None, UserId::new())
@@ -699,7 +701,7 @@ mod tests {
         let (tool, manager) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             None,
-            "# Skill: Summariser\n\nSummarises text.",
+            "---\nname: summariser\ndescription: Summarises text.\n---\n\n## Instructions\nSummarise the input.",
         );
 
         let result = tool
@@ -739,7 +741,7 @@ mod tests {
         let (tool, manager) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             None,
-            "# Skill: Test\n\nTest skill content.",
+            "---\nname: test\ndescription: A test skill.\n---\n\n## Instructions\nTest skill content.",
         );
 
         // No "kind" field — should default to "skill".
@@ -766,7 +768,7 @@ mod tests {
         let (tool, manager) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             Some(ws_id),
-            "# Skill: Scoped\n\nScoped skill.",
+            "---\nname: scoped\ndescription: Scoped skill.\n---\n\n## Instructions\nScoped skill content.",
         );
 
         tool.execute(serde_json::json!({

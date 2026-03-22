@@ -303,6 +303,13 @@ impl<R: PluginRepo> PluginManager<R> {
             .await
             .map_err(PluginError::Skill)?;
 
+        debug!(
+            skill_count = catalog.len(),
+            workspace_dir = %workspace_dir.display(),
+            names = ?catalog.names(),
+            "skill catalog loaded for turn"
+        );
+
         if catalog.is_empty() {
             return Ok(vec![]);
         }
