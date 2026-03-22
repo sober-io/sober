@@ -21,17 +21,19 @@ use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
 use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
+use sober_plugin::PluginManager;
+use sober_plugin_gen::PluginGenerator;
 use sober_sandbox::{CommandPolicy, SandboxPolicy};
-use sober_skill::{ActivateSkillTool, SkillActivationState, SkillLoader};
+use sober_skill::SkillActivationState;
 use sober_workspace::{BlobStore, SnapshotManager};
 
 use super::shell::SharedPermissionMode;
 use super::{
     ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
-    DeleteSecretTool, FetchUrlTool, ListArtifactsTool, ListSecretsTool, ListSnapshotsTool,
-    ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool, RestoreSnapshotTool,
-    SchedulerTools, SecretToolContext, ShellTool, SnapshotToolContext, StoreSecretTool,
-    ToolRegistry, WebSearchTool,
+    DeleteSecretTool, FetchUrlTool, GeneratePluginTool, ListArtifactsTool, ListSecretsTool,
+    ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
+    RestoreSnapshotTool, SchedulerTools, SecretToolContext, ShellTool, SnapshotToolContext,
+    StoreSecretTool, ToolRegistry, WebSearchTool,
 };
 use crate::SharedSchedulerClient;
 
@@ -125,8 +127,10 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub blob_store: Arc<BlobStore>,
     /// Snapshot manager for snapshot and shell auto-snapshot tools.
     pub snapshot_manager: Arc<SnapshotManager>,
-    /// Skill loader for discovering and caching skills from the filesystem.
-    pub skill_loader: Arc<SkillLoader>,
+    /// Unified plugin manager for MCP, Skill, and WASM plugin tools.
+    pub plugin_manager: Arc<PluginManager<R::Plg>>,
+    /// LLM-powered plugin generator (None = generation disabled).
+    pub plugin_generator: Option<Arc<PluginGenerator>>,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {
@@ -222,18 +226,37 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             tools.push(Arc::new(RestoreSnapshotTool::new(snapshot_ctx)));
         }
 
-        // 4. Skill tool — loaded per-turn from cached catalog.
+        // 4. Plugin tools — MCP, Skill, and WASM tools from PluginManager.
         //    Reuses the per-conversation activation state when provided so that
         //    skills activated in earlier turns remain marked as active.
         let user_home = sober_workspace::user_home_dir();
         let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
-        if let Ok(catalog) = self.skill_loader.load(&user_home, &workspace_path).await
-            && !catalog.is_empty()
+        match self
+            .plugin_manager
+            .tools_for_turn(
+                ctx.user_id,
+                &user_home,
+                &workspace_path,
+                ctx.workspace_id,
+                ctx.skill_activation_state.clone(),
+            )
+            .await
         {
-            let activation_state = ctx.skill_activation_state.clone().unwrap_or_else(|| {
-                Arc::new(std::sync::Mutex::new(SkillActivationState::default()))
-            });
-            tools.push(Arc::new(ActivateSkillTool::new(catalog, activation_state)));
+            Ok(plugin_tools) => tools.extend(plugin_tools),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load plugin tools, continuing without them");
+            }
+        }
+
+        // 5. Generate-plugin tool — available when a plugin generator is configured.
+        if let Some(generator) = &self.plugin_generator {
+            tools.push(Arc::new(GeneratePluginTool::new(
+                Arc::clone(generator),
+                Arc::clone(&self.plugin_manager),
+                ctx.workspace_dir.clone(),
+                ctx.workspace_id,
+                ctx.user_id,
+            )));
         }
 
         ToolRegistry::with_builtins(tools)

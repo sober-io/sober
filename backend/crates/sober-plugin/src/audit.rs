@@ -57,6 +57,22 @@ pub enum AuditVerdict {
 }
 
 /// Full audit report produced by the pipeline.
+impl AuditReport {
+    /// Returns `true` if the plugin was approved.
+    pub fn is_approved(&self) -> bool {
+        self.verdict == AuditVerdict::Approved
+    }
+
+    /// Returns the rejection reason, if any.
+    pub fn rejection_reason(&self) -> Option<&str> {
+        match &self.verdict {
+            AuditVerdict::Rejected { reason, .. } => Some(reason),
+            AuditVerdict::Approved => None,
+        }
+    }
+}
+
+/// Full audit report produced by the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditReport {
     /// Plugin name.

@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4050,6 +4050,8 @@ dependencies = [
  "sober-mcp",
  "sober-memory",
  "sober-mind",
+ "sober-plugin",
+ "sober-plugin-gen",
  "sober-sandbox",
  "sober-skill",
  "sober-workspace",
@@ -4069,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -4154,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4200,7 +4202,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "chrono",
  "metrics",
@@ -4233,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "sober-mcp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "metrics",
@@ -4286,22 +4288,44 @@ dependencies = [
 
 [[package]]
 name = "sober-plugin"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
  "dirs",
  "extism",
+ "http",
+ "metrics",
  "pretty_assertions",
  "serde",
  "serde_json",
  "sober-core",
+ "sober-mcp",
+ "sober-skill",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "ureq",
  "uuid",
  "wat",
+]
+
+[[package]]
+name = "sober-plugin-gen"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "sober-core",
+ "sober-llm",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]

@@ -13,9 +13,8 @@ use super::enums::{
     WorktreeState,
 };
 use super::ids::{
-    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, McpServerId,
-    MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId,
-    WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
+    RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -197,29 +196,6 @@ pub struct ConversationWithDetails {
     /// Linked workspace root path (joined from workspaces table).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
-}
-
-/// A per-user MCP server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    /// Unique identifier.
-    pub id: McpServerId,
-    /// The user who owns this configuration.
-    pub user_id: UserId,
-    /// Display name for the MCP server.
-    pub name: String,
-    /// Command to start the server.
-    pub command: String,
-    /// Command-line arguments.
-    pub args: serde_json::Value,
-    /// Environment variables.
-    pub env: serde_json::Value,
-    /// Whether the server is enabled.
-    pub enabled: bool,
-    /// When the configuration was created.
-    pub created_at: DateTime<Utc>,
-    /// When the configuration was last updated.
-    pub updated_at: DateTime<Utc>,
 }
 
 /// A scheduled job.

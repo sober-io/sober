@@ -45,6 +45,14 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
+            name: "system::plugin_cleanup",
+            schedule: "every: 1h",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": "plugin_cleanup",
+            }),
+        },
+        SystemJobDef {
             name: "system::trait_evolution_check",
             schedule: "0 0 3 * * * *",
             payload: serde_json::json!({

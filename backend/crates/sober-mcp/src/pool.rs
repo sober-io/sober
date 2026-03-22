@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use metrics::{counter, gauge};
-use sober_core::types::McpServerId;
+use sober_core::types::PluginId;
 use sober_sandbox::SandboxPolicy;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -50,11 +50,11 @@ struct ServerEntry {
 
 /// Pool managing multiple MCP server connections with crash recovery.
 ///
-/// Each server is identified by its [`McpServerId`]. The pool tracks
+/// Each server is identified by its [`PluginId`]. The pool tracks
 /// connection state, failure counts, and manages reconnection attempts
 /// with configurable cooldown periods.
 pub struct McpPool {
-    servers: HashMap<McpServerId, ServerEntry>,
+    servers: HashMap<PluginId, ServerEntry>,
     config: McpConfig,
 }
 
@@ -80,7 +80,7 @@ impl McpPool {
     /// were provided.
     pub async fn connect_servers(
         &mut self,
-        servers: Vec<(McpServerId, McpServerRunConfig, SandboxPolicy)>,
+        servers: Vec<(PluginId, McpServerRunConfig, SandboxPolicy)>,
     ) -> Vec<McpError> {
         let mut errors = Vec::new();
 
@@ -178,7 +178,7 @@ impl McpPool {
         let mut total_tools = 0;
         let mut total_resources = 0;
 
-        let server_ids: Vec<McpServerId> = self.servers.keys().copied().collect();
+        let server_ids: Vec<PluginId> = self.servers.keys().copied().collect();
 
         for id in server_ids {
             let entry = match self.servers.get(&id) {
@@ -286,7 +286,7 @@ impl McpPool {
     ///
     /// If the failure count exceeds `max_consecutive_failures`, the server
     /// is marked as disconnected and its client is dropped.
-    pub async fn record_failure(&mut self, server_id: &McpServerId) {
+    pub async fn record_failure(&mut self, server_id: &PluginId) {
         if let Some(entry) = self.servers.get_mut(server_id) {
             match &mut entry.state {
                 ServerState::Connected => {
@@ -328,7 +328,7 @@ impl McpPool {
     }
 
     /// Record a successful operation for a server, resetting its failure count.
-    pub fn record_success(&mut self, server_id: &McpServerId) {
+    pub fn record_success(&mut self, server_id: &PluginId) {
         if let Some(entry) = self.servers.get_mut(server_id)
             && !matches!(entry.state, ServerState::Connected)
         {
@@ -344,7 +344,7 @@ impl McpPool {
     /// # Errors
     ///
     /// Returns an error if the server is not found or reconnection fails.
-    pub async fn try_reconnect(&mut self, server_id: &McpServerId) -> Result<(), McpError> {
+    pub async fn try_reconnect(&mut self, server_id: &PluginId) -> Result<(), McpError> {
         let entry = self
             .servers
             .get(server_id)
@@ -477,7 +477,7 @@ impl McpPool {
 
     /// Returns `true` if the specified server is currently connected.
     #[must_use]
-    pub fn is_connected(&self, server_id: &McpServerId) -> bool {
+    pub fn is_connected(&self, server_id: &PluginId) -> bool {
         self.servers
             .get(server_id)
             .is_some_and(|e| matches!(e.state, ServerState::Connected))

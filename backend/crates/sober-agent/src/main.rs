@@ -19,11 +19,13 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{PgAgentRepos, PgMessageRepo, create_pool};
+use sober_db::{PgAgentRepos, PgMessageRepo, PgPluginRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
+use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
+use sober_plugin::PluginManager;
 use sober_sandbox::{CommandPolicy, SandboxProfile};
 use sober_skill::SkillLoader;
 use sober_workspace::BlobStore;
@@ -148,10 +150,29 @@ async fn main() -> Result<()> {
     // 13. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
-    // 14. Create SkillLoader and ToolBootstrap — centralized tool construction for all turns
+    // 14. Create SkillLoader, PluginManager, and ToolBootstrap
     let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(
         SKILL_CACHE_TTL_SECS,
     )));
+
+    let mcp_pool = McpPool::new(McpConfig::default());
+    let plugin_repo = PgPluginRepo::new(pool.clone());
+    let plugin_manager = Arc::new(PluginManager::new(
+        plugin_repo,
+        mcp_pool,
+        Arc::clone(&skill_loader),
+    ));
+
+    // Sync user-level skills from filesystem into the plugins table on startup.
+    // This ensures ListSkills returns data immediately without waiting for a
+    // conversation turn or manual reload.
+    {
+        let user_home = sober_workspace::user_home_dir();
+        let _ = plugin_manager
+            .sync_filesystem_skills(&user_home, &std::path::PathBuf::new(), None)
+            .await;
+        info!("startup skill sync complete");
+    }
 
     let tool_bootstrap = Arc::new(ToolBootstrap {
         shell: ShellToolConfig {
@@ -175,7 +196,11 @@ async fn main() -> Result<()> {
         mek: mek.clone(),
         blob_store,
         snapshot_manager,
-        skill_loader: Arc::clone(&skill_loader),
+        plugin_manager: Arc::clone(&plugin_manager),
+        plugin_generator: Some(Arc::new(sober_plugin_gen::PluginGenerator::new(
+            Arc::clone(&llm),
+            config.llm.model.clone(),
+        ))),
     });
 
     // 15. Create broadcast channel for conversation update events
@@ -223,7 +248,7 @@ async fn main() -> Result<()> {
         confirmation_sender,
         shared_permission_mode,
         broadcast_tx,
-        skill_loader,
+        plugin_manager,
     );
 
     // 20. Bind to Unix domain socket

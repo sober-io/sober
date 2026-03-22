@@ -17,6 +17,15 @@ service AgentService {
   rpc SubscribeConversationUpdates(SubscribeRequest) returns (stream ConversationUpdate);
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
   rpc ReloadSkills(ReloadSkillsRequest) returns (ReloadSkillsResponse);
+  // Plugin management RPCs.
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  rpc InstallPlugin(InstallPluginRequest) returns (InstallPluginResponse);
+  rpc UninstallPlugin(UninstallPluginRequest) returns (UninstallPluginResponse);
+  rpc EnablePlugin(EnablePluginRequest) returns (EnablePluginResponse);
+  rpc DisablePlugin(DisablePluginRequest) returns (DisablePluginResponse);
+  rpc ImportPlugins(ImportPluginsRequest) returns (ImportPluginsResponse);
+  rpc ReloadPlugins(ReloadPluginsRequest) returns (ReloadPluginsResponse);
+  rpc ChangePluginScope(ChangePluginScopeRequest) returns (ChangePluginScopeResponse);
 }
 
 message ConfirmAck {}
@@ -147,6 +156,7 @@ message ListSkillsResponse {
 
 message ReloadSkillsRequest {
   optional string conversation_id = 1;
+  optional string user_id = 2;
 }
 
 message ReloadSkillsResponse {
@@ -167,4 +177,83 @@ message ConversationUpdate {
     Done done = 9;
     Error error = 10;
   }
+}
+
+// --- Plugin management types ---
+
+message PluginInfo {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  string version = 4;
+  string description = 5;
+  string status = 6;
+  string config = 7; // JSON string
+  string installed_at = 8;
+  string scope = 9;  // "system", "user", "workspace"
+}
+
+message ListPluginsRequest {
+  optional string kind = 1;
+  optional string status = 2;
+}
+
+message ListPluginsResponse {
+  repeated PluginInfo plugins = 1;
+}
+
+message InstallPluginRequest {
+  string name = 1;
+  string kind = 2;
+  string config = 3; // JSON string
+  optional string description = 4;
+  optional string version = 5;
+}
+
+message InstallPluginResponse {
+  PluginInfo plugin = 1;
+}
+
+message UninstallPluginRequest {
+  string plugin_id = 1;
+}
+
+message UninstallPluginResponse {}
+
+message EnablePluginRequest {
+  string plugin_id = 1;
+}
+
+message EnablePluginResponse {}
+
+message DisablePluginRequest {
+  string plugin_id = 1;
+}
+
+message DisablePluginResponse {}
+
+message ImportPluginsRequest {
+  string mcp_servers_json = 1; // JSON string of mcpServers config
+}
+
+message ImportPluginsResponse {
+  uint32 imported_count = 1;
+  repeated PluginInfo plugins = 2;
+}
+
+message ReloadPluginsRequest {}
+
+message ReloadPluginsResponse {
+  uint32 active_count = 1;
+}
+
+message ChangePluginScopeRequest {
+  string plugin_id = 1;
+  string new_scope = 2;  // "system", "user", "workspace"
+  // Required when moving TO workspace scope — identifies the target workspace.
+  optional string workspace_id = 3;
+}
+
+message ChangePluginScopeResponse {
+  PluginInfo plugin = 1;
 }

@@ -78,36 +78,6 @@ pub struct CreateJob {
     pub next_run_at: DateTime<Utc>,
 }
 
-/// Input for creating an MCP server configuration.
-#[derive(Debug, Clone)]
-pub struct CreateMcpServer {
-    /// The user who owns this configuration.
-    pub user_id: UserId,
-    /// Display name.
-    pub name: String,
-    /// Command to start the server.
-    pub command: String,
-    /// Command-line arguments (JSON array).
-    pub args: serde_json::Value,
-    /// Environment variables (JSON object).
-    pub env: serde_json::Value,
-}
-
-/// Input for updating an MCP server configuration.
-#[derive(Debug, Clone, Default)]
-pub struct UpdateMcpServer {
-    /// New display name.
-    pub name: Option<String>,
-    /// New command.
-    pub command: Option<String>,
-    /// New arguments.
-    pub args: Option<serde_json::Value>,
-    /// New environment variables.
-    pub env: Option<serde_json::Value>,
-    /// New enabled state.
-    pub enabled: Option<bool>,
-}
-
 /// Input for registering a git repository in a workspace.
 #[derive(Debug, Clone)]
 pub struct RegisterRepo {

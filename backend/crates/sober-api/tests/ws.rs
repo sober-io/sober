@@ -100,6 +100,66 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         }))
     }
 
+    async fn list_plugins(
+        &self,
+        _request: tonic::Request<proto::ListPluginsRequest>,
+    ) -> Result<tonic::Response<proto::ListPluginsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ListPluginsResponse {
+            plugins: vec![],
+        }))
+    }
+
+    async fn install_plugin(
+        &self,
+        _request: tonic::Request<proto::InstallPluginRequest>,
+    ) -> Result<tonic::Response<proto::InstallPluginResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn uninstall_plugin(
+        &self,
+        _request: tonic::Request<proto::UninstallPluginRequest>,
+    ) -> Result<tonic::Response<proto::UninstallPluginResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn enable_plugin(
+        &self,
+        _request: tonic::Request<proto::EnablePluginRequest>,
+    ) -> Result<tonic::Response<proto::EnablePluginResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn disable_plugin(
+        &self,
+        _request: tonic::Request<proto::DisablePluginRequest>,
+    ) -> Result<tonic::Response<proto::DisablePluginResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn import_plugins(
+        &self,
+        _request: tonic::Request<proto::ImportPluginsRequest>,
+    ) -> Result<tonic::Response<proto::ImportPluginsResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn reload_plugins(
+        &self,
+        _request: tonic::Request<proto::ReloadPluginsRequest>,
+    ) -> Result<tonic::Response<proto::ReloadPluginsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ReloadPluginsResponse {
+            active_count: 0,
+        }))
+    }
+
+    async fn change_plugin_scope(
+        &self,
+        _request: tonic::Request<proto::ChangePluginScopeRequest>,
+    ) -> Result<tonic::Response<proto::ChangePluginScopeResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

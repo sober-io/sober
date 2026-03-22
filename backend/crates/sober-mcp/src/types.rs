@@ -148,7 +148,7 @@ impl ServerCapabilities {
 /// Configuration for connecting to a specific MCP server.
 ///
 /// This is the runtime configuration used by [`McpClient`](crate::McpClient),
-/// distinct from the database-stored [`McpServerConfig`](sober_core::types::McpServerConfig).
+/// distinct from the database-stored [`Plugin`](sober_core::types::Plugin) record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerRunConfig {
     /// Display name for the server.

@@ -375,55 +375,6 @@ async fn job_lifecycle(pool: PgPool) {
     assert!(active_after.is_empty());
 }
 
-// ── MCP Servers ──────────────────────────────────────────────────────────────
-
-#[sqlx::test(migrations = "../../migrations")]
-async fn mcp_server_crud(pool: PgPool) {
-    let repo = PgMcpServerRepo::new(pool.clone());
-    let user_repo = PgUserRepo::new(pool);
-
-    let user = user_repo
-        .create(CreateUser {
-            email: "mcp@example.com".into(),
-            username: "mcpuser".into(),
-            password_hash: "hash".into(),
-        })
-        .await
-        .unwrap();
-
-    let server = repo
-        .create(CreateMcpServer {
-            user_id: user.id,
-            name: "test-server".into(),
-            command: "npx".into(),
-            args: serde_json::json!(["@test/mcp-server"]),
-            env: serde_json::json!({}),
-        })
-        .await
-        .unwrap();
-    assert_eq!(server.name, "test-server");
-    assert!(server.enabled);
-
-    let list = repo.list_by_user(user.id).await.unwrap();
-    assert_eq!(list.len(), 1);
-
-    let updated = repo
-        .update(
-            server.id,
-            UpdateMcpServer {
-                enabled: Some(false),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert!(!updated.enabled);
-
-    repo.delete(server.id).await.unwrap();
-    let list_after = repo.list_by_user(user.id).await.unwrap();
-    assert!(list_after.is_empty());
-}
-
 // ── Workspaces ───────────────────────────────────────────────────────────────
 
 #[sqlx::test(migrations = "../../migrations")]
