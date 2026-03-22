@@ -139,6 +139,8 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
         description: &str,
         kind: PluginKind,
         config: serde_json::Value,
+        manifest: Option<sober_plugin::PluginManifest>,
+        wasm_bytes: Option<Vec<u8>>,
     ) -> Result<(), ToolError> {
         let scope = if self.workspace_id.is_some() {
             PluginScope::Workspace
@@ -157,8 +159,8 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             workspace_id: self.workspace_id,
             config,
             installed_by: Some(self.user_id),
-            manifest: None,
-            wasm_bytes: None,
+            manifest,
+            wasm_bytes,
         };
 
         let report = self
@@ -226,6 +228,10 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write source: {e}")))?;
 
+        // Parse the manifest for the audit pipeline.
+        let manifest = sober_plugin::PluginManifest::from_toml(&generated.manifest)
+            .map_err(|e| ToolError::ExecutionFailed(format!("invalid manifest: {e}")))?;
+
         // Register the plugin through the audit pipeline.
         self.register_plugin(
             name,
@@ -235,6 +241,8 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
                 "wasm_path": wasm_path.to_string_lossy(),
                 "manifest_toml": generated.manifest,
             }),
+            Some(manifest),
+            Some(generated.wasm_bytes),
         )
         .await?;
 
@@ -288,6 +296,8 @@ impl<R: PluginRepo + 'static> GeneratePluginTool<R> {
             serde_json::json!({
                 "path": skill_path.to_string_lossy(),
             }),
+            None,
+            None,
         )
         .await?;
 
