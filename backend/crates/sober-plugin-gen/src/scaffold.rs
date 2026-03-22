@@ -55,13 +55,12 @@ fn cargo_toml(name: &str) -> String {
         r#"[package]
 name = "sober-plugin-{name}"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-sober-pdk = {{ path = "../../sdks/sober-pdk" }}
 extism-pdk = "1"
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
@@ -72,13 +71,12 @@ serde_json = "1"
 fn lib_rs(name: &str) -> String {
     format!(
         r#"use extism_pdk::*;
-use sober_pdk::log;
 
 #[plugin_fn]
 pub fn {name}(input: String) -> FnResult<String> {{
-    log::info(&format!("{name} called with: {{input}}"));
     Ok(serde_json::json!({{
-        "result": "TODO: implement {name}"
+        "result": "TODO: implement {name}",
+        "input": input
     }})
     .to_string())
 }}

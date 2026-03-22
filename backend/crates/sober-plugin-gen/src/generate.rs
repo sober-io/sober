@@ -239,30 +239,30 @@ impl PluginGenerator {
 fn wasm_system_prompt() -> String {
     r#"You are an expert Rust developer who writes Sõber WASM plugins.
 
-A Sõber WASM plugin is a Rust `cdylib` crate that uses the `extism-pdk` and
-`sober-pdk` crates. Each exported tool function must be annotated with
-`#[plugin_fn]` and have the signature:
+A Sõber WASM plugin is a Rust `cdylib` crate that uses `extism-pdk`.
+Each exported tool function must be annotated with `#[plugin_fn]` and
+have the signature:
 
 ```rust
+use extism_pdk::*;
+
 #[plugin_fn]
 pub fn tool_name(input: String) -> FnResult<String>
 ```
 
 The input is a JSON string. The return value must also be a JSON string.
 
-Available capabilities via `sober_pdk`:
-- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging (always available)
-- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` — key-value store (requires `key_value` capability)
-- `sober_pdk::http::fetch(url, method, headers, body)` — HTTP requests (requires `network` capability)
-- `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability)
-- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability)
-- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` — emit metrics (requires `metrics` capability)
-- `sober_pdk::memory::read(scope, query)` — read from memory/context (requires `memory_read` capability; not yet connected)
-- `sober_pdk::memory::write(scope, data)` — write to memory/context (requires `memory_write` capability; not yet connected)
-- `sober_pdk::conversation::read(id)` — read conversation history (requires `conversation_read` capability; not yet connected)
-- `sober_pdk::schedule::create(spec)` — create scheduled jobs (requires `schedule` capability; not yet connected)
-- `sober_pdk::fs::read(path)` / `write(path, data)` — filesystem access (requires `filesystem` capability; not yet connected)
-- `sober_pdk::llm::call(prompt)` — invoke an LLM provider (requires `llm_call` capability; not yet connected)
+Host functions are called via Extism's `host_fn!` mechanism — they are
+injected automatically at runtime. The plugin communicates with the host
+by reading/writing JSON through the WASM boundary.
+
+Available dependencies (add to Cargo.toml):
+- `extism-pdk = "1"` — WASM plugin SDK (always required)
+- `serde = { version = "1", features = ["derive"] }` — serialization
+- `serde_json = "1"` — JSON handling
+
+Do NOT use `sober-pdk` — it is not available as a published crate.
+Use `extism-pdk` directly for all plugin functionality.
 
 Manifest format (`plugin.toml`):
 ```toml
@@ -281,119 +281,37 @@ name = "tool-name"
 description = "..."
 ```
 
-## Full example: a plugin using logging, HTTP, key-value, and secrets
+## Full example plugin
 
 ```rust
 use extism_pdk::*;
 use serde_json::{json, Value};
-use sober_pdk::{http, kv, log, secrets};
 
-/// Fetches weather data for a city, caches it, and returns the result.
+/// Converts text to uppercase and returns statistics.
 #[plugin_fn]
-pub fn weather(input: String) -> FnResult<String> {
+pub fn transform(input: String) -> FnResult<String> {
     // Parse JSON input
     let params: Value = serde_json::from_str(&input)?;
-    let city = params["city"]
+    let text = params["text"]
         .as_str()
-        .ok_or_else(|| Error::msg("missing 'city' field"))?;
+        .ok_or_else(|| Error::msg("missing 'text' field"))?;
 
-    log::info(&format!("weather lookup for: {city}"));
-
-    // Check cache first (key_value capability)
-    let cache_key = format!("weather:{city}");
-    if let Some(cached) = kv::get(&cache_key)? {
-        log::info("cache hit");
-        return Ok(cached);
-    }
-
-    // Read API key from secrets (secret_read capability)
-    let api_key = secrets::get("WEATHER_API_KEY")?
-        .ok_or_else(|| Error::msg("WEATHER_API_KEY secret not configured"))?;
-
-    // Fetch from API (network capability)
-    let url = format!("https://api.weather.example/v1?city={city}&key={api_key}");
-    let response = http::get(&url)?;
-
-    if response.status != 200 {
-        log::error(&format!("API returned status {}", response.status));
-        return Ok(json!({
-            "error": format!("API error: HTTP {}", response.status)
-        }).to_string());
-    }
-
-    let result = json!({
-        "city": city,
-        "data": serde_json::from_str::<Value>(&response.body)
-            .unwrap_or(json!({"raw": response.body}))
-    }).to_string();
-
-    // Cache for next time (key_value capability)
-    kv::set(&cache_key, &result)?;
-
-    Ok(result)
-}
-```
-
-The corresponding `plugin.toml` for this example:
-```toml
-[plugin]
-name = "weather"
-version = "0.1.0"
-description = "Fetches and caches weather data"
-
-[capabilities]
-key_value = true
-network = true
-secret_read = true
-
-[[tools]]
-name = "weather"
-description = "Look up weather for a city"
-```
-
-## Example: a plugin using tool_call, metrics, and all other capabilities
-
-```rust
-use extism_pdk::*;
-use serde_json::{json, Value};
-use sober_pdk::{log, metrics, tool_call};
-// Phase 2+ capabilities (not yet connected — stubs that return errors):
-// use sober_pdk::{memory, conversation, schedule, fs, llm};
-
-#[plugin_fn]
-pub fn summarise_and_store(input: String) -> FnResult<String> {
-    let params: Value = serde_json::from_str(&input)?;
-    let topic = params["topic"].as_str().unwrap_or("general");
-
-    // Call another agent tool (tool_call capability)
-    let search_result = tool_call::invoke("web_search", &json!({
-        "query": topic
-    }).to_string())?;
-
-    // Emit a metric (metrics capability)
-    metrics::counter("summaries_generated");
-
-    // Phase 2+ examples (not yet connected):
-    // memory::write("user", &json!({"key": topic, "value": &search_result}).to_string())?;
-    // let history = conversation::read("current")?;
-    // let analysis = llm::call(&format!("Summarise: {search_result}"))?;
-    // schedule::create("every: 24h", &json!({"topic": topic}).to_string())?;
-    // let data = fs::read("/workspace/data.json")?;
-
-    log::info(&format!("summarised topic: {topic}"));
+    let upper = text.to_uppercase();
+    let word_count = text.split_whitespace().count();
 
     Ok(json!({
-        "topic": topic,
-        "summary": search_result
+        "result": upper,
+        "word_count": word_count,
+        "char_count": text.len()
     }).to_string())
 }
 ```
 
-IMPORTANT — current capability status:
-- FUNCTIONAL: `log` (always available), `key_value` (in-memory), `network` (HTTP via ureq), `metrics` (counter/gauge/histogram)
-- STUBS (return errors at runtime): `secret_read`, `tool_call`, `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`
-
-Prefer functional capabilities in generated plugins. If a stub capability is requested, include it but warn the user it is not yet connected.
+Note: Capabilities (KV, HTTP, metrics, etc.) are provided as host functions
+injected at runtime — they are NOT Rust crate imports. Currently only `log`,
+`kv` (in-memory), `network` (HTTP), and `metrics` are functional. Other
+capabilities return stub errors. Do NOT import `sober_pdk` — it is not
+available as a dependency. Use only `extism-pdk`, `serde`, and `serde_json`.
 
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).
