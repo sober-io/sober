@@ -1114,9 +1114,10 @@ mod tests {
                 "description": "A test skill",
                 "kind": "skill"
             }))
-            .await;
-        assert!(matches!(result, Err(ToolError::ExecutionFailed(_))));
-        assert!(result.unwrap_err().to_string().contains("workspace"));
+            .await
+            .expect("should return Ok with is_error");
+        assert!(result.is_error);
+        assert!(result.content.contains("workspace"));
     }
 
     #[tokio::test]
@@ -1128,9 +1129,10 @@ mod tests {
                 "description": "A test plugin",
                 "kind": "wasm"
             }))
-            .await;
-        assert!(matches!(result, Err(ToolError::ExecutionFailed(_))));
-        assert!(result.unwrap_err().to_string().contains("workspace"));
+            .await
+            .expect("should return Ok with is_error");
+        assert!(result.is_error);
+        assert!(result.content.contains("workspace"));
     }
 
     #[tokio::test]
