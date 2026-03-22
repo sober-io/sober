@@ -263,6 +263,16 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 ToolError::ExecutionFailed(format!("failed to store WASM in blob store: {e}"))
             })?;
 
+        // Store manifest as a blob too — kept inline in config for fast loading,
+        // but also content-addressed for future import/export packaging.
+        let manifest_blob_key = self
+            .blob_store
+            .store(generated.manifest.as_bytes())
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("failed to store manifest in blob store: {e}"))
+            })?;
+
         // Save source and manifest to .sober/plugins/<name>/ for human inspection.
         let plugin_dir = workspace_dir.join(".sober").join("plugins").join(name);
         tokio::fs::create_dir_all(&plugin_dir)
@@ -283,6 +293,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
 
         let new_config = serde_json::json!({
             "blob_key": blob_key,
+            "manifest_blob_key": manifest_blob_key,
             "source_path": plugin_dir.join("src_lib.rs").to_string_lossy(),
             "manifest_toml": generated.manifest,
         });
