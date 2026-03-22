@@ -62,7 +62,26 @@ impl PluginHost {
 
         // Build host functions with the resolved capabilities.
         let host_ctx = HostContext::new(plugin_id, capabilities);
-        let functions = build_host_functions(host_ctx);
+        Self::load_with_context(wasm_bytes, manifest, host_ctx)
+    }
+
+    /// Loads WASM bytes with a pre-configured host context.
+    ///
+    /// Use this when you need to inject a runtime handle, user ID, or other
+    /// context into the host functions at creation time (e.g. production use
+    /// with service handles).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::ExecutionFailed`] if the WASM module cannot
+    /// be loaded (e.g. invalid bytes, missing imports).
+    pub fn load_with_context(
+        wasm_bytes: &[u8],
+        manifest: &PluginManifest,
+        ctx: HostContext,
+    ) -> Result<Self, PluginError> {
+        let plugin_id = ctx.plugin_id;
+        let functions = build_host_functions(ctx);
 
         // Create an Extism manifest from raw WASM bytes.
         let wasm = Wasm::data(wasm_bytes.to_vec());

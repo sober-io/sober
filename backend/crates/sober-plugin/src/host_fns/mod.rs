@@ -25,15 +25,38 @@
 //! scheduling, conversation) return "not yet connected" stub errors until
 //! the backing services are wired in.
 
+mod conversation;
+mod filesystem;
+mod kv;
+mod llm;
+mod log;
+mod memory;
+mod metrics;
+mod network;
+mod schedule;
+mod secrets;
+mod tool_call;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use extism::{CurrentPlugin, Function, PTR, UserData, Val};
 use serde::{Deserialize, Serialize};
-use sober_core::types::ids::PluginId;
-use tracing::{debug, error, info, trace, warn};
+use sober_core::types::ids::{PluginId, UserId};
 
 use crate::capability::Capability;
+
+use self::conversation::host_conversation_read_impl;
+use self::filesystem::{host_fs_read_impl, host_fs_write_impl};
+use self::kv::{host_kv_delete_impl, host_kv_get_impl, host_kv_list_impl, host_kv_set_impl};
+use self::llm::host_llm_complete_impl;
+use self::log::host_log_impl;
+use self::memory::{host_memory_query_impl, host_memory_write_impl};
+use self::metrics::host_emit_metric_impl;
+use self::network::host_http_request_impl;
+use self::schedule::host_schedule_impl;
+use self::secrets::host_read_secret_impl;
+use self::tool_call::host_call_tool_impl;
 
 // ---------------------------------------------------------------------------
 // HostContext — shared state available to all host functions
@@ -42,8 +65,9 @@ use crate::capability::Capability;
 /// Shared context passed to all host functions via Extism's `UserData` mechanism.
 ///
 /// Carries the plugin identity and granted capabilities so that each host
-/// function can enforce permission checks.  Future phases will add a DB
-/// pool handle, tool registry reference, etc.
+/// function can enforce permission checks.  The optional `runtime_handle`
+/// enables host functions to bridge into async code (e.g. calling services
+/// that require a tokio runtime).
 #[derive(Debug, Clone)]
 pub struct HostContext {
     /// Identity of the plugin instance these functions belong to.
@@ -52,6 +76,12 @@ pub struct HostContext {
     pub capabilities: Vec<Capability>,
     /// In-memory KV store for Phase 1 (replaced by DB-backed store later).
     pub kv_store: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+    /// Tokio runtime handle for bridging async operations from synchronous
+    /// host function calls.  `None` in test mode or when no runtime is available.
+    pub runtime_handle: Option<tokio::runtime::Handle>,
+    /// User ID for scoped operations (memory, conversation, etc.).
+    /// `None` when the plugin is invoked outside a user context (e.g. system jobs).
+    pub user_id: Option<UserId>,
 }
 
 impl HostContext {
@@ -61,11 +91,38 @@ impl HostContext {
             plugin_id,
             capabilities,
             kv_store: Arc::new(Mutex::new(HashMap::new())),
+            runtime_handle: None,
+            user_id: None,
         }
     }
 
+    /// Sets the tokio runtime handle for async bridging.
+    #[must_use]
+    pub fn with_runtime_handle(mut self, handle: tokio::runtime::Handle) -> Self {
+        self.runtime_handle = Some(handle);
+        self
+    }
+
+    /// Sets the user ID for scoped operations.
+    #[must_use]
+    pub fn with_user_id(mut self, user_id: UserId) -> Self {
+        self.user_id = Some(user_id);
+        self
+    }
+
+    /// Runs an async future synchronously using the stored runtime handle.
+    ///
+    /// Returns an error if no runtime handle is available (e.g. in test mode).
+    pub fn block_on_async<F: std::future::Future>(&self, f: F) -> Result<F::Output, extism::Error> {
+        let handle = self
+            .runtime_handle
+            .as_ref()
+            .ok_or_else(|| extism::Error::msg("no runtime handle available"))?;
+        Ok(handle.block_on(f))
+    }
+
     /// Returns `true` if the plugin has been granted the given capability.
-    fn has_capability(&self, check: &CapabilityKind) -> bool {
+    pub(crate) fn has_capability(&self, check: &CapabilityKind) -> bool {
         self.capabilities.iter().any(|c| {
             matches!(
                 (check, c),
@@ -90,7 +147,7 @@ impl HostContext {
 
 /// Simplified capability kind used for permission checks (no restriction data).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CapabilityKind {
+pub(crate) enum CapabilityKind {
     KeyValue,
     Network,
     SecretRead,
@@ -110,30 +167,30 @@ enum CapabilityKind {
 
 /// Input for `host_log`.
 #[derive(Debug, Deserialize)]
-struct LogRequest {
-    level: String,
-    message: String,
+pub(crate) struct LogRequest {
+    pub level: String,
+    pub message: String,
     #[serde(default)]
-    fields: HashMap<String, serde_json::Value>,
+    pub fields: HashMap<String, serde_json::Value>,
 }
 
 /// Input for `host_kv_get`.
 #[derive(Debug, Deserialize)]
-struct KvGetRequest {
-    key: String,
+pub(crate) struct KvGetRequest {
+    pub key: String,
 }
 
 /// Output for `host_kv_get`.
 #[derive(Debug, Serialize)]
-struct KvGetResponse {
-    value: Option<serde_json::Value>,
+pub(crate) struct KvGetResponse {
+    pub value: Option<serde_json::Value>,
 }
 
 /// Input for `host_kv_set`.
 #[derive(Debug, Deserialize)]
-struct KvSetRequest {
-    key: String,
-    value: serde_json::Value,
+pub(crate) struct KvSetRequest {
+    pub key: String,
+    pub value: serde_json::Value,
 }
 
 // Stub request/response types: fields are deserialized to validate the
@@ -142,160 +199,160 @@ struct KvSetRequest {
 
 /// Input for `host_http_request`.
 #[derive(Debug, Deserialize)]
-struct HttpRequest {
-    method: String,
-    url: String,
+pub(crate) struct HttpRequest {
+    pub method: String,
+    pub url: String,
     #[serde(default)]
-    headers: HashMap<String, String>,
+    pub headers: HashMap<String, String>,
     #[serde(default)]
-    body: Option<String>,
+    pub body: Option<String>,
 }
 
 /// Output for `host_http_request`.
 #[derive(Debug, Serialize)]
-struct HttpResponse {
-    status: u16,
+pub(crate) struct HttpResponse {
+    pub status: u16,
     #[serde(default)]
-    headers: HashMap<String, String>,
-    body: String,
+    pub headers: HashMap<String, String>,
+    pub body: String,
 }
 
 /// Input for `host_read_secret`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct ReadSecretRequest {
-    name: String,
+pub(crate) struct ReadSecretRequest {
+    pub name: String,
 }
 
 /// Output for `host_read_secret`.
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
-struct ReadSecretResponse {
-    value: String,
+pub(crate) struct ReadSecretResponse {
+    pub value: String,
 }
 
 /// Input for `host_call_tool`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct CallToolRequest {
-    tool: String,
+pub(crate) struct CallToolRequest {
+    pub tool: String,
     #[serde(default)]
-    input: serde_json::Value,
+    pub input: serde_json::Value,
 }
 
 /// Output for `host_call_tool`.
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
-struct CallToolResponse {
-    output: serde_json::Value,
+pub(crate) struct CallToolResponse {
+    pub output: serde_json::Value,
 }
 
 /// Input for `host_kv_delete`.
 #[derive(Debug, Deserialize)]
-struct KvDeleteRequest {
-    key: String,
+pub(crate) struct KvDeleteRequest {
+    pub key: String,
 }
 
 /// Input for `host_kv_list`.
 #[derive(Debug, Deserialize)]
-struct KvListRequest {
+pub(crate) struct KvListRequest {
     #[serde(default)]
-    prefix: Option<String>,
+    pub prefix: Option<String>,
 }
 
 /// Output for `host_kv_list`.
 #[derive(Debug, Serialize)]
-struct KvListResponse {
-    keys: Vec<String>,
+pub(crate) struct KvListResponse {
+    pub keys: Vec<String>,
 }
 
 /// Input for `host_emit_metric`.
 #[derive(Debug, Deserialize)]
-struct EmitMetricRequest {
-    name: String,
-    kind: String,
-    value: f64,
+pub(crate) struct EmitMetricRequest {
+    pub name: String,
+    pub kind: String,
+    pub value: f64,
     #[serde(default)]
-    labels: HashMap<String, String>,
+    pub labels: HashMap<String, String>,
 }
 
 /// Input for `host_memory_query`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct MemoryQueryRequest {
-    query: String,
+pub(crate) struct MemoryQueryRequest {
+    pub query: String,
     #[serde(default)]
-    scope: Option<String>,
+    pub scope: Option<String>,
     #[serde(default)]
-    limit: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 /// Input for `host_memory_write`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct MemoryWriteRequest {
-    content: String,
+pub(crate) struct MemoryWriteRequest {
+    pub content: String,
     #[serde(default)]
-    scope: Option<String>,
+    pub scope: Option<String>,
     #[serde(default)]
-    metadata: HashMap<String, serde_json::Value>,
+    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Input for `host_conversation_read`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct ConversationReadRequest {
-    conversation_id: String,
+pub(crate) struct ConversationReadRequest {
+    pub conversation_id: String,
     #[serde(default)]
-    limit: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 /// Input for `host_schedule`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct ScheduleRequest {
+pub(crate) struct ScheduleRequest {
     /// Cron expression or interval (e.g. "*/5 * * * *" or "30s").
-    schedule: String,
+    pub schedule: String,
     /// Payload to deliver when the job fires.
-    payload: serde_json::Value,
+    pub payload: serde_json::Value,
 }
 
 /// Input for `host_fs_read`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct FsReadRequest {
-    path: String,
+pub(crate) struct FsReadRequest {
+    pub path: String,
 }
 
 /// Input for `host_fs_write`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct FsWriteRequest {
-    path: String,
-    content: String,
+pub(crate) struct FsWriteRequest {
+    pub path: String,
+    pub content: String,
 }
 
 /// Input for `host_llm_complete`.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct LlmCompleteRequest {
-    prompt: String,
+pub(crate) struct LlmCompleteRequest {
+    pub prompt: String,
     #[serde(default)]
-    model: Option<String>,
+    pub model: Option<String>,
     #[serde(default)]
-    max_tokens: Option<u32>,
+    pub max_tokens: Option<u32>,
 }
 
 /// Generic error envelope returned to plugins.
 #[derive(Debug, Serialize)]
-struct HostError {
-    error: String,
+pub(crate) struct HostError {
+    pub error: String,
 }
 
 /// Generic success envelope (for void-returning operations).
 #[derive(Debug, Serialize)]
-struct HostOk {
-    ok: bool,
+pub(crate) struct HostOk {
+    pub ok: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +360,7 @@ struct HostOk {
 // ---------------------------------------------------------------------------
 
 /// Reads a JSON-encoded value from the plugin's memory at the given input offset.
-fn read_input<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_input<T: serde::de::DeserializeOwned>(
     plugin: &mut CurrentPlugin,
     inputs: &[Val],
 ) -> Result<T, extism::Error> {
@@ -312,7 +369,7 @@ fn read_input<T: serde::de::DeserializeOwned>(
 }
 
 /// Writes a JSON-encoded value to plugin memory and stores the handle in outputs.
-fn write_output<T: Serialize>(
+pub(crate) fn write_output<T: Serialize>(
     plugin: &mut CurrentPlugin,
     outputs: &mut [Val],
     value: &T,
@@ -327,7 +384,7 @@ fn write_output<T: Serialize>(
 }
 
 /// Returns an error response to the plugin for a denied capability.
-fn capability_denied_error(
+pub(crate) fn capability_denied_error(
     plugin: &mut CurrentPlugin,
     outputs: &mut [Val],
     capability: &str,
@@ -339,7 +396,7 @@ fn capability_denied_error(
 }
 
 /// Returns a "not yet connected" stub error to the plugin.
-fn not_yet_connected_error(
+pub(crate) fn not_yet_connected_error(
     plugin: &mut CurrentPlugin,
     outputs: &mut [Val],
     function_name: &str,
@@ -348,596 +405,6 @@ fn not_yet_connected_error(
         error: format!("{function_name}: not yet connected (stub)"),
     };
     write_output(plugin, outputs, &err)
-}
-
-// ---------------------------------------------------------------------------
-// Host function implementations
-// ---------------------------------------------------------------------------
-
-/// Structured logging from the plugin.
-///
-/// Always available — no capability gate required.  Maps plugin log levels
-/// to `tracing` levels on the host side.
-fn host_log_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: LogRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-    let plugin_id = ctx.plugin_id;
-
-    match req.level.to_lowercase().as_str() {
-        "trace" => trace!(plugin_id = %plugin_id, fields = ?req.fields, "{}", req.message),
-        "debug" => debug!(plugin_id = %plugin_id, fields = ?req.fields, "{}", req.message),
-        "info" => info!(plugin_id = %plugin_id, fields = ?req.fields, "{}", req.message),
-        "warn" => warn!(plugin_id = %plugin_id, fields = ?req.fields, "{}", req.message),
-        "error" => error!(plugin_id = %plugin_id, fields = ?req.fields, "{}", req.message),
-        _ => info!(plugin_id = %plugin_id, fields = ?req.fields, "[{}] {}", req.level, req.message),
-    }
-
-    let ok = HostOk { ok: true };
-    write_output(plugin, outputs, &ok)
-}
-
-/// Reads a value from plugin-scoped key-value storage.
-///
-/// Requires the `KeyValue` capability.  Phase 1 uses an in-memory store.
-fn host_kv_get_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: KvGetRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::KeyValue) {
-        return capability_denied_error(plugin, outputs, "key_value");
-    }
-
-    let kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    let value = kv.get(&req.key).cloned();
-
-    let resp = KvGetResponse { value };
-    write_output(plugin, outputs, &resp)
-}
-
-/// Writes a value to plugin-scoped key-value storage.
-///
-/// Requires the `KeyValue` capability.  Phase 1 uses an in-memory store.
-fn host_kv_set_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: KvSetRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::KeyValue) {
-        return capability_denied_error(plugin, outputs, "key_value");
-    }
-
-    let mut kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    kv.insert(req.key, req.value);
-
-    let ok = HostOk { ok: true };
-    write_output(plugin, outputs, &ok)
-}
-
-/// Deletes a key from plugin-scoped key-value storage.
-///
-/// Requires the `KeyValue` capability.  Phase 1 uses an in-memory store.
-fn host_kv_delete_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: KvDeleteRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::KeyValue) {
-        return capability_denied_error(plugin, outputs, "key_value");
-    }
-
-    let mut kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-    kv.remove(&req.key);
-
-    let ok = HostOk { ok: true };
-    write_output(plugin, outputs, &ok)
-}
-
-/// Lists keys in plugin-scoped key-value storage, optionally filtered by prefix.
-///
-/// Requires the `KeyValue` capability.  Phase 1 uses an in-memory store.
-fn host_kv_list_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: KvListRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::KeyValue) {
-        return capability_denied_error(plugin, outputs, "key_value");
-    }
-
-    let kv = ctx
-        .kv_store
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("kv lock poisoned: {e}")))?;
-
-    let keys: Vec<String> = match &req.prefix {
-        Some(prefix) => kv
-            .keys()
-            .filter(|k| k.starts_with(prefix.as_str()))
-            .cloned()
-            .collect(),
-        None => kv.keys().cloned().collect(),
-    };
-
-    let resp = KvListResponse { keys };
-    write_output(plugin, outputs, &resp)
-}
-
-/// Makes an outbound HTTP request.
-///
-/// Requires the `Network` capability.  When the capability restricts domains,
-/// the request URL's host must match one of the allowed entries.  Uses `ureq`
-/// for synchronous HTTP (Extism host functions cannot be async).
-fn host_http_request_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: HttpRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-
-    // Extract what we need from the context, then drop the lock.
-    let allowed_domains = {
-        let ctx = data
-            .lock()
-            .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-        if !ctx.has_capability(&CapabilityKind::Network) {
-            return capability_denied_error(plugin, outputs, "network");
-        }
-
-        // Collect the domain restriction from the Network capability.
-        ctx.capabilities
-            .iter()
-            .find_map(|c| match c {
-                Capability::Network { domains } => Some(domains.clone()),
-                _ => None,
-            })
-            .unwrap_or_default()
-    };
-
-    // Enforce domain restrictions when the list is non-empty.
-    if !allowed_domains.is_empty() {
-        let host = extract_host(&req.url);
-        match host {
-            Some(h) => {
-                if !allowed_domains.iter().any(|d| d == &h) {
-                    let err = HostError {
-                        error: format!("network: domain {h:?} not in allowed list"),
-                    };
-                    return write_output(plugin, outputs, &err);
-                }
-            }
-            None => {
-                let err = HostError {
-                    error: format!("network: could not extract host from URL {:?}", req.url),
-                };
-                return write_output(plugin, outputs, &err);
-            }
-        }
-    }
-
-    // Build the ureq agent — disable treating 4xx/5xx as errors so the
-    // plugin sees the actual status code.
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
-
-    // Dispatch by HTTP method.
-    let result = match req.method.to_uppercase().as_str() {
-        "GET" => {
-            let mut builder = agent.get(&req.url);
-            for (k, v) in &req.headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
-            builder.call()
-        }
-        "POST" => send_with_body(agent.post(&req.url), &req.headers, &req.body),
-        "PUT" => send_with_body(agent.put(&req.url), &req.headers, &req.body),
-        "PATCH" => send_with_body(agent.patch(&req.url), &req.headers, &req.body),
-        "DELETE" => {
-            let mut builder = agent.delete(&req.url);
-            for (k, v) in &req.headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
-            builder.call()
-        }
-        "HEAD" => {
-            let mut builder = agent.head(&req.url);
-            for (k, v) in &req.headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
-            builder.call()
-        }
-        "OPTIONS" => {
-            let mut builder = agent.options(&req.url);
-            for (k, v) in &req.headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
-            builder.call()
-        }
-        other => {
-            let err = HostError {
-                error: format!("unsupported HTTP method: {other}"),
-            };
-            return write_output(plugin, outputs, &err);
-        }
-    };
-
-    match result {
-        Ok(mut response) => {
-            let status = response.status().as_u16();
-            let mut resp_headers = HashMap::new();
-            for (name, value) in response.headers() {
-                if let Ok(v) = value.to_str() {
-                    resp_headers.insert(name.to_string(), v.to_string());
-                }
-            }
-            let body = response.body_mut().read_to_string().unwrap_or_default();
-            let resp = HttpResponse {
-                status,
-                headers: resp_headers,
-                body,
-            };
-            write_output(plugin, outputs, &resp)
-        }
-        Err(e) => {
-            let err = HostError {
-                error: format!("HTTP request failed: {e}"),
-            };
-            write_output(plugin, outputs, &err)
-        }
-    }
-}
-
-/// Sends an HTTP request that carries a body (POST, PUT, PATCH).
-fn send_with_body(
-    builder: ureq::RequestBuilder<ureq::typestate::WithBody>,
-    headers: &HashMap<String, String>,
-    body: &Option<String>,
-) -> Result<http::Response<ureq::Body>, ureq::Error> {
-    let mut b = builder;
-    for (k, v) in headers {
-        b = b.header(k.as_str(), v.as_str());
-    }
-    match body {
-        Some(data) => b.send(data.as_bytes()),
-        None => b.send_empty(),
-    }
-}
-
-/// Extracts the host (domain) from a URL string without pulling in the `url` crate.
-///
-/// Handles `scheme://host:port/path` and `scheme://host/path` forms.
-/// Returns `None` if the URL does not contain a recognisable host.
-fn extract_host(url: &str) -> Option<String> {
-    // Skip past the scheme (e.g. "https://").
-    let after_scheme = url.find("://").map(|i| &url[i + 3..]).unwrap_or(url);
-
-    // Strip userinfo if present (user:pass@host).
-    let after_userinfo = match after_scheme.find('@') {
-        Some(i) => &after_scheme[i + 1..],
-        None => after_scheme,
-    };
-
-    // Take everything before the first `/` or `?` (path/query start).
-    let host_port = after_userinfo
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(after_userinfo);
-
-    // Strip the port if present.
-    let host = if host_port.starts_with('[') {
-        // IPv6 bracket notation: [::1]:8080
-        host_port.find(']').map(|i| &host_port[1..i])
-    } else {
-        Some(host_port.rsplit_once(':').map_or(host_port, |(h, _)| h))
-    };
-
-    host.filter(|h| !h.is_empty()).map(|h| h.to_lowercase())
-}
-
-/// Reads a secret from the vault.
-///
-/// Requires the `SecretRead` capability.  Phase 1: returns a stub error.
-fn host_read_secret_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: ReadSecretRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::SecretRead) {
-        return capability_denied_error(plugin, outputs, "secret_read");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_read_secret")
-}
-
-/// Calls another tool/plugin.
-///
-/// Requires the `ToolCall` capability.  Phase 1: returns a stub error.
-fn host_call_tool_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: CallToolRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::ToolCall) {
-        return capability_denied_error(plugin, outputs, "tool_call");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_call_tool")
-}
-
-/// Emits a metric (counter, gauge, or histogram sample).
-///
-/// Requires the `Metrics` capability.  All metric names are prefixed with
-/// `sober_plugin_` to namespace them away from core metrics.  Supported
-/// kinds: `"counter"`, `"gauge"`, `"histogram"`.
-fn host_emit_metric_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let req: EmitMetricRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-
-    // Check capability then drop the lock before doing any work.
-    {
-        let ctx = data
-            .lock()
-            .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-        if !ctx.has_capability(&CapabilityKind::Metrics) {
-            return capability_denied_error(plugin, outputs, "metrics");
-        }
-    }
-
-    let name = format!("sober_plugin_{}", req.name);
-
-    // Convert labels into owned key-value pairs for the metrics macros.
-    let labels: Vec<(String, String)> = req.labels.into_iter().collect();
-
-    match req.kind.as_str() {
-        "counter" => {
-            metrics::counter!(name.clone(), &labels).increment(req.value as u64);
-        }
-        "gauge" => {
-            metrics::gauge!(name.clone(), &labels).set(req.value);
-        }
-        "histogram" => {
-            metrics::histogram!(name.clone(), &labels).record(req.value);
-        }
-        other => {
-            let err = HostError {
-                error: format!(
-                    "unsupported metric kind: {other:?} (expected counter, gauge, or histogram)"
-                ),
-            };
-            return write_output(plugin, outputs, &err);
-        }
-    }
-
-    let ok = HostOk { ok: true };
-    write_output(plugin, outputs, &ok)
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2+ stubs
-// ---------------------------------------------------------------------------
-
-/// Queries the memory/context system.
-///
-/// Requires the `MemoryRead` capability.  Phase 2: returns a stub error.
-fn host_memory_query_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: MemoryQueryRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::MemoryRead) {
-        return capability_denied_error(plugin, outputs, "memory_read");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_memory_query")
-}
-
-/// Writes to the memory/context system.
-///
-/// Requires the `MemoryWrite` capability.  Phase 2: returns a stub error.
-fn host_memory_write_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: MemoryWriteRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::MemoryWrite) {
-        return capability_denied_error(plugin, outputs, "memory_write");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_memory_write")
-}
-
-/// Reads conversation history.
-///
-/// Requires the `ConversationRead` capability.  Phase 2: returns a stub error.
-fn host_conversation_read_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: ConversationReadRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::ConversationRead) {
-        return capability_denied_error(plugin, outputs, "conversation_read");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_conversation_read")
-}
-
-/// Creates or manages a scheduled job.
-///
-/// Requires the `Schedule` capability.  Phase 2: returns a stub error.
-fn host_schedule_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: ScheduleRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::Schedule) {
-        return capability_denied_error(plugin, outputs, "schedule");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_schedule")
-}
-
-/// Reads a file from the sandboxed filesystem.
-///
-/// Requires the `Filesystem` capability.  Phase 2: returns a stub error.
-fn host_fs_read_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: FsReadRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::Filesystem) {
-        return capability_denied_error(plugin, outputs, "filesystem");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_fs_read")
-}
-
-/// Writes a file to the sandboxed filesystem.
-///
-/// Requires the `Filesystem` capability.  Phase 2: returns a stub error.
-fn host_fs_write_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: FsWriteRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::Filesystem) {
-        return capability_denied_error(plugin, outputs, "filesystem");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_fs_write")
-}
-
-/// Sends a prompt to an LLM provider.
-///
-/// Requires the `LlmCall` capability.  Phase 2: returns a stub error.
-fn host_llm_complete_impl(
-    plugin: &mut CurrentPlugin,
-    inputs: &[Val],
-    outputs: &mut [Val],
-    user_data: UserData<HostContext>,
-) -> Result<(), extism::Error> {
-    let _req: LlmCompleteRequest = read_input(plugin, inputs)?;
-    let data = user_data.get()?;
-    let ctx = data
-        .lock()
-        .map_err(|e| extism::Error::msg(format!("lock poisoned: {e}")))?;
-
-    if !ctx.has_capability(&CapabilityKind::LlmCall) {
-        return capability_denied_error(plugin, outputs, "llm_call");
-    }
-
-    not_yet_connected_error(plugin, outputs, "host_llm_complete")
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,6 +487,7 @@ type HostFn =
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Capability;
 
     fn test_context(capabilities: Vec<Capability>) -> HostContext {
         HostContext::new(PluginId::new(), capabilities)
@@ -1336,7 +804,7 @@ mod tests {
     #[test]
     fn extract_host_https() {
         assert_eq!(
-            extract_host("https://example.com/path"),
+            network::extract_host("https://example.com/path"),
             Some("example.com".into())
         );
     }
@@ -1344,7 +812,7 @@ mod tests {
     #[test]
     fn extract_host_http_with_port() {
         assert_eq!(
-            extract_host("http://localhost:8080/api"),
+            network::extract_host("http://localhost:8080/api"),
             Some("localhost".into())
         );
     }
@@ -1352,7 +820,7 @@ mod tests {
     #[test]
     fn extract_host_no_path() {
         assert_eq!(
-            extract_host("https://api.example.com"),
+            network::extract_host("https://api.example.com"),
             Some("api.example.com".into())
         );
     }
@@ -1360,7 +828,7 @@ mod tests {
     #[test]
     fn extract_host_with_query() {
         assert_eq!(
-            extract_host("https://example.com?q=1"),
+            network::extract_host("https://example.com?q=1"),
             Some("example.com".into())
         );
     }
@@ -1368,7 +836,7 @@ mod tests {
     #[test]
     fn extract_host_with_fragment() {
         assert_eq!(
-            extract_host("https://example.com#section"),
+            network::extract_host("https://example.com#section"),
             Some("example.com".into())
         );
     }
@@ -1376,27 +844,30 @@ mod tests {
     #[test]
     fn extract_host_with_userinfo() {
         assert_eq!(
-            extract_host("https://user:pass@example.com/path"),
+            network::extract_host("https://user:pass@example.com/path"),
             Some("example.com".into())
         );
     }
 
     #[test]
     fn extract_host_ipv6() {
-        assert_eq!(extract_host("http://[::1]:8080/path"), Some("::1".into()));
+        assert_eq!(
+            network::extract_host("http://[::1]:8080/path"),
+            Some("::1".into())
+        );
     }
 
     #[test]
     fn extract_host_normalizes_case() {
         assert_eq!(
-            extract_host("https://EXAMPLE.COM/path"),
+            network::extract_host("https://EXAMPLE.COM/path"),
             Some("example.com".into())
         );
     }
 
     #[test]
     fn extract_host_empty_returns_none() {
-        assert_eq!(extract_host(""), None);
+        assert_eq!(network::extract_host(""), None);
     }
 
     // -- HttpResponse serialization ------------------------------------------
@@ -1424,4 +895,84 @@ mod tests {
         assert!((req.value - 0.42).abs() < f64::EPSILON);
         assert!(req.labels.is_empty());
     }
+
+    // -- New HostContext fields tests ----------------------------------------
+
+    #[test]
+    fn host_context_new_defaults() {
+        let ctx = test_context(vec![]);
+        assert!(ctx.runtime_handle.is_none());
+        assert!(ctx.user_id.is_none());
+    }
+
+    #[test]
+    fn host_context_with_user_id() {
+        let user_id = UserId::new();
+        let ctx = test_context(vec![]).with_user_id(user_id);
+        assert_eq!(ctx.user_id, Some(user_id));
+    }
+
+    #[test]
+    fn host_context_with_runtime_handle() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        let handle = rt.handle().clone();
+
+        let ctx = test_context(vec![]).with_runtime_handle(handle);
+        assert!(ctx.runtime_handle.is_some());
+    }
+
+    #[test]
+    fn host_context_builder_chain() {
+        let user_id = UserId::new();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        let handle = rt.handle().clone();
+
+        let ctx = test_context(vec![])
+            .with_runtime_handle(handle)
+            .with_user_id(user_id);
+
+        assert!(ctx.runtime_handle.is_some());
+        assert_eq!(ctx.user_id, Some(user_id));
+    }
+
+    #[test]
+    fn block_on_async_without_handle_returns_error() {
+        let ctx = test_context(vec![]);
+        let result = ctx.block_on_async(async { 42 });
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no runtime handle"),
+        );
+    }
+
+    #[test]
+    fn block_on_async_with_handle_runs_future() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        let handle = rt.handle().clone();
+
+        let ctx = test_context(vec![]).with_runtime_handle(handle);
+        let result = ctx.block_on_async(async { 42 });
+        assert_eq!(result.expect("should succeed"), 42);
+    }
+
+    // Compile-time assertion that HostContext remains Send + Sync.
+    #[allow(dead_code)]
+    const _: () = {
+        fn assert_send_sync<T: Send + Sync>() {}
+        fn check() {
+            assert_send_sync::<HostContext>();
+        }
+    };
 }
