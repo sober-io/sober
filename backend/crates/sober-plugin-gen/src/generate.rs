@@ -400,11 +400,12 @@ fn compile_error_prompt(error: &str) -> String {
 }
 
 fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String {
+    let safe_desc = description.replace('"', "'");
     let mut lines = vec![
-        format!("[plugin]"),
+        "[plugin]".to_string(),
         format!("name = \"{name}\""),
-        format!("version = \"0.1.0\""),
-        format!("description = \"{description}\""),
+        "version = \"0.1.0\"".to_string(),
+        format!("description = \"{safe_desc}\""),
         String::new(),
         "[capabilities]".to_string(),
     ];
@@ -416,7 +417,7 @@ fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String
     lines.push(String::new());
     lines.push("[[tools]]".to_string());
     lines.push(format!("name = \"{name}\""));
-    lines.push(format!("description = \"{description}\""));
+    lines.push(format!("description = \"{safe_desc}\""));
 
     lines.join("\n")
 }
