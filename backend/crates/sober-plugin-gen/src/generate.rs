@@ -264,11 +264,16 @@ The input is a JSON string. The return value must also be a JSON string.
 
 Available capabilities via `sober_pdk`:
 - `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — structured logging (always available)
-- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` — key-value store (requires `key_value` capability)
+- `sober_pdk::kv::get(key)` / `set(key, value)` / `delete(key)` / `list(prefix)` — key-value store (requires `key_value` capability)
 - `sober_pdk::http::fetch(url, method, headers, body)` — HTTP requests (requires `network` capability)
-- `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability; stub)
-- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability; stub)
-- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` — emit metrics (requires `metrics` capability)
+- `sober_pdk::secrets::get(key)` — read a secret (requires `secret_read` capability)
+- `sober_pdk::tool_call::invoke(name, input)` — call other tools/plugins (requires `tool_call` capability)
+- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` / `histogram(name, value)` — emit metrics (requires `metrics` capability)
+- `sober_pdk::memory::query(query, scope, limit)` / `write(content, scope, metadata)` — vector memory (requires `memory_read` / `memory_write` capability)
+- `sober_pdk::conversation::read(conversation_id, limit)` — read conversation history (requires `conversation_read` capability)
+- `sober_pdk::schedule::add(cron_or_interval, payload)` — schedule a job (requires `schedule` capability)
+- `sober_pdk::fs::read(path)` / `write(path, content)` — sandboxed file I/O (requires `filesystem` capability)
+- `sober_pdk::llm::complete(prompt, model, max_tokens)` — LLM text completion (requires `llm_inference` capability)
 
 IMPORTANT: `sober-pdk` is already included in Cargo.toml — do NOT add it manually.
 The Cargo.toml is generated automatically with the correct path dependency.
@@ -281,9 +286,17 @@ version = "0.1.0"
 description = "..."
 
 [capabilities]
-key_value = true     # optional
-network = true       # optional
-secret_read = true   # optional
+key_value = true           # optional — plugin-scoped key-value storage
+network = true             # optional — outbound HTTP requests
+secret_read = true         # optional — read host secrets
+tool_call = true           # optional — invoke other tools/plugins
+memory_read = true         # optional — vector memory search
+memory_write = true        # optional — vector memory write
+conversation_read = true   # optional — read conversation history
+schedule = true            # optional — schedule jobs
+metrics = true             # optional — emit counters/gauges/histograms
+filesystem = true          # optional — sandboxed file I/O
+llm_inference = true       # optional — LLM text completion
 
 [[tools]]
 name = "tool-name"
@@ -324,11 +337,9 @@ pub fn greet(input: String) -> FnResult<String> {
 }
 ```
 
-IMPORTANT — current capability status:
-- FUNCTIONAL: `log` (always available), `key_value` (in-memory), `network` (HTTP via ureq), `metrics` (counter/gauge/histogram)
-- STUBS (return errors at runtime): `secret_read`, `tool_call`, `memory_read`, `memory_write`, `conversation_read`, `schedule`, `filesystem`, `llm_call`
-
-Prefer functional capabilities. If a stub capability is requested, include it but warn the user it is not yet connected.
+All capabilities listed above are functional. Some may return errors at runtime if the
+host service is not configured for the current plugin instance (e.g. no LLM backend
+configured), but the host function contract is fully wired.
 
 Rules:
 - Output ONLY a single fenced Rust code block (```rust ... ```).

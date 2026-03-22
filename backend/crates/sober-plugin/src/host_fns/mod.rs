@@ -3,7 +3,7 @@
 //! Each host function is registered with Extism when a plugin instance is
 //! created.  Functions use JSON serialization across the WASM boundary:
 //! the plugin sends a JSON request, the host deserializes it, performs the
-//! operation (or returns a stub error), and serializes the result back.
+//! operation, and serializes the result back.
 //!
 //! # Capability gating
 //!
@@ -12,9 +12,11 @@
 //! check before executing.  `host_log` is the only function that is always
 //! available.
 //!
-//! # Functional host functions
+//! # Host functions
 //!
-//! The following host functions are fully operational:
+//! All host functions are wired to their backend traits.  Functions return
+//! "not yet connected" only when the corresponding backend is not provided
+//! (e.g. in test mode or when a service is not configured).
 //!
 //! - `host_log` — structured logging (always available, no capability gate)
 //! - `host_kv_*` — plugin-scoped key-value storage (via `KvBackend` trait, `KeyValue` capability)
@@ -22,10 +24,13 @@
 //! - `host_emit_metric` — counter/gauge/histogram emission via `metrics` crate (`Metrics` capability)
 //! - `host_fs_read` — sandboxed file read via `std::fs` (`Filesystem` capability, path-restricted)
 //! - `host_fs_write` — sandboxed file write via `std::fs` (`Filesystem` capability, path-restricted)
-//!
-//! Remaining host functions (secrets, tool calls, memory, LLM,
-//! scheduling, conversation) return "not yet connected" stub errors until
-//! the backing services are wired in.
+//! - `host_read_secret` — secret lookup via `SecretBackend` trait (`SecretRead` capability)
+//! - `host_call_tool` — tool invocation via `ToolExecutor` trait (`ToolCall` capability)
+//! - `host_memory_query` — vector memory search via `MemoryBackend` trait (`MemoryRead` capability)
+//! - `host_memory_write` — vector memory write via `MemoryBackend` trait (`MemoryWrite` capability)
+//! - `host_conversation_read` — conversation history via `ConversationBackend` trait (`ConversationRead` capability)
+//! - `host_schedule` — job scheduling via `ScheduleBackend` trait (`Schedule` capability)
+//! - `host_llm_complete` — LLM text completion via `LlmBackend` trait (`LlmInference` capability)
 
 mod conversation;
 mod filesystem;
@@ -297,10 +302,6 @@ pub(crate) struct KvSetRequest {
     pub value: serde_json::Value,
 }
 
-// Stub request/response types: fields are deserialized to validate the
-// contract but not yet read by stub implementations.  `#[allow(dead_code)]`
-// silences warnings until the backing services are wired in.
-
 /// Input for `host_http_request`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct HttpRequest {
@@ -323,21 +324,18 @@ pub(crate) struct HttpResponse {
 
 /// Input for `host_read_secret`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ReadSecretRequest {
     pub name: String,
 }
 
 /// Output for `host_read_secret`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct ReadSecretResponse {
     pub value: String,
 }
 
 /// Input for `host_call_tool`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct CallToolRequest {
     pub tool: String,
     #[serde(default)]
@@ -346,28 +344,24 @@ pub(crate) struct CallToolRequest {
 
 /// Output for `host_call_tool`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct CallToolResponse {
     pub output: serde_json::Value,
 }
 
 /// Output for `host_memory_query`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct MemoryQueryResponse {
     pub results: Vec<crate::backends::MemoryHit>,
 }
 
 /// Output for `host_conversation_read`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct ConversationReadResponse {
     pub messages: Vec<crate::backends::ConversationMessage>,
 }
 
 /// Output for `host_schedule`.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)] // will be constructed when backend is wired
 pub(crate) struct ScheduleResponse {
     pub job_id: String,
 }
@@ -403,7 +397,6 @@ pub(crate) struct EmitMetricRequest {
 
 /// Input for `host_memory_query`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct MemoryQueryRequest {
     pub query: String,
     #[serde(default)]
@@ -414,7 +407,6 @@ pub(crate) struct MemoryQueryRequest {
 
 /// Input for `host_memory_write`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct MemoryWriteRequest {
     pub content: String,
     #[serde(default)]
@@ -425,7 +417,6 @@ pub(crate) struct MemoryWriteRequest {
 
 /// Input for `host_conversation_read`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ConversationReadRequest {
     pub conversation_id: String,
     #[serde(default)]
@@ -434,7 +425,6 @@ pub(crate) struct ConversationReadRequest {
 
 /// Input for `host_schedule`.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // fields read via serde; will be used when backend is wired
 pub(crate) struct ScheduleRequest {
     /// Cron expression or interval (e.g. "*/5 * * * *" or "30s").
     pub schedule: String,
@@ -529,7 +519,10 @@ pub(crate) fn capability_denied_error(
     write_output(plugin, outputs, &err)
 }
 
-/// Returns a "not yet connected" stub error to the plugin.
+/// Returns a "not yet connected" error when the backend service is not configured.
+///
+/// Used when a host function's optional backend is `None` (e.g. test mode or
+/// a service that has not been wired up for this plugin instance).
 pub(crate) fn not_yet_connected_error(
     plugin: &mut CurrentPlugin,
     outputs: &mut [Val],
@@ -571,18 +564,18 @@ pub fn build_host_functions(ctx: HostContext) -> Vec<Function> {
     let functions = vec![
         // Always available
         ("host_log", host_log_impl as HostFn),
-        // Phase 1 — KeyValue (via KvBackend trait)
+        // KeyValue (via KvBackend trait)
         ("host_kv_get", host_kv_get_impl as HostFn),
         ("host_kv_set", host_kv_set_impl as HostFn),
         ("host_kv_delete", host_kv_delete_impl as HostFn),
         ("host_kv_list", host_kv_list_impl as HostFn),
-        // Phase 1 — functional (network + metrics)
+        // Network and metrics
         ("host_http_request", host_http_request_impl as HostFn),
         ("host_emit_metric", host_emit_metric_impl as HostFn),
-        // Phase 1 — stubs (secrets, tool calls)
+        // Secrets and tool calls (via SecretBackend / ToolExecutor traits)
         ("host_read_secret", host_read_secret_impl as HostFn),
         ("host_call_tool", host_call_tool_impl as HostFn),
-        // Phase 2+ — stubs
+        // Memory, conversation, scheduling, filesystem, LLM
         ("host_memory_query", host_memory_query_impl as HostFn),
         ("host_memory_write", host_memory_write_impl as HostFn),
         (
