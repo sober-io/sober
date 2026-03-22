@@ -221,12 +221,22 @@ impl PluginGenerator {
             .await
             .map_err(|e| GenError::Generate(e.to_string()))?;
 
-        let content = response
+        let raw = response
             .choices
             .first()
             .and_then(|c| c.message.content.clone())
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| GenError::Generate("LLM returned empty skill content".to_string()))?;
+
+        // Strip code fences if the LLM wrapped the output.
+        let content = strip_markdown_fences(&raw);
+
+        // Validate frontmatter exists.
+        if !content.starts_with("---") {
+            return Err(GenError::Generate(
+                "Skill content missing YAML frontmatter (must start with ---)".to_string(),
+            ));
+        }
 
         Ok(content)
     }
@@ -394,40 +404,65 @@ serde_json = "1"
 fn skill_system_prompt() -> &'static str {
     r#"You are an expert at writing Sõber skill definitions.
 
-A Sõber skill is a reusable prompt template stored as a markdown document. It
-instructs the agent how to handle a specific type of task.
+A Sõber skill is a reusable prompt template stored as a SKILL.md file with
+YAML frontmatter. The agent loads the frontmatter for metadata and injects
+the body into the conversation as instructions.
 
-Structure:
-```markdown
-# Skill: <Name>
+REQUIRED format (output this EXACTLY — no code fences, no wrapping):
 
-## Description
-<One-sentence summary>
+---
+name: skill-name
+description: One-sentence summary of what this skill does
+---
 
 ## When to use
-<Bullet list of triggers / use cases>
+- Bullet list of triggers / use cases
 
 ## Instructions
-<Step-by-step guidance for the agent>
+Step-by-step guidance for the agent (imperative language).
 
 ## Output format
-<Expected output structure>
+Expected output structure (JSON, markdown table, etc.).
 
 ## Example
-<A worked example>
-```
+A worked example showing input and expected output.
 
-Rules:
+IMPORTANT:
+- Start with `---` (YAML frontmatter delimiter) on the VERY FIRST LINE.
+- The `name` field MUST match the skill name (lowercase, hyphens).
+- The `description` field is a single sentence.
+- Do NOT wrap output in ```markdown``` code fences.
+- Do NOT include `# Skill: ...` headers — the frontmatter IS the header.
 - Be concise and precise.
-- Use imperative language in the Instructions section.
-- The Output format section must describe a structured format (JSON, markdown table, etc.).
+- Use imperative language in Instructions.
 - Do not include implementation code — skills are prompt templates, not programs."#
 }
 
 fn skill_user_prompt(name: &str, description: &str) -> String {
     format!(
-        "Generate a Sõber skill definition.\n\nSkill name: {name}\nDescription: {description}\n\nRespond with the full markdown skill document."
+        "Generate a Sõber skill definition.\n\nSkill name: {name}\nDescription: {description}\n\nRespond with ONLY the raw SKILL.md content starting with --- (no code fences)."
     )
+}
+
+/// Strips markdown code fences from LLM output.
+///
+/// Handles ```markdown ... ```, ```yaml ... ```, or bare ``` ... ```.
+fn strip_markdown_fences(raw: &str) -> String {
+    let trimmed = raw.trim();
+
+    // Check for opening fence
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // Skip the language tag line
+        let after_tag = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or(rest);
+
+        // Strip closing fence
+        if let Some(pos) = after_tag.rfind("```") {
+            return after_tag[..pos].trim().to_string();
+        }
+        return after_tag.trim().to_string();
+    }
+
+    trimmed.to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn generate_skill_returns_llm_content() {
-        let expected = "# Skill: Summariser\n\nSummarises text.";
+        let expected = "---\nname: summariser\ndescription: Summarises text.\n---\n\n## Instructions\nSummarise the input.";
         let mock = MockLlm::new(vec![Ok(expected.to_string())]);
         let generator = PluginGenerator::new(mock.clone(), "test-model");
 
@@ -609,7 +644,9 @@ mod tests {
 
     #[tokio::test]
     async fn generate_skill_prompt_contains_name_and_description() {
-        let mock = MockLlm::new(vec![Ok("# Skill: Test\n\nContent.".to_string())]);
+        let mock = MockLlm::new(vec![Ok(
+            "---\nname: test\ndescription: Test skill.\n---\n\nContent.".to_string(),
+        )]);
         let generator = PluginGenerator::new(mock.clone(), "test-model");
 
         generator
