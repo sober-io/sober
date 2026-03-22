@@ -43,13 +43,15 @@ mod network;
 mod schedule;
 mod secrets;
 mod tool_call;
+mod types;
 
-use std::collections::HashMap;
+pub(crate) use types::*;
+
 use std::fmt;
 use std::sync::Arc;
 
 use extism::{CurrentPlugin, Function, PTR, UserData, Val};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sober_core::types::ids::{PluginId, UserId};
 
 use crate::backends::InMemoryKvBackend;
@@ -316,215 +318,6 @@ pub(crate) enum CapabilityKind {
 }
 
 // ---------------------------------------------------------------------------
-// JSON request / response types for the WASM boundary
-// ---------------------------------------------------------------------------
-
-/// Input for `host_log`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct LogRequest {
-    pub level: String,
-    pub message: String,
-    #[serde(default)]
-    pub fields: HashMap<String, serde_json::Value>,
-}
-
-/// Input for `host_kv_get`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct KvGetRequest {
-    pub key: String,
-}
-
-/// Output for `host_kv_get`.
-#[derive(Debug, Serialize)]
-pub(crate) struct KvGetResponse {
-    pub value: Option<serde_json::Value>,
-}
-
-/// Input for `host_kv_set`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct KvSetRequest {
-    pub key: String,
-    pub value: serde_json::Value,
-}
-
-/// Input for `host_http_request`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct HttpRequest {
-    pub method: String,
-    pub url: String,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
-    #[serde(default)]
-    pub body: Option<String>,
-}
-
-/// Output for `host_http_request`.
-#[derive(Debug, Serialize)]
-pub(crate) struct HttpResponse {
-    pub status: u16,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
-    pub body: String,
-}
-
-/// Input for `host_read_secret`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct ReadSecretRequest {
-    pub name: String,
-}
-
-/// Output for `host_read_secret`.
-#[derive(Debug, Serialize)]
-pub(crate) struct ReadSecretResponse {
-    pub value: String,
-}
-
-/// Input for `host_call_tool`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct CallToolRequest {
-    pub tool: String,
-    #[serde(default)]
-    pub input: serde_json::Value,
-}
-
-/// Output for `host_call_tool`.
-#[derive(Debug, Serialize)]
-pub(crate) struct CallToolResponse {
-    pub output: serde_json::Value,
-}
-
-/// Output for `host_memory_query`.
-#[derive(Debug, Serialize)]
-pub(crate) struct MemoryQueryResponse {
-    pub results: Vec<crate::backends::MemoryHit>,
-}
-
-/// Output for `host_conversation_read`.
-#[derive(Debug, Serialize)]
-pub(crate) struct ConversationReadResponse {
-    pub messages: Vec<crate::backends::ConversationMessage>,
-}
-
-/// Output for `host_schedule`.
-#[derive(Debug, Serialize)]
-pub(crate) struct ScheduleResponse {
-    pub job_id: String,
-}
-
-/// Input for `host_kv_delete`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct KvDeleteRequest {
-    pub key: String,
-}
-
-/// Input for `host_kv_list`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct KvListRequest {
-    #[serde(default)]
-    pub prefix: Option<String>,
-}
-
-/// Output for `host_kv_list`.
-#[derive(Debug, Serialize)]
-pub(crate) struct KvListResponse {
-    pub keys: Vec<String>,
-}
-
-/// Input for `host_emit_metric`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct EmitMetricRequest {
-    pub name: String,
-    pub kind: String,
-    pub value: f64,
-    #[serde(default)]
-    pub labels: HashMap<String, String>,
-}
-
-/// Input for `host_memory_query`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct MemoryQueryRequest {
-    pub query: String,
-    #[serde(default)]
-    pub scope: Option<String>,
-    #[serde(default)]
-    pub limit: Option<u32>,
-}
-
-/// Input for `host_memory_write`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct MemoryWriteRequest {
-    pub content: String,
-    #[serde(default)]
-    pub scope: Option<String>,
-    #[serde(default)]
-    pub metadata: HashMap<String, serde_json::Value>,
-}
-
-/// Input for `host_conversation_read`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct ConversationReadRequest {
-    pub conversation_id: String,
-    #[serde(default)]
-    pub limit: Option<u32>,
-}
-
-/// Input for `host_schedule`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct ScheduleRequest {
-    /// Cron expression or interval (e.g. "*/5 * * * *" or "30s").
-    pub schedule: String,
-    /// Payload to deliver when the job fires.
-    pub payload: serde_json::Value,
-}
-
-/// Input for `host_fs_read`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct FsReadRequest {
-    pub path: String,
-}
-
-/// Input for `host_fs_write`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct FsWriteRequest {
-    pub path: String,
-    pub content: String,
-}
-
-/// Output for `host_fs_read`.
-#[derive(Debug, Serialize)]
-pub(crate) struct FsReadResponse {
-    pub content: String,
-}
-
-/// Input for `host_llm_complete`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct LlmCompleteRequest {
-    pub prompt: String,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub max_tokens: Option<u32>,
-}
-
-/// Output for `host_llm_complete`.
-#[derive(Debug, Serialize)]
-pub(crate) struct LlmCompleteResponse {
-    pub text: String,
-}
-
-/// Generic error envelope returned to plugins.
-#[derive(Debug, Serialize)]
-pub(crate) struct HostError {
-    pub error: String,
-}
-
-/// Generic success envelope (for void-returning operations).
-#[derive(Debug, Serialize)]
-pub(crate) struct HostOk {
-    pub ok: bool,
-}
-
-// ---------------------------------------------------------------------------
 // Helper: read JSON input from WASM memory
 // ---------------------------------------------------------------------------
 
@@ -658,6 +451,8 @@ type HostFn =
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::capability::Capability;
 

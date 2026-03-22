@@ -14,10 +14,25 @@ use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::{ArtifactFilter, CreateArtifact, PluginFilter};
 use sober_core::types::repo::{ArtifactRepo, PluginRepo};
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
-use sober_plugin::PluginManager;
+use sober_plugin::audit::AuditRequest;
 use sober_plugin::registry::InstallRequest;
+use sober_plugin::{AuditPipeline, PluginManager};
 use sober_plugin_gen::PluginGenerator;
 use sober_workspace::BlobStore;
+
+/// Configuration for [`GeneratePluginTool`] construction.
+///
+/// Groups the dependencies and context that the tool needs beyond the
+/// plugin manager (which is always required).
+pub struct GeneratePluginConfig<A: ArtifactRepo> {
+    pub generator: Arc<PluginGenerator>,
+    pub blob_store: Arc<BlobStore>,
+    pub artifact_repo: Option<Arc<A>>,
+    pub workspace_dir: Option<PathBuf>,
+    pub workspace_id: Option<WorkspaceId>,
+    pub conversation_id: Option<ConversationId>,
+    pub user_id: UserId,
+}
 
 /// Built-in tool that generates plugins (WASM or skill) via LLM.
 ///
@@ -45,34 +60,24 @@ pub struct GeneratePluginTool<R: PluginRepo, A: ArtifactRepo> {
 impl<R: PluginRepo, A: ArtifactRepo> GeneratePluginTool<R, A> {
     /// Creates a new generate-plugin tool.
     ///
-    /// `workspace_dir` is the directory where generated plugin source files
-    /// will be saved for human inspection. If `None`, the tool returns a
+    /// `config.workspace_dir` is the directory where generated plugin source
+    /// files will be saved for human inspection. If `None`, the tool returns a
     /// message asking the user to set up a workspace first.
     ///
-    /// Generated WASM bytes are stored in `blob_store` content-addressed
+    /// Generated WASM bytes are stored in `config.blob_store` content-addressed
     /// rather than written to the filesystem, so they survive workspace moves.
-    /// When `artifact_repo` and `workspace_id` are both provided the blob
-    /// is also registered as a workspace artifact.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        generator: Arc<PluginGenerator>,
-        plugin_manager: Arc<PluginManager<R>>,
-        blob_store: Arc<BlobStore>,
-        artifact_repo: Option<Arc<A>>,
-        workspace_dir: Option<PathBuf>,
-        workspace_id: Option<WorkspaceId>,
-        conversation_id: Option<ConversationId>,
-        user_id: UserId,
-    ) -> Self {
+    /// When `config.artifact_repo` and `config.workspace_id` are both provided
+    /// the blob is also registered as a workspace artifact.
+    pub fn new(plugin_manager: Arc<PluginManager<R>>, config: GeneratePluginConfig<A>) -> Self {
         Self {
-            generator,
+            generator: config.generator,
             plugin_manager,
-            blob_store,
-            artifact_repo,
-            workspace_dir,
-            workspace_id,
-            conversation_id,
-            user_id,
+            blob_store: config.blob_store,
+            artifact_repo: config.artifact_repo,
+            workspace_dir: config.workspace_dir,
+            workspace_id: config.workspace_id,
+            conversation_id: config.conversation_id,
+            user_id: config.user_id,
         }
     }
 }
@@ -312,6 +317,25 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             let existing = &existing_plugins[0];
             let plugin_id = existing.id;
 
+            // Audit the new WASM bytes before committing any changes.
+            // This ensures regenerated plugins go through the same security
+            // pipeline as first-time installations.
+            let audit_request = AuditRequest {
+                name: name.to_owned(),
+                kind: PluginKind::Wasm,
+                origin: PluginOrigin::Agent,
+                config: new_config.clone(),
+                manifest: Some(manifest.clone()),
+                wasm_bytes: Some(generated.wasm_bytes.clone()),
+            };
+            let report = AuditPipeline::audit(&audit_request);
+            if !report.is_approved() {
+                return Err(ToolError::ExecutionFailed(format!(
+                    "regenerated plugin rejected by audit: {}",
+                    report.rejection_reason().unwrap_or("unknown")
+                )));
+            }
+
             // Evict the stale WASM host BEFORE updating config.  If config
             // update fails, the next load simply re-reads the old blob (still
             // valid).  The reverse order risks serving stale cached bytes
@@ -332,7 +356,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 plugin_id = %plugin_id,
                 plugin_name = name,
                 blob_key = %blob_key,
-                "regenerated WASM plugin — config updated and WASM host evicted"
+                "regenerated WASM plugin — audit passed, config updated, WASM host evicted"
             );
 
             // Archive old artifact and create a new one when a workspace is present.
@@ -742,6 +766,18 @@ mod tests {
             async { Ok(()) }
         }
 
+        async fn delete_kv_data(&self, _plugin_id: PluginId, _key: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+
+        async fn list_kv_keys(
+            &self,
+            _plugin_id: PluginId,
+            _prefix: Option<&str>,
+        ) -> Result<Vec<String>, AppError> {
+            Ok(vec![])
+        }
+
         fn update_scope(
             &self,
             _id: PluginId,
@@ -898,8 +934,9 @@ mod tests {
 
     /// Creates a tool with a temporary blob store directory.
     ///
-    /// Returns the tool and the `TempDir` so the caller can keep it alive
-    /// for the duration of the test.
+    /// Returns the tool and the `TempDir` (as `blob_dir`) so the caller can
+    /// keep it alive for the duration of the test — dropping it deletes the
+    /// temporary directory and invalidates the blob store.
     fn make_tool(
         workspace_dir: Option<PathBuf>,
     ) -> (
@@ -911,19 +948,22 @@ mod tests {
         );
         let generator = Arc::new(PluginGenerator::new(llm, "test-model"));
         let manager = make_manager(MockPluginRepo::new());
-        let blob_tmp = tempfile::tempdir().expect("blob tempdir");
-        let blob_store = Arc::new(BlobStore::new(blob_tmp.path().to_path_buf()));
+        // Kept alive so the blob store's backing directory survives the test.
+        let blob_dir = tempfile::tempdir().expect("blob tempdir");
+        let blob_store = Arc::new(BlobStore::new(blob_dir.path().to_path_buf()));
         let tool = GeneratePluginTool::new(
-            generator,
             manager,
-            blob_store,
-            None::<Arc<MockArtifactRepo>>,
-            workspace_dir,
-            None,
-            None,
-            UserId::new(),
+            GeneratePluginConfig {
+                generator,
+                blob_store,
+                artifact_repo: None::<Arc<MockArtifactRepo>>,
+                workspace_dir,
+                workspace_id: None,
+                conversation_id: None,
+                user_id: UserId::new(),
+            },
         );
-        (tool, blob_tmp)
+        (tool, blob_dir)
     }
 
     fn make_tool_with_manager(
@@ -939,19 +979,22 @@ mod tests {
         let generator = Arc::new(PluginGenerator::new(llm, "test-model"));
         let repo = MockPluginRepo::new();
         let manager = make_manager(repo);
-        let blob_tmp = tempfile::tempdir().expect("blob tempdir");
-        let blob_store = Arc::new(BlobStore::new(blob_tmp.path().to_path_buf()));
+        // Kept alive so the blob store's backing directory survives the test.
+        let blob_dir = tempfile::tempdir().expect("blob tempdir");
+        let blob_store = Arc::new(BlobStore::new(blob_dir.path().to_path_buf()));
         let tool = GeneratePluginTool::new(
-            generator,
             Arc::clone(&manager),
-            blob_store,
-            None::<Arc<MockArtifactRepo>>,
-            workspace_dir,
-            workspace_id,
-            None,
-            UserId::new(),
+            GeneratePluginConfig {
+                generator,
+                blob_store,
+                artifact_repo: None::<Arc<MockArtifactRepo>>,
+                workspace_dir,
+                workspace_id,
+                conversation_id: None,
+                user_id: UserId::new(),
+            },
         );
-        (tool, manager, blob_tmp)
+        (tool, manager, blob_dir)
     }
 
     // -----------------------------------------------------------------------
@@ -960,7 +1003,7 @@ mod tests {
 
     #[test]
     fn metadata_correctness() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let meta = tool.metadata();
         assert_eq!(meta.name, "generate_plugin");
         assert!(meta.context_modifying);
@@ -977,7 +1020,7 @@ mod tests {
 
     #[test]
     fn metadata_has_kind_enum() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let meta = tool.metadata();
         let kind_schema = &meta.input_schema["properties"]["kind"];
         let enum_values = kind_schema["enum"].as_array().expect("enum array");
@@ -987,7 +1030,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_name() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool
             .execute(serde_json::json!({"description": "test"}))
             .await;
@@ -997,7 +1040,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_empty_name() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool
             .execute(serde_json::json!({"name": "", "description": "test"}))
             .await;
@@ -1007,7 +1050,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_description() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool.execute(serde_json::json!({"name": "test"})).await;
         assert!(matches!(result, Err(ToolError::InvalidInput(_))));
         assert!(result.unwrap_err().to_string().contains("description"));
@@ -1015,7 +1058,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_empty_description() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool
             .execute(serde_json::json!({"name": "test", "description": ""}))
             .await;
@@ -1025,7 +1068,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_unknown_kind() {
-        let (tool, _blob_tmp) = make_tool(Some(PathBuf::from("/tmp/test-ws")));
+        let (tool, _blob_dir) = make_tool(Some(PathBuf::from("/tmp/test-ws")));
         let result = tool
             .execute(serde_json::json!({
                 "name": "test",
@@ -1039,7 +1082,7 @@ mod tests {
 
     #[tokio::test]
     async fn skill_requires_workspace() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool
             .execute(serde_json::json!({
                 "name": "test-skill",
@@ -1053,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn wasm_requires_workspace() {
-        let (tool, _blob_tmp) = make_tool(None);
+        let (tool, _blob_dir) = make_tool(None);
         let result = tool
             .execute(serde_json::json!({
                 "name": "test-wasm",
@@ -1068,7 +1111,7 @@ mod tests {
     #[tokio::test]
     async fn skill_generation_saves_and_registers() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (tool, manager, _blob_tmp) = make_tool_with_manager(
+        let (tool, manager, _blob_dir) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             None,
             "---\nname: summariser\ndescription: Summarises text.\n---\n\n## Instructions\nSummarise the input.",
@@ -1108,7 +1151,7 @@ mod tests {
     #[tokio::test]
     async fn default_kind_is_skill() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (tool, manager, _blob_tmp) = make_tool_with_manager(
+        let (tool, manager, _blob_dir) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             None,
             "---\nname: test\ndescription: A test skill.\n---\n\n## Instructions\nTest skill content.",
@@ -1135,7 +1178,7 @@ mod tests {
     async fn workspace_scope_when_workspace_id_present() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let ws_id = WorkspaceId::new();
-        let (tool, manager, _blob_tmp) = make_tool_with_manager(
+        let (tool, manager, _blob_dir) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             Some(ws_id),
             "---\nname: scoped\ndescription: Scoped skill.\n---\n\n## Instructions\nScoped skill content.",
@@ -1239,7 +1282,7 @@ mod tests {
     #[tokio::test]
     async fn first_time_skill_creation_does_not_call_update_config() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (tool, manager, _blob_tmp) = make_tool_with_manager(
+        let (tool, manager, _blob_dir) = make_tool_with_manager(
             Some(tmp.path().to_path_buf()),
             None,
             "---\nname: new-skill\ndescription: A brand new skill.\n---\n\n## Instructions\nDo something.",

@@ -12,6 +12,7 @@ use hyper_util::rt::TokioIo;
 use sober_agent::ConfirmationBroker;
 use sober_agent::SharedSchedulerClient;
 use sober_agent::agent::{Agent, AgentConfig};
+use sober_agent::backends::GrpcScheduleBackend;
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
@@ -25,7 +26,9 @@ use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
-use sober_plugin::backends::PgKvBackend;
+use sober_plugin::backends::{
+    PgConversationBackend, PgKvBackend, PgSecretBackend, QdrantMemoryBackend,
+};
 use sober_plugin::{PluginManager, WasmServices};
 use sober_sandbox::{CommandPolicy, SandboxProfile};
 use sober_skill::SkillLoader;
@@ -161,10 +164,23 @@ async fn main() -> Result<()> {
     let wasm_services = WasmServices {
         kv_backend: Some(Arc::new(PgKvBackend::new(pool.clone()))),
         llm_engine: Some(Arc::clone(&llm)),
-        // Remaining backends (secrets, memory, conversation, schedule,
-        // tool_executor) require more complex wiring and will be connected
-        // incrementally in follow-up tasks.
-        ..WasmServices::default()
+        secret_backend: mek
+            .as_ref()
+            .map(|m| -> Arc<dyn sober_plugin::backends::SecretBackend> {
+                Arc::new(PgSecretBackend::new(pool.clone(), Arc::clone(m)))
+            }),
+        memory_backend: Some(Arc::new(QdrantMemoryBackend::new(
+            Arc::clone(&memory),
+            Arc::clone(&llm),
+        ))),
+        conversation_backend: Some(Arc::new(PgConversationBackend::new(pool.clone()))),
+        schedule_backend: Some(Arc::new(GrpcScheduleBackend::new(Arc::clone(
+            &scheduler_client,
+        )))),
+        // ToolExecutor creates a circular dependency (ToolRegistry -> PluginManager
+        // -> HostContext -> ToolExecutor -> ToolRegistry). Must be wired via a
+        // post-init setter or lazy Arc once the tool registry is constructed.
+        tool_executor: None,
     };
     let plugin_manager = Arc::new(
         PluginManager::new(

@@ -244,6 +244,44 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
         Ok(())
     }
 
+    async fn delete_kv_data(&self, plugin_id: PluginId, key: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE plugin_kv_data SET data = data - $2, updated_at = now() WHERE plugin_id = $1",
+        )
+        .bind(plugin_id.as_uuid())
+        .bind(key)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
+    async fn list_kv_keys(
+        &self,
+        plugin_id: PluginId,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, AppError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT k FROM plugin_kv_data, jsonb_object_keys(data) AS k WHERE plugin_id = $1",
+        )
+        .bind(plugin_id.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        let keys: Vec<String> = match prefix {
+            Some(p) => rows
+                .into_iter()
+                .map(|(k,)| k)
+                .filter(|k| k.starts_with(p))
+                .collect(),
+            None => rows.into_iter().map(|(k,)| k).collect(),
+        };
+
+        Ok(keys)
+    }
+
     async fn update_scope(
         &self,
         id: PluginId,

@@ -731,6 +731,20 @@ pub trait PluginRepo: Send + Sync {
         value: serde_json::Value,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
+    /// Deletes a plugin-scoped key-value data entry.
+    fn delete_kv_data(
+        &self,
+        plugin_id: PluginId,
+        key: &str,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all keys in a plugin's key-value store, optionally filtered by prefix.
+    fn list_kv_keys(
+        &self,
+        plugin_id: PluginId,
+        prefix: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
+
     /// Updates the scope of a plugin (system, user, workspace).
     fn update_scope(
         &self,

@@ -286,17 +286,17 @@ version = "0.1.0"
 description = "..."
 
 [capabilities]
-key_value = true           # optional — plugin-scoped key-value storage
-network = true             # optional — outbound HTTP requests
-secret_read = true         # optional — read host secrets
-tool_call = true           # optional — invoke other tools/plugins
-memory_read = true         # optional — vector memory search
-memory_write = true        # optional — vector memory write
-conversation_read = true   # optional — read conversation history
-schedule = true            # optional — schedule jobs
-metrics = true             # optional — emit counters/gauges/histograms
-filesystem = true          # optional — sandboxed file I/O
-llm_inference = true       # optional — LLM text completion
+key_value = true
+network = true                           # or: network = { allowed_hosts = ["api.example.com"] }
+secret_read = true
+tool_call = true                         # or: tool_call = { tools = ["search", "memory_query"] }
+memory_read = true                       # or: memory_read = { scopes = ["user"] }
+memory_write = true                      # or: memory_write = { scopes = ["user"] }
+conversation_read = true
+schedule = true
+metrics = true
+filesystem = true                        # or: filesystem = { paths = ["/workspace/data"] }
+llm_inference = true
 
 [[tools]]
 name = "tool-name"

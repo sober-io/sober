@@ -12,9 +12,9 @@ pub mod schedule;
 pub mod secrets;
 pub mod tool_call;
 
-pub use conversation::{ConversationBackend, ConversationMessage};
+pub use conversation::{ConversationBackend, ConversationMessage, PgConversationBackend};
 pub use kv::{InMemoryKvBackend, KvBackend, PgKvBackend};
-pub use memory::{MemoryBackend, MemoryHit};
+pub use memory::{MemoryBackend, MemoryHit, QdrantMemoryBackend};
 pub use schedule::ScheduleBackend;
-pub use secrets::SecretBackend;
+pub use secrets::{PgSecretBackend, SecretBackend};
 pub use tool_call::ToolExecutor;

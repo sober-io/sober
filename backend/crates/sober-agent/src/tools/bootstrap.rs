@@ -30,8 +30,8 @@ use sober_workspace::{BlobStore, SnapshotManager};
 use super::shell::SharedPermissionMode;
 use super::{
     ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
-    DeleteSecretTool, FetchUrlTool, GeneratePluginTool, ListArtifactsTool, ListSecretsTool,
-    ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
+    DeleteSecretTool, FetchUrlTool, GeneratePluginConfig, GeneratePluginTool, ListArtifactsTool,
+    ListSecretsTool, ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
     RestoreSnapshotTool, SchedulerTools, SecretToolContext, ShellTool, SnapshotToolContext,
     StoreSecretTool, ToolRegistry, WebSearchTool,
 };
@@ -256,14 +256,16 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 .workspace_id
                 .map(|_| Arc::new(self.repos.artifacts().clone()));
             tools.push(Arc::new(GeneratePluginTool::new(
-                Arc::clone(generator),
                 Arc::clone(&self.plugin_manager),
-                Arc::clone(&self.blob_store),
-                artifact_repo,
-                ctx.workspace_dir.clone(),
-                ctx.workspace_id,
-                Some(ctx.conversation_id),
-                ctx.user_id,
+                GeneratePluginConfig {
+                    generator: Arc::clone(generator),
+                    blob_store: Arc::clone(&self.blob_store),
+                    artifact_repo,
+                    workspace_dir: ctx.workspace_dir.clone(),
+                    workspace_id: ctx.workspace_id,
+                    conversation_id: Some(ctx.conversation_id),
+                    user_id: ctx.user_id,
+                },
             )));
         }
 

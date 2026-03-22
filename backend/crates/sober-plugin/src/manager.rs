@@ -420,6 +420,8 @@ impl<R: PluginRepo> PluginManager<R> {
         let host = match cached_host {
             Some(h) => h,
             None => {
+                // Manifest is stored as a TOML string in the plugin's DB config,
+                // separate from the WASM blob. The blob contains only compiled bytes.
                 let manifest_toml = plugin
                     .config
                     .get("manifest_toml")
@@ -716,6 +718,22 @@ mod tests {
             _value: serde_json::Value,
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { Ok(()) }
+        }
+
+        fn delete_kv_data(
+            &self,
+            _plugin_id: PluginId,
+            _key: &str,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { Ok(()) }
+        }
+
+        fn list_kv_keys(
+            &self,
+            _plugin_id: PluginId,
+            _prefix: Option<&str>,
+        ) -> impl std::future::Future<Output = Result<Vec<String>, AppError>> + Send {
+            async { Ok(vec![]) }
         }
 
         fn update_scope(
