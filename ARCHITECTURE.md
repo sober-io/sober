@@ -92,7 +92,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
 | `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`. |
-| `sober-plugin` | Plugin registry, sandboxed execution, security audit, code generation |
+| `sober-plugin` | Plugin registry, WASM host functions (11 capabilities via Extism), backend service traits, audit pipeline, blob-backed storage |
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
@@ -279,12 +279,12 @@ DISCOVER → AUDIT → SANDBOX_TEST → INSTALL → MONITOR → UPDATE/REMOVE
 
 1. **Static Analysis** — AST scanning for dangerous patterns
 2. **Capability Declaration** — Plugins must declare all required permissions
-3. **Sandbox Execution** — First run in WASM sandbox (wasmtime)
+3. **Sandbox Execution** — First run in WASM sandbox (Extism, wasmtime-backed)
 4. **Behavioral Analysis** — Monitor syscalls, network access, memory usage
 5. **Code Generation** — For predictable plugin logic, generate native Rust/WASM
    that can execute without LLM in the loop
 
-Plugins implement the `SoberPlugin` trait (metadata, capabilities, sandboxed execute, audit report). MCP-compatible.
+Plugins declare capabilities in a TOML manifest (`plugin.toml`) and export tool functions via `#[plugin_fn]`. The host wires 11 capability-gated host functions (KV, HTTP, secrets, LLM, memory, conversation, scheduling, filesystem, metrics, tool calls) through Extism's `UserData` mechanism. Generated WASM binaries are stored content-addressed in `BlobStore`.
 
 ---
 
