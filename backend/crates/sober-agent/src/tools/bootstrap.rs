@@ -56,6 +56,8 @@ pub struct ShellToolConfig {
     pub auto_snapshot: bool,
     /// Maximum number of snapshots retained per workspace.
     pub max_snapshots: Option<u32>,
+    /// Sandbox execution log repo for persisting audit entries.
+    pub sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
 }
 
 /// Configuration for the web search tool.
@@ -132,8 +134,6 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
     /// LLM-powered plugin generator (None = generation disabled).
     pub plugin_generator: Option<Arc<PluginGenerator>>,
-    /// Sandbox execution log repo for persisting audit entries.
-    pub sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {
@@ -176,14 +176,9 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             .clone()
             .unwrap_or_else(|| self.shell.default_workspace_root.clone());
         let shell_tool = ShellTool::new(
-            self.shell.command_policy.clone(),
-            Arc::clone(&self.shell.permission_mode),
+            &self.shell,
             shell_workspace,
-            self.shell.sandbox_policy.clone(),
-            self.shell.auto_snapshot,
-            self.shell.max_snapshots,
             Some((*self.snapshot_manager).clone()),
-            self.sandbox_log_repo.clone(),
         );
         tools.push(Arc::new(shell_tool));
 

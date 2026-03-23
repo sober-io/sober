@@ -226,6 +226,7 @@ async fn main() -> Result<()> {
             sandbox_policy,
             auto_snapshot: true,
             max_snapshots: None,
+            sandbox_log_repo: Some(Arc::new(PgSandboxExecutionLogRepo::new(pool.clone()))),
         },
         search: SearchToolConfig {
             searxng_url: config.searxng.url.clone(),
@@ -245,7 +246,6 @@ async fn main() -> Result<()> {
             Arc::clone(&llm),
             config.llm.model.clone(),
         ))),
-        sandbox_log_repo: Some(Arc::new(PgSandboxExecutionLogRepo::new(pool.clone()))),
     });
 
     // 15. Create broadcast channel for conversation update events
