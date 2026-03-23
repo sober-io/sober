@@ -44,9 +44,11 @@ pub struct AppConfig {
 }
 
 /// Runtime environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Environment {
     /// Local development with pretty logging.
+    #[default]
     Development,
     /// Production with JSON logging.
     Production,
@@ -320,6 +322,7 @@ impl<F: Fn(&str) -> Option<String>> EnvSource<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use std::collections::HashMap;
 
     /// Creates a lookup closure from a set of key-value pairs.
@@ -410,5 +413,26 @@ mod tests {
         .unwrap();
         assert_eq!(config.llm.api_key.as_deref(), Some("sk-test"));
         assert_eq!(config.auth.session_secret.as_deref(), Some("my-secret"));
+    }
+
+    // ── Task 1: Environment Deserialize + Default ───────────────────────────
+
+    #[test]
+    fn environment_deserializes_from_lowercase() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            environment: Environment,
+        }
+        let toml_str = r#"environment = "production""#;
+        let w: Wrapper = toml::from_str(toml_str).unwrap();
+        assert_eq!(w.environment, Environment::Production);
+        let toml_str = r#"environment = "development""#;
+        let w: Wrapper = toml::from_str(toml_str).unwrap();
+        assert_eq!(w.environment, Environment::Development);
+    }
+
+    #[test]
+    fn environment_defaults_to_development() {
+        assert_eq!(Environment::default(), Environment::Development);
     }
 }
