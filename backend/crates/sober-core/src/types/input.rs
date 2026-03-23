@@ -256,6 +256,52 @@ pub struct CreatePluginAuditLog {
     pub audited_by: Option<UserId>,
 }
 
+/// Input for creating a sandbox execution log.
+#[derive(Debug, Clone)]
+pub struct CreateSandboxExecutionLog {
+    /// Unique execution identifier (from the sandbox audit entry).
+    pub execution_id: uuid::Uuid,
+    /// Workspace context (if applicable).
+    pub workspace_id: Option<WorkspaceId>,
+    /// User who triggered the execution (if applicable).
+    pub user_id: Option<UserId>,
+    /// Name of the sandbox policy used.
+    pub policy_name: String,
+    /// The command that was executed.
+    pub command: Vec<String>,
+    /// What triggered this execution (e.g. "agent", "scheduler", "user").
+    pub trigger: String,
+    /// Execution duration in milliseconds.
+    pub duration_ms: i64,
+    /// Process exit code (if completed).
+    pub exit_code: Option<i32>,
+    /// Domains denied by the network proxy.
+    pub denied_network_requests: Vec<String>,
+    /// How the execution ended (e.g. "success", "timeout", "error").
+    pub outcome: String,
+}
+
+/// Input for creating a plugin invocation log.
+#[derive(Debug, Clone)]
+pub struct CreatePluginInvocationLog {
+    /// The plugin that was invoked (if known).
+    pub plugin_id: Option<PluginId>,
+    /// Plugin name at invocation time.
+    pub plugin_name: String,
+    /// Name of the tool that was called.
+    pub tool_name: String,
+    /// User who triggered the invocation (if applicable).
+    pub user_id: Option<UserId>,
+    /// Conversation context (if applicable).
+    pub conversation_id: Option<ConversationId>,
+    /// Execution duration in milliseconds.
+    pub duration_ms: i64,
+    /// Whether the invocation succeeded.
+    pub success: bool,
+    /// Error message if the invocation failed.
+    pub error_message: Option<String>,
+}
+
 /// Filter for querying plugins.
 #[derive(Debug, Clone, Default)]
 pub struct PluginFilter {

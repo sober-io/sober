@@ -177,7 +177,7 @@ impl ShellTool {
             format!("cd {} && {}", workdir.display(), input.command),
         ];
 
-        let result = sandbox
+        let (result, _audit_entry) = sandbox
             .execute(&command, &HashMap::new())
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("sandbox execution failed: {e}")))?;

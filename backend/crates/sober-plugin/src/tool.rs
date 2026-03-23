@@ -5,8 +5,11 @@
 //! uses `spawn_blocking` to avoid blocking the async runtime.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
+use metrics::{counter, histogram};
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
+use tracing::{debug, warn};
 
 use crate::host::PluginHost;
 
@@ -59,8 +62,19 @@ impl Tool for PluginTool {
     fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> {
         let host = Arc::clone(&self.host);
         let tool_name = self.tool_name.clone();
+        let meta_tool_name = self.tool_name.clone();
+
+        // Capture the plugin name from the host's manifest for logging.
+        let plugin_name = self
+            .host
+            .lock()
+            .ok()
+            .map(|h| h.manifest().plugin.name.clone())
+            .unwrap_or_else(|| "<unknown>".to_owned());
 
         Box::pin(async move {
+            let start = Instant::now();
+
             let result = tokio::task::spawn_blocking(move || {
                 let mut host = host
                     .lock()
@@ -71,12 +85,58 @@ impl Tool for PluginTool {
             .map_err(|e| format!("spawn_blocking failed: {e}"))
             .and_then(|r| r);
 
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let duration_secs = start.elapsed().as_secs_f64();
+
             match result {
-                Ok(output) => Ok(output),
-                Err(msg) => Ok(ToolOutput {
-                    content: format!("Plugin execution failed: {msg}"),
-                    is_error: true,
-                }),
+                Ok(output) => {
+                    counter!(
+                        "sober_plugin_invocations_total",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
+                        "status" => "success",
+                    )
+                    .increment(1);
+                    histogram!(
+                        "sober_plugin_invocation_duration_seconds",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
+                    )
+                    .record(duration_secs);
+                    debug!(
+                        plugin = %plugin_name,
+                        tool = %meta_tool_name,
+                        duration_ms,
+                        "plugin tool invocation succeeded"
+                    );
+                    Ok(output)
+                }
+                Err(msg) => {
+                    counter!(
+                        "sober_plugin_invocations_total",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
+                        "status" => "error",
+                    )
+                    .increment(1);
+                    histogram!(
+                        "sober_plugin_invocation_duration_seconds",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
+                    )
+                    .record(duration_secs);
+                    warn!(
+                        plugin = %plugin_name,
+                        tool = %meta_tool_name,
+                        duration_ms,
+                        error = %msg,
+                        "plugin tool invocation failed"
+                    );
+                    Ok(ToolOutput {
+                        content: format!("Plugin execution failed: {msg}"),
+                        is_error: true,
+                    })
+                }
             }
         })
     }

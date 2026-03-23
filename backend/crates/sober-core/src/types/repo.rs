@@ -669,6 +669,24 @@ pub trait SecretRepo: Send + Sync {
     ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
 }
 
+/// Repository for sandbox execution audit logs.
+pub trait SandboxExecutionLogRepo: Send + Sync {
+    /// Appends a sandbox execution audit log entry.
+    fn create(
+        &self,
+        entry: CreateSandboxExecutionLog,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Repository for plugin tool invocation logs.
+pub trait PluginInvocationLogRepo: Send + Sync {
+    /// Appends a plugin invocation log entry.
+    fn create(
+        &self,
+        entry: CreatePluginInvocationLog,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
 /// Plugin registry operations.
 pub trait PluginRepo: Send + Sync {
     /// Creates a new plugin.

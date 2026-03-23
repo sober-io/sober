@@ -58,7 +58,7 @@ impl JobExecutor for ArtifactExecutor {
 
         // Run in sandbox.
         let sandbox = BwrapSandbox::new(self.sandbox_policy.clone());
-        let result = sandbox
+        let (result, _audit_entry) = sandbox
             .execute(&command, &HashMap::new())
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
