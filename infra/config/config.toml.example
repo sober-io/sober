@@ -1,5 +1,5 @@
 # Sõber Configuration File
-# Docs: https://github.com/harrisiirak/s-ber
+# Docs: https://github.com/sober-io/sober
 
 # Runtime environment: "production" or "development"
 environment = "development"

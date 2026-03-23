@@ -9,6 +9,71 @@ use std::path::PathBuf;
 
 use crate::error::AppError;
 
+// ── Default constants ────────────────────────────────────────────────────────
+
+/// Default bind address for servers.
+pub const DEFAULT_HOST: &str = "0.0.0.0";
+/// Default API server port.
+pub const DEFAULT_API_PORT: u16 = 3000;
+/// Default web reverse-proxy port.
+pub const DEFAULT_WEB_PORT: u16 = 8080;
+/// Default database connection pool size.
+pub const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
+/// Default Qdrant URL.
+pub const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
+/// Default OpenAI-compatible LLM API base URL.
+pub const DEFAULT_LLM_BASE_URL: &str = "https://openrouter.ai/api/v1";
+/// Default LLM model identifier.
+pub const DEFAULT_LLM_MODEL: &str = "anthropic/claude-sonnet-4";
+/// Default max tokens per LLM completion.
+pub const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
+/// Default embedding model.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
+/// Default embedding vector dimensionality.
+pub const DEFAULT_EMBEDDING_DIM: u64 = 1536;
+/// Default rate limit: max requests per window.
+pub const DEFAULT_RATE_LIMIT_MAX_REQUESTS: u32 = 1200;
+/// Default rate limit window in seconds.
+pub const DEFAULT_RATE_LIMIT_WINDOW_SECS: u64 = 60;
+/// Default session TTL: 30 days in seconds.
+pub const DEFAULT_SESSION_TTL_SECONDS: u64 = 2_592_000;
+/// Default SearXNG URL.
+pub const DEFAULT_SEARXNG_URL: &str = "http://localhost:8080";
+/// Default admin socket path.
+pub const DEFAULT_ADMIN_SOCKET_PATH: &str = "/run/sober/admin.sock";
+/// Default agent gRPC socket path.
+pub const DEFAULT_AGENT_SOCKET_PATH: &str = "/run/sober/agent.sock";
+/// Default agent metrics port.
+pub const DEFAULT_AGENT_METRICS_PORT: u16 = 9100;
+/// Default scheduler metrics port.
+pub const DEFAULT_SCHEDULER_METRICS_PORT: u16 = 9101;
+/// Default scheduler tick interval in seconds.
+pub const DEFAULT_SCHEDULER_TICK_INTERVAL_SECS: u64 = 1;
+/// Default scheduler socket path.
+pub const DEFAULT_SCHEDULER_SOCKET_PATH: &str = "/run/sober/scheduler.sock";
+/// Default maximum concurrent scheduler jobs.
+pub const DEFAULT_SCHEDULER_MAX_CONCURRENT_JOBS: u32 = 10;
+/// Default workspace root directory.
+pub const DEFAULT_WORKSPACE_ROOT: &str = "/var/lib/sober/workspaces";
+/// Default sandbox profile.
+pub const DEFAULT_SANDBOX_PROFILE: &str = "standard";
+/// Default upstream API URL for the web reverse-proxy.
+pub const DEFAULT_WEB_API_UPSTREAM_URL: &str = "http://localhost:3000";
+/// Default MCP request timeout in seconds.
+pub const DEFAULT_MCP_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Default MCP max consecutive failures.
+pub const DEFAULT_MCP_MAX_CONSECUTIVE_FAILURES: u32 = 3;
+/// Default MCP idle timeout in seconds.
+pub const DEFAULT_MCP_IDLE_TIMEOUT_SECS: u64 = 300;
+/// Default memory decay half-life in days.
+pub const DEFAULT_MEMORY_DECAY_HALF_LIFE_DAYS: u32 = 30;
+/// Default memory retrieval boost factor.
+pub const DEFAULT_MEMORY_RETRIEVAL_BOOST: f64 = 0.2;
+/// Default memory prune threshold.
+pub const DEFAULT_MEMORY_PRUNE_THRESHOLD: f64 = 0.1;
+/// Default ACP agent CLI args.
+pub const DEFAULT_ACP_ARGS: &str = "acp";
+
 /// Top-level application configuration.
 ///
 /// Loaded from environment variables at startup via [`load_from_env`](AppConfig::load_from_env).
@@ -43,7 +108,6 @@ pub struct AppConfig {
     /// Runtime environment (development or production).
     pub environment: Environment,
     /// Agent process settings (socket, metrics, workspace).
-    #[serde(rename = "agent")]
     pub agent: AgentProcessConfig,
     /// Web reverse-proxy settings.
     pub web: WebConfig,
@@ -74,7 +138,7 @@ impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             url: String::new(),
-            max_connections: 10,
+            max_connections: DEFAULT_DB_MAX_CONNECTIONS,
         }
     }
 }
@@ -92,7 +156,7 @@ pub struct QdrantConfig {
 impl Default for QdrantConfig {
     fn default() -> Self {
         Self {
-            url: "http://localhost:6334".to_owned(),
+            url: DEFAULT_QDRANT_URL.to_owned(),
             api_key: None,
         }
     }
@@ -119,12 +183,12 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://openrouter.ai/api/v1".to_owned(),
+            base_url: DEFAULT_LLM_BASE_URL.to_owned(),
             api_key: None,
-            model: "anthropic/claude-sonnet-4".to_owned(),
-            max_tokens: 4096,
-            embedding_model: "text-embedding-3-small".to_owned(),
-            embedding_dim: 1536,
+            model: DEFAULT_LLM_MODEL.to_owned(),
+            max_tokens: DEFAULT_LLM_MAX_TOKENS,
+            embedding_model: DEFAULT_EMBEDDING_MODEL.to_owned(),
+            embedding_dim: DEFAULT_EMBEDDING_DIM,
         }
     }
 }
@@ -146,10 +210,10 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".to_owned(),
-            port: 3000,
-            rate_limit_max_requests: 1200,
-            rate_limit_window_secs: 60,
+            host: DEFAULT_HOST.to_owned(),
+            port: DEFAULT_API_PORT,
+            rate_limit_max_requests: DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+            rate_limit_window_secs: DEFAULT_RATE_LIMIT_WINDOW_SECS,
         }
     }
 }
@@ -168,7 +232,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             session_secret: None,
-            session_ttl_seconds: 2_592_000,
+            session_ttl_seconds: DEFAULT_SESSION_TTL_SECONDS,
         }
     }
 }
@@ -184,7 +248,7 @@ pub struct SearxngConfig {
 impl Default for SearxngConfig {
     fn default() -> Self {
         Self {
-            url: "http://localhost:8080".to_owned(),
+            url: DEFAULT_SEARXNG_URL.to_owned(),
         }
     }
 }
@@ -200,7 +264,7 @@ pub struct AdminConfig {
 impl Default for AdminConfig {
     fn default() -> Self {
         Self {
-            socket_path: PathBuf::from("/run/sober/admin.sock"),
+            socket_path: PathBuf::from(DEFAULT_ADMIN_SOCKET_PATH),
         }
     }
 }
@@ -228,13 +292,13 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
-            tick_interval_secs: 1,
-            agent_socket_path: PathBuf::from("/run/sober/agent.sock"),
-            socket_path: PathBuf::from("/run/sober/scheduler.sock"),
-            max_concurrent_jobs: 10,
-            metrics_port: 9101,
-            workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
-            sandbox_profile: "standard".to_owned(),
+            tick_interval_secs: DEFAULT_SCHEDULER_TICK_INTERVAL_SECS,
+            agent_socket_path: PathBuf::from(DEFAULT_AGENT_SOCKET_PATH),
+            socket_path: PathBuf::from(DEFAULT_SCHEDULER_SOCKET_PATH),
+            max_concurrent_jobs: DEFAULT_SCHEDULER_MAX_CONCURRENT_JOBS,
+            metrics_port: DEFAULT_SCHEDULER_METRICS_PORT,
+            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
+            sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
 }
@@ -254,9 +318,9 @@ pub struct McpConfig {
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
-            request_timeout_secs: 30,
-            max_consecutive_failures: 3,
-            idle_timeout_secs: 300,
+            request_timeout_secs: DEFAULT_MCP_REQUEST_TIMEOUT_SECS,
+            max_consecutive_failures: DEFAULT_MCP_MAX_CONSECUTIVE_FAILURES,
+            idle_timeout_secs: DEFAULT_MCP_IDLE_TIMEOUT_SECS,
         }
     }
 }
@@ -278,7 +342,7 @@ impl Default for AcpAgentConfig {
         Self {
             name: String::new(),
             command: String::new(),
-            args: vec!["acp".to_owned()],
+            args: vec![DEFAULT_ACP_ARGS.to_owned()],
         }
     }
 }
@@ -298,9 +362,9 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            decay_half_life_days: 30,
-            retrieval_boost: 0.2,
-            prune_threshold: 0.1,
+            decay_half_life_days: DEFAULT_MEMORY_DECAY_HALF_LIFE_DAYS,
+            retrieval_boost: DEFAULT_MEMORY_RETRIEVAL_BOOST,
+            prune_threshold: DEFAULT_MEMORY_PRUNE_THRESHOLD,
         }
     }
 }
@@ -335,10 +399,10 @@ pub struct AgentProcessConfig {
 impl Default for AgentProcessConfig {
     fn default() -> Self {
         Self {
-            socket_path: PathBuf::from("/run/sober/agent.sock"),
-            metrics_port: 9100,
-            workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
-            sandbox_profile: "standard".to_owned(),
+            socket_path: PathBuf::from(DEFAULT_AGENT_SOCKET_PATH),
+            metrics_port: DEFAULT_AGENT_METRICS_PORT,
+            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
+            sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
 }
@@ -362,9 +426,9 @@ pub struct WebConfig {
 impl Default for WebConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".to_owned(),
-            port: 8080,
-            api_upstream_url: "http://localhost:3000".to_owned(),
+            host: DEFAULT_HOST.to_owned(),
+            port: DEFAULT_WEB_PORT,
+            api_upstream_url: DEFAULT_WEB_API_UPSTREAM_URL.to_owned(),
             static_dir: None,
         }
     }

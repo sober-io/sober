@@ -238,7 +238,7 @@ download_and_extract() {
 write_default_config() {
     cat > "$CONFIG_DIR/config.toml" <<'TOML'
 # Sõber Configuration File
-# Docs: https://github.com/harrisiirak/s-ber
+# Docs: https://github.com/sober-io/sober
 
 # Runtime environment: "production" or "development"
 environment = "production"
@@ -325,6 +325,7 @@ collect_config() {
     [ -f "$CONFIG_DIR/.env" ] && return
 
     prompt_required "DATABASE_URL" "PostgreSQL connection string" "postgres://sober:password@localhost/sober"
+    prompt_required "QDRANT_URL" "Qdrant vector database URL" "http://localhost:6334"
     prompt_required "LLM_BASE_URL" "LLM API base URL" "https://openrouter.ai/api/v1"
     prompt_required "LLM_API_KEY" "LLM API key" ""
     prompt_required "LLM_MODEL" "LLM model identifier" "anthropic/claude-sonnet-4"
@@ -337,6 +338,7 @@ collect_config() {
 
     # Patch user-provided values into config.toml
     sed -i "s|^url = \"\"$|url = \"$DATABASE_URL\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^url = \"http://localhost:6334\"$|url = \"$QDRANT_URL\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^base_url = \"https://openrouter.ai/api/v1\"$|base_url = \"$LLM_BASE_URL\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^# api_key = \"sk-...\"|api_key = \"$LLM_API_KEY\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$LLM_MODEL\"|" "$CONFIG_DIR/config.toml"
