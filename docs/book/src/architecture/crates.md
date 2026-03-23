@@ -78,7 +78,7 @@ graph TD
 
 ## Binary Crates
 
-Four crates produce runnable binaries:
+Five crates produce runnable binaries:
 
 - **`sober-web`** — `sober-web` process
 - **`sober-api`** — `sober-api` process

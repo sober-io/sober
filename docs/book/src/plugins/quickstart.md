@@ -6,7 +6,7 @@ WASM plugin that exposes a single tool.
 ## Prerequisites
 
 - Rust toolchain with the `wasm32-wasip1` target
-- `sober` CLI or access to the Sõber HTTP API
+- Access to the Sõber HTTP API or settings UI
 
 ```bash
 rustup target add wasm32-wasip1
@@ -19,7 +19,7 @@ cargo new --lib my-plugin
 cd my-plugin
 ```
 
-## Step 2 — Add the Extism PDK dependency
+## Step 2 — Add the sober-pdk dependency
 
 Open `Cargo.toml` and add:
 
@@ -28,7 +28,7 @@ Open `Cargo.toml` and add:
 crate-type = ["cdylib"]
 
 [dependencies]
-extism-pdk = "1"
+sober-pdk = "0.1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
@@ -41,7 +41,7 @@ format WASM plugins use.
 Replace `src/lib.rs` with:
 
 ```rust
-use extism_pdk::*;
+use sober_pdk::{plugin_fn, FnResult, Json};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -57,7 +57,7 @@ struct GreetOutput {
 #[plugin_fn]
 pub fn greet(input: Json<GreetInput>) -> FnResult<Json<GreetOutput>> {
     let output = GreetOutput {
-        message: format!("Hello, {}! Greetings from my-plugin.", input.name),
+        message: format!("Hello, {}! Greetings from my-plugin.", input.0.name),
     };
     Ok(Json(output))
 }
@@ -76,7 +76,7 @@ installation. If it returns an error the plugin is rejected.
 pub fn __sober_test(_: ()) -> FnResult<()> {
     // Basic sanity check — exercise the happy path.
     let result = greet(Json(GreetInput { name: "test".into() }))?;
-    assert!(!result.message.is_empty());
+    assert!(!result.0.message.is_empty());
     Ok(())
 }
 ```
@@ -97,7 +97,7 @@ description = "Returns a greeting for the given name"
 ```
 
 This minimal manifest declares no capabilities — the plugin only needs the
-always-available `host_log` function.
+always-available logging functions.
 
 ## Step 5 — Build
 
@@ -113,21 +113,18 @@ target/wasm32-wasip1/release/my_plugin.wasm
 
 ## Step 6 — Install
 
-### Via CLI (offline, database must be accessible)
-
-```bash
-sober plugin install \
-  --wasm target/wasm32-wasip1/release/my_plugin.wasm \
-  --manifest plugin.toml
-```
-
-### Via API
+Plugins are installed via the Sõber settings UI or the HTTP API. The API accepts
+a JSON payload that includes the base64-encoded WASM binary and the manifest
+contents:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/plugins \
   -H "Authorization: Bearer $TOKEN" \
-  -F "wasm=@target/wasm32-wasip1/release/my_plugin.wasm" \
-  -F "manifest=@plugin.toml"
+  -H "Content-Type: application/json" \
+  -d '{
+    "wasm_b64": "'$(base64 -w0 target/wasm32-wasip1/release/my_plugin.wasm)'",
+    "manifest": "'"$(cat plugin.toml)"'"
+  }'
 ```
 
 A successful install returns the plugin ID and an audit report. If any audit

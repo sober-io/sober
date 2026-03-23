@@ -80,6 +80,20 @@ database. If you add or modify queries you will need Docker running to regenerat
 
 ---
 
+## Compiling WASM Plugins
+
+Writing and compiling Sõber plugins (WASM modules) requires:
+
+| Dependency | Notes |
+|------------|-------|
+| Rust | Install via [rustup](https://rustup.rs) |
+| `wasm32-wasip1` Rust target | `rustup target add wasm32-wasip1` |
+
+No other build tools are required for basic plugin development. See the
+[Plugin Quickstart](../plugins/quickstart.md) for step-by-step instructions.
+
+---
+
 ## LLM Provider
 
 All deployment methods require access to an LLM API. Sõber supports any OpenAI-compatible

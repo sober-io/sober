@@ -24,6 +24,8 @@ Search the web via a configured SearXNG instance and return a ranked list of res
 
 Returns a numbered list: title, URL, and a content snippet for each result.
 
+**User says:** "Search the web for the latest Rust async trait patterns." or "What's the current Rust edition?"
+
 **Example**
 
 ```json
@@ -41,6 +43,8 @@ Fetch and extract the text content of a URL. HTML is stripped of scripts and sty
 | `url` | string | yes | Must start with `http://` or `https://`. |
 
 Supported content types: all `text/*` types, `application/json`, `application/xml`, `application/xhtml+xml`, `application/javascript`, `application/yaml`, `application/toml`, `application/csv`, `application/ld+json`, `application/rss+xml`, `application/atom+xml`. Binary content (images, PDFs, video) is rejected. Maximum response body: 10 MB. Request timeout: 10 seconds.
+
+**User says:** "Read the content of https://example.com/report.html and summarise it." or "What does this page say: https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"
 
 **Example**
 
@@ -65,6 +69,8 @@ Search long-term memory using a semantic query. The agent calls this proactively
 
 Results include chunk type, importance score, similarity score, creation date, and content. Retrieval automatically boosts the importance score of returned memories.
 
+**User says:** "What do you know about my coding preferences?" or "Do you remember what editor I use?"
+
 **Example**
 
 ```json
@@ -82,6 +88,8 @@ Store a piece of information in long-term memory with a chunk type and importanc
 | `content` | string | yes | The information to store. |
 | `chunk_type` | string | yes | `fact`, `preference`, `skill`, or `code`. |
 | `importance` | number | no | Score 0.0–1.0. Defaults: `preference`=0.8, `fact`/`skill`=0.7, `code`=0.6, `conversation`=0.5. |
+
+**User says:** "Remember that I prefer dark mode and compact UI density." or "Always use tabs, not spaces, for my projects."
 
 **Example**
 
@@ -130,6 +138,8 @@ Payload types:
 
 **`runs`** — List recent runs for a job. Requires `job_id`. Optional: `limit`.
 
+**User says:** "Create a scheduled job that sends me a daily briefing at 9am." or "What scheduled jobs do I have?" or "Pause the daily briefing job." or "Cancel the weekly report."
+
 ---
 
 ## Per-Conversation Tools
@@ -160,6 +170,8 @@ Every command is classified as `Safe`, `Moderate`, or `Dangerous` before executi
 
 Commands on the admin deny list are blocked regardless of mode. When `auto_snapshot` is enabled, a workspace snapshot is created automatically before any `Dangerous` command.
 
+**User says:** "Run the tests in my project." or "List all files in the src/ directory." or "What's in the Cargo.toml?"
+
 **Example**
 
 ```json
@@ -189,6 +201,8 @@ Encrypt and store a secret.
 
 Non-sensitive fields (`provider`, `server`, `base_url`, `model`, `description`) are stored as plaintext metadata for listing purposes.
 
+**User says:** "Store my OpenAI API key." or "Save my GitHub token as a secret named github-token."
+
 ---
 
 #### `read_secret`
@@ -201,6 +215,8 @@ Decrypt and retrieve a secret by name. This tool is **internal**: the decrypted 
 
 ---
 
+**User says:** "Use my stored OpenAI key to make a request." (agent uses this internally — the decrypted value is never shown in the chat.)
+
 #### `list_secrets`
 
 List secret metadata (names and types only, no decrypted values).
@@ -208,6 +224,8 @@ List secret metadata (names and types only, no decrypted values).
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `secret_type` | string | no | Filter by type. Omit to list all. |
+
+**User says:** "What secrets do I have stored?" or "List my API keys."
 
 ---
 
@@ -218,6 +236,8 @@ Permanently remove a secret from the vault.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | yes | Name of the secret to delete. |
+
+**User says:** "Delete my old GitHub token." or "Remove the openai-api-key secret."
 
 ---
 
@@ -241,6 +261,8 @@ Create a new workspace artifact.
 | `description` | string | no | Optional description. |
 | `storage_type` | string | no | `inline` (default) or `blob`. |
 
+**User says:** "Save that code as an artifact." or "Create a document artifact with the report you just wrote."
+
 ---
 
 #### `list_artifacts`
@@ -251,6 +273,8 @@ List artifacts in the current workspace.
 |-----------|------|----------|-------------|
 | `kind` | string | no | Filter by kind. |
 | `state` | string | no | Filter by state. |
+
+**User says:** "What artifacts do I have?" or "List all code change artifacts in this workspace."
 
 ---
 
@@ -264,6 +288,8 @@ Read the full content of an artifact by ID.
 
 Returns title, kind, state, storage type, description, creation timestamp, and content.
 
+**User says:** "Show me the content of that artifact." or "Read artifact `<uuid>`."
+
 ---
 
 #### `delete_artifact`
@@ -273,6 +299,8 @@ Archive (soft-delete) an artifact. The artifact moves to `archived` state but re
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `artifact_id` | string | yes | UUID of the artifact to archive. |
+
+**User says:** "Delete that artifact." or "Archive the old proposal artifact."
 
 ---
 
@@ -290,6 +318,8 @@ Create a tar snapshot of the current workspace conversation directory.
 
 Returns the artifact ID and filesystem path of the created archive.
 
+**User says:** "Take a snapshot of my workspace before we make changes." or "Save the current state."
+
 ---
 
 #### `list_snapshots`
@@ -297,6 +327,8 @@ Returns the artifact ID and filesystem path of the created archive.
 List snapshot artifacts for this workspace, including artifact IDs, labels, and creation times.
 
 No parameters.
+
+**User says:** "List my snapshots." or "What snapshots do I have?"
 
 ---
 
@@ -309,6 +341,8 @@ Restore the workspace from a previously created snapshot. Before restoring, a sa
 | `artifact_id` | string | yes | Artifact ID of the snapshot to restore (from `list_snapshots`). |
 
 The operation is audit-logged with workspace and conversation IDs.
+
+**User says:** "Restore the snapshot from yesterday." or "Roll back to the snapshot before the last change."
 
 ---
 
@@ -326,3 +360,5 @@ Generate a new plugin via LLM from a natural-language description. Supports two 
 | `description` | string | yes | Natural-language description of what the plugin should do. |
 | `plugin_kind` | string | no | `wasm` (default) or `skill`. |
 | `name` | string | no | Plugin name (auto-derived from description if omitted). |
+
+**User says:** "Generate a plugin that fetches my daily weather and posts it to the conversation." or "Create a WASM plugin that converts Markdown to HTML."

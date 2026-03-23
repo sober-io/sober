@@ -6,10 +6,13 @@ Conversation events flow through a subscription model that decouples event produ
 
 `sober-api` subscribes to `sober-agent`'s event stream once at startup via the `SubscribeConversationUpdates` server-streaming RPC. It receives all conversation events for all conversations and routes each event to the correct WebSocket connection(s) via a `ConnectionRegistry` keyed by `conversation_id`.
 
-```
-sober-api ──SubscribeConversationUpdates──▶ sober-agent
-                                                │
-           ◀──── stream of ConversationUpdate ──┘
+```mermaid
+sequenceDiagram
+    participant API as sober-api
+    participant Agent as sober-agent
+
+    API->>Agent: SubscribeConversationUpdates (server-streaming RPC)
+    Agent-->>API: stream of ConversationUpdate
 ```
 
 ## RPCs

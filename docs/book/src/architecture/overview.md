@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sõber is a self-evolving multi-agent system. A primary agent can spawn, command, and orchestrate replica agents across distributed systems. Each replica is cryptographically bound to its parent, operates in isolated contexts, and can be delegated work autonomously.
+Sõber is a self-evolving AI agent system built around three design pillars: security-first boundaries (zero trust, encrypted inter-process communication), strict context isolation (scoped BCF memory containers, no cross-user leakage), and plugin extensibility (audited WASM plugin pipeline for autonomous capability growth).
 
 ## Core Principles
 
@@ -66,7 +66,7 @@ The time-driven entry point. Runs an autonomous tick engine for interval and cro
 
 ### sober-agent
 
-The gRPC server at the heart of the system. Handles agent orchestration, replica lifecycle, and task delegation. Called by both `sober-api` (user-driven) and `sober-scheduler` (time-driven). Publishes all conversation events to an internal broadcast channel that `sober-api` subscribes to.
+The gRPC server at the heart of the system. Handles agent orchestration and task delegation. Called by both `sober-api` (user-driven) and `sober-scheduler` (time-driven). Publishes all conversation events to an internal broadcast channel that `sober-api` subscribes to.
 
 ## Communication Boundaries
 

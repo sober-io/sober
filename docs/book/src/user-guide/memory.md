@@ -26,28 +26,16 @@ Memories are stored when:
 
 ## Memory Scopes
 
-Memory is partitioned into nested scopes. Each scope is a separate container — context loading follows the principle of least privilege and only loads what is needed.
+Memory is partitioned into scopes that enforce isolation between users and the system. Context loading follows the principle of least privilege and only loads what is needed.
 
-```mermaid
-graph TD
-    G[Global / System scope]
-    U[User scope]
-    Gr[Group scope]
-    S[Session scope]
+The architecture is designed to support four nested scope levels (global → user → group → session), but the current implementation provides **two Qdrant collection levels**:
 
-    G --> U
-    U --> Gr
-    Gr --> S
-```
+| Scope | Qdrant Collection | Description |
+|-------|-------------------|-------------|
+| **System** | `system` | System prompts, base personality, shared knowledge. |
+| **User** | `user_{uuid}` | Per-user facts, preferences, conversation history. Isolated per user — no cross-user access is possible at the collection level. |
 
-| Scope | Description |
-|-------|-------------|
-| **Global** (system) | System prompts, base personality, shared knowledge. |
-| **User** | Per-user facts, preferences, conversation history. |
-| **Group** | Shared context for teams or channels. |
-| **Session** | Ephemeral — current conversation only, discarded after. |
-
-In Qdrant, user-scoped memories live in the collection `user_{uuid}` and system-scoped memories in `system`. Group collections follow `group_{uuid}`.
+> **Design intent vs. current implementation:** Group-scoped (`group_{uuid}`) and session-scoped collections are planned but not yet implemented. Within the existing collections, memories can be filtered by a `scope_id` payload field to achieve logical sub-scoping, but dedicated collection-level group and session isolation is future work.
 
 ---
 
@@ -106,9 +94,11 @@ Recall queries combine two signals:
 
 The combined score ranks results for the agent.
 
+> **Roadmap:** Plan 031 will introduce PostgreSQL `tsvector`-based full-text search as a fallback and complement to Qdrant vector search — useful for exact-match keyword queries and when the vector store is unavailable.
+
 ### Scoped Collections
 
-Qdrant collections are scoped per-user and per-group to enforce isolation. A user's recall query only searches `user_{uuid}` (and optionally `system`). No cross-user data leaks are possible at the collection level.
+Qdrant collections are scoped per-user to enforce isolation. A user's recall query searches only `user_{uuid}` (and optionally `system`). No cross-user data leaks are possible at the collection level.
 
 ---
 

@@ -50,8 +50,16 @@ The MCP server runs independently and exposes an HTTP SSE endpoint. Sõber conne
 
 ## MCP Server Lifecycle
 
-```
-DISCOVER → INITIALIZE → CONNECTED → (IDLE_TIMEOUT / FAILURE) → RESTART
+```mermaid
+stateDiagram-v2
+    [*] --> DISCOVER
+    DISCOVER --> INITIALIZE
+    INITIALIZE --> CONNECTED
+    CONNECTED --> FAILURE : request error
+    CONNECTED --> IDLE_TIMEOUT : no activity for idle_timeout_secs
+    FAILURE --> RESTART : max_consecutive_failures reached
+    IDLE_TIMEOUT --> DISCOVER : reconnect on next use
+    RESTART --> INITIALIZE : after restart_cooldown_secs
 ```
 
 1. **DISCOVER** — Sõber looks up registered MCP servers for the current user from the database.

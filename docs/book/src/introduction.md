@@ -6,25 +6,24 @@ Sõber (Estonian for "friend") is a self-evolving, security-first AI agent syste
 individuals and teams who want a personal AI assistant that grows with them — without
 compromising privacy or control.
 
-At its core, Sõber is a multi-agent platform where a primary agent can spawn, command, and
-orchestrate replica agents across distributed systems. Each replica is cryptographically bound
-to its parent, operates in fully isolated contexts, and can be delegated work autonomously.
-Sõber is built to run on infrastructure you control, with your data staying where you put it.
+At its core, Sõber is an AI agent that maintains your identity, preferences, and long-term
+memory across conversations. It uses tools, manages scoped memory, and extends its own
+capabilities through an audited plugin system — all while running on infrastructure you control,
+with your data staying where you put it.
 
 ---
 
 ## Key Concepts
 
-### Agents and Replicas
+### The Agent
 
-The **primary agent** is your main Sõber instance. It maintains your identity, preferences, and
-long-term memory. When given complex or parallelisable tasks, the primary agent spawns
-**replica agents** — short-lived workers that inherit a scoped view of context from their parent,
-execute a delegated task, and report results back.
+The **primary agent** is your Sõber instance. It maintains your identity, preferences, and
+long-term memory. It handles conversations, executes tools, manages workspace artifacts, and
+runs scheduled tasks autonomously. The agent's personality and behaviour are defined by a
+layered `soul.md` system and evolve over time based on your interactions.
 
-Replicas are cryptographically bound to the parent that created them: each one carries a signed
-delegation token that authorises its scope of work. A rogue or compromised replica cannot
-escalate beyond the permissions it was granted.
+Multi-agent orchestration — delegating tasks to specialised agent instances — is a planned
+feature. The current architecture is designed with that capability in mind.
 
 ### Plugins and Skills
 

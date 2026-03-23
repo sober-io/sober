@@ -94,8 +94,13 @@ A plugin that attempts to call a host function it did not declare receives a cap
 
 ### Plugin Audit Pipeline
 
-```
-DISCOVER → AUDIT → SANDBOX_TEST → INSTALL → MONITOR → UPDATE/REMOVE
+```mermaid
+graph LR
+    D[DISCOVER] --> A[AUDIT]
+    A --> ST[SANDBOX_TEST]
+    ST --> I[INSTALL]
+    I --> M[MONITOR]
+    M --> U[UPDATE/REMOVE]
 ```
 
 1. **Static Analysis** — AST scanning for dangerous patterns before execution.
@@ -115,17 +120,6 @@ Generated WASM binaries are stored content-addressed in the `BlobStore`.
 | Password | Argon2id hashing, configurable memory/iteration parameters |
 | Sessions | Cookie-based (`HttpOnly`, `Secure`, `SameSite=Strict`), PostgreSQL-backed |
 | RBAC | Role-based access control with scoped permissions (knowledge, tools, agent, admin) |
-
-### Planned
-
-The following authentication methods are **planned** but not yet implemented:
-
-| Method | Status |
-|--------|--------|
-| OIDC | Planned |
-| WebAuthn / Passkeys | Planned |
-| FIDO2 hardware tokens | Planned |
-| HMAC-signed API keys | Planned |
 
 ### Authorization: RBAC + ABAC Hybrid
 

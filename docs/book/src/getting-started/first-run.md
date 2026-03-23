@@ -40,8 +40,20 @@ Fill in:
 - **Email address** — used for login and notifications
 - **Password** — must meet the minimum length requirement
 
-Click **Create account**. The first account created on a fresh installation is automatically
-granted admin privileges.
+Click **Create account**. All new accounts are created with `User` role and `Pending` status.
+On a fresh installation, use the CLI to approve and promote your account to admin before
+logging in:
+
+```bash
+sober user create --email you@example.com --username you --admin
+```
+
+This creates the account with both `user` and `admin` roles and `Pending` status. Approve it
+so you can log in:
+
+```bash
+sober user approve you@example.com
+```
 
 > If registration is disabled (set by the admin), contact your administrator for an invite.
 
@@ -86,40 +98,49 @@ workspace tools.
 
 ---
 
-## Step 5: Admin Settings
+## Step 5: Settings and Administration
 
-As the first user (admin), you have access to the admin panel. Navigate to **Settings →
-Administration** or visit `/settings/admin` directly.
+The web UI currently includes a **Plugin Management** page at `/settings/plugins`, where you
+can install, view, and remove WASM plugins.
 
-From the admin panel you can:
+System administration (user management, configuration validation, migrations) is handled
+through the CLI tools rather than the web UI:
 
-- **View system status** — uptime, connected services, scheduler state
-- **Manage users** — invite new users, change roles, deactivate accounts
-- **Install plugins** — browse and install WASM plugins from the registry
-- **Review audit logs** — see all security events and agent actions
-- **Configure soul.md** — edit the base agent personality for all users
+```bash
+# List all users (requires database access)
+sober user list
+
+# Approve a pending user account
+sober user approve user@example.com
+
+# Disable a user account
+sober user disable user@example.com
+
+# Check system status (requires sober-api to be running)
+soberctl status
+```
+
+Run `sober --help` or `soberctl --help` for the full command reference.
 
 ---
 
-## Step 6: Using the CLI
+## Step 6: Database and Configuration CLI
 
-The `sober` and `soberctl` CLI tools give you administrative access without the web UI.
+The `sober` offline tool handles database operations and configuration without needing the API
+to be running:
 
 ```bash
-# Check system status (requires sober-api to be running)
-soberctl status
-
-# List all users
-soberctl users list
-
-# View recent agent activity
-soberctl agent logs --tail 50
-
 # Run database migrations (offline, does not need the API)
 sober migrate run
 
+# Show migration status
+sober migrate status
+
 # Validate your configuration
 sober config validate
+
+# Display the resolved configuration (secrets redacted)
+sober config show
 ```
 
 Run `sober --help` or `soberctl --help` for the full command reference.

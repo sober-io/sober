@@ -97,11 +97,17 @@ Standard 5-field cron syntax (second-level cron with 7 fields is also supported)
 
 ## Job Lifecycle
 
-```
-PENDING → ACTIVE → RUNNING → DONE
-                          ↘ FAILED
-         PAUSED ←→ ACTIVE
-         CANCELLED
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> ACTIVE
+    ACTIVE --> RUNNING : tick fires
+    RUNNING --> DONE : success
+    RUNNING --> FAILED : error
+    ACTIVE --> PAUSED : pause
+    PAUSED --> ACTIVE : resume
+    ACTIVE --> CANCELLED
+    PAUSED --> CANCELLED
 ```
 
 | Status | Description |

@@ -44,20 +44,20 @@ The agent's personality is defined by a layered `soul.md` resolution. Each layer
 ```mermaid
 graph TD
     Base["Base soul.md\n(compiled into binary)\nFoundation — defines everything"]
-    User["User-level soul.md\n(~/.sober/soul.md)\nFull override of base"]
-    Workspace["Workspace soul.md\n(./.sober/soul.md)\nAdditive only"]
+    User["User-level soul.md\n(loaded from database)\nFull override of base"]
+    Workspace["Workspace soul.md\n(loaded from database)\nAdditive only"]
 
     Base --> User
     User --> Workspace
 ```
 
-| Layer | Location | Override Rules |
-|-------|----------|----------------|
-| Base | `sober-mind/instructions/soul.md` (binary) | Foundation — defines everything |
-| User | `~/.sober/soul.md` | Full override of base. The user controls their instance. |
-| Workspace | `./.sober/soul.md` | Additive only. Can adjust style and domain focus. Cannot contradict ethical boundaries or security guardrails. |
+| Layer | Source | Override Rules |
+|-------|--------|----------------|
+| Base | `sober-mind/instructions/soul.md`, compiled into the binary at build time | Foundation — defines everything. Zero runtime I/O. |
+| User | Stored in the database; loaded at agent startup or on user switch | Full override of base. The user controls their instance. |
+| Workspace | Stored in the database; loaded on workspace switch | Additive only. Can adjust style and domain focus. Cannot contradict ethical boundaries or security guardrails. |
 
-The `SoulResolver` reads these layers at agent startup (or on workspace switch) and merges them into the resolved soul that drives all subsequent prompt assembly.
+The `SoulResolver` loads the user and workspace layers from the database at agent startup (or on workspace switch) and merges them with the compiled base into the resolved soul that drives all subsequent prompt assembly.
 
 ## Dynamic Prompt Assembly
 

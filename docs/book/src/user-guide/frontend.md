@@ -103,11 +103,12 @@ pnpm test --watch
 3. **Reverse-proxies WebSocket connections** — `/api/v1/ws` is proxied to maintain the WebSocket upgrade.
 4. **Handles SPA fallback** — unknown routes return `index.html` so SvelteKit's client-side router handles navigation.
 
-```
-Browser ──/── sober-web ──/api/*──► sober-api
-                │
-                └── /static/* ──► embedded assets (or disk)
-                └── /* ──► index.html (SPA fallback)
+```mermaid
+graph LR
+    Browser -->|/api/*| Web[sober-web]
+    Web -->|proxy| API[sober-api]
+    Web -->|/static/*| Assets[embedded assets\nor disk]
+    Web -->|/*| SPA[index.html\nSPA fallback]
 ```
 
 ### Embedded vs. disk assets

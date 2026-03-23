@@ -2,6 +2,8 @@
 
 A workspace is an isolated environment where the agent performs file-based work on your behalf. Each workspace has its own directory, git repository, blob store, and configuration. The agent uses workspaces to run shell commands, create artifacts, manage snapshots, and maintain project-specific context.
 
+Every conversation has its own dedicated working directory inside the workspace, named after the conversation UUID.
+
 ---
 
 ## What Workspaces Are For
@@ -27,20 +29,26 @@ Workspaces are stored under the workspace root, which is configurable:
 ~/.sober/workspaces/
 ```
 
-Each workspace is a directory named by its UUID:
+Each workspace is a directory (the workspace root). The conversation UUID, not a user UUID, forms the per-conversation subdirectory name:
 
 ```
 /var/lib/sober/workspaces/
-  550e8400-e29b-41d4-a716-446655440000/    # workspace UUID
-    .sober/                                 # Sõber configuration for this workspace
-      soul.md                               # workspace-level soul layer (additive)
-      config.toml                           # workspace-level settings (optional)
+  550e8400-e29b-41d4-a716-446655440000/    # workspace root (workspace UUID)
+    .sober/                                 # Sõber internals for this workspace
+      config.toml                           # workspace-level settings
+      state.json                            # agent state (observations)
+      proposals/                            # proposed soul/config changes
+      traces/                               # execution traces
+      snapshots/                            # tar archives created by snapshot tools
+        pre-dangerous-20260323T120000.tar.gz
+        my-checkpoint-20260323T130000.tar.gz
+      worktrees/                            # git worktrees
+      blobs/                                # content-addressed blob store
+        <prefix>/
+          <sha256-hash>
     .git/                                   # git repository managed by libgit2
     <conversation-uuid>/                    # per-conversation working directory
       ...                                   # agent-created files
-    .snapshots/                             # tar archives created by snapshot tools
-      pre-dangerous-20260323T120000.tar.gz
-      my-checkpoint-20260323T130000.tar.gz
 ```
 
 The workspace root is set separately for the agent and scheduler processes:
@@ -57,23 +65,27 @@ workspace_root = "/var/lib/sober/workspaces"
 
 ## `.sober/` Directory
 
-Each workspace can contain a `.sober/` directory that customises Sõber's behaviour for that project.
+Each workspace contains a `.sober/` directory that Sõber manages for internal state and configuration.
 
-### `soul.md`
+### `config.toml`
 
-A workspace-level soul layer that is appended to the agent's personality for conversations in this workspace. The workspace layer is **additive only** — it can adjust communication style or add domain-specific context, but it cannot override ethical boundaries or security rules established in the base soul.
+A per-workspace configuration file created automatically when the workspace is initialised. This can override settings like the LLM model, sandbox profile, and snapshot retention limits. The format mirrors the main `config.toml` but only workspace-relevant sections are honoured.
+
+### `soul.md` (optional)
+
+An optional workspace-level soul layer. If present, it is appended to the agent's personality for conversations in this workspace. The workspace layer is **additive only** — it can adjust communication style or add domain-specific context, but it cannot override ethical boundaries or security rules established in the base soul.
 
 Resolution order:
 
 ```
 sober-mind/instructions/soul.md   (base — compiled into the binary)
   └── ~/.sober/soul.md             (user-level override)
-       └── ./.sober/soul.md        (workspace-level, additive only)
+       └── .sober/soul.md          (workspace-level, additive only)
 ```
 
-### `config.toml`
+### `state.json`
 
-An optional per-workspace configuration file. This can override settings like snapshot retention limits. The format mirrors the main `config.toml` but only workspace-relevant sections are honoured.
+Stores agent observations and ephemeral workspace state. Managed automatically by the agent — you do not normally need to edit this file.
 
 ---
 
@@ -106,7 +118,7 @@ Large or binary content is stored content-addressed in the workspace blob store 
 Blob-backed artifacts (created with `storage_type: "blob"`) have their hash recorded in the `blob_key` field and their bytes stored in:
 
 ```
-/var/lib/sober/workspaces/<workspace-id>/blobs/<hash-prefix>/<hash>
+<workspace-root>/.sober/blobs/<hash-prefix>/<hash>
 ```
 
 Generated WASM plugins are also stored as blobs, ensuring they survive workspace directory changes.

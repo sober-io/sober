@@ -19,10 +19,22 @@ name        = "greet"
 description = "Returns a greeting for the given name and optional language"
 ```
 
+**`Cargo.toml`**
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sober-pdk = "0.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
 **`src/lib.rs`**
 
 ```rust
-use extism_pdk::*;
+use sober_pdk::{plugin_fn, FnResult, Json};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -75,8 +87,8 @@ cargo build --target wasm32-wasip1 --release
 ## Example 2 — Web scraper (network capability)
 
 A plugin that fetches a web page and returns its plain-text content. It
-demonstrates the `network` capability with domain restriction and the use of
-`host_log` for diagnostics.
+demonstrates the `network` capability with domain restriction and structured
+logging.
 
 **`plugin.toml`**
 
@@ -94,12 +106,23 @@ name        = "fetch_page"
 description = "Fetches the raw HTML of a URL and returns it as text"
 ```
 
+**`Cargo.toml`**
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sober-pdk = "0.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
 **`src/lib.rs`**
 
 ```rust
-use extism_pdk::*;
+use sober_pdk::{plugin_fn, FnResult, Json, log, http};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 #[derive(Deserialize)]
 struct FetchInput {
@@ -112,42 +135,23 @@ struct FetchOutput {
     body:   String,
 }
 
-fn log(level: &str, message: &str) {
-    let req = json!({ "level": level, "message": message, "fields": {} });
-    host::call("sober", "host_log", &serde_json::to_vec(&req).unwrap()).ok();
-}
-
-fn http_get(url: &str) -> Result<(u16, String), String> {
-    let req = json!({
-        "method":  "GET",
-        "url":     url,
-        "headers": { "User-Agent": "sober-plugin/web-scraper" },
-        "body":    null
-    });
-    let raw = host::call("sober", "host_http_request", &serde_json::to_vec(&req).unwrap())
-        .map_err(|e| e.to_string())?;
-    let resp: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
-
-    if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
-        return Err(err.to_owned());
-    }
-    let status = resp["status"].as_u64().unwrap_or(0) as u16;
-    let body   = resp["body"].as_str().unwrap_or("").to_owned();
-    Ok((status, body))
-}
-
 #[plugin_fn]
 pub fn fetch_page(Json(input): Json<FetchInput>) -> FnResult<Json<FetchOutput>> {
-    log("info", &format!("fetching {}", input.url));
+    log::info(&format!("fetching {}", input.url));
 
-    match http_get(&input.url) {
-        Ok((status, body)) => {
-            log("info", &format!("got status {status}"));
-            Ok(Json(FetchOutput { status, body }))
+    let resp = http::get(
+        &input.url,
+        &[("User-Agent", "sober-plugin/web-scraper")],
+    );
+
+    match resp {
+        Ok(r) => {
+            log::info(&format!("got status {}", r.status));
+            Ok(Json(FetchOutput { status: r.status, body: r.body }))
         }
         Err(e) => {
-            log("error", &format!("fetch failed: {e}"));
-            Err(Error::msg(e))
+            log::error(&format!("fetch failed: {e}"));
+            Err(e)
         }
     }
 }
@@ -183,21 +187,24 @@ name        = "search_knowledge"
 description = "Performs a semantic search over previously indexed documents"
 ```
 
+**`Cargo.toml`**
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sober-pdk = "0.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
 **`src/lib.rs`**
 
 ```rust
-use extism_pdk::*;
+use sober_pdk::{plugin_fn, FnResult, Json, kv, memory, log};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-
-// ---------------------------------------------------------------------------
-// Helper: call a host function and parse JSON response.
-// ---------------------------------------------------------------------------
-
-fn call_host(fn_name: &str, req: &serde_json::Value) -> Result<serde_json::Value, Error> {
-    let raw = host::call("sober", fn_name, &serde_json::to_vec(req).unwrap())?;
-    Ok(serde_json::from_slice(&raw)?)
-}
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Tool: index_document
@@ -217,30 +224,20 @@ struct IndexOutput {
 
 #[plugin_fn]
 pub fn index_document(Json(input): Json<IndexInput>) -> FnResult<Json<IndexOutput>> {
-    let mut metadata = json!({});
+    let mut metadata = HashMap::new();
     if let Some(src) = &input.source {
-        metadata["source"] = serde_json::Value::String(src.clone());
+        metadata.insert("source".to_string(), serde_json::json!(src));
     }
 
-    let write_req = json!({
-        "content":  input.content,
-        "scope":    "user",
-        "metadata": metadata
-    });
-
-    let resp = call_host("host_memory_write", &write_req)?;
-
-    if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
-        return Err(Error::msg(format!("memory write failed: {err}")));
-    }
+    memory::write(&input.content, Some("user"), metadata)?;
 
     // Track indexed count in KV store.
-    let count_resp = call_host("host_kv_get", &json!({ "key": "indexed_count" }))?;
-    let count: u64 = count_resp["value"]
-        .as_u64()
+    let count = kv::get("indexed_count")?
+        .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    kv::set("indexed_count", &serde_json::json!(count + 1))?;
 
-    call_host("host_kv_set", &json!({ "key": "indexed_count", "value": count + 1 }))?;
+    log::info(&format!("indexed document #{}", count + 1));
 
     Ok(Json(IndexOutput { indexed: true }))
 }
@@ -273,29 +270,15 @@ struct SearchOutput {
 
 #[plugin_fn]
 pub fn search_knowledge(Json(input): Json<SearchInput>) -> FnResult<Json<SearchOutput>> {
-    let query_req = json!({
-        "query": input.query,
-        "scope": "user",
-        "limit": input.limit
-    });
+    let hits = memory::query(&input.query, Some("user"), Some(input.limit))?;
 
-    let resp = call_host("host_memory_query", &query_req)?;
-
-    if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
-        return Err(Error::msg(format!("memory query failed: {err}")));
-    }
-
-    let results = resp["results"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .map(|r| SearchResult {
-                    content: r["content"].as_str().unwrap_or("").to_owned(),
-                    score:   r["score"].as_f64().unwrap_or(0.0),
-                })
-                .collect()
+    let results = hits
+        .into_iter()
+        .map(|hit| SearchResult {
+            content: hit.content,
+            score:   hit.score,
         })
-        .unwrap_or_default();
+        .collect();
 
     Ok(Json(SearchOutput { results }))
 }
