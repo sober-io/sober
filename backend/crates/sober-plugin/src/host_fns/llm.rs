@@ -49,11 +49,19 @@ pub(crate) fn host_llm_complete_impl(
         model,
         messages,
         tools: vec![],
-        max_tokens: Some(req.max_tokens.unwrap_or(16384)),
+        // Enforce a minimum — thinking models need headroom for reasoning.
+        max_tokens: Some(req.max_tokens.unwrap_or(8192).max(4096)),
         temperature: None,
         stop: vec![],
         stream: false,
     };
+
+    tracing::info!(
+        max_tokens = ?completion_req.max_tokens,
+        model = %completion_req.model,
+        message_count = completion_req.messages.len(),
+        "plugin LLM request"
+    );
 
     // Drop the lock before blocking (see lock discipline note in host_fns/mod.rs).
     drop(ctx);
