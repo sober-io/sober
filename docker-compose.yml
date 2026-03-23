@@ -2,31 +2,31 @@ name: sober
 
 x-common-env: &common-env
   SOBER_ENV: development
-  DATABASE_URL: postgres://sober:sober@postgres:5432/sober
-  DATABASE_MAX_CONNECTIONS: "10"
-  QDRANT_URL: http://qdrant:6334
+  SOBER_DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+  SOBER_DATABASE_MAX_CONNECTIONS: "10"
+  SOBER_QDRANT_URL: http://qdrant:6334
   RUST_LOG: info,tower_http=debug
 
 x-llm-env: &llm-env
-  LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
-  LLM_API_KEY: ${LLM_API_KEY:-}
-  LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
-  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
-  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
-  EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+  SOBER_LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+  SOBER_LLM_API_KEY: ${LLM_API_KEY:-}
+  SOBER_LLM_MODEL: ${LLM_MODEL:-anthropic/claude-sonnet-4}
+  SOBER_LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+  SOBER_LLM_EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  SOBER_LLM_EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
 
 x-memory-env: &memory-env
-  MEMORY_DECAY_HALF_LIFE_DAYS: "30"
-  MEMORY_RETRIEVAL_BOOST: "0.2"
-  MEMORY_PRUNE_THRESHOLD: "0.1"
+  SOBER_MEMORY_DECAY_HALF_LIFE_DAYS: "30"
+  SOBER_MEMORY_RETRIEVAL_BOOST: "0.2"
+  SOBER_MEMORY_PRUNE_THRESHOLD: "0.1"
 
 x-mcp-env: &mcp-env
-  MCP_REQUEST_TIMEOUT_SECS: "30"
-  MCP_MAX_CONSECUTIVE_FAILURES: "3"
-  MCP_IDLE_TIMEOUT_SECS: "300"
+  SOBER_MCP_REQUEST_TIMEOUT_SECS: "30"
+  SOBER_MCP_MAX_CONSECUTIVE_FAILURES: "3"
+  SOBER_MCP_IDLE_TIMEOUT_SECS: "300"
 
 x-crypto-env: &crypto-env
-  MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
+  SOBER_CRYPTO_MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
 
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4317
@@ -120,7 +120,7 @@ services:
       dockerfile: infra/docker/Dockerfile.cli
     entrypoint: ["sober", "migrate", "run"]
     environment:
-      DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+      SOBER_DATABASE_URL: postgres://sober:sober@postgres:5432/sober
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,12 +137,13 @@ services:
       - "9100:9100"
     environment:
       <<: [*common-env, *llm-env, *memory-env, *mcp-env, *crypto-env, *otel-env]
-      AGENT_SOCKET_PATH: /run/sober/agent.sock
-      SANDBOX_PROFILE: unrestricted
-      ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
-      SEARXNG_URL: http://searxng:8080
+      SOBER_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SOBER_AGENT_SANDBOX_PROFILE: unrestricted
+      SOBER_AGENT_METRICS_PORT: "9100"
+      SOBER_AGENT_WORKSPACE_ROOT: /var/lib/sober/workspaces
+      SOBER_ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
+      SOBER_SEARXNG_URL: http://searxng:8080
       OTEL_SERVICE_NAME: sober-agent
-      METRICS_PORT: "9100"
     volumes:
       - sober_sockets:/run/sober
       - sober_workspaces:/var/lib/sober/workspaces
@@ -168,12 +169,12 @@ services:
       - "3000:3000"
     environment:
       <<: [*common-env, *llm-env, *memory-env, *mcp-env, *otel-env]
-      HOST: "0.0.0.0"
-      PORT: "3000"
-      ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
-      SESSION_SECRET: docker-dev-secret
-      SESSION_TTL_SECONDS: "2592000"
-      SEARXNG_URL: http://searxng:8080
+      SOBER_SERVER_HOST: "0.0.0.0"
+      SOBER_SERVER_PORT: "3000"
+      SOBER_ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
+      SOBER_AUTH_SESSION_SECRET: docker-dev-secret
+      SOBER_AUTH_SESSION_TTL_SECONDS: "2592000"
+      SOBER_SEARXNG_URL: http://searxng:8080
       OTEL_SERVICE_NAME: sober-api
     volumes:
       - sober_sockets:/run/sober
@@ -194,12 +195,14 @@ services:
       - "9101:9101"
     environment:
       <<: [*common-env, *otel-env]
-      SCHEDULER_TICK_INTERVAL_SECS: "1"
-      SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
-      SCHEDULER_ADMIN_SOCKET_PATH: /run/sober/scheduler-admin.sock
-      SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+      SOBER_SCHEDULER_TICK_INTERVAL_SECS: "1"
+      SOBER_SCHEDULER_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SOBER_SCHEDULER_SOCKET_PATH: /run/sober/scheduler.sock
+      SOBER_SCHEDULER_MAX_CONCURRENT_JOBS: "10"
+      SOBER_SCHEDULER_METRICS_PORT: "9101"
+      SOBER_SCHEDULER_WORKSPACE_ROOT: /var/lib/sober/workspaces
+      SOBER_SCHEDULER_SANDBOX_PROFILE: unrestricted
       OTEL_SERVICE_NAME: sober-scheduler
-      METRICS_PORT: "9101"
     volumes:
       - sober_sockets:/run/sober
     depends_on:
@@ -214,10 +217,10 @@ services:
       - "8088:8080"
     environment:
       <<: *otel-env
-      HOST: "0.0.0.0"
-      PORT: "8080"
-      API_UPSTREAM_URL: http://sober-api:3000
-      STATIC_DIR: /opt/sober/data/static
+      SOBER_WEB_HOST: "0.0.0.0"
+      SOBER_WEB_PORT: "8080"
+      SOBER_WEB_API_UPSTREAM_URL: http://sober-api:3000
+      SOBER_WEB_STATIC_DIR: /opt/sober/data/static
       RUST_LOG: sober_web=info
       OTEL_SERVICE_NAME: sober-web
     depends_on:
