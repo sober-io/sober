@@ -141,7 +141,7 @@ pub struct CapabilitiesConfig {
     #[serde(default)]
     pub filesystem: Cap<FilesystemCap>,
     /// Invoke an LLM provider.
-    #[serde(default)]
+    #[serde(default, alias = "llm_inference")]
     pub llm_call: Cap<bool>,
     /// Call other tools/plugins.
     #[serde(default)]

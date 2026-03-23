@@ -301,7 +301,7 @@ Available capabilities via `sober_pdk`:
 - `sober_pdk::conversation::read(conversation_id, limit)` — requires `conversation_read`
 - `sober_pdk::schedule::add(cron_expr, &payload)` — requires `schedule`
 - `sober_pdk::fs::read(path)` / `write(path, content)` — requires `filesystem`
-- `sober_pdk::llm::complete(prompt, model, max_tokens)` — requires `llm_inference`
+- `sober_pdk::llm::complete(prompt, model, max_tokens)` — requires `llm_call`
 
 `sober-pdk` is already in Cargo.toml — do NOT add it manually.
 
@@ -323,7 +323,7 @@ conversation_read = true
 schedule = true
 metrics = true
 filesystem = true                        # or: filesystem = { paths = ["/workspace/data"] }
-llm_inference = true
+llm_call = true
 
 [[tools]]
 name = "greet"                           # MUST match the #[plugin_fn] fn name exactly
