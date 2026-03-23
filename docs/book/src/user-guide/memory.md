@@ -26,16 +26,26 @@ Memories are stored when:
 
 ## Memory Scopes
 
-Memory is partitioned into scopes that enforce isolation between users and the system. Context loading follows the principle of least privilege and only loads what is needed.
+Memory is partitioned into scopes that enforce isolation. Context loading follows the principle of least privilege — only the minimal required scopes are loaded for any operation.
 
-The architecture is designed to support four nested scope levels (global → user → group → session), but the current implementation provides **two Qdrant collection levels**:
+```mermaid
+graph TD
+    G["Global / System scope"]
+    U["User scope"]
+    Gr["Group scope"]
+    S["Session scope"]
+
+    G --> U --> Gr --> S
+```
 
 | Scope | Qdrant Collection | Description |
 |-------|-------------------|-------------|
 | **System** | `system` | System prompts, base personality, shared knowledge. |
-| **User** | `user_{uuid}` | Per-user facts, preferences, conversation history. Isolated per user — no cross-user access is possible at the collection level. |
+| **User** | `user_{uuid}` | Per-user facts, preferences, conversation history. Isolated per user. |
+| **Group** | `user_{uuid}` (shared logically) | Group conversations support multiple users with roles and agent modes. Memories from group conversations are currently stored in the individual user's scope — shared group memory collections are planned. |
+| **Session** | (ephemeral) | Current conversation context. Not persisted to Qdrant — loaded from recent messages in the database. |
 
-> **Design intent vs. current implementation:** Group-scoped (`group_{uuid}`) and session-scoped collections are planned but not yet implemented. Within the existing collections, memories can be filtered by a `scope_id` payload field to achieve logical sub-scoping, but dedicated collection-level group and session isolation is future work.
+The four-level scope hierarchy is defined in the type system (`ScopeKind` enum). Currently, Qdrant collections exist at the **system** and **user** levels. Group and session scoping use logical filtering within those collections rather than dedicated collections.
 
 ---
 
