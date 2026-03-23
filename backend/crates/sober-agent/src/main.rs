@@ -192,7 +192,6 @@ async fn main() -> Result<()> {
             };
             mind.base_system_prompt(&caller).await.ok()
         },
-        db_pool: Some(pool.clone()),
     };
     let plugin_manager = Arc::new(
         PluginManager::new(
@@ -273,6 +272,7 @@ async fn main() -> Result<()> {
         mek,
         Some(config.llm.clone()),
         tool_bootstrap,
+        Some(pool.clone()),
     ));
 
     // 18. Spawn the confirmation broker loop

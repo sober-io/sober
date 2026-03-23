@@ -8,9 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use metrics::{counter, histogram};
-use sober_core::types::ids::PluginId;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
-use tracing::{debug, warn};
 
 use crate::host::PluginHost;
 
@@ -26,9 +24,6 @@ pub struct PluginTool {
     host: Arc<Mutex<PluginHost>>,
     tool_name: String,
     metadata: ToolMetadata,
-    plugin_id: PluginId,
-    user_id: Option<sober_core::types::ids::UserId>,
-    db_pool: Option<sqlx::PgPool>,
 }
 
 impl PluginTool {
@@ -37,14 +32,7 @@ impl PluginTool {
     /// The `host` is shared across all tools from the same plugin.
     /// `tool_name` must match a `[[tools]]` entry in the manifest.
     /// `description` comes from the manifest's tool entry.
-    pub fn new(
-        host: Arc<Mutex<PluginHost>>,
-        tool_name: String,
-        description: String,
-        plugin_id: PluginId,
-        user_id: Option<sober_core::types::ids::UserId>,
-        db_pool: Option<sqlx::PgPool>,
-    ) -> Self {
+    pub fn new(host: Arc<Mutex<PluginHost>>, tool_name: String, description: String) -> Self {
         let metadata = ToolMetadata {
             name: tool_name.clone(),
             description,
@@ -61,9 +49,6 @@ impl PluginTool {
             host,
             tool_name,
             metadata,
-            plugin_id,
-            user_id,
-            db_pool,
         }
     }
 }
@@ -77,9 +62,6 @@ impl Tool for PluginTool {
         let host = Arc::clone(&self.host);
         let tool_name = self.tool_name.clone();
         let meta_tool_name = self.tool_name.clone();
-        let plugin_id = self.plugin_id;
-        let user_id = self.user_id;
-        let db_pool = self.db_pool.clone();
 
         // Capture the plugin name from the host's manifest for logging.
         let plugin_name = self
@@ -102,10 +84,9 @@ impl Tool for PluginTool {
             .map_err(|e| format!("spawn_blocking failed: {e}"))
             .and_then(|r| r);
 
-            let duration_ms = start.elapsed().as_millis() as u64;
             let duration_secs = start.elapsed().as_secs_f64();
 
-            let (success, error_message, output) = match result {
+            match result {
                 Ok(output) => {
                     counter!(
                         "sober_plugin_executions_total",
@@ -114,13 +95,13 @@ impl Tool for PluginTool {
                         "status" => "success",
                     )
                     .increment(1);
-                    debug!(
-                        plugin = %plugin_name,
-                        tool = %meta_tool_name,
-                        duration_ms,
-                        "plugin tool execution succeeded"
-                    );
-                    (true, None, Ok(output))
+                    histogram!(
+                        "sober_plugin_execution_duration_seconds",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
+                    )
+                    .record(duration_secs);
+                    Ok(output)
                 }
                 Err(msg) => {
                     counter!(
@@ -130,56 +111,18 @@ impl Tool for PluginTool {
                         "status" => "error",
                     )
                     .increment(1);
-                    warn!(
-                        plugin = %plugin_name,
-                        tool = %meta_tool_name,
-                        duration_ms,
-                        error = %msg,
-                        "plugin tool execution failed"
-                    );
-                    (
-                        false,
-                        Some(msg.clone()),
-                        Ok(ToolOutput {
-                            content: format!("Plugin execution failed: {msg}"),
-                            is_error: true,
-                        }),
+                    histogram!(
+                        "sober_plugin_execution_duration_seconds",
+                        "plugin" => plugin_name.clone(),
+                        "tool" => meta_tool_name.clone(),
                     )
+                    .record(duration_secs);
+                    Ok(ToolOutput {
+                        content: format!("Plugin execution failed: {msg}"),
+                        is_error: true,
+                    })
                 }
-            };
-
-            histogram!(
-                "sober_plugin_execution_duration_seconds",
-                "plugin" => plugin_name.clone(),
-                "tool" => meta_tool_name.clone(),
-            )
-            .record(duration_secs);
-
-            // Persist execution log to DB.
-            if let Some(pool) = db_pool {
-                tokio::spawn(async move {
-                    if let Err(e) = sqlx::query(
-                        "INSERT INTO plugin_execution_logs \
-                         (plugin_id, plugin_name, tool_name, user_id, \
-                          duration_ms, success, error_message) \
-                         VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                    )
-                    .bind(plugin_id.as_uuid())
-                    .bind(&plugin_name)
-                    .bind(&meta_tool_name)
-                    .bind(user_id.map(|id| *id.as_uuid()))
-                    .bind(duration_ms as i64)
-                    .bind(success)
-                    .bind(&error_message)
-                    .execute(&pool)
-                    .await
-                    {
-                        tracing::warn!(error = %e, "failed to persist plugin execution log");
-                    }
-                });
             }
-
-            output
         })
     }
 }

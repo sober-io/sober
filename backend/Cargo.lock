@@ -4055,6 +4055,7 @@ dependencies = [
  "sober-sandbox",
  "sober-skill",
  "sober-workspace",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

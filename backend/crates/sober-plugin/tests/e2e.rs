@@ -286,9 +286,6 @@ async fn plugin_tool_execute_returns_echoed_content() {
         Arc::clone(&host),
         "greet".into(),
         "Echoes the input back".into(),
-        sober_core::types::ids::PluginId::new(),
-        None,
-        None,
     );
 
     // Verify metadata
@@ -325,9 +322,6 @@ async fn plugin_tool_multiple_calls_on_shared_host() {
         Arc::clone(&host),
         "greet".into(),
         "Echoes the input back".into(),
-        sober_core::types::ids::PluginId::new(),
-        None,
-        None,
     );
 
     // Call greet multiple times to verify the host can be reused

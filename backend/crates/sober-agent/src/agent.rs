@@ -112,6 +112,8 @@ struct LoopContext<'a, R: AgentRepos> {
     mek: &'a Option<Arc<Mek>>,
     /// XML listing of all available skills for system prompt injection.
     skill_catalog_xml: String,
+    /// Database pool for tool execution audit logging.
+    tool_log_pool: Option<sqlx::PgPool>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -140,6 +142,8 @@ pub struct Agent<R: AgentRepos> {
     /// remember) that are identical across conversations. Built once at
     /// construction and reused every turn.
     static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
+    /// Database pool for tool execution audit logging.
+    tool_log_pool: Option<sqlx::PgPool>,
     /// Per-conversation skill activation tracking. Skills activated in one turn
     /// remain active in subsequent turns of the same conversation.
     skill_activations: std::sync::RwLock<
@@ -163,6 +167,7 @@ impl<R: AgentRepos> Agent<R> {
         mek: Option<Arc<Mek>>,
         llm_config: Option<LlmConfig>,
         tool_bootstrap: Arc<ToolBootstrap<R>>,
+        tool_log_pool: Option<sqlx::PgPool>,
     ) -> Self {
         let static_tools = tool_bootstrap.build_static_tools();
         Self {
@@ -179,6 +184,7 @@ impl<R: AgentRepos> Agent<R> {
             llm_config,
             tool_bootstrap,
             static_tools,
+            tool_log_pool,
             skill_activations: std::sync::RwLock::new(HashMap::new()),
         }
     }
@@ -533,6 +539,7 @@ impl<R: AgentRepos> Agent<R> {
         let workspace_id = conversation.workspace_id;
         let llm_config = self.llm_config.clone();
         let mek = self.mek.clone();
+        let tool_log_pool = self.tool_log_pool.clone();
 
         let trigger_label = format!("{trigger:?}").to_lowercase();
 
@@ -562,6 +569,7 @@ impl<R: AgentRepos> Agent<R> {
                 llm_config: &llm_config,
                 mek: &mek,
                 skill_catalog_xml,
+                tool_log_pool,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -864,6 +872,7 @@ impl<R: AgentRepos> Agent<R> {
                         conversation_id,
                         repos,
                         ctx.workspace_id,
+                        ctx.tool_log_pool.as_ref(),
                     )
                     .await;
 
@@ -1076,6 +1085,7 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         repos: &Arc<R>,
         workspace_id: Option<WorkspaceId>,
+        tool_log_pool: Option<&sqlx::PgPool>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -1217,11 +1227,38 @@ impl<R: AgentRepos> Agent<R> {
                     format!("Tool not found: {tool_name}")
                 }
             };
+            let tool_duration_ms = tool_start.elapsed().as_millis() as i64;
             metrics::histogram!(
                 "sober_agent_tool_call_duration_seconds",
                 "tool" => tool_name.clone(),
             )
             .record(tool_start.elapsed().as_secs_f64());
+
+            // Persist tool execution log to DB.
+            if let Some(pool) = tool_log_pool {
+                let pool = pool.clone();
+                let log_tool = tool_name.clone();
+                let log_user = user_id;
+                let log_ws = workspace_id;
+                let log_conv = conversation_id;
+                let log_success = !any_errors;
+                tokio::spawn(async move {
+                    let _ = sqlx::query(
+                        "INSERT INTO plugin_execution_logs \
+                         (tool_name, user_id, workspace_id, conversation_id, \
+                          duration_ms, success) \
+                         VALUES ($1, $2, $3, $4, $5, $6)",
+                    )
+                    .bind(&log_tool)
+                    .bind(log_user.as_uuid())
+                    .bind(log_ws.map(|id| *id.as_uuid()))
+                    .bind(log_conv.as_uuid())
+                    .bind(tool_duration_ms)
+                    .bind(log_success)
+                    .execute(&pool)
+                    .await;
+                });
+            }
 
             let _ = event_tx
                 .send(Ok(AgentEvent::ToolCallResult {
