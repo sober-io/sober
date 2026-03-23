@@ -1173,8 +1173,6 @@ impl<R: AgentRepos> Agent<R> {
                                 risk_level,
                                 reason,
                             };
-                            // NeedsConfirmation is not an error — count as success
-                            // since the tool correctly identified a dangerous action.
                             metrics::counter!(
                                 "sober_agent_tool_calls_total",
                                 "tool" => tool_name.clone(),

@@ -41,7 +41,7 @@ pub use bootstrap::{
     MemoryToolConfig, SearchToolConfig, ShellToolConfig, ToolBootstrap, TurnContext,
 };
 pub use fetch_url::FetchUrlTool;
-pub use generate_plugin::GeneratePluginTool;
+pub use generate_plugin::{GeneratePluginConfig, GeneratePluginTool};
 pub use memory::{RecallTool, RememberTool};
 pub use registry::ToolRegistry;
 pub use scheduler::SchedulerTools;

@@ -189,15 +189,20 @@ fn build_executor_registry(
         .context("failed to resolve sandbox policy")?;
 
     // Plugin cleanup executor
-    let cleanup_plugin_repo = sober_db::PgPluginRepo::new(pool);
+    let cleanup_plugin_repo = sober_db::PgPluginRepo::new(pool.clone());
     registry.register(
         "plugin_cleanup",
         Arc::new(PluginCleanupExecutor::new(cleanup_plugin_repo)),
     );
 
+    let sandbox_log_repo = Arc::new(sober_db::PgSandboxExecutionLogRepo::new(pool));
     registry.register(
         "artifact",
-        Arc::new(ArtifactExecutor::new(blob_store, sandbox_policy)),
+        Arc::new(ArtifactExecutor::new(
+            blob_store,
+            sandbox_policy,
+            Some(sandbox_log_repo),
+        )),
     );
 
     Ok(registry)

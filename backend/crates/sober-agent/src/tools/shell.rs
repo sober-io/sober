@@ -10,9 +10,15 @@ use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 use sober_core::PermissionMode;
+use sober_core::types::ids::UserId;
+use sober_core::types::input::CreateSandboxExecutionLog;
+use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
 use sober_workspace::SnapshotManager;
+
+use super::ShellToolConfig;
 
 /// Maximum output length returned to the LLM to avoid blowing up context.
 const MAX_OUTPUT_LEN: usize = 16_000;
@@ -43,37 +49,38 @@ pub type SharedPermissionMode = Arc<RwLock<PermissionMode>>;
 /// confirmation, the tool returns [`ToolError::NeedsConfirmation`]
 /// and the agent loop handles the interactive flow.
 pub struct ShellTool {
-    policy: CommandPolicy,
+    command_policy: CommandPolicy,
     permission_mode: SharedPermissionMode,
     workspace_home: PathBuf,
     sandbox_policy: SandboxPolicy,
     auto_snapshot: bool,
     max_snapshots: u32,
     snapshot_manager: Option<SnapshotManager>,
+    sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
+    user_id: Option<UserId>,
+    workspace_id: Option<sober_core::types::WorkspaceId>,
 }
 
 impl ShellTool {
-    /// Create a new ShellTool with a shared permission mode.
-    ///
-    /// `max_snapshots` controls how many snapshots are retained before pruning.
-    /// Pass `None` to use the default (10).
+    /// Creates a new ShellTool from shared config and per-conversation params.
     pub fn new(
-        policy: CommandPolicy,
-        permission_mode: SharedPermissionMode,
+        config: &ShellToolConfig,
         workspace_home: PathBuf,
-        sandbox_policy: SandboxPolicy,
-        auto_snapshot: bool,
-        max_snapshots: Option<u32>,
         snapshot_manager: Option<SnapshotManager>,
+        user_id: Option<UserId>,
+        workspace_id: Option<sober_core::types::WorkspaceId>,
     ) -> Self {
         Self {
-            policy,
-            permission_mode,
+            command_policy: config.command_policy.clone(),
+            permission_mode: Arc::clone(&config.permission_mode),
             workspace_home,
-            sandbox_policy,
-            auto_snapshot,
-            max_snapshots: max_snapshots.unwrap_or(DEFAULT_MAX_SNAPSHOTS),
+            sandbox_policy: config.sandbox_policy.clone(),
+            auto_snapshot: config.auto_snapshot,
+            max_snapshots: config.max_snapshots.unwrap_or(DEFAULT_MAX_SNAPSHOTS),
             snapshot_manager,
+            sandbox_log_repo: config.sandbox_log_repo.clone(),
+            user_id,
+            workspace_id,
         }
     }
 
@@ -86,7 +93,7 @@ impl ShellTool {
         }
 
         // Check admin deny list
-        if self.policy.is_denied(&input.command) {
+        if self.command_policy.is_denied(&input.command) {
             return Ok(ToolOutput {
                 content: "Command denied by system policy.".to_string(),
                 is_error: true,
@@ -94,7 +101,7 @@ impl ShellTool {
         }
 
         // Classify risk
-        let risk = self.policy.classify(&input.command);
+        let risk = self.command_policy.classify(&input.command);
 
         // Read current permission mode (may be updated at runtime via gRPC).
         let permission_mode = *self
@@ -177,10 +184,32 @@ impl ShellTool {
             format!("cd {} && {}", workdir.display(), input.command),
         ];
 
-        let result = sandbox
+        let (result, audit_entry) = sandbox
             .execute(&command, &HashMap::new())
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("sandbox execution failed: {e}")))?;
+
+        // Persist sandbox audit entry via repo.
+        if let Some(repo) = &self.sandbox_log_repo {
+            let repo = Arc::clone(repo);
+            let entry = CreateSandboxExecutionLog {
+                execution_id: audit_entry.execution_id,
+                workspace_id: self.workspace_id,
+                user_id: self.user_id,
+                policy_name: audit_entry.policy.name.clone(),
+                command: audit_entry.command.clone(),
+                trigger: format!("{:?}", audit_entry.trigger),
+                duration_ms: audit_entry.duration_ms as i64,
+                exit_code: audit_entry.exit_code,
+                denied_network_requests: audit_entry.denied_network_requests.clone(),
+                outcome: format!("{:?}", audit_entry.outcome),
+            };
+            tokio::spawn(async move {
+                if let Err(e) = repo.create(entry).await {
+                    tracing::warn!(error = %e, "failed to persist sandbox audit log");
+                }
+            });
+        }
 
         // Format output
         let mut output = String::new();
@@ -252,13 +281,16 @@ mod tests {
 
     fn test_tool() -> ShellTool {
         ShellTool {
-            policy: CommandPolicy::default(),
+            command_policy: CommandPolicy::default(),
             permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
             workspace_home: PathBuf::from("/tmp/test-workspace"),
             sandbox_policy: SandboxProfile::LockedDown.resolve(&HashMap::new()).unwrap(),
             auto_snapshot: false,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             snapshot_manager: None,
+            sandbox_log_repo: None,
+            user_id: None,
+            workspace_id: None,
         }
     }
 
@@ -298,7 +330,7 @@ mod tests {
     #[test]
     fn shell_tool_denies_blocked_command() {
         let tool = ShellTool {
-            policy: CommandPolicy::with_denied(vec!["shutdown".to_string()]),
+            command_policy: CommandPolicy::with_denied(vec!["shutdown".to_string()]),
             ..test_tool()
         };
         let rt = tokio::runtime::Runtime::new().unwrap();

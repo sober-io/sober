@@ -19,6 +19,7 @@ use sober_core::types::AgentRepos;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
+use sober_db::PgSandboxExecutionLogRepo;
 use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
 use sober_plugin::PluginManager;
@@ -30,8 +31,8 @@ use sober_workspace::{BlobStore, SnapshotManager};
 use super::shell::SharedPermissionMode;
 use super::{
     ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
-    DeleteSecretTool, FetchUrlTool, GeneratePluginTool, ListArtifactsTool, ListSecretsTool,
-    ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
+    DeleteSecretTool, FetchUrlTool, GeneratePluginConfig, GeneratePluginTool, ListArtifactsTool,
+    ListSecretsTool, ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
     RestoreSnapshotTool, SchedulerTools, SecretToolContext, ShellTool, SnapshotToolContext,
     StoreSecretTool, ToolRegistry, WebSearchTool,
 };
@@ -55,6 +56,8 @@ pub struct ShellToolConfig {
     pub auto_snapshot: bool,
     /// Maximum number of snapshots retained per workspace.
     pub max_snapshots: Option<u32>,
+    /// Sandbox execution log repo for persisting audit entries.
+    pub sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
 }
 
 /// Configuration for the web search tool.
@@ -173,13 +176,11 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             .clone()
             .unwrap_or_else(|| self.shell.default_workspace_root.clone());
         let shell_tool = ShellTool::new(
-            self.shell.command_policy.clone(),
-            Arc::clone(&self.shell.permission_mode),
+            &self.shell,
             shell_workspace,
-            self.shell.sandbox_policy.clone(),
-            self.shell.auto_snapshot,
-            self.shell.max_snapshots,
             Some((*self.snapshot_manager).clone()),
+            Some(ctx.user_id),
+            ctx.workspace_id,
         );
         tools.push(Arc::new(shell_tool));
 
@@ -250,12 +251,22 @@ impl<R: AgentRepos> ToolBootstrap<R> {
 
         // 5. Generate-plugin tool — available when a plugin generator is configured.
         if let Some(generator) = &self.plugin_generator {
+            // Provide the artifact repo when a workspace context is active so that
+            // generated WASM binaries are tracked as workspace artifacts.
+            let artifact_repo: Option<Arc<R::Artifact>> = ctx
+                .workspace_id
+                .map(|_| Arc::new(self.repos.artifacts().clone()));
             tools.push(Arc::new(GeneratePluginTool::new(
-                Arc::clone(generator),
                 Arc::clone(&self.plugin_manager),
-                ctx.workspace_dir.clone(),
-                ctx.workspace_id,
-                ctx.user_id,
+                GeneratePluginConfig {
+                    generator: Arc::clone(generator),
+                    blob_store: Arc::clone(&self.blob_store),
+                    artifact_repo,
+                    workspace_dir: ctx.workspace_dir.clone(),
+                    workspace_id: ctx.workspace_id,
+                    conversation_id: Some(ctx.conversation_id),
+                    user_id: ctx.user_id,
+                },
             )));
         }
 

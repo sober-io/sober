@@ -161,6 +161,13 @@ impl Mind {
     /// Assembles a prompt for autonomous (non-conversational) execution.
     ///
     /// Builds system prompt from instruction files — no conversation history.
+    /// Returns the base system prompt (soul + instructions, no tools or skills).
+    ///
+    /// Useful for providing a consistent system context to plugin LLM calls.
+    pub async fn base_system_prompt(&self, caller: &CallerContext) -> Result<String, MindError> {
+        self.build_system_prompt(caller, &[], "", "").await
+    }
+
     /// The task text becomes the sole user message. Intended for scheduled jobs.
     /// Skills are not injected into autonomous prompts.
     pub async fn assemble_autonomous_prompt(

@@ -24,13 +24,45 @@ use sober_core::types::repo::PluginRepo;
 use sober_core::types::tool::Tool;
 use sober_mcp::McpPool;
 use sober_skill::{ActivateSkillTool, SkillActivationState, SkillLoader};
+use sober_workspace::BlobStore;
 use tracing::{debug, warn};
 
+use crate::backends::{
+    ConversationBackend, KvBackend, MemoryBackend, ScheduleBackend, SecretBackend, ToolExecutor,
+};
 use crate::error::PluginError;
 use crate::host::PluginHost;
+use crate::host_fns::HostContext;
 use crate::manifest::PluginManifest;
 use crate::registry::{InstallRequest, PluginRegistry};
 use crate::tool::PluginTool;
+
+/// Service handles for WASM host function execution.
+///
+/// Collects the optional backend services that WASM plugins may use.
+/// Pass this to [`PluginManager::with_wasm_services`] to wire service
+/// handles through to the WASM host context.
+#[derive(Default)]
+pub struct WasmServices {
+    /// Plugin-scoped key-value storage backend.
+    pub kv_backend: Option<Arc<dyn KvBackend>>,
+    /// LLM engine for completion requests.
+    pub llm_engine: Option<Arc<dyn sober_llm::LlmEngine>>,
+    /// Secret reading backend.
+    pub secret_backend: Option<Arc<dyn SecretBackend>>,
+    /// Memory read/write backend.
+    pub memory_backend: Option<Arc<dyn MemoryBackend>>,
+    /// Conversation reading backend.
+    pub conversation_backend: Option<Arc<dyn ConversationBackend>>,
+    /// Job scheduling backend.
+    pub schedule_backend: Option<Arc<dyn ScheduleBackend>>,
+    /// Tool execution backend.
+    pub tool_executor: Option<Arc<dyn ToolExecutor>>,
+    /// System prompt for non-raw LLM calls from plugins.
+    pub system_prompt: Option<String>,
+    /// Database pool for persisting plugin execution logs.
+    pub db_pool: Option<sqlx::PgPool>,
+}
 
 /// Unified plugin manager that collects tools from MCP, Skill, and WASM plugins.
 ///
@@ -45,6 +77,11 @@ pub struct PluginManager<R: PluginRepo> {
     registry: PluginRegistry<R>,
     mcp_pool: tokio::sync::Mutex<McpPool>,
     skill_loader: Arc<SkillLoader>,
+    /// Content-addressed blob store for loading WASM binaries stored by
+    /// `GeneratePluginTool`. `None` when blob storage is not configured.
+    blob_store: Option<Arc<BlobStore>>,
+    /// Service handles injected into WASM host contexts.
+    wasm_services: WasmServices,
     /// WASM hosts cached by plugin ID.  Uses `std::sync::RwLock` because
     /// accesses are brief and never held across `.await` points.
     wasm_hosts: RwLock<HashMap<PluginId, Arc<Mutex<PluginHost>>>>,
@@ -56,13 +93,36 @@ impl<R: PluginRepo> PluginManager<R> {
     /// The `mcp_pool` should be pre-connected to any MCP servers the user has
     /// configured.  The manager will query tools from connected servers but
     /// will not initiate new connections.
-    pub fn new(plugin_repo: R, mcp_pool: McpPool, skill_loader: Arc<SkillLoader>) -> Self {
+    ///
+    /// `blob_store` is used to load WASM binaries that were stored
+    /// content-addressed by `GeneratePluginTool`.  Pass `None` when blob
+    /// storage is not configured (WASM plugins will fall back to filesystem
+    /// loading via `wasm_path` in the plugin config).
+    pub fn new(
+        plugin_repo: R,
+        mcp_pool: McpPool,
+        skill_loader: Arc<SkillLoader>,
+        blob_store: Option<Arc<BlobStore>>,
+    ) -> Self {
         Self {
             registry: PluginRegistry::new(plugin_repo),
             mcp_pool: tokio::sync::Mutex::new(mcp_pool),
             skill_loader,
+            blob_store,
+            wasm_services: WasmServices::default(),
             wasm_hosts: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Configures the WASM service backends for host function execution.
+    ///
+    /// Call this before wrapping in `Arc` to inject real service handles
+    /// (KV, LLM, secrets, etc.) into WASM plugins.  Without this, WASM
+    /// plugins will use in-memory defaults or return "not connected" errors.
+    #[must_use]
+    pub fn with_wasm_services(mut self, services: WasmServices) -> Self {
+        self.wasm_services = services;
+        self
     }
 
     /// Returns a reference to the plugin registry.
@@ -347,9 +407,11 @@ impl<R: PluginRepo> PluginManager<R> {
 
     /// Loads tools from a WASM plugin.
     ///
-    /// Checks the host cache first; on miss, reads WASM bytes from the path
-    /// in the plugin config and creates a new [`PluginHost`].  Returns a
-    /// [`PluginTool`] for each tool declared in the manifest.
+    /// Checks the host cache first.  On a cache miss, resolves WASM bytes by
+    /// checking the plugin config for `wasm_blob_key` (content-addressed BlobStore)
+    /// and falling back to `wasm_path` (filesystem) when no blob key is
+    /// present.  Creates a new [`PluginHost`] and caches it by plugin ID.
+    /// Returns a [`PluginTool`] for each tool declared in the manifest.
     async fn wasm_tools(&self, plugin: &Plugin) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
         // Check cache.
         let cached_host = {
@@ -362,14 +424,8 @@ impl<R: PluginRepo> PluginManager<R> {
         let host = match cached_host {
             Some(h) => h,
             None => {
-                let wasm_path = plugin
-                    .config
-                    .get("wasm_path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        PluginError::Config("WASM plugin missing 'wasm_path' in config".into())
-                    })?;
-
+                // Manifest is stored as a TOML string in the plugin's DB config,
+                // separate from the WASM blob. The blob contains only compiled bytes.
                 let manifest_toml = plugin
                     .config
                     .get("manifest_toml")
@@ -378,14 +434,80 @@ impl<R: PluginRepo> PluginManager<R> {
                         PluginError::Config("WASM plugin missing 'manifest_toml' in config".into())
                     })?;
 
-                let bytes = tokio::fs::read(wasm_path).await.map_err(|e| {
-                    PluginError::ExecutionFailed(format!(
-                        "failed to read WASM file at {wasm_path}: {e}"
-                    ))
-                })?;
+                // Prefer wasm_blob_key (content-addressed) over wasm_path (filesystem).
+                let bytes = if let Some(wasm_blob_key) =
+                    plugin.config.get("wasm_blob_key").and_then(|v| v.as_str())
+                {
+                    let store = self.blob_store.as_ref().ok_or_else(|| {
+                        PluginError::Config(format!(
+                            "WASM plugin '{}' has wasm_blob_key but no blob store is configured",
+                            plugin.name
+                        ))
+                    })?;
+                    store.retrieve(wasm_blob_key).await.map_err(|e| {
+                        PluginError::ExecutionFailed(format!(
+                            "failed to retrieve WASM blob '{wasm_blob_key}' for plugin '{}': {e}",
+                            plugin.name
+                        ))
+                    })?
+                } else {
+                    // Fallback: read from filesystem path.
+                    let wasm_path = plugin
+                        .config
+                        .get("wasm_path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            PluginError::Config(
+                                "WASM plugin missing both 'wasm_blob_key' and 'wasm_path' in config"
+                                    .into(),
+                            )
+                        })?;
+
+                    tokio::fs::read(wasm_path).await.map_err(|e| {
+                        PluginError::ExecutionFailed(format!(
+                            "failed to read WASM file at {wasm_path}: {e}"
+                        ))
+                    })?
+                };
 
                 let manifest = PluginManifest::from_toml(manifest_toml)?;
-                let new_host = PluginHost::load(&bytes, &manifest)?;
+
+                // Build a HostContext with all available service backends.
+                let capabilities = manifest.capabilities.to_capabilities();
+                let mut ctx = HostContext::new(plugin.id, capabilities);
+                ctx = ctx.with_runtime_handle(tokio::runtime::Handle::current());
+
+                if let Some(ref kv) = self.wasm_services.kv_backend {
+                    ctx = ctx.with_kv_backend(Arc::clone(kv));
+                }
+                if let Some(ref llm) = self.wasm_services.llm_engine {
+                    ctx = ctx.with_llm_engine(Arc::clone(llm));
+                }
+                if let Some(ref sec) = self.wasm_services.secret_backend {
+                    ctx = ctx.with_secret_backend(Arc::clone(sec));
+                }
+                if let Some(ref mem) = self.wasm_services.memory_backend {
+                    ctx = ctx.with_memory_backend(Arc::clone(mem));
+                }
+                if let Some(ref conv) = self.wasm_services.conversation_backend {
+                    ctx = ctx.with_conversation_backend(Arc::clone(conv));
+                }
+                if let Some(ref sched) = self.wasm_services.schedule_backend {
+                    ctx = ctx.with_schedule_backend(Arc::clone(sched));
+                }
+                if let Some(ref tool) = self.wasm_services.tool_executor {
+                    ctx = ctx.with_tool_executor(Arc::clone(tool));
+                }
+
+                // Set user_id from the plugin's owner for scoped operations.
+                if let Some(owner_id) = plugin.owner_id {
+                    ctx = ctx.with_user_id(owner_id);
+                }
+                if let Some(ref sp) = self.wasm_services.system_prompt {
+                    ctx = ctx.with_system_prompt(sp.clone());
+                }
+
+                let new_host = PluginHost::load_with_context(&bytes, &manifest, ctx)?;
                 let host = Arc::new(Mutex::new(new_host));
 
                 let mut cache = self.wasm_hosts.write().map_err(|_| {
@@ -413,6 +535,10 @@ impl<R: PluginRepo> PluginManager<R> {
                     Arc::clone(&host),
                     entry.name.clone(),
                     entry.description.clone(),
+                    plugin.id,
+                    plugin.owner_id,
+                    plugin.workspace_id,
+                    self.wasm_services.db_pool.clone(),
                 )) as Arc<dyn Tool>
             })
             .collect();
@@ -605,6 +731,22 @@ mod tests {
             async { Ok(()) }
         }
 
+        fn delete_kv_data(
+            &self,
+            _plugin_id: PluginId,
+            _key: &str,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { Ok(()) }
+        }
+
+        fn list_kv_keys(
+            &self,
+            _plugin_id: PluginId,
+            _prefix: Option<&str>,
+        ) -> impl std::future::Future<Output = Result<Vec<String>, AppError>> + Send {
+            async { Ok(vec![]) }
+        }
+
         fn update_scope(
             &self,
             _id: PluginId,
@@ -641,7 +783,7 @@ mod tests {
         let repo = MockPluginRepo::new(plugins);
         let pool = McpPool::new(McpConfig::default());
         let loader = Arc::new(SkillLoader::new(Duration::from_secs(300)));
-        PluginManager::new(repo, pool, loader)
+        PluginManager::new(repo, pool, loader, None)
     }
 
     // -----------------------------------------------------------------------

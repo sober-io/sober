@@ -55,6 +55,8 @@ pub mod schedule;
 
 /// Sandboxed filesystem access.
 pub mod filesystem;
+/// Shorthand alias for [`filesystem`].
+pub use filesystem as fs;
 
 /// Invoke LLM completions from within a plugin.
 pub mod llm;

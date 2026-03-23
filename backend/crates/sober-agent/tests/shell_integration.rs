@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use sober_agent::tools::ShellTool;
+use sober_agent::tools::{ShellTool, ShellToolConfig};
 use sober_core::PermissionMode;
 use sober_core::types::tool::Tool;
 use sober_sandbox::{CommandPolicy, SandboxProfile};
@@ -16,15 +16,16 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
     let sandbox_policy = SandboxProfile::Standard
         .resolve(&HashMap::new())
         .expect("failed to resolve sandbox policy");
-    ShellTool::new(
-        CommandPolicy::default(),
-        Arc::new(RwLock::new(PermissionMode::Autonomous)),
-        workspace_home,
+    let config = ShellToolConfig {
+        command_policy: CommandPolicy::default(),
+        permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
+        default_workspace_root: workspace_home.clone(),
         sandbox_policy,
-        false,
-        None,
-        None,
-    )
+        auto_snapshot: false,
+        max_snapshots: None,
+        sandbox_log_repo: None,
+    };
+    ShellTool::new(&config, workspace_home, None, None, None)
 }
 
 #[tokio::test]
@@ -81,15 +82,16 @@ async fn shell_tool_denies_blocked_commands() {
     let sandbox_policy = SandboxProfile::Standard
         .resolve(&HashMap::new())
         .expect("failed to resolve sandbox policy");
-    let tool = ShellTool::new(
-        CommandPolicy::with_denied(vec!["shutdown".to_string()]),
-        Arc::new(RwLock::new(PermissionMode::Autonomous)),
-        dir.path().to_path_buf(),
+    let config = ShellToolConfig {
+        command_policy: CommandPolicy::with_denied(vec!["shutdown".to_string()]),
+        permission_mode: Arc::new(RwLock::new(PermissionMode::Autonomous)),
+        default_workspace_root: dir.path().to_path_buf(),
         sandbox_policy,
-        false,
-        None,
-        None,
-    );
+        auto_snapshot: false,
+        max_snapshots: None,
+        sandbox_log_repo: None,
+    };
+    let tool = ShellTool::new(&config, dir.path().to_path_buf(), None, None, None);
     let result = tool
         .execute(serde_json::json!({"command": "shutdown -h now"}))
         .await

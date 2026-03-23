@@ -12,6 +12,7 @@ use hyper_util::rt::TokioIo;
 use sober_agent::ConfirmationBroker;
 use sober_agent::SharedSchedulerClient;
 use sober_agent::agent::{Agent, AgentConfig};
+use sober_agent::backends::GrpcScheduleBackend;
 use sober_agent::grpc::AgentGrpcService;
 use sober_agent::grpc::proto::agent_service_server::AgentServiceServer;
 use sober_agent::grpc::scheduler_proto;
@@ -19,13 +20,16 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{PgAgentRepos, PgMessageRepo, PgPluginRepo, create_pool};
+use sober_db::{PgAgentRepos, PgMessageRepo, PgPluginRepo, PgSandboxExecutionLogRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::soul::SoulResolver;
-use sober_plugin::PluginManager;
+use sober_plugin::backends::{
+    PgConversationBackend, PgKvBackend, PgSecretBackend, QdrantMemoryBackend,
+};
+use sober_plugin::{PluginManager, WasmServices};
 use sober_sandbox::{CommandPolicy, SandboxProfile};
 use sober_skill::SkillLoader;
 use sober_workspace::BlobStore;
@@ -157,11 +161,48 @@ async fn main() -> Result<()> {
 
     let mcp_pool = McpPool::new(McpConfig::default());
     let plugin_repo = PgPluginRepo::new(pool.clone());
-    let plugin_manager = Arc::new(PluginManager::new(
-        plugin_repo,
-        mcp_pool,
-        Arc::clone(&skill_loader),
-    ));
+    let wasm_services = WasmServices {
+        kv_backend: Some(Arc::new(PgKvBackend::new(pool.clone()))),
+        llm_engine: Some(Arc::clone(&llm)),
+        secret_backend: mek
+            .as_ref()
+            .map(|m| -> Arc<dyn sober_plugin::backends::SecretBackend> {
+                Arc::new(PgSecretBackend::new(pool.clone(), Arc::clone(m)))
+            }),
+        memory_backend: Some(Arc::new(QdrantMemoryBackend::new(
+            Arc::clone(&memory),
+            Arc::clone(&llm),
+        ))),
+        conversation_backend: Some(Arc::new(PgConversationBackend::new(pool.clone()))),
+        schedule_backend: Some(Arc::new(GrpcScheduleBackend::new(Arc::clone(
+            &scheduler_client,
+        )))),
+        // ToolExecutor creates a circular dependency (ToolRegistry -> PluginManager
+        // -> HostContext -> ToolExecutor -> ToolRegistry). Must be wired via a
+        // post-init setter or lazy Arc once the tool registry is constructed.
+        tool_executor: None,
+        db_pool: Some(pool.clone()),
+        system_prompt: {
+            use sober_core::types::access::{CallerContext, TriggerKind};
+            let caller = CallerContext {
+                user_id: None,
+                trigger: TriggerKind::Admin,
+                permissions: vec![],
+                scope_grants: vec![],
+                workspace_id: None,
+            };
+            mind.base_system_prompt(&caller).await.ok()
+        },
+    };
+    let plugin_manager = Arc::new(
+        PluginManager::new(
+            plugin_repo,
+            mcp_pool,
+            Arc::clone(&skill_loader),
+            Some(Arc::clone(&blob_store)),
+        )
+        .with_wasm_services(wasm_services),
+    );
 
     // Sync user-level skills from filesystem into the plugins table on startup.
     // This ensures ListSkills returns data immediately without waiting for a
@@ -182,6 +223,7 @@ async fn main() -> Result<()> {
             sandbox_policy,
             auto_snapshot: true,
             max_snapshots: None,
+            sandbox_log_repo: Some(Arc::new(PgSandboxExecutionLogRepo::new(pool.clone()))),
         },
         search: SearchToolConfig {
             searxng_url: config.searxng.url.clone(),

@@ -210,7 +210,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
         plugin_id: PluginId,
         key: &str,
     ) -> Result<Option<serde_json::Value>, AppError> {
-        let row: Option<(serde_json::Value,)> =
+        let row: Option<(Option<serde_json::Value>,)> =
             sqlx::query_as("SELECT data->$2 FROM plugin_kv_data WHERE plugin_id = $1")
                 .bind(plugin_id.as_uuid())
                 .bind(key)
@@ -218,7 +218,7 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
                 .await
                 .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.and_then(|(v,)| if v.is_null() { None } else { Some(v) }))
+        Ok(row.and_then(|(v,)| v))
     }
 
     async fn set_kv_data(
@@ -242,6 +242,44 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
         .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(())
+    }
+
+    async fn delete_kv_data(&self, plugin_id: PluginId, key: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE plugin_kv_data SET data = data - $2, updated_at = now() WHERE plugin_id = $1",
+        )
+        .bind(plugin_id.as_uuid())
+        .bind(key)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
+    async fn list_kv_keys(
+        &self,
+        plugin_id: PluginId,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, AppError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT k FROM plugin_kv_data, jsonb_object_keys(data) AS k WHERE plugin_id = $1",
+        )
+        .bind(plugin_id.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        let keys: Vec<String> = match prefix {
+            Some(p) => rows
+                .into_iter()
+                .map(|(k,)| k)
+                .filter(|k| k.starts_with(p))
+                .collect(),
+            None => rows.into_iter().map(|(k,)| k).collect(),
+        };
+
+        Ok(keys)
     }
 
     async fn update_scope(

@@ -31,13 +31,14 @@ pub use ids::{
 };
 pub use input::{
     ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMessage, CreatePlugin,
-    CreatePluginAuditLog, CreateSession, CreateTag, CreateUser, ListConversationsFilter, NewSecret,
-    PluginFilter, RegisterRepo, UpdateSecret,
+    CreatePluginAuditLog, CreatePluginExecutionLog, CreateSandboxExecutionLog, CreateSession,
+    CreateTag, CreateUser, ListConversationsFilter, NewSecret, PluginFilter, RegisterRepo,
+    UpdateSecret,
 };
 pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, ConversationUserRepo, JobRepo, JobRunRepo,
-    MessageRepo, PluginRepo, RoleRepo, SecretRepo, SessionRepo, TagRepo, UserRepo, WorkspaceRepo,
-    WorkspaceRepoRepo, WorktreeRepo,
+    MessageRepo, PluginExecutionLogRepo, PluginRepo, RoleRepo, SandboxExecutionLogRepo, SecretRepo,
+    SessionRepo, TagRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};

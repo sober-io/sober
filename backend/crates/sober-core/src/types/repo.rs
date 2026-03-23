@@ -669,6 +669,24 @@ pub trait SecretRepo: Send + Sync {
     ) -> impl Future<Output = Result<Vec<SecretId>, AppError>> + Send;
 }
 
+/// Repository for sandbox execution audit logs.
+pub trait SandboxExecutionLogRepo: Send + Sync {
+    /// Appends a sandbox execution audit log entry.
+    fn create(
+        &self,
+        entry: CreateSandboxExecutionLog,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Repository for plugin tool execution logs.
+pub trait PluginExecutionLogRepo: Send + Sync {
+    /// Appends a plugin execution log entry.
+    fn create(
+        &self,
+        entry: CreatePluginExecutionLog,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
 /// Plugin registry operations.
 pub trait PluginRepo: Send + Sync {
     /// Creates a new plugin.
@@ -730,6 +748,20 @@ pub trait PluginRepo: Send + Sync {
         key: &str,
         value: serde_json::Value,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes a plugin-scoped key-value data entry.
+    fn delete_kv_data(
+        &self,
+        plugin_id: PluginId,
+        key: &str,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all keys in a plugin's key-value store, optionally filtered by prefix.
+    fn list_kv_keys(
+        &self,
+        plugin_id: PluginId,
+        prefix: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
 
     /// Updates the scope of a plugin (system, user, workspace).
     fn update_scope(

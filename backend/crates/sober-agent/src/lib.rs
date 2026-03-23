@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod audit;
+pub mod backends;
 pub mod broadcast;
 pub mod confirm;
 pub mod error;

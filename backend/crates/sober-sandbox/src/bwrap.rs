@@ -9,8 +9,9 @@ use std::time::Instant;
 use metrics::{counter, histogram};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, timeout};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
+use crate::audit::{ExecutionTrigger, SandboxAuditEntry};
 use crate::detect::detect_bwrap;
 use crate::error::SandboxError;
 use crate::policy::{NetMode, SandboxPolicy};
@@ -57,7 +58,7 @@ impl BwrapSandbox {
         &self,
         command: &[String],
         env: &HashMap<String, String>,
-    ) -> Result<SandboxResult, SandboxError> {
+    ) -> Result<(SandboxResult, SandboxAuditEntry), SandboxError> {
         let bwrap_path = detect_bwrap()?;
         let start = Instant::now();
 
@@ -113,20 +114,78 @@ impl BwrapSandbox {
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let profile = self.policy.name.clone();
+        let elapsed_secs = start.elapsed().as_secs_f64();
 
-        let outcome = match result {
-            Ok(Ok(output)) => Ok(SandboxResult {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-                duration_ms,
-                denied_network_requests: denied,
-            }),
-            Ok(Err(e)) => Err(SandboxError::SpawnFailed(format!(
-                "failed to wait for process: {e}"
-            ))),
+        match result {
+            Ok(Ok(output)) => {
+                let sandbox_result = SandboxResult {
+                    exit_code: output.status.code().unwrap_or(-1),
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                    duration_ms,
+                    denied_network_requests: denied,
+                };
+
+                // Metrics.
+                counter!(
+                    "sober_sandbox_executions_total",
+                    "profile" => profile.clone(),
+                    "status" => "success",
+                )
+                .increment(1);
+                histogram!(
+                    "sober_sandbox_execution_duration_seconds",
+                    "profile" => profile.clone(),
+                )
+                .record(elapsed_secs);
+
+                for domain in &sandbox_result.denied_network_requests {
+                    counter!(
+                        "sober_sandbox_policy_violations_total",
+                        "profile" => profile.clone(),
+                        "violation" => format!("network_denied:{domain}"),
+                    )
+                    .increment(1);
+                }
+
+                // Build audit entry.
+                let entry = SandboxAuditEntry::from_result(
+                    self.policy.clone(),
+                    command.to_vec(),
+                    ExecutionTrigger::Agent,
+                    &sandbox_result,
+                );
+                info!(
+                    execution_id = %entry.execution_id,
+                    policy = %entry.policy.name,
+                    command = ?&entry.command[..entry.command.len().min(3)],
+                    duration_ms = entry.duration_ms,
+                    exit_code = ?entry.exit_code,
+                    outcome = ?entry.outcome,
+                    denied_domains = ?entry.denied_network_requests,
+                    "sandbox execution audit"
+                );
+
+                Ok((sandbox_result, entry))
+            }
+            Ok(Err(e)) => {
+                counter!(
+                    "sober_sandbox_executions_total",
+                    "profile" => profile,
+                    "status" => "error",
+                )
+                .increment(1);
+                Err(SandboxError::SpawnFailed(format!(
+                    "failed to wait for process: {e}"
+                )))
+            }
             Err(_) => {
-                // Timeout — try graceful then forced kill.
+                counter!(
+                    "sober_sandbox_executions_total",
+                    "profile" => profile,
+                    "status" => "timeout",
+                )
+                .increment(1);
                 warn!(
                     seconds = max_secs,
                     policy = %self.policy.name,
@@ -134,41 +193,7 @@ impl BwrapSandbox {
                 );
                 Err(SandboxError::Timeout { seconds: max_secs })
             }
-        };
-
-        // Record execution metrics.
-        let status = match &outcome {
-            Ok(r) if r.exit_code == 0 => "success",
-            Ok(_) => "success", // non-zero exit is still a completed execution
-            Err(SandboxError::Timeout { .. }) => "timeout",
-            Err(SandboxError::PolicyResolutionFailed(_)) => "denied",
-            Err(_) => "error",
-        };
-        counter!(
-            "sober_sandbox_executions_total",
-            "profile" => profile.clone(),
-            "status" => status,
-        )
-        .increment(1);
-        histogram!(
-            "sober_sandbox_execution_duration_seconds",
-            "profile" => profile.clone(),
-        )
-        .record(start.elapsed().as_secs_f64());
-
-        // Record policy violations for denied network requests.
-        if let Ok(ref result) = outcome {
-            for domain in &result.denied_network_requests {
-                counter!(
-                    "sober_sandbox_policy_violations_total",
-                    "profile" => profile.clone(),
-                    "violation" => format!("network_denied:{domain}"),
-                )
-                .increment(1);
-            }
         }
-
-        outcome
     }
 
     /// Spawn a long-running sandboxed process with piped stdin/stdout.

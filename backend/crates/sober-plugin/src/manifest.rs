@@ -215,4 +215,22 @@ description = "Counts things"
             PluginManifest::from_toml(toml).expect("should accept metrics with declarations");
         assert_eq!(manifest.metrics.len(), 1);
     }
+
+    #[test]
+    fn inline_tables_parse_correctly() {
+        let toml = r#"
+[plugin]
+name = "test"
+version = "1.0.0"
+
+[capabilities]
+network = { allowed_hosts = ["api.example.com"] }
+
+[[tools]]
+name = "t"
+description = "d"
+"#;
+        let manifest = PluginManifest::from_toml(toml).expect("inline tables should be unaffected");
+        assert_eq!(manifest.tools[0].name, "t");
+    }
 }
