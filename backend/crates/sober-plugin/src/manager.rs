@@ -536,6 +536,7 @@ impl<R: PluginRepo> PluginManager<R> {
                     entry.name.clone(),
                     entry.description.clone(),
                     plugin.id,
+                    plugin.owner_id,
                     self.wasm_services.execution_log.clone(),
                 )) as Arc<dyn Tool>
             })

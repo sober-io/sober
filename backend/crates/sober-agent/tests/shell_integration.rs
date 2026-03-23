@@ -25,7 +25,7 @@ fn make_test_tool(workspace_home: PathBuf) -> ShellTool {
         max_snapshots: None,
         sandbox_log_repo: None,
     };
-    ShellTool::new(&config, workspace_home, None)
+    ShellTool::new(&config, workspace_home, None, None, None)
 }
 
 #[tokio::test]
@@ -91,7 +91,7 @@ async fn shell_tool_denies_blocked_commands() {
         max_snapshots: None,
         sandbox_log_repo: None,
     };
-    let tool = ShellTool::new(&config, dir.path().to_path_buf(), None);
+    let tool = ShellTool::new(&config, dir.path().to_path_buf(), None, None, None);
     let result = tool
         .execute(serde_json::json!({"command": "shutdown -h now"}))
         .await

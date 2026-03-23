@@ -179,6 +179,8 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             &self.shell,
             shell_workspace,
             Some((*self.snapshot_manager).clone()),
+            Some(ctx.user_id),
+            ctx.workspace_id,
         );
         tools.push(Arc::new(shell_tool));
 

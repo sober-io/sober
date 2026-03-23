@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 use sober_core::PermissionMode;
-use sober_core::types::ids::{UserId, WorkspaceId};
+use sober_core::types::ids::UserId;
 use sober_core::types::input::CreateSandboxExecutionLog;
 use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
@@ -56,6 +56,8 @@ pub struct ShellTool {
     max_snapshots: u32,
     snapshot_manager: Option<SnapshotManager>,
     sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
+    user_id: Option<UserId>,
+    workspace_id: Option<sober_core::types::WorkspaceId>,
 }
 
 impl ShellTool {
@@ -64,6 +66,8 @@ impl ShellTool {
         config: &ShellToolConfig,
         workspace_home: PathBuf,
         snapshot_manager: Option<SnapshotManager>,
+        user_id: Option<UserId>,
+        workspace_id: Option<sober_core::types::WorkspaceId>,
     ) -> Self {
         Self {
             command_policy: config.command_policy.clone(),
@@ -74,6 +78,8 @@ impl ShellTool {
             max_snapshots: config.max_snapshots.unwrap_or(DEFAULT_MAX_SNAPSHOTS),
             snapshot_manager,
             sandbox_log_repo: config.sandbox_log_repo.clone(),
+            user_id,
+            workspace_id,
         }
     }
 
@@ -187,8 +193,8 @@ impl ShellTool {
             let repo = Arc::clone(repo);
             let entry = CreateSandboxExecutionLog {
                 execution_id: audit_entry.execution_id,
-                workspace_id: audit_entry.workspace_id.map(WorkspaceId::from_uuid),
-                user_id: audit_entry.user_id.map(UserId::from_uuid),
+                workspace_id: self.workspace_id,
+                user_id: self.user_id,
                 policy_name: audit_entry.policy.name.clone(),
                 command: audit_entry.command.clone(),
                 trigger: format!("{:?}", audit_entry.trigger),
@@ -282,6 +288,8 @@ mod tests {
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             snapshot_manager: None,
             sandbox_log_repo: None,
+            user_id: None,
+            workspace_id: None,
         }
     }
 

@@ -29,6 +29,7 @@ pub struct PluginTool {
     tool_name: String,
     metadata: ToolMetadata,
     plugin_id: PluginId,
+    user_id: Option<sober_core::types::ids::UserId>,
     execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
 }
 
@@ -43,6 +44,7 @@ impl PluginTool {
         tool_name: String,
         description: String,
         plugin_id: PluginId,
+        user_id: Option<sober_core::types::ids::UserId>,
         execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
     ) -> Self {
         let metadata = ToolMetadata {
@@ -62,6 +64,7 @@ impl PluginTool {
             tool_name,
             metadata,
             plugin_id,
+            user_id,
             execution_log,
         }
     }
@@ -77,6 +80,7 @@ impl Tool for PluginTool {
         let tool_name = self.tool_name.clone();
         let meta_tool_name = self.tool_name.clone();
         let plugin_id = self.plugin_id;
+        let user_id = self.user_id;
         let execution_log = self.execution_log.clone();
 
         // Capture the plugin name from the host's manifest for logging.
@@ -159,7 +163,7 @@ impl Tool for PluginTool {
                     plugin_id: Some(plugin_id),
                     plugin_name,
                     tool_name: meta_tool_name,
-                    user_id: None, // not available at this level
+                    user_id,
                     conversation_id: None,
                     duration_ms: duration_ms as i64,
                     success,
