@@ -58,6 +58,8 @@ pub struct WasmServices {
     pub schedule_backend: Option<Arc<dyn ScheduleBackend>>,
     /// Tool execution backend.
     pub tool_executor: Option<Arc<dyn ToolExecutor>>,
+    /// System prompt for non-raw LLM calls from plugins.
+    pub system_prompt: Option<String>,
 }
 
 /// Unified plugin manager that collects tools from MCP, Skill, and WASM plugins.
@@ -498,6 +500,9 @@ impl<R: PluginRepo> PluginManager<R> {
                 // Set user_id from the plugin's owner for scoped operations.
                 if let Some(owner_id) = plugin.owner_id {
                     ctx = ctx.with_user_id(owner_id);
+                }
+                if let Some(ref sp) = self.wasm_services.system_prompt {
+                    ctx = ctx.with_system_prompt(sp.clone());
                 }
 
                 let new_host = PluginHost::load_with_context(&bytes, &manifest, ctx)?;

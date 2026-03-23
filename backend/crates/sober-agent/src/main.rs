@@ -181,6 +181,7 @@ async fn main() -> Result<()> {
         // -> HostContext -> ToolExecutor -> ToolRegistry). Must be wired via a
         // post-init setter or lazy Arc once the tool registry is constructed.
         tool_executor: None,
+        system_prompt: Some("You are a helpful assistant. Respond concisely.".to_owned()),
     };
     let plugin_manager = Arc::new(
         PluginManager::new(
