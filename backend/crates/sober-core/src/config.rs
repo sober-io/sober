@@ -382,6 +382,98 @@ impl std::fmt::Debug for CryptoConfig {
 }
 
 impl AppConfig {
+    /// Discovers the config file path using the search order:
+    /// 1. `SOBER_CONFIG` env var (explicit path)
+    /// 2. `/etc/sober/config.toml` (production)
+    /// 3. `./config.toml` (development)
+    ///
+    /// Returns `None` if no config file is found. Accepts closures for testability.
+    fn discover_config_path(
+        get_env: impl Fn(&str) -> Option<String>,
+        path_exists: impl Fn(&std::path::Path) -> bool,
+    ) -> Option<PathBuf> {
+        // 1. Explicit path via env var
+        if let Some(path) = get_env("SOBER_CONFIG") {
+            return Some(PathBuf::from(path));
+        }
+        // 2. System config
+        let etc = std::path::Path::new("/etc/sober/config.toml");
+        if path_exists(etc) {
+            return Some(etc.to_path_buf());
+        }
+        // 3. Local config
+        let local = std::path::Path::new("./config.toml");
+        if path_exists(local) {
+            return Some(local.to_path_buf());
+        }
+        None
+    }
+
+    /// Internal: discover TOML + overlay env vars, no validation.
+    fn load_resolved() -> Result<Self, AppError> {
+        dotenvy::dotenv().ok();
+
+        let config_path = Self::discover_config_path(|key| std::env::var(key).ok(), |p| p.exists());
+
+        let mut config = match &config_path {
+            Some(path) => {
+                let contents = std::fs::read_to_string(path).map_err(|e| {
+                    AppError::Validation(format!(
+                        "failed to read config file {}: {e}",
+                        path.display()
+                    ))
+                })?;
+                toml::from_str(&contents).map_err(|e| {
+                    AppError::Validation(format!(
+                        "failed to parse config file {}: {e}",
+                        path.display()
+                    ))
+                })?
+            }
+            None => AppConfig::default(),
+        };
+
+        config.apply_env_overrides(|key| std::env::var(key).ok());
+        Ok(config)
+    }
+
+    /// Loads configuration from TOML file + env var overlay, then validates.
+    ///
+    /// Use this for binaries that need a fully validated config (api, agent, scheduler).
+    /// Discovery order: `SOBER_CONFIG` env var, `/etc/sober/config.toml`, `./config.toml`.
+    /// Falls back to defaults if no file is found. Environment variables always win.
+    pub fn load() -> Result<Self, AppError> {
+        let config = Self::load_resolved()?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Loads configuration without validation.
+    ///
+    /// Use for binaries that don't need all config sections (e.g., sober-web only needs
+    /// `[web]`) or CLI commands that display config without requiring it to be complete.
+    pub fn load_unvalidated() -> Result<Self, AppError> {
+        Self::load_resolved()
+    }
+
+    /// Overlays `SOBER_*` environment variables onto the config, overwriting any
+    /// TOML or default values. Each set env var wins over the file/default value.
+    ///
+    /// This is a no-op placeholder — the full overlay is added in a subsequent commit.
+    pub(crate) fn apply_env_overrides(&mut self, _get_var: impl Fn(&str) -> Option<String>) {
+        // Will be implemented in Task 5.
+    }
+
+    /// Validates the loaded configuration.
+    ///
+    /// Called after TOML loading + env overlay. Checks required fields and format constraints.
+    ///
+    /// This is a no-op placeholder — the full validation is added in a subsequent commit.
+    pub fn validate(&self) -> Result<(), AppError> {
+        // Will be implemented in Task 6.
+        Ok(())
+    }
+
     /// Loads configuration from environment variables.
     ///
     /// Calls `dotenvy::dotenv().ok()` first to load `.env` if present.
@@ -716,5 +808,54 @@ metrics_port = 9201
         assert_eq!(config.scheduler.metrics_port, 9201);
         assert_eq!(config.server.port, 3000);
         assert!(config.acp.is_none());
+    }
+
+    // ── Task 4: Config file discovery + TOML loading ────────────────────────
+
+    #[test]
+    fn discover_config_returns_none_when_no_file() {
+        let path = AppConfig::discover_config_path(
+            |_| None,
+            |p| p == std::path::Path::new("/nonexistent"),
+        );
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn discover_config_prefers_sober_config_env() {
+        let path = AppConfig::discover_config_path(
+            |key| {
+                if key == "SOBER_CONFIG" {
+                    Some("/custom/config.toml".to_owned())
+                } else {
+                    None
+                }
+            },
+            |_| true,
+        );
+        assert_eq!(path, Some(PathBuf::from("/custom/config.toml")));
+    }
+
+    #[test]
+    fn discover_config_falls_through_to_etc() {
+        let path = AppConfig::discover_config_path(
+            |_| None,
+            |p| p == std::path::Path::new("/etc/sober/config.toml"),
+        );
+        assert_eq!(path, Some(PathBuf::from("/etc/sober/config.toml")));
+    }
+
+    #[test]
+    fn load_from_toml_string() {
+        let toml_str = r#"
+[database]
+url = "postgres://test:test@localhost/test"
+[server]
+port = 4000
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.database.url, "postgres://test:test@localhost/test");
+        assert_eq!(config.server.port, 4000);
+        assert_eq!(config.llm.model, "anthropic/claude-sonnet-4");
     }
 }
