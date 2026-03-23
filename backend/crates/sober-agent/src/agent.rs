@@ -15,9 +15,12 @@ use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
+use sober_core::types::input::{CreateMessage, CreatePluginExecutionLog};
+use sober_core::types::repo::{
+    ConversationRepo, MessageRepo, PluginExecutionLogRepo, UserRepo, WorkspaceRepo,
+};
 use sober_crypto::envelope::Mek;
+use sober_db::PgPluginExecutionLogRepo;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
@@ -113,7 +116,7 @@ struct LoopContext<'a, R: AgentRepos> {
     /// XML listing of all available skills for system prompt injection.
     skill_catalog_xml: String,
     /// Database pool for tool execution audit logging.
-    tool_log_pool: Option<sqlx::PgPool>,
+    tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -143,7 +146,7 @@ pub struct Agent<R: AgentRepos> {
     /// construction and reused every turn.
     static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
     /// Database pool for tool execution audit logging.
-    tool_log_pool: Option<sqlx::PgPool>,
+    tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
     /// Per-conversation skill activation tracking. Skills activated in one turn
     /// remain active in subsequent turns of the same conversation.
     skill_activations: std::sync::RwLock<
@@ -167,7 +170,7 @@ impl<R: AgentRepos> Agent<R> {
         mek: Option<Arc<Mek>>,
         llm_config: Option<LlmConfig>,
         tool_bootstrap: Arc<ToolBootstrap<R>>,
-        tool_log_pool: Option<sqlx::PgPool>,
+        tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
     ) -> Self {
         let static_tools = tool_bootstrap.build_static_tools();
         Self {
@@ -184,7 +187,7 @@ impl<R: AgentRepos> Agent<R> {
             llm_config,
             tool_bootstrap,
             static_tools,
-            tool_log_pool,
+            tool_execution_log,
             skill_activations: std::sync::RwLock::new(HashMap::new()),
         }
     }
@@ -539,7 +542,7 @@ impl<R: AgentRepos> Agent<R> {
         let workspace_id = conversation.workspace_id;
         let llm_config = self.llm_config.clone();
         let mek = self.mek.clone();
-        let tool_log_pool = self.tool_log_pool.clone();
+        let tool_execution_log = self.tool_execution_log.clone();
 
         let trigger_label = format!("{trigger:?}").to_lowercase();
 
@@ -569,7 +572,7 @@ impl<R: AgentRepos> Agent<R> {
                 llm_config: &llm_config,
                 mek: &mek,
                 skill_catalog_xml,
-                tool_log_pool,
+                tool_execution_log,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -872,7 +875,7 @@ impl<R: AgentRepos> Agent<R> {
                         conversation_id,
                         repos,
                         ctx.workspace_id,
-                        ctx.tool_log_pool.as_ref(),
+                        ctx.tool_execution_log.as_ref(),
                     )
                     .await;
 
@@ -1085,7 +1088,7 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         repos: &Arc<R>,
         workspace_id: Option<WorkspaceId>,
-        tool_log_pool: Option<&sqlx::PgPool>,
+        tool_execution_log: Option<&Arc<PgPluginExecutionLogRepo>>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -1234,29 +1237,24 @@ impl<R: AgentRepos> Agent<R> {
             )
             .record(tool_start.elapsed().as_secs_f64());
 
-            // Persist tool execution log to DB.
-            if let Some(pool) = tool_log_pool {
-                let pool = pool.clone();
-                let log_tool = tool_name.clone();
-                let log_user = user_id;
-                let log_ws = workspace_id;
-                let log_conv = conversation_id;
-                let log_success = !any_errors;
+            // Persist tool execution log via repo.
+            if let Some(repo) = tool_execution_log {
+                let repo = Arc::clone(repo);
+                let entry = CreatePluginExecutionLog {
+                    plugin_id: None,
+                    plugin_name: None,
+                    tool_name: tool_name.clone(),
+                    user_id: Some(user_id),
+                    conversation_id: Some(conversation_id),
+                    workspace_id,
+                    duration_ms: tool_duration_ms,
+                    success: !any_errors,
+                    error_message: None,
+                };
                 tokio::spawn(async move {
-                    let _ = sqlx::query(
-                        "INSERT INTO plugin_execution_logs \
-                         (tool_name, user_id, workspace_id, conversation_id, \
-                          duration_ms, success) \
-                         VALUES ($1, $2, $3, $4, $5, $6)",
-                    )
-                    .bind(&log_tool)
-                    .bind(log_user.as_uuid())
-                    .bind(log_ws.map(|id| *id.as_uuid()))
-                    .bind(log_conv.as_uuid())
-                    .bind(tool_duration_ms)
-                    .bind(log_success)
-                    .execute(&pool)
-                    .await;
+                    if let Err(e) = repo.create(entry).await {
+                        tracing::warn!(error = %e, "failed to persist tool execution log");
+                    }
                 });
             }
 

@@ -21,14 +21,15 @@ impl sober_core::types::PluginExecutionLogRepo for PgPluginExecutionLogRepo {
         sqlx::query(
             "INSERT INTO plugin_execution_logs \
              (plugin_id, plugin_name, tool_name, user_id, conversation_id, \
-              duration_ms, success, error_message) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+              workspace_id, duration_ms, success, error_message) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(entry.plugin_id.map(|id| *id.as_uuid()))
         .bind(&entry.plugin_name)
         .bind(&entry.tool_name)
         .bind(entry.user_id.map(|id| *id.as_uuid()))
         .bind(entry.conversation_id.map(|id| *id.as_uuid()))
+        .bind(entry.workspace_id.map(|id| *id.as_uuid()))
         .bind(entry.duration_ms)
         .bind(entry.success)
         .bind(&entry.error_message)

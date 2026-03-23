@@ -286,19 +286,21 @@ pub struct CreateSandboxExecutionLog {
 pub struct CreatePluginExecutionLog {
     /// The plugin that was invoked (if known).
     pub plugin_id: Option<PluginId>,
-    /// Plugin name at invocation time.
-    pub plugin_name: String,
+    /// Plugin name (None for non-plugin tools like shell, memory, etc.).
+    pub plugin_name: Option<String>,
     /// Name of the tool that was called.
     pub tool_name: String,
-    /// User who triggered the invocation (if applicable).
+    /// User who triggered the execution.
     pub user_id: Option<UserId>,
-    /// Conversation context (if applicable).
+    /// Conversation context.
     pub conversation_id: Option<ConversationId>,
+    /// Workspace context.
+    pub workspace_id: Option<WorkspaceId>,
     /// Execution duration in milliseconds.
     pub duration_ms: i64,
-    /// Whether the invocation succeeded.
+    /// Whether the execution succeeded.
     pub success: bool,
-    /// Error message if the invocation failed.
+    /// Error message if the execution failed.
     pub error_message: Option<String>,
 }
 
