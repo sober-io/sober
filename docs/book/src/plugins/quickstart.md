@@ -1,1 +1,144 @@
 # Quick Start
+
+This tutorial walks through building, configuring, and installing a minimal Sõber
+WASM plugin that exposes a single tool.
+
+## Prerequisites
+
+- Rust toolchain with the `wasm32-wasip1` target
+- `sober` CLI or access to the Sõber HTTP API
+
+```bash
+rustup target add wasm32-wasip1
+```
+
+## Step 1 — Create a Rust library project
+
+```bash
+cargo new --lib my-plugin
+cd my-plugin
+```
+
+## Step 2 — Add the Extism PDK dependency
+
+Open `Cargo.toml` and add:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+The `cdylib` crate type tells the compiler to produce a dynamic library — the
+format WASM plugins use.
+
+## Step 3 — Write a tool function
+
+Replace `src/lib.rs` with:
+
+```rust
+use extism_pdk::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct GreetInput {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct GreetOutput {
+    message: String,
+}
+
+#[plugin_fn]
+pub fn greet(input: Json<GreetInput>) -> FnResult<Json<GreetOutput>> {
+    let output = GreetOutput {
+        message: format!("Hello, {}! Greetings from my-plugin.", input.name),
+    };
+    Ok(Json(output))
+}
+```
+
+The `#[plugin_fn]` attribute marks the function as a tool export. The function
+name (`greet`) must match the `name` field in the manifest's `[[tools]]` entry.
+
+### Optional: add a self-test
+
+Export a `__sober_test` function and the audit pipeline will call it during
+installation. If it returns an error the plugin is rejected.
+
+```rust
+#[plugin_fn]
+pub fn __sober_test(_: ()) -> FnResult<()> {
+    // Basic sanity check — exercise the happy path.
+    let result = greet(Json(GreetInput { name: "test".into() }))?;
+    assert!(!result.message.is_empty());
+    Ok(())
+}
+```
+
+## Step 4 — Create `plugin.toml`
+
+Place this file in the project root alongside `Cargo.toml`:
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "A minimal greeting plugin"
+
+[[tools]]
+name = "greet"
+description = "Returns a greeting for the given name"
+```
+
+This minimal manifest declares no capabilities — the plugin only needs the
+always-available `host_log` function.
+
+## Step 5 — Build
+
+```bash
+cargo build --target wasm32-wasip1 --release
+```
+
+The compiled module is at:
+
+```
+target/wasm32-wasip1/release/my_plugin.wasm
+```
+
+## Step 6 — Install
+
+### Via CLI (offline, database must be accessible)
+
+```bash
+sober plugin install \
+  --wasm target/wasm32-wasip1/release/my_plugin.wasm \
+  --manifest plugin.toml
+```
+
+### Via API
+
+```bash
+curl -X POST http://localhost:8080/api/v1/plugins \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "wasm=@target/wasm32-wasip1/release/my_plugin.wasm" \
+  -F "manifest=@plugin.toml"
+```
+
+A successful install returns the plugin ID and an audit report. If any audit
+stage fails the response includes the rejection reason.
+
+## Verify
+
+Ask Sõber to greet someone. The agent will discover the new `greet` tool and
+can invoke it when appropriate, or you can call it directly:
+
+```bash
+soberctl tool call greet '{"name": "world"}'
+# {"message": "Hello, world! Greetings from my-plugin."}
+```
