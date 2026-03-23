@@ -9,8 +9,6 @@ use std::time::Instant;
 
 use metrics::{counter, histogram};
 use sober_core::types::ids::PluginId;
-use sober_core::types::input::CreatePluginExecutionLog;
-use sober_core::types::repo::PluginExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 use tracing::{debug, warn};
 
@@ -30,7 +28,7 @@ pub struct PluginTool {
     metadata: ToolMetadata,
     plugin_id: PluginId,
     user_id: Option<sober_core::types::ids::UserId>,
-    execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
+    db_pool: Option<sqlx::PgPool>,
 }
 
 impl PluginTool {
@@ -45,7 +43,7 @@ impl PluginTool {
         description: String,
         plugin_id: PluginId,
         user_id: Option<sober_core::types::ids::UserId>,
-        execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
+        db_pool: Option<sqlx::PgPool>,
     ) -> Self {
         let metadata = ToolMetadata {
             name: tool_name.clone(),
@@ -65,7 +63,7 @@ impl PluginTool {
             metadata,
             plugin_id,
             user_id,
-            execution_log,
+            db_pool,
         }
     }
 }
@@ -81,7 +79,7 @@ impl Tool for PluginTool {
         let meta_tool_name = self.tool_name.clone();
         let plugin_id = self.plugin_id;
         let user_id = self.user_id;
-        let execution_log = self.execution_log.clone();
+        let db_pool = self.db_pool.clone();
 
         // Capture the plugin name from the host's manifest for logging.
         let plugin_name = self
@@ -110,7 +108,7 @@ impl Tool for PluginTool {
             let (success, error_message, output) = match result {
                 Ok(output) => {
                     counter!(
-                        "sober_plugin_invocations_total",
+                        "sober_plugin_executions_total",
                         "plugin" => plugin_name.clone(),
                         "tool" => meta_tool_name.clone(),
                         "status" => "success",
@@ -120,13 +118,13 @@ impl Tool for PluginTool {
                         plugin = %plugin_name,
                         tool = %meta_tool_name,
                         duration_ms,
-                        "plugin tool invocation succeeded"
+                        "plugin tool execution succeeded"
                     );
                     (true, None, Ok(output))
                 }
                 Err(msg) => {
                     counter!(
-                        "sober_plugin_invocations_total",
+                        "sober_plugin_executions_total",
                         "plugin" => plugin_name.clone(),
                         "tool" => meta_tool_name.clone(),
                         "status" => "error",
@@ -137,7 +135,7 @@ impl Tool for PluginTool {
                         tool = %meta_tool_name,
                         duration_ms,
                         error = %msg,
-                        "plugin tool invocation failed"
+                        "plugin tool execution failed"
                     );
                     (
                         false,
@@ -151,27 +149,32 @@ impl Tool for PluginTool {
             };
 
             histogram!(
-                "sober_plugin_invocation_duration_seconds",
+                "sober_plugin_execution_duration_seconds",
                 "plugin" => plugin_name.clone(),
                 "tool" => meta_tool_name.clone(),
             )
             .record(duration_secs);
 
-            // Persist invocation log via repo.
-            if let Some(repo) = execution_log {
-                let entry = CreatePluginExecutionLog {
-                    plugin_id: Some(plugin_id),
-                    plugin_name,
-                    tool_name: meta_tool_name,
-                    user_id,
-                    conversation_id: None,
-                    duration_ms: duration_ms as i64,
-                    success,
-                    error_message,
-                };
+            // Persist execution log to DB.
+            if let Some(pool) = db_pool {
                 tokio::spawn(async move {
-                    if let Err(e) = repo.create(entry).await {
-                        tracing::warn!(error = %e, "failed to persist plugin invocation log");
+                    if let Err(e) = sqlx::query(
+                        "INSERT INTO plugin_execution_logs \
+                         (plugin_id, plugin_name, tool_name, user_id, \
+                          duration_ms, success, error_message) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    )
+                    .bind(plugin_id.as_uuid())
+                    .bind(&plugin_name)
+                    .bind(&meta_tool_name)
+                    .bind(user_id.map(|id| *id.as_uuid()))
+                    .bind(duration_ms as i64)
+                    .bind(success)
+                    .bind(&error_message)
+                    .execute(&pool)
+                    .await
+                    {
+                        tracing::warn!(error = %e, "failed to persist plugin execution log");
                     }
                 });
             }

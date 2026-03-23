@@ -17,9 +17,9 @@ use std::sync::Arc;
 use sober_core::config::MemoryConfig;
 use sober_core::types::AgentRepos;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
+use sober_db::PgSandboxExecutionLogRepo;
 use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
 use sober_plugin::PluginManager;
@@ -57,7 +57,7 @@ pub struct ShellToolConfig {
     /// Maximum number of snapshots retained per workspace.
     pub max_snapshots: Option<u32>,
     /// Sandbox execution log repo for persisting audit entries.
-    pub sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
+    pub sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
 }
 
 /// Configuration for the web search tool.

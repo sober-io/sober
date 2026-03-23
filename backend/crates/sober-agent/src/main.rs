@@ -20,10 +20,7 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{
-    PgAgentRepos, PgMessageRepo, PgPluginExecutionLogRepo, PgPluginRepo, PgSandboxExecutionLogRepo,
-    create_pool,
-};
+use sober_db::{PgAgentRepos, PgMessageRepo, PgPluginRepo, PgSandboxExecutionLogRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
@@ -195,7 +192,7 @@ async fn main() -> Result<()> {
             };
             mind.base_system_prompt(&caller).await.ok()
         },
-        execution_log: Some(Arc::new(PgPluginExecutionLogRepo::new(pool.clone()))),
+        db_pool: Some(pool.clone()),
     };
     let plugin_manager = Arc::new(
         PluginManager::new(

@@ -14,6 +14,7 @@ use sober_core::types::ids::UserId;
 use sober_core::types::input::CreateSandboxExecutionLog;
 use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
 use sober_workspace::SnapshotManager;
 
@@ -55,7 +56,7 @@ pub struct ShellTool {
     auto_snapshot: bool,
     max_snapshots: u32,
     snapshot_manager: Option<SnapshotManager>,
-    sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
+    sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
     user_id: Option<UserId>,
     workspace_id: Option<sober_core::types::WorkspaceId>,
 }

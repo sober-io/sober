@@ -60,8 +60,8 @@ pub struct WasmServices {
     pub tool_executor: Option<Arc<dyn ToolExecutor>>,
     /// System prompt for non-raw LLM calls from plugins.
     pub system_prompt: Option<String>,
-    /// Invocation log repo for persisting tool call audit logs.
-    pub execution_log: Option<Arc<dyn sober_core::types::repo::PluginExecutionLogRepo>>,
+    /// Database pool for persisting plugin execution logs.
+    pub db_pool: Option<sqlx::PgPool>,
 }
 
 /// Unified plugin manager that collects tools from MCP, Skill, and WASM plugins.
@@ -537,7 +537,7 @@ impl<R: PluginRepo> PluginManager<R> {
                     entry.description.clone(),
                     plugin.id,
                     plugin.owner_id,
-                    self.wasm_services.execution_log.clone(),
+                    self.wasm_services.db_pool.clone(),
                 )) as Arc<dyn Tool>
             })
             .collect();
