@@ -53,11 +53,11 @@ graph TD
 
 | Layer | Source | Override Rules |
 |-------|--------|----------------|
-| Base | `sober-mind/instructions/soul.md`, compiled into the binary at build time | Foundation — defines everything. Zero runtime I/O. |
-| User | Stored in the database; loaded at agent startup or on user switch | Full override of base. The user controls their instance. |
-| Workspace | Stored in the database; loaded on workspace switch | Additive only. Can adjust style and domain focus. Cannot contradict ethical boundaries or security guardrails. |
+| Base | `sober-mind/instructions/soul.md`, compiled into the binary | Foundation — defines identity, values, and communication style. |
+| User | `~/.sober/soul.md` or database | Full override of base. The user controls their instance. |
+| Workspace | `./.sober/soul.md` (project-level) | Additive only. Can adjust style and domain focus. Cannot contradict ethical boundaries or security guardrails. |
 
-The `SoulResolver` loads the user and workspace layers from the database at agent startup (or on workspace switch) and merges them with the compiled base into the resolved soul that drives all subsequent prompt assembly.
+The resolved soul.md content is added to the system prompt during prompt assembly. The `SoulResolver` merges the three layers in order — base, then user override, then workspace additions.
 
 ## Dynamic Prompt Assembly
 

@@ -9,13 +9,13 @@
 
 ## What is Sõber?
 
-Sõber ("friend" in Estonian) is a self-evolving AI agent system built on three pillars: security-first design, strict context isolation, and autonomous self-improvement. The agent assists users with tasks, uses tools, manages scoped memory, and can discover and install plugins autonomously — all through an audited pipeline that keeps you in control.
+Sõber ("friend" in Estonian) is a self-evolving personal AI agent. It assists users with tasks, uses tools, manages scoped memory, and can discover and install plugins autonomously — all through an audited pipeline. Security-first, context-isolated, and designed to run on infrastructure you control.
 
 ---
 
 ## Features
 
-- **Multi-agent orchestration** — delegate tasks to specialized agent instances with scoped context
+- **Extensible agent system** — tool use, scoped memory, plugin installation, and autonomous scheduling
 - **WASM plugin system** (Extism) — sandboxed execution via wasmtime, capability-gated host functions (KV, HTTP, secrets, LLM, memory, scheduling, filesystem, metrics, and more)
 - **Process-level sandboxing** (bwrap) with policy profiles and network filtering
 - **Binary Context Format (BCF)** — compact, optionally encrypted memory snapshots (zstd + AES-256-GCM)

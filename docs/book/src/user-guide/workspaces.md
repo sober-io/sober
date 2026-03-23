@@ -1,8 +1,6 @@
 # Workspaces
 
-A workspace is an isolated environment where the agent performs file-based work on your behalf. Each workspace has its own directory, git repository, blob store, and configuration. The agent uses workspaces to run shell commands, create artifacts, manage snapshots, and maintain project-specific context.
-
-Every conversation has its own dedicated working directory inside the workspace, named after the conversation UUID.
+Every conversation has its own dedicated workspace directory, named after the conversation UUID. The agent uses workspaces to run shell commands, create artifacts, manage snapshots, and maintain conversation-specific context.
 
 ---
 
