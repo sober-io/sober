@@ -49,7 +49,7 @@ pub(crate) fn host_llm_complete_impl(
         model,
         messages,
         tools: vec![],
-        max_tokens: req.max_tokens,
+        max_tokens: Some(req.max_tokens.unwrap_or(1024)),
         temperature: None,
         stop: vec![],
         stream: false,
