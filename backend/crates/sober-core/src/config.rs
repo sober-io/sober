@@ -636,10 +636,27 @@ impl AppConfig {
     /// Validates the loaded configuration.
     ///
     /// Called after TOML loading + env overlay. Checks required fields and format constraints.
-    ///
-    /// This is a no-op placeholder — the full validation is added in a subsequent commit.
     pub fn validate(&self) -> Result<(), AppError> {
-        // Will be implemented in Task 6.
+        if self.database.url.is_empty() {
+            return Err(AppError::Validation(
+                "missing required config: database.url — set in config.toml [database] section or SOBER_DATABASE_URL env var".to_owned(),
+            ));
+        }
+
+        if self.environment == Environment::Production && self.auth.session_secret.is_none() {
+            return Err(AppError::Validation(
+                "missing required config: auth.session_secret — required when environment = production. Set in config.toml [auth] section or SOBER_AUTH_SESSION_SECRET env var".to_owned(),
+            ));
+        }
+
+        if let Some(ref key) = self.crypto.master_encryption_key
+            && (key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(AppError::Validation(
+                "invalid config: crypto.master_encryption_key — must be a 64-character hex string (256-bit key). Generate with: openssl rand -hex 32".to_owned(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -1095,5 +1112,46 @@ url = "postgres://toml@localhost/db"
         let mut config: AppConfig = toml::from_str(toml_str).unwrap();
         config.apply_env_overrides(env_from(&[]));
         assert_eq!(config.database.url, "postgres://toml@localhost/db");
+    }
+
+    // ── Task 6: Validation ──────────────────────────────────────────────────
+
+    #[test]
+    fn validate_rejects_empty_database_url() {
+        let config = AppConfig::default();
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, AppError::Validation(msg) if msg.contains("database.url")));
+    }
+
+    #[test]
+    fn validate_rejects_missing_session_secret_in_production() {
+        let mut config = AppConfig::default();
+        config.database.url = "postgres://test@localhost/test".to_owned();
+        config.environment = Environment::Production;
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, AppError::Validation(msg) if msg.contains("session_secret")));
+    }
+
+    #[test]
+    fn validate_accepts_missing_session_secret_in_development() {
+        let mut config = AppConfig::default();
+        config.database.url = "postgres://test@localhost/test".to_owned();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_hex_encryption_key() {
+        let mut config = AppConfig::default();
+        config.database.url = "postgres://test@localhost/test".to_owned();
+        config.crypto.master_encryption_key = Some("not-valid-hex".to_owned());
+        let err = config.validate().unwrap_err();
+        assert!(matches!(err, AppError::Validation(msg) if msg.contains("master_encryption_key")));
+    }
+
+    #[test]
+    fn validate_accepts_valid_config() {
+        let mut config = AppConfig::default();
+        config.database.url = "postgres://test@localhost/test".to_owned();
+        assert!(config.validate().is_ok());
     }
 }
