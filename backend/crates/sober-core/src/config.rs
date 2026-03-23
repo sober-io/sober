@@ -458,10 +458,179 @@ impl AppConfig {
 
     /// Overlays `SOBER_*` environment variables onto the config, overwriting any
     /// TOML or default values. Each set env var wins over the file/default value.
-    ///
-    /// This is a no-op placeholder — the full overlay is added in a subsequent commit.
-    pub(crate) fn apply_env_overrides(&mut self, _get_var: impl Fn(&str) -> Option<String>) {
-        // Will be implemented in Task 5.
+    pub(crate) fn apply_env_overrides(&mut self, get_var: impl Fn(&str) -> Option<String>) {
+        let env = EnvSource(&get_var);
+
+        // environment
+        if let Some(val) = get_var("SOBER_ENV") {
+            self.environment = match val.as_str() {
+                "production" => Environment::Production,
+                _ => Environment::Development,
+            };
+        }
+
+        // database
+        if let Some(v) = get_var("SOBER_DATABASE_URL") {
+            self.database.url = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_DATABASE_MAX_CONNECTIONS") {
+            self.database.max_connections = v;
+        }
+
+        // qdrant
+        if let Some(v) = get_var("SOBER_QDRANT_URL") {
+            self.qdrant.url = v;
+        }
+        if let Some(v) = get_var("SOBER_QDRANT_API_KEY") {
+            self.qdrant.api_key = Some(v);
+        }
+
+        // llm
+        if let Some(v) = get_var("SOBER_LLM_BASE_URL") {
+            self.llm.base_url = v;
+        }
+        if let Some(v) = get_var("SOBER_LLM_API_KEY") {
+            self.llm.api_key = Some(v);
+        }
+        if let Some(v) = get_var("SOBER_LLM_MODEL") {
+            self.llm.model = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_MAX_TOKENS") {
+            self.llm.max_tokens = v;
+        }
+        if let Some(v) = get_var("SOBER_LLM_EMBEDDING_MODEL") {
+            self.llm.embedding_model = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_EMBEDDING_DIM") {
+            self.llm.embedding_dim = v;
+        }
+
+        // server
+        if let Some(v) = get_var("SOBER_SERVER_HOST") {
+            self.server.host = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SERVER_PORT") {
+            self.server.port = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SERVER_RATE_LIMIT_MAX_REQUESTS") {
+            self.server.rate_limit_max_requests = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SERVER_RATE_LIMIT_WINDOW_SECS") {
+            self.server.rate_limit_window_secs = v;
+        }
+
+        // auth
+        if let Some(v) = get_var("SOBER_AUTH_SESSION_SECRET") {
+            self.auth.session_secret = Some(v);
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_AUTH_SESSION_TTL_SECONDS") {
+            self.auth.session_ttl_seconds = v;
+        }
+
+        // searxng
+        if let Some(v) = get_var("SOBER_SEARXNG_URL") {
+            self.searxng.url = v;
+        }
+
+        // admin
+        if let Some(v) = get_var("SOBER_ADMIN_SOCKET_PATH") {
+            self.admin.socket_path = PathBuf::from(v);
+        }
+
+        // agent (process config)
+        if let Some(v) = get_var("SOBER_AGENT_SOCKET_PATH") {
+            self.agent.socket_path = PathBuf::from(v);
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_AGENT_METRICS_PORT") {
+            self.agent.metrics_port = v;
+        }
+        if let Some(v) = get_var("SOBER_AGENT_WORKSPACE_ROOT") {
+            self.agent.workspace_root = PathBuf::from(v);
+        }
+        if let Some(v) = get_var("SOBER_AGENT_SANDBOX_PROFILE") {
+            self.agent.sandbox_profile = v;
+        }
+
+        // scheduler
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SCHEDULER_TICK_INTERVAL_SECS") {
+            self.scheduler.tick_interval_secs = v;
+        }
+        if let Some(v) = get_var("SOBER_SCHEDULER_AGENT_SOCKET_PATH") {
+            self.scheduler.agent_socket_path = PathBuf::from(v);
+        }
+        if let Some(v) = get_var("SOBER_SCHEDULER_SOCKET_PATH") {
+            self.scheduler.socket_path = PathBuf::from(v);
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SCHEDULER_MAX_CONCURRENT_JOBS") {
+            self.scheduler.max_concurrent_jobs = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_SCHEDULER_METRICS_PORT") {
+            self.scheduler.metrics_port = v;
+        }
+        if let Some(v) = get_var("SOBER_SCHEDULER_WORKSPACE_ROOT") {
+            self.scheduler.workspace_root = PathBuf::from(v);
+        }
+        if let Some(v) = get_var("SOBER_SCHEDULER_SANDBOX_PROFILE") {
+            self.scheduler.sandbox_profile = v;
+        }
+
+        // web
+        if let Some(v) = get_var("SOBER_WEB_HOST") {
+            self.web.host = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_WEB_PORT") {
+            self.web.port = v;
+        }
+        if let Some(v) = get_var("SOBER_WEB_API_UPSTREAM_URL") {
+            self.web.api_upstream_url = v;
+        }
+        if let Some(v) = get_var("SOBER_WEB_STATIC_DIR") {
+            self.web.static_dir = Some(PathBuf::from(v));
+        }
+
+        // mcp
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MCP_REQUEST_TIMEOUT_SECS") {
+            self.mcp.request_timeout_secs = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MCP_MAX_CONSECUTIVE_FAILURES") {
+            self.mcp.max_consecutive_failures = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MCP_IDLE_TIMEOUT_SECS") {
+            self.mcp.idle_timeout_secs = v;
+        }
+
+        // memory
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MEMORY_DECAY_HALF_LIFE_DAYS") {
+            self.memory.decay_half_life_days = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MEMORY_RETRIEVAL_BOOST") {
+            self.memory.retrieval_boost = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_MEMORY_PRUNE_THRESHOLD") {
+            self.memory.prune_threshold = v;
+        }
+
+        // crypto
+        if let Some(v) = get_var("SOBER_CRYPTO_MASTER_ENCRYPTION_KEY") {
+            self.crypto.master_encryption_key = Some(v);
+        }
+
+        // acp (optional section — any SOBER_ACP_* env var triggers Some)
+        let acp_command = get_var("SOBER_ACP_COMMAND");
+        let acp_name = get_var("SOBER_ACP_NAME");
+        let acp_args = get_var("SOBER_ACP_ARGS");
+        if acp_command.is_some() || acp_name.is_some() || acp_args.is_some() {
+            let acp = self.acp.get_or_insert_with(AcpAgentConfig::default);
+            if let Some(v) = acp_command {
+                acp.command = v;
+            }
+            if let Some(v) = acp_name {
+                acp.name = v;
+            }
+            if let Some(v) = acp_args {
+                acp.args = v.split_whitespace().map(String::from).collect();
+            }
+        }
     }
 
     /// Validates the loaded configuration.
@@ -601,6 +770,20 @@ impl<F: Fn(&str) -> Option<String>> EnvSource<F> {
                 AppError::Validation(format!("invalid value for {key}: {e} (got: {val})"))
             }),
             None => Ok(default),
+        }
+    }
+
+    /// Parses an optional env var. Returns `Ok(None)` if absent, `Ok(Some(v))` if valid.
+    fn parse_opt<T>(&self, key: &str) -> Result<Option<T>, AppError>
+    where
+        T: std::str::FromStr,
+        T::Err: std::fmt::Display,
+    {
+        match (self.0)(key) {
+            Some(val) => val.parse::<T>().map(Some).map_err(|e| {
+                AppError::Validation(format!("invalid value for {key}: {e} (got: {val})"))
+            }),
+            None => Ok(None),
         }
     }
 }
@@ -857,5 +1040,60 @@ port = 4000
         assert_eq!(config.database.url, "postgres://test:test@localhost/test");
         assert_eq!(config.server.port, 4000);
         assert_eq!(config.llm.model, "anthropic/claude-sonnet-4");
+    }
+
+    // ── Task 5: Env var overlay ─────────────────────────────────────────────
+
+    #[test]
+    fn env_overrides_toml_values() {
+        let toml_str = r#"
+[database]
+url = "postgres://toml@localhost/db"
+[server]
+port = 4000
+"#;
+        let mut config: AppConfig = toml::from_str(toml_str).unwrap();
+        config.apply_env_overrides(env_from(&[
+            ("SOBER_DATABASE_URL", "postgres://env@localhost/db"),
+            ("SOBER_SERVER_PORT", "5000"),
+        ]));
+        assert_eq!(config.database.url, "postgres://env@localhost/db");
+        assert_eq!(config.server.port, 5000);
+    }
+
+    #[test]
+    fn env_overlay_creates_acp_from_none() {
+        let mut config = AppConfig::default();
+        assert!(config.acp.is_none());
+        config.apply_env_overrides(env_from(&[
+            ("SOBER_ACP_COMMAND", "claude"),
+            ("SOBER_ACP_NAME", "Claude Code"),
+        ]));
+        let acp = config.acp.as_ref().unwrap();
+        assert_eq!(acp.command, "claude");
+        assert_eq!(acp.name, "Claude Code");
+        assert_eq!(acp.args, vec!["acp"]);
+    }
+
+    #[test]
+    fn env_overlay_acp_args_whitespace_split() {
+        let mut config = AppConfig::default();
+        config.apply_env_overrides(env_from(&[
+            ("SOBER_ACP_COMMAND", "claude"),
+            ("SOBER_ACP_ARGS", "acp --verbose"),
+        ]));
+        let acp = config.acp.as_ref().unwrap();
+        assert_eq!(acp.args, vec!["acp", "--verbose"]);
+    }
+
+    #[test]
+    fn env_does_not_override_unset_vars() {
+        let toml_str = r#"
+[database]
+url = "postgres://toml@localhost/db"
+"#;
+        let mut config: AppConfig = toml::from_str(toml_str).unwrap();
+        config.apply_env_overrides(env_from(&[]));
+        assert_eq!(config.database.url, "postgres://toml@localhost/db");
     }
 }
