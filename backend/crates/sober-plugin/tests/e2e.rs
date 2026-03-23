@@ -286,6 +286,9 @@ async fn plugin_tool_execute_returns_echoed_content() {
         Arc::clone(&host),
         "greet".into(),
         "Echoes the input back".into(),
+        sober_core::types::ids::PluginId::new(),
+        None,
+        None,
     );
 
     // Verify metadata
