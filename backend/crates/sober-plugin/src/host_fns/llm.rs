@@ -59,8 +59,17 @@ pub(crate) fn host_llm_complete_impl(
         .choices
         .into_iter()
         .next()
-        .and_then(|c| c.message.content)
+        .map(|c| {
+            c.message
+                .content
+                .or(c.message.reasoning_content)
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
+
+    if text.is_empty() {
+        tracing::warn!("LLM returned empty content for plugin call");
+    }
 
     write_output(plugin, outputs, &LlmCompleteResponse { text })
 }
