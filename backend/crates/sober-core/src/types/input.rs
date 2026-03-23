@@ -283,7 +283,7 @@ pub struct CreateSandboxExecutionLog {
 
 /// Input for creating a plugin invocation log.
 #[derive(Debug, Clone)]
-pub struct CreatePluginInvocationLog {
+pub struct CreatePluginExecutionLog {
     /// The plugin that was invoked (if known).
     pub plugin_id: Option<PluginId>,
     /// Plugin name at invocation time.

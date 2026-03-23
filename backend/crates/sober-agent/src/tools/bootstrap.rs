@@ -17,6 +17,7 @@ use std::sync::Arc;
 use sober_core::config::MemoryConfig;
 use sober_core::types::AgentRepos;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
+use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
 use sober_llm::LlmEngine;
@@ -131,6 +132,8 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
     /// LLM-powered plugin generator (None = generation disabled).
     pub plugin_generator: Option<Arc<PluginGenerator>>,
+    /// Sandbox execution log repo for persisting audit entries.
+    pub sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {
@@ -180,6 +183,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             self.shell.auto_snapshot,
             self.shell.max_snapshots,
             Some((*self.snapshot_manager).clone()),
+            self.sandbox_log_repo.clone(),
         );
         tools.push(Arc::new(shell_tool));
 

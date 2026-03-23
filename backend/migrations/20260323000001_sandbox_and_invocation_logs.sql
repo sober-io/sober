@@ -18,7 +18,7 @@ CREATE INDEX idx_sandbox_execution_logs_workspace ON sandbox_execution_logs(work
 CREATE INDEX idx_sandbox_execution_logs_created ON sandbox_execution_logs(created_at);
 
 -- Plugin tool invocation logs
-CREATE TABLE plugin_invocation_logs (
+CREATE TABLE plugin_execution_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     plugin_id UUID REFERENCES plugins(id) ON DELETE SET NULL,
     plugin_name TEXT NOT NULL,
@@ -31,5 +31,5 @@ CREATE TABLE plugin_invocation_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_plugin_invocation_logs_plugin ON plugin_invocation_logs(plugin_id) WHERE plugin_id IS NOT NULL;
-CREATE INDEX idx_plugin_invocation_logs_created ON plugin_invocation_logs(created_at);
+CREATE INDEX idx_plugin_execution_logs_plugin ON plugin_execution_logs(plugin_id) WHERE plugin_id IS NOT NULL;
+CREATE INDEX idx_plugin_execution_logs_created ON plugin_execution_logs(created_at);

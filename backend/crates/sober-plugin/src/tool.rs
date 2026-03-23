@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use metrics::{counter, histogram};
+use sober_core::types::ids::PluginId;
+use sober_core::types::input::CreatePluginExecutionLog;
+use sober_core::types::repo::PluginExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 use tracing::{debug, warn};
 
@@ -25,6 +28,8 @@ pub struct PluginTool {
     host: Arc<Mutex<PluginHost>>,
     tool_name: String,
     metadata: ToolMetadata,
+    plugin_id: PluginId,
+    execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
 }
 
 impl PluginTool {
@@ -33,7 +38,13 @@ impl PluginTool {
     /// The `host` is shared across all tools from the same plugin.
     /// `tool_name` must match a `[[tools]]` entry in the manifest.
     /// `description` comes from the manifest's tool entry.
-    pub fn new(host: Arc<Mutex<PluginHost>>, tool_name: String, description: String) -> Self {
+    pub fn new(
+        host: Arc<Mutex<PluginHost>>,
+        tool_name: String,
+        description: String,
+        plugin_id: PluginId,
+        execution_log: Option<Arc<dyn PluginExecutionLogRepo>>,
+    ) -> Self {
         let metadata = ToolMetadata {
             name: tool_name.clone(),
             description,
@@ -50,6 +61,8 @@ impl PluginTool {
             host,
             tool_name,
             metadata,
+            plugin_id,
+            execution_log,
         }
     }
 }
@@ -63,6 +76,8 @@ impl Tool for PluginTool {
         let host = Arc::clone(&self.host);
         let tool_name = self.tool_name.clone();
         let meta_tool_name = self.tool_name.clone();
+        let plugin_id = self.plugin_id;
+        let execution_log = self.execution_log.clone();
 
         // Capture the plugin name from the host's manifest for logging.
         let plugin_name = self
@@ -88,7 +103,7 @@ impl Tool for PluginTool {
             let duration_ms = start.elapsed().as_millis() as u64;
             let duration_secs = start.elapsed().as_secs_f64();
 
-            match result {
+            let (success, error_message, output) = match result {
                 Ok(output) => {
                     counter!(
                         "sober_plugin_invocations_total",
@@ -97,19 +112,13 @@ impl Tool for PluginTool {
                         "status" => "success",
                     )
                     .increment(1);
-                    histogram!(
-                        "sober_plugin_invocation_duration_seconds",
-                        "plugin" => plugin_name.clone(),
-                        "tool" => meta_tool_name.clone(),
-                    )
-                    .record(duration_secs);
                     debug!(
                         plugin = %plugin_name,
                         tool = %meta_tool_name,
                         duration_ms,
                         "plugin tool invocation succeeded"
                     );
-                    Ok(output)
+                    (true, None, Ok(output))
                 }
                 Err(msg) => {
                     counter!(
@@ -119,12 +128,6 @@ impl Tool for PluginTool {
                         "status" => "error",
                     )
                     .increment(1);
-                    histogram!(
-                        "sober_plugin_invocation_duration_seconds",
-                        "plugin" => plugin_name.clone(),
-                        "tool" => meta_tool_name.clone(),
-                    )
-                    .record(duration_secs);
                     warn!(
                         plugin = %plugin_name,
                         tool = %meta_tool_name,
@@ -132,12 +135,44 @@ impl Tool for PluginTool {
                         error = %msg,
                         "plugin tool invocation failed"
                     );
-                    Ok(ToolOutput {
-                        content: format!("Plugin execution failed: {msg}"),
-                        is_error: true,
-                    })
+                    (
+                        false,
+                        Some(msg.clone()),
+                        Ok(ToolOutput {
+                            content: format!("Plugin execution failed: {msg}"),
+                            is_error: true,
+                        }),
+                    )
                 }
+            };
+
+            histogram!(
+                "sober_plugin_invocation_duration_seconds",
+                "plugin" => plugin_name.clone(),
+                "tool" => meta_tool_name.clone(),
+            )
+            .record(duration_secs);
+
+            // Persist invocation log via repo.
+            if let Some(repo) = execution_log {
+                let entry = CreatePluginExecutionLog {
+                    plugin_id: Some(plugin_id),
+                    plugin_name,
+                    tool_name: meta_tool_name,
+                    user_id: None, // not available at this level
+                    conversation_id: None,
+                    duration_ms: duration_ms as i64,
+                    success,
+                    error_message,
+                };
+                tokio::spawn(async move {
+                    if let Err(e) = repo.create(entry).await {
+                        tracing::warn!(error = %e, "failed to persist plugin invocation log");
+                    }
+                });
             }
+
+            output
         })
     }
 }

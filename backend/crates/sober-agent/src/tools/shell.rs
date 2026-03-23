@@ -10,6 +10,9 @@ use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 use sober_core::PermissionMode;
+use sober_core::types::ids::{UserId, WorkspaceId};
+use sober_core::types::input::CreateSandboxExecutionLog;
+use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
 use sober_workspace::SnapshotManager;
@@ -50,6 +53,7 @@ pub struct ShellTool {
     auto_snapshot: bool,
     max_snapshots: u32,
     snapshot_manager: Option<SnapshotManager>,
+    sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
 }
 
 impl ShellTool {
@@ -57,6 +61,7 @@ impl ShellTool {
     ///
     /// `max_snapshots` controls how many snapshots are retained before pruning.
     /// Pass `None` to use the default (10).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         policy: CommandPolicy,
         permission_mode: SharedPermissionMode,
@@ -65,6 +70,7 @@ impl ShellTool {
         auto_snapshot: bool,
         max_snapshots: Option<u32>,
         snapshot_manager: Option<SnapshotManager>,
+        sandbox_log_repo: Option<Arc<dyn SandboxExecutionLogRepo>>,
     ) -> Self {
         Self {
             policy,
@@ -74,6 +80,7 @@ impl ShellTool {
             auto_snapshot,
             max_snapshots: max_snapshots.unwrap_or(DEFAULT_MAX_SNAPSHOTS),
             snapshot_manager,
+            sandbox_log_repo,
         }
     }
 
@@ -177,10 +184,32 @@ impl ShellTool {
             format!("cd {} && {}", workdir.display(), input.command),
         ];
 
-        let (result, _audit_entry) = sandbox
+        let (result, audit_entry) = sandbox
             .execute(&command, &HashMap::new())
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("sandbox execution failed: {e}")))?;
+
+        // Persist sandbox audit entry via repo.
+        if let Some(repo) = &self.sandbox_log_repo {
+            let repo = Arc::clone(repo);
+            let entry = CreateSandboxExecutionLog {
+                execution_id: audit_entry.execution_id,
+                workspace_id: audit_entry.workspace_id.map(WorkspaceId::from_uuid),
+                user_id: audit_entry.user_id.map(UserId::from_uuid),
+                policy_name: audit_entry.policy.name.clone(),
+                command: audit_entry.command.clone(),
+                trigger: format!("{:?}", audit_entry.trigger),
+                duration_ms: audit_entry.duration_ms as i64,
+                exit_code: audit_entry.exit_code,
+                denied_network_requests: audit_entry.denied_network_requests.clone(),
+                outcome: format!("{:?}", audit_entry.outcome),
+            };
+            tokio::spawn(async move {
+                if let Err(e) = repo.create(entry).await {
+                    tracing::warn!(error = %e, "failed to persist sandbox audit log");
+                }
+            });
+        }
 
         // Format output
         let mut output = String::new();

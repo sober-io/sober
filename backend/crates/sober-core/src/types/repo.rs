@@ -6,6 +6,8 @@
 //!
 //! Uses Rust 2024 RPITIT — no `async_trait` crate needed.
 
+use std::pin::Pin;
+
 use chrono::{DateTime, Utc};
 
 use super::domain::*;
@@ -670,21 +672,25 @@ pub trait SecretRepo: Send + Sync {
 }
 
 /// Repository for sandbox execution audit logs.
+///
+/// Uses boxed futures for object safety (`Arc<dyn SandboxExecutionLogRepo>`).
 pub trait SandboxExecutionLogRepo: Send + Sync {
     /// Appends a sandbox execution audit log entry.
     fn create(
         &self,
         entry: CreateSandboxExecutionLog,
-    ) -> impl Future<Output = Result<(), AppError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + '_>>;
 }
 
-/// Repository for plugin tool invocation logs.
-pub trait PluginInvocationLogRepo: Send + Sync {
-    /// Appends a plugin invocation log entry.
+/// Repository for plugin tool execution logs.
+///
+/// Uses boxed futures for object safety (`Arc<dyn PluginExecutionLogRepo>`).
+pub trait PluginExecutionLogRepo: Send + Sync {
+    /// Appends a plugin execution log entry.
     fn create(
         &self,
-        entry: CreatePluginInvocationLog,
-    ) -> impl Future<Output = Result<(), AppError>> + Send;
+        entry: CreatePluginExecutionLog,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + '_>>;
 }
 
 /// Plugin registry operations.
