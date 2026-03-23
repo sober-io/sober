@@ -227,10 +227,11 @@ Structure (~150-200 lines):
    ```bash
    git clone https://github.com/sober-io/sober.git
    cd sober
-   cp .env.example .env  # Edit with your LLM API key
+   cp .env.example .env  # Edit with your LLM API key (uses SOBER_* env vars)
    docker compose up -d
    # Open http://localhost:8088
    ```
+   Alternative: `cp infra/config/config.toml.example config.toml` for TOML-based config.
 
 5. **Installation** — Three methods:
    - One-liner: `curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash`
@@ -274,8 +275,9 @@ git commit -m "docs: add README with project overview, quick start, and architec
 - Create: `docs/book/src/getting-started/first-run.md`
 
 **Reference:**
-- `backend/crates/sober-core/src/config.rs` — AppConfig struct
-- `.env.example` — env var names and defaults
+- `backend/crates/sober-core/src/config.rs` — AppConfig struct, layered loading, validation, env overlay
+- `infra/config/config.toml.example` — canonical TOML config reference
+- `.env.example` — env var names and defaults (SOBER_* prefix)
 - `scripts/install.sh` — flags and usage
 - `docker-compose.yml` — compose setup
 
@@ -296,13 +298,14 @@ Three installation methods:
 
 1. **install.sh (recommended for production)**
    - One-liner: `curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash`
-   - What it does: downloads latest release from GitHub, creates `sober` system user, installs to `/opt/sober`, sets up systemd services, runs migrations
+   - What it does: downloads latest release from GitHub, creates `sober` system user, installs to `/opt/sober`, sets up systemd services, generates `config.toml`, runs migrations
    - CLI flags table: `--user`, `--version`, `--yes`, `--uninstall`, `--database-url`, `--llm-base-url`, `--llm-api-key`, `--llm-model`, `--help`
+   - Note: install.sh now generates a full `/etc/sober/config.toml` (not `.env`) with user-provided values patched in via sed
    - Upgrade: re-run the same command (auto-detects existing install)
    - Uninstall: `curl ... | sudo bash -s -- --uninstall` (preserves data)
 
 2. **Docker Compose**
-   - Clone, copy `.env.example`, edit, `docker compose up -d`
+   - Clone, copy `.env.example` (or create `config.toml` from `infra/config/config.toml.example`), edit, `docker compose up -d`
    - Services started: PostgreSQL, Qdrant, SearXNG, sober-agent, sober-api, sober-scheduler, sober-web, auto-migration
    - Ports: 8088 (web UI), 3000 (API)
 
@@ -312,48 +315,100 @@ Three installation methods:
 
 - [ ] **Step 4: Write configuration.md**
 
-Complete environment variable reference table. Group by subsystem:
+Configuration uses a **layered resolution** model (highest priority wins):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SOBER_ENV` | `development` | Environment mode |
-| `DATABASE_URL` | — (required) | PostgreSQL connection string |
-| `DATABASE_MAX_CONNECTIONS` | `10` | Connection pool size |
-| `QDRANT_URL` | `http://localhost:6334` | Vector database endpoint |
-| `QDRANT_API_KEY` | — | Qdrant auth (optional) |
-| `HOST` | `0.0.0.0` | Server bind address |
-| `PORT` | `3000` | Server bind port |
-| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | LLM API endpoint |
-| `LLM_API_KEY` | — | LLM provider API key |
-| `LLM_MODEL` | `anthropic/claude-sonnet-4` | Model identifier |
-| `LLM_MAX_TOKENS` | `4096` | Max completion tokens |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
-| `EMBEDDING_DIM` | `1536` | Embedding vector dimensionality |
-| `SESSION_SECRET` | — | Session signing key (required in prod) |
-| `SESSION_TTL_SECONDS` | `2592000` | Session lifetime (30 days) |
-| `SEARXNG_URL` | `http://localhost:8080` | SearXNG instance URL |
-| `ADMIN_SOCKET_PATH` | `/run/sober/admin.sock` | Admin Unix socket |
-| `SCHEDULER_TICK_INTERVAL_SECS` | `1` | Scheduler tick frequency |
-| `SCHEDULER_AGENT_SOCKET_PATH` | `/run/sober/agent.sock` | Agent gRPC socket |
-| `SCHEDULER_SOCKET_PATH` | `/run/sober/scheduler.sock` | Scheduler socket |
-| `SCHEDULER_MAX_CONCURRENT_JOBS` | `10` | Max concurrent jobs |
-| `MCP_REQUEST_TIMEOUT_SECS` | `30` | MCP request timeout |
-| `MCP_MAX_CONSECUTIVE_FAILURES` | `3` | Failures before unhealthy |
-| `MCP_IDLE_TIMEOUT_SECS` | `300` | MCP idle timeout |
-| `MEMORY_DECAY_HALF_LIFE_DAYS` | `30` | Memory importance decay |
-| `MEMORY_RETRIEVAL_BOOST` | `0.2` | Recent memory boost |
-| `MEMORY_PRUNE_THRESHOLD` | `0.1` | Minimum importance |
-| `MASTER_ENCRYPTION_KEY` | — | Hex 256-bit key (optional). Generate: `openssl rand -hex 32` |
-| `RUST_LOG` | `info` | Log level filter |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry collector endpoint (optional) |
-| `PUBLIC_API_URL` | `http://localhost:3000` | Public API URL (used by frontend) |
-| `ACP_AGENT_COMMAND` | — | Local coding agent binary (optional, e.g. "claude"). Not in `.env.example` — config.rs only |
-| `ACP_AGENT_NAME` | — | Local agent display name. Not in `.env.example` |
-| `ACP_AGENT_ARGS` | `acp` | Local agent CLI args. Not in `.env.example` |
+1. **Environment variables** (`SOBER_*`) — always override everything
+2. **`.env` file** (development, loaded via dotenvy)
+3. **`config.toml`** — discovered via: `SOBER_CONFIG` env var → `/etc/sober/config.toml` → `./config.toml`
+4. **Compiled defaults** — hardcoded in `AppConfig`
 
-Note: `.env.example` overrides some code defaults (e.g. `SCHEDULER_TICK_INTERVAL_SECS=60` vs code default of `1`). Document what `.env.example` ships with since that's what users see.
+Document the layered model first, then the TOML structure, then the full env var reference.
 
-Note: `install.sh` writes a `/etc/sober/config.toml` but the application reads config exclusively from env vars (via `AppConfig`). The TOML file is a convenience reference only — document it as such, not as a config mechanism.
+**TOML Structure** — reference `infra/config/config.toml.example` for the canonical example. Show the top-level sections:
+
+```toml
+environment = "development"
+[database]
+[qdrant]
+[llm]
+[server]
+[auth]
+[agent]
+[scheduler]
+[web]
+[mcp]
+[memory]
+[crypto]
+[acp]
+```
+
+**Environment Variable Reference** — all use `SOBER_*` prefix. Group by TOML section:
+
+| Variable | TOML Key | Default | Description |
+|----------|----------|---------|-------------|
+| `SOBER_ENV` | `environment` | `development` | Environment mode (`development` / `production`) |
+| `SOBER_CONFIG` | — | — | Explicit path to config.toml (skips discovery) |
+| **`[database]`** | | | |
+| `SOBER_DATABASE_URL` | `database.url` | — (required) | PostgreSQL connection string |
+| `SOBER_DATABASE_MAX_CONNECTIONS` | `database.max_connections` | `10` | Connection pool size |
+| **`[qdrant]`** | | | |
+| `SOBER_QDRANT_URL` | `qdrant.url` | `http://localhost:6334` | Vector database endpoint |
+| `SOBER_QDRANT_API_KEY` | `qdrant.api_key` | — | Qdrant auth (optional) |
+| **`[llm]`** | | | |
+| `SOBER_LLM_BASE_URL` | `llm.base_url` | `https://openrouter.ai/api/v1` | LLM API endpoint |
+| `SOBER_LLM_API_KEY` | `llm.api_key` | — | LLM provider API key |
+| `SOBER_LLM_MODEL` | `llm.model` | `anthropic/claude-sonnet-4` | Model identifier |
+| `SOBER_LLM_MAX_TOKENS` | `llm.max_tokens` | `4096` | Max completion tokens |
+| `SOBER_LLM_EMBEDDING_MODEL` | `llm.embedding_model` | `text-embedding-3-small` | Embedding model |
+| `SOBER_LLM_EMBEDDING_DIM` | `llm.embedding_dim` | `1536` | Embedding vector dimensionality |
+| **`[server]`** | | | |
+| `SOBER_SERVER_HOST` | `server.host` | `0.0.0.0` | Server bind address |
+| `SOBER_SERVER_PORT` | `server.port` | `3000` | Server bind port |
+| `SOBER_SERVER_RATE_LIMIT_MAX_REQUESTS` | `server.rate_limit_max_requests` | `1200` | Rate limit max requests |
+| `SOBER_SERVER_RATE_LIMIT_WINDOW_SECS` | `server.rate_limit_window_secs` | `60` | Rate limit window |
+| **`[auth]`** | | | |
+| `SOBER_AUTH_SESSION_SECRET` | `auth.session_secret` | — | Session signing key (required in production) |
+| `SOBER_AUTH_SESSION_TTL_SECONDS` | `auth.session_ttl_seconds` | `2592000` | Session lifetime (30 days) |
+| **`[agent]`** | | | |
+| `SOBER_AGENT_SOCKET_PATH` | `agent.socket_path` | `/run/sober/agent.sock` | Agent gRPC socket path |
+| `SOBER_AGENT_METRICS_PORT` | `agent.metrics_port` | `9100` | Agent metrics port |
+| `SOBER_AGENT_WORKSPACE_ROOT` | `agent.workspace_root` | `/var/lib/sober/workspaces` | Workspace directory |
+| `SOBER_AGENT_SANDBOX_PROFILE` | `agent.sandbox_profile` | `standard` | Sandbox policy profile |
+| **`[scheduler]`** | | | |
+| `SOBER_SCHEDULER_TICK_INTERVAL_SECS` | `scheduler.tick_interval_secs` | `1` | Scheduler tick frequency |
+| `SOBER_SCHEDULER_AGENT_SOCKET_PATH` | `scheduler.agent_socket_path` | `/run/sober/agent.sock` | Agent gRPC socket |
+| `SOBER_SCHEDULER_SOCKET_PATH` | `scheduler.socket_path` | `/run/sober/scheduler.sock` | Scheduler admin socket |
+| `SOBER_SCHEDULER_MAX_CONCURRENT_JOBS` | `scheduler.max_concurrent_jobs` | `10` | Max concurrent jobs |
+| `SOBER_SCHEDULER_METRICS_PORT` | `scheduler.metrics_port` | `9101` | Scheduler metrics port |
+| `SOBER_SCHEDULER_WORKSPACE_ROOT` | `scheduler.workspace_root` | `/var/lib/sober/workspaces` | Workspace directory |
+| `SOBER_SCHEDULER_SANDBOX_PROFILE` | `scheduler.sandbox_profile` | `standard` | Sandbox policy profile |
+| **`[web]`** | | | |
+| `SOBER_WEB_HOST` | `web.host` | `0.0.0.0` | Web server bind address |
+| `SOBER_WEB_PORT` | `web.port` | `8080` | Web server bind port |
+| `SOBER_WEB_API_UPSTREAM_URL` | `web.api_upstream_url` | `http://localhost:3000` | API upstream for reverse proxy |
+| `SOBER_WEB_STATIC_DIR` | `web.static_dir` | — | Optional static file dir (overrides embedded) |
+| **`[mcp]`** | | | |
+| `SOBER_MCP_REQUEST_TIMEOUT_SECS` | `mcp.request_timeout_secs` | `30` | MCP request timeout |
+| `SOBER_MCP_MAX_CONSECUTIVE_FAILURES` | `mcp.max_consecutive_failures` | `3` | Failures before unhealthy |
+| `SOBER_MCP_IDLE_TIMEOUT_SECS` | `mcp.idle_timeout_secs` | `300` | MCP idle timeout |
+| **`[memory]`** | | | |
+| `SOBER_MEMORY_DECAY_HALF_LIFE_DAYS` | `memory.decay_half_life_days` | `30` | Memory importance decay |
+| `SOBER_MEMORY_RETRIEVAL_BOOST` | `memory.retrieval_boost` | `0.2` | Recent memory boost |
+| `SOBER_MEMORY_PRUNE_THRESHOLD` | `memory.prune_threshold` | `0.1` | Minimum importance |
+| **`[crypto]`** | | | |
+| `SOBER_CRYPTO_MASTER_ENCRYPTION_KEY` | `crypto.master_encryption_key` | — | Hex 256-bit key (optional). Generate: `openssl rand -hex 32` |
+| **`[acp]`** | | | |
+| `SOBER_ACP_COMMAND` | `acp.command` | — | Local coding agent binary (optional, e.g. "claude") |
+| `SOBER_ACP_NAME` | `acp.name` | — | Local agent display name |
+| `SOBER_ACP_ARGS` | `acp.args` | `acp` | Local agent CLI args |
+| **Non-AppConfig vars** | | | |
+| `RUST_LOG` | — | `info` | Log level filter (not in config.toml) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | — | OpenTelemetry collector (not in config.toml) |
+| `PUBLIC_API_URL` | — | `http://localhost:3000` | Public API URL for frontend (not in config.toml) |
+
+**CLI helpers** — mention `sober config generate` (template), `sober config show` (resolved values), and `sober config validate` (validation) as tools for debugging configuration.
+
+**Validation** — document what `AppConfig::load()` validates: `database.url` must be non-empty, `auth.session_secret` required in production, `crypto.master_encryption_key` must be valid hex if set.
 
 - [ ] **Step 5: Write first-run.md**
 
@@ -450,6 +505,9 @@ Two binaries:
 - `sober migrate run` — run database migrations
 - `sober migrate status` — check migration status
 - `sober keygen` — generate cryptographic keypairs
+- `sober config show [--source]` — display resolved configuration (secrets redacted)
+- `sober config validate` — validate configuration (checks database.url, session_secret in prod, encryption key format)
+- `sober config generate` — generate annotated `config.toml` template to stdout
 - Document each subcommand with usage examples
 
 **`soberctl`** — runtime admin tool (connects via Unix socket):
@@ -833,7 +891,7 @@ git commit -m "docs: add architecture section — overview, crates, memory, secu
 - [ ] **Step 1: Write contributing.md**
 
 Sections:
-1. **Development Setup** — clone, `just setup`, prerequisites, `.env` setup
+1. **Development Setup** — clone, `just setup`, prerequisites, config setup (`config.toml` or `.env`)
 2. **Project Structure** — repo layout overview
 3. **Building** — backend (`cargo build`), frontend (`pnpm build`), full stack (Docker)
 4. **Testing** — unit tests (`just test`), integration tests (`just test-integration`, requires Docker), per-crate testing

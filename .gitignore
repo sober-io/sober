@@ -31,3 +31,6 @@ Thumbs.db
 
 # sqlx offline query cache — DO commit this
 # !backend/.sqlx/
+
+# mdBook build output
+docs/book/build/

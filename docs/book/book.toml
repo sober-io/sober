@@ -1,0 +1,16 @@
+[book]
+title = "Sõber Documentation"
+authors = ["Sõber Contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+git-repository-url = "https://github.com/sober-io/sober"
+edit-url-template = "https://github.com/sober-io/sober/edit/main/docs/book/{path}"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
