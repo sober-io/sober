@@ -13,7 +13,8 @@ use crate::error::AppError;
 ///
 /// Loaded from environment variables at startup via [`load_from_env`](AppConfig::load_from_env).
 /// Unused sections are harmless — each section applies its own defaults.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     /// PostgreSQL connection settings.
     pub database: DatabaseConfig,
@@ -41,6 +42,11 @@ pub struct AppConfig {
     pub crypto: CryptoConfig,
     /// Runtime environment (development or production).
     pub environment: Environment,
+    /// Agent process settings (socket, metrics, workspace).
+    #[serde(rename = "agent")]
+    pub agent: AgentProcessConfig,
+    /// Web reverse-proxy settings.
+    pub web: WebConfig,
 }
 
 /// Runtime environment.
@@ -55,7 +61,8 @@ pub enum Environment {
 }
 
 /// PostgreSQL connection settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct DatabaseConfig {
     /// PostgreSQL connection URL.
     pub url: String,
@@ -63,8 +70,18 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
 }
 
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            max_connections: 10,
+        }
+    }
+}
+
 /// Qdrant vector database settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct QdrantConfig {
     /// Qdrant gRPC/HTTP URL.
     pub url: String,
@@ -72,8 +89,18 @@ pub struct QdrantConfig {
     pub api_key: Option<String>,
 }
 
+impl Default for QdrantConfig {
+    fn default() -> Self {
+        Self {
+            url: "http://localhost:6334".to_owned(),
+            api_key: None,
+        }
+    }
+}
+
 /// LLM provider settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct LlmConfig {
     /// Base URL for the OpenAI-compatible API endpoint.
     pub base_url: String,
@@ -89,8 +116,22 @@ pub struct LlmConfig {
     pub embedding_dim: u64,
 }
 
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://openrouter.ai/api/v1".to_owned(),
+            api_key: None,
+            model: "anthropic/claude-sonnet-4".to_owned(),
+            max_tokens: 4096,
+            embedding_model: "text-embedding-3-small".to_owned(),
+            embedding_dim: 1536,
+        }
+    }
+}
+
 /// HTTP server settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct ServerConfig {
     /// Bind address (e.g. `0.0.0.0`).
     pub host: String,
@@ -102,8 +143,20 @@ pub struct ServerConfig {
     pub rate_limit_window_secs: u64,
 }
 
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "0.0.0.0".to_owned(),
+            port: 3000,
+            rate_limit_max_requests: 1200,
+            rate_limit_window_secs: 60,
+        }
+    }
+}
+
 /// Authentication and session settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct AuthConfig {
     /// Secret used for session token signing (required in production).
     pub session_secret: Option<String>,
@@ -111,22 +164,50 @@ pub struct AuthConfig {
     pub session_ttl_seconds: u64,
 }
 
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            session_secret: None,
+            session_ttl_seconds: 2_592_000,
+        }
+    }
+}
+
 /// SearXNG search engine settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct SearxngConfig {
     /// SearXNG instance URL.
     pub url: String,
 }
 
+impl Default for SearxngConfig {
+    fn default() -> Self {
+        Self {
+            url: "http://localhost:8080".to_owned(),
+        }
+    }
+}
+
 /// Admin Unix socket settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct AdminConfig {
     /// Path to the admin Unix domain socket.
     pub socket_path: PathBuf,
 }
 
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: PathBuf::from("/run/sober/admin.sock"),
+        }
+    }
+}
+
 /// Scheduler settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct SchedulerConfig {
     /// Tick interval in seconds.
     pub tick_interval_secs: u64,
@@ -136,10 +217,31 @@ pub struct SchedulerConfig {
     pub socket_path: PathBuf,
     /// Maximum number of concurrent jobs.
     pub max_concurrent_jobs: u32,
+    /// Prometheus metrics port.
+    pub metrics_port: u16,
+    /// Root directory for workspaces.
+    pub workspace_root: PathBuf,
+    /// Sandbox profile name.
+    pub sandbox_profile: String,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_secs: 1,
+            agent_socket_path: PathBuf::from("/run/sober/agent.sock"),
+            socket_path: PathBuf::from("/run/sober/scheduler.sock"),
+            max_concurrent_jobs: 10,
+            metrics_port: 9101,
+            workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
+            sandbox_profile: "standard".to_owned(),
+        }
+    }
 }
 
 /// MCP server connection settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct McpConfig {
     /// Request timeout in seconds.
     pub request_timeout_secs: u64,
@@ -149,8 +251,19 @@ pub struct McpConfig {
     pub idle_timeout_secs: u64,
 }
 
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            request_timeout_secs: 30,
+            max_consecutive_failures: 3,
+            idle_timeout_secs: 300,
+        }
+    }
+}
+
 /// ACP (Agent Client Protocol) agent settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct AcpAgentConfig {
     /// Display name for the agent.
     pub name: String,
@@ -160,8 +273,19 @@ pub struct AcpAgentConfig {
     pub args: Vec<String>,
 }
 
+impl Default for AcpAgentConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            command: String::new(),
+            args: vec!["acp".to_owned()],
+        }
+    }
+}
+
 /// Memory system tuning parameters.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct MemoryConfig {
     /// Half-life for importance score decay, in days.
     pub decay_half_life_days: u32,
@@ -171,14 +295,79 @@ pub struct MemoryConfig {
     pub prune_threshold: f64,
 }
 
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            decay_half_life_days: 30,
+            retrieval_boost: 0.2,
+            prune_threshold: 0.1,
+        }
+    }
+}
+
 /// Envelope encryption settings for secrets management.
-#[derive(Clone)]
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(default)]
 pub struct CryptoConfig {
     /// Hex-encoded 256-bit master encryption key for envelope encryption.
     ///
     /// Required when secrets management is enabled. Generate with:
     /// `openssl rand -hex 32`
     pub master_encryption_key: Option<String>,
+}
+
+/// Agent process settings (sober-agent binary).
+///
+/// Configurable via `[agent]` TOML section or `SOBER_AGENT_*` env vars.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct AgentProcessConfig {
+    /// Path to the agent gRPC socket.
+    pub socket_path: PathBuf,
+    /// Prometheus metrics port.
+    pub metrics_port: u16,
+    /// Root directory for workspaces.
+    pub workspace_root: PathBuf,
+    /// Sandbox profile name.
+    pub sandbox_profile: String,
+}
+
+impl Default for AgentProcessConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: PathBuf::from("/run/sober/agent.sock"),
+            metrics_port: 9100,
+            workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
+            sandbox_profile: "standard".to_owned(),
+        }
+    }
+}
+
+/// Web reverse-proxy settings (sober-web binary).
+///
+/// Configurable via `[web]` TOML section or `SOBER_WEB_*` env vars.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct WebConfig {
+    /// Bind address.
+    pub host: String,
+    /// Bind port.
+    pub port: u16,
+    /// Upstream API server URL to proxy `/api/*` and WebSocket.
+    pub api_upstream_url: String,
+    /// Optional path to serve static files from disk instead of embedded.
+    pub static_dir: Option<PathBuf>,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            host: "0.0.0.0".to_owned(),
+            port: 8080,
+            api_upstream_url: "http://localhost:3000".to_owned(),
+            static_dir: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for CryptoConfig {
@@ -256,6 +445,9 @@ impl AppConfig {
                     env.or("SCHEDULER_SOCKET_PATH", "/run/sober/scheduler.sock"),
                 ),
                 max_concurrent_jobs: env.parse("SCHEDULER_MAX_CONCURRENT_JOBS", 10)?,
+                metrics_port: 9101,
+                workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
+                sandbox_profile: "standard".to_owned(),
             },
             mcp: McpConfig {
                 request_timeout_secs: env.parse("MCP_REQUEST_TIMEOUT_SECS", 30)?,
@@ -279,6 +471,8 @@ impl AppConfig {
                 master_encryption_key: env.opt("MASTER_ENCRYPTION_KEY"),
             },
             environment,
+            agent: AgentProcessConfig::default(),
+            web: WebConfig::default(),
         })
     }
 }
@@ -434,5 +628,93 @@ mod tests {
     #[test]
     fn environment_defaults_to_development() {
         assert_eq!(Environment::default(), Environment::Development);
+    }
+
+    // ── Task 2: All config structs Deserialize + Default ─────────────────────
+
+    #[test]
+    fn database_config_deserializes_from_toml() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            database: DatabaseConfig,
+        }
+        let toml_str = r#"
+[database]
+url = "postgres://test:test@localhost/test"
+max_connections = 20
+"#;
+        let w: Wrapper = toml::from_str(toml_str).unwrap();
+        assert_eq!(w.database.url, "postgres://test:test@localhost/test");
+        assert_eq!(w.database.max_connections, 20);
+    }
+
+    #[test]
+    fn database_config_defaults() {
+        let cfg = DatabaseConfig::default();
+        assert_eq!(cfg.url, "");
+        assert_eq!(cfg.max_connections, 10);
+    }
+
+    // ── Task 3: New config structs ───────────────────────────────────────────
+
+    #[test]
+    fn agent_process_config_defaults() {
+        let cfg = AgentProcessConfig::default();
+        assert_eq!(cfg.socket_path, PathBuf::from("/run/sober/agent.sock"));
+        assert_eq!(cfg.metrics_port, 9100);
+        assert_eq!(
+            cfg.workspace_root,
+            PathBuf::from("/var/lib/sober/workspaces")
+        );
+        assert_eq!(cfg.sandbox_profile, "standard");
+    }
+
+    #[test]
+    fn web_config_defaults() {
+        let cfg = WebConfig::default();
+        assert_eq!(cfg.host, "0.0.0.0");
+        assert_eq!(cfg.port, 8080);
+        assert_eq!(cfg.api_upstream_url, "http://localhost:3000");
+        assert!(cfg.static_dir.is_none());
+    }
+
+    #[test]
+    fn scheduler_config_has_new_fields() {
+        let cfg = SchedulerConfig::default();
+        assert_eq!(cfg.metrics_port, 9101);
+        assert_eq!(
+            cfg.workspace_root,
+            PathBuf::from("/var/lib/sober/workspaces")
+        );
+        assert_eq!(cfg.sandbox_profile, "standard");
+    }
+
+    #[test]
+    fn full_toml_deserializes() {
+        let toml_str = r#"
+environment = "production"
+
+[database]
+url = "postgres://test:test@localhost/test"
+
+[agent]
+socket_path = "/tmp/agent.sock"
+metrics_port = 9200
+
+[web]
+port = 9090
+api_upstream_url = "http://api:3000"
+
+[scheduler]
+metrics_port = 9201
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.environment, Environment::Production);
+        assert_eq!(config.agent.socket_path, PathBuf::from("/tmp/agent.sock"));
+        assert_eq!(config.agent.metrics_port, 9200);
+        assert_eq!(config.web.port, 9090);
+        assert_eq!(config.scheduler.metrics_port, 9201);
+        assert_eq!(config.server.port, 3000);
+        assert!(config.acp.is_none());
     }
 }
