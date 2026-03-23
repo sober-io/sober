@@ -662,96 +662,21 @@ impl AppConfig {
 
     /// Loads configuration from environment variables.
     ///
-    /// Calls `dotenvy::dotenv().ok()` first to load `.env` if present.
-    /// Returns [`AppError::Validation`] for missing or malformed values.
+    /// **Deprecated:** Use [`load()`](AppConfig::load) which also reads `config.toml`.
+    #[deprecated(note = "use AppConfig::load() which also reads config.toml")]
     pub fn load_from_env() -> Result<Self, AppError> {
         dotenvy::dotenv().ok();
         Self::load_from(|key| std::env::var(key).ok())
     }
 
-    /// Loads configuration from an arbitrary key-value source.
+    /// Loads configuration from an arbitrary key-value source (for testing).
     ///
-    /// The `get_var` closure is called for each configuration key.
-    /// Returns `None` when a key is absent.
+    /// Starts from defaults, applies the provided vars as overrides, then validates.
     pub fn load_from(get_var: impl Fn(&str) -> Option<String>) -> Result<Self, AppError> {
-        let env = EnvSource(get_var);
-
-        let environment = match env.opt("SOBER_ENV").as_deref() {
-            Some("production") => Environment::Production,
-            _ => Environment::Development,
-        };
-
-        Ok(Self {
-            database: DatabaseConfig {
-                url: env.required("DATABASE_URL")?,
-                max_connections: env.parse("DATABASE_MAX_CONNECTIONS", 10)?,
-            },
-            qdrant: QdrantConfig {
-                url: env.or("QDRANT_URL", "http://localhost:6334"),
-                api_key: env.opt("QDRANT_API_KEY"),
-            },
-            llm: LlmConfig {
-                base_url: env.or("LLM_BASE_URL", "https://openrouter.ai/api/v1"),
-                api_key: env.opt("LLM_API_KEY"),
-                model: env.or("LLM_MODEL", "anthropic/claude-sonnet-4"),
-                max_tokens: env.parse("LLM_MAX_TOKENS", 4096)?,
-                embedding_model: env.or("EMBEDDING_MODEL", "text-embedding-3-small"),
-                embedding_dim: env.parse("EMBEDDING_DIM", 1536)?,
-            },
-            server: ServerConfig {
-                host: env.or("HOST", "0.0.0.0"),
-                port: env.parse("PORT", 3000)?,
-                rate_limit_max_requests: env.parse("RATE_LIMIT_MAX_REQUESTS", 1200)?,
-                rate_limit_window_secs: env.parse("RATE_LIMIT_WINDOW_SECS", 60)?,
-            },
-            auth: AuthConfig {
-                session_secret: env.opt("SESSION_SECRET"),
-                session_ttl_seconds: env.parse("SESSION_TTL_SECONDS", 2_592_000)?,
-            },
-            searxng: SearxngConfig {
-                url: env.or("SEARXNG_URL", "http://localhost:8080"),
-            },
-            admin: AdminConfig {
-                socket_path: PathBuf::from(env.or("ADMIN_SOCKET_PATH", "/run/sober/admin.sock")),
-            },
-            scheduler: SchedulerConfig {
-                tick_interval_secs: env.parse("SCHEDULER_TICK_INTERVAL_SECS", 1)?,
-                agent_socket_path: PathBuf::from(
-                    env.or("SCHEDULER_AGENT_SOCKET_PATH", "/run/sober/agent.sock"),
-                ),
-                socket_path: PathBuf::from(
-                    env.or("SCHEDULER_SOCKET_PATH", "/run/sober/scheduler.sock"),
-                ),
-                max_concurrent_jobs: env.parse("SCHEDULER_MAX_CONCURRENT_JOBS", 10)?,
-                metrics_port: 9101,
-                workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
-                sandbox_profile: "standard".to_owned(),
-            },
-            mcp: McpConfig {
-                request_timeout_secs: env.parse("MCP_REQUEST_TIMEOUT_SECS", 30)?,
-                max_consecutive_failures: env.parse("MCP_MAX_CONSECUTIVE_FAILURES", 3)?,
-                idle_timeout_secs: env.parse("MCP_IDLE_TIMEOUT_SECS", 300)?,
-            },
-            memory: MemoryConfig {
-                decay_half_life_days: env.parse("MEMORY_DECAY_HALF_LIFE_DAYS", 30)?,
-                retrieval_boost: env.parse("MEMORY_RETRIEVAL_BOOST", 0.2)?,
-                prune_threshold: env.parse("MEMORY_PRUNE_THRESHOLD", 0.1)?,
-            },
-            acp: env.opt("ACP_AGENT_COMMAND").map(|command| {
-                let args_str = env.or("ACP_AGENT_ARGS", "acp");
-                AcpAgentConfig {
-                    name: env.or("ACP_AGENT_NAME", &command),
-                    command,
-                    args: args_str.split_whitespace().map(String::from).collect(),
-                }
-            }),
-            crypto: CryptoConfig {
-                master_encryption_key: env.opt("MASTER_ENCRYPTION_KEY"),
-            },
-            environment,
-            agent: AgentProcessConfig::default(),
-            web: WebConfig::default(),
-        })
+        let mut config = Self::default();
+        config.apply_env_overrides(&get_var);
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -759,37 +684,6 @@ impl AppConfig {
 struct EnvSource<F: Fn(&str) -> Option<String>>(F);
 
 impl<F: Fn(&str) -> Option<String>> EnvSource<F> {
-    /// Reads a required key, returning an error if absent.
-    fn required(&self, key: &str) -> Result<String, AppError> {
-        (self.0)(key).ok_or_else(|| {
-            AppError::Validation(format!("missing required environment variable: {key}"))
-        })
-    }
-
-    /// Reads a key with a default fallback.
-    fn or(&self, key: &str, default: &str) -> String {
-        (self.0)(key).unwrap_or_else(|| default.to_owned())
-    }
-
-    /// Reads an optional key.
-    fn opt(&self, key: &str) -> Option<String> {
-        (self.0)(key)
-    }
-
-    /// Reads and parses a key, falling back to a default.
-    fn parse<T>(&self, key: &str, default: T) -> Result<T, AppError>
-    where
-        T: std::str::FromStr + std::fmt::Display,
-        T::Err: std::fmt::Display,
-    {
-        match (self.0)(key) {
-            Some(val) => val.parse::<T>().map_err(|e| {
-                AppError::Validation(format!("invalid value for {key}: {e} (got: {val})"))
-            }),
-            None => Ok(default),
-        }
-    }
-
     /// Parses an optional env var. Returns `Ok(None)` if absent, `Ok(Some(v))` if valid.
     fn parse_opt<T>(&self, key: &str) -> Result<Option<T>, AppError>
     where
@@ -823,7 +717,7 @@ mod tests {
     #[test]
     fn load_with_database_url_set() {
         let config = AppConfig::load_from(env_from(&[(
-            "DATABASE_URL",
+            "SOBER_DATABASE_URL",
             "postgres://test:test@localhost/test",
         )]))
         .unwrap();
@@ -838,34 +732,36 @@ mod tests {
         let result = AppConfig::load_from(env_from(&[]));
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, AppError::Validation(msg) if msg.contains("DATABASE_URL")));
+        assert!(matches!(err, AppError::Validation(msg) if msg.contains("database.url")));
     }
 
     #[test]
     fn production_environment() {
         let config = AppConfig::load_from(env_from(&[
-            ("DATABASE_URL", "postgres://test:test@localhost/test"),
+            ("SOBER_DATABASE_URL", "postgres://test:test@localhost/test"),
             ("SOBER_ENV", "production"),
+            ("SOBER_AUTH_SESSION_SECRET", "test-secret"),
         ]))
         .unwrap();
         assert_eq!(config.environment, Environment::Production);
     }
 
     #[test]
-    fn invalid_port_returns_validation_error() {
-        let result = AppConfig::load_from(env_from(&[
-            ("DATABASE_URL", "postgres://test:test@localhost/test"),
-            ("PORT", "not_a_number"),
-        ]));
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, AppError::Validation(msg) if msg.contains("PORT")));
+    fn invalid_port_is_ignored_and_default_kept() {
+        // Invalid parse values in env overlay are silently ignored —
+        // the default value is preserved.
+        let config = AppConfig::load_from(env_from(&[
+            ("SOBER_DATABASE_URL", "postgres://test:test@localhost/test"),
+            ("SOBER_SERVER_PORT", "not_a_number"),
+        ]))
+        .unwrap();
+        assert_eq!(config.server.port, 3000); // default kept
     }
 
     #[test]
     fn defaults_applied_correctly() {
         let config = AppConfig::load_from(env_from(&[(
-            "DATABASE_URL",
+            "SOBER_DATABASE_URL",
             "postgres://test:test@localhost/test",
         )]))
         .unwrap();
@@ -880,7 +776,7 @@ mod tests {
     #[test]
     fn optional_fields_are_none_by_default() {
         let config = AppConfig::load_from(env_from(&[(
-            "DATABASE_URL",
+            "SOBER_DATABASE_URL",
             "postgres://test:test@localhost/test",
         )]))
         .unwrap();
@@ -892,13 +788,29 @@ mod tests {
     #[test]
     fn optional_fields_populated_when_set() {
         let config = AppConfig::load_from(env_from(&[
-            ("DATABASE_URL", "postgres://test:test@localhost/test"),
-            ("LLM_API_KEY", "sk-test"),
-            ("SESSION_SECRET", "my-secret"),
+            ("SOBER_DATABASE_URL", "postgres://test:test@localhost/test"),
+            ("SOBER_LLM_API_KEY", "sk-test"),
+            ("SOBER_AUTH_SESSION_SECRET", "my-secret"),
         ]))
         .unwrap();
         assert_eq!(config.llm.api_key.as_deref(), Some("sk-test"));
         assert_eq!(config.auth.session_secret.as_deref(), Some("my-secret"));
+    }
+
+    // ── Task 7: load_from with new env var names ────────────────────────────
+
+    #[test]
+    fn load_from_with_new_env_var_names() {
+        let config = AppConfig::load_from(env_from(&[
+            ("SOBER_DATABASE_URL", "postgres://test:test@localhost/test"),
+            ("SOBER_SERVER_PORT", "5000"),
+            ("SOBER_ENV", "production"),
+            ("SOBER_AUTH_SESSION_SECRET", "test-secret"),
+        ]))
+        .unwrap();
+        assert_eq!(config.database.url, "postgres://test:test@localhost/test");
+        assert_eq!(config.server.port, 5000);
+        assert_eq!(config.environment, Environment::Production);
     }
 
     // ── Task 1: Environment Deserialize + Default ───────────────────────────

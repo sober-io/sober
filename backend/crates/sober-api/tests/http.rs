@@ -36,7 +36,7 @@ impl TestAuth {
 /// Uses a mock agent gRPC client that will error if called (HTTP tests don't use it).
 fn build_test_router(pool: PgPool, auth: &TestAuth) -> axum::Router {
     let config = AppConfig::load_from(|key| match key {
-        "DATABASE_URL" => Some("postgres://unused:unused@localhost/unused".into()),
+        "SOBER_DATABASE_URL" => Some("postgres://unused:unused@localhost/unused".into()),
         _ => None,
     })
     .unwrap();

@@ -219,7 +219,7 @@ async fn start_server(pool: PgPool) -> (SocketAddr, String) {
         .unwrap();
 
     let config = AppConfig::load_from(|key| match key {
-        "DATABASE_URL" => Some("postgres://unused:unused@localhost/unused".into()),
+        "SOBER_DATABASE_URL" => Some("postgres://unused:unused@localhost/unused".into()),
         _ => None,
     })
     .unwrap();
