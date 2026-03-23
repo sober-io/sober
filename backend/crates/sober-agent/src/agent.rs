@@ -1159,6 +1159,8 @@ impl<R: AgentRepos> Agent<R> {
             };
 
             let tool_start = Instant::now();
+            let mut tool_success = true;
+            let mut tool_error: Option<String> = None;
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
                     if tool.metadata().context_modifying {
@@ -1186,8 +1188,6 @@ impl<R: AgentRepos> Agent<R> {
                                 risk_level,
                                 reason,
                             };
-                            // NeedsConfirmation is not an error — count as success
-                            // since the tool correctly identified a dangerous action.
                             metrics::counter!(
                                 "sober_agent_tool_calls_total",
                                 "tool" => tool_name.clone(),
@@ -1209,6 +1209,8 @@ impl<R: AgentRepos> Agent<R> {
                         }
                         Err(e) => {
                             any_errors = true;
+                            tool_success = false;
+                            tool_error = Some(e.to_string());
                             metrics::counter!(
                                 "sober_agent_tool_calls_total",
                                 "tool" => tool_name.clone(),
@@ -1221,6 +1223,8 @@ impl<R: AgentRepos> Agent<R> {
                 }
                 None => {
                     any_errors = true;
+                    tool_success = false;
+                    tool_error = Some(format!("Tool not found: {tool_name}"));
                     metrics::counter!(
                         "sober_agent_tool_calls_total",
                         "tool" => tool_name.clone(),
@@ -1248,8 +1252,8 @@ impl<R: AgentRepos> Agent<R> {
                     conversation_id: Some(conversation_id),
                     workspace_id,
                     duration_ms: tool_duration_ms,
-                    success: !any_errors,
-                    error_message: None,
+                    success: tool_success,
+                    error_message: tool_error,
                 };
                 tokio::spawn(async move {
                     if let Err(e) = repo.create(entry).await {
