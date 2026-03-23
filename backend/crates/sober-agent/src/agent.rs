@@ -57,6 +57,8 @@ pub struct AgentConfig {
     pub embedding_model: String,
     /// Maximum tokens to generate per completion.
     pub max_tokens: u32,
+    /// Root directory for workspaces.
+    pub workspace_root: PathBuf,
 }
 
 impl Default for AgentConfig {
@@ -69,6 +71,7 @@ impl Default for AgentConfig {
             model: "anthropic/claude-sonnet-4".to_owned(),
             embedding_model: "text-embedding-3-small".to_owned(),
             max_tokens: 4096,
+            workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
         }
     }
 }
@@ -376,8 +379,7 @@ impl<R: AgentRepos> Agent<R> {
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
         // Resolve or provision workspace for this conversation.
-        let workspace_root_env = std::env::var("WORKSPACE_ROOT")
-            .unwrap_or_else(|_| "/var/lib/sober/workspaces".to_string());
+        let workspace_root_env = self.config.workspace_root.display().to_string();
 
         // If conversation has no workspace, create one.
         // Each conversation gets its own workspace: {WORKSPACE_ROOT}/{conversation_id}/

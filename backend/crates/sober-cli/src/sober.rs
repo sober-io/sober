@@ -6,6 +6,7 @@ mod commands;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use sober_core::config::AppConfig;
 use sober_db::{DatabaseConfig, PgUserRepo, create_pool};
 use tracing_subscriber::EnvFilter;
 
@@ -34,7 +35,8 @@ async fn main() -> Result<()> {
 fn run_config(cmd: ConfigCommand) -> Result<()> {
     match cmd {
         ConfigCommand::Validate => commands::config::validate(),
-        ConfigCommand::Show => commands::config::show(),
+        ConfigCommand::Show { source } => commands::config::show(source),
+        ConfigCommand::Generate => commands::config::generate(),
     }
 }
 
@@ -68,18 +70,15 @@ async fn run_migrate(cmd: MigrateCommand) -> Result<()> {
     }
 }
 
-/// Connect to the database using configuration from environment variables.
+/// Connect to the database using the resolved application configuration.
 ///
 /// Uses a single connection (max_connections=1) since CLI operations are
 /// sequential.
 async fn connect_db() -> Result<sqlx::PgPool> {
-    dotenvy::dotenv().ok();
-
-    let database_url =
-        std::env::var("DATABASE_URL").context("DATABASE_URL environment variable is required")?;
+    let app_config = AppConfig::load().context("failed to load configuration")?;
 
     let config = DatabaseConfig {
-        url: database_url,
+        url: app_config.database.url,
         max_connections: 1,
     };
 

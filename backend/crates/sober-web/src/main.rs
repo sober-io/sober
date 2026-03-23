@@ -17,6 +17,7 @@ use futures::{SinkExt, StreamExt};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rust_embed::Embed;
+use sober_core::config::AppConfig;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
@@ -49,13 +50,16 @@ async fn main() -> Result<()> {
     };
     let _telemetry = sober_core::init_telemetry(environment, "sober_web=info");
 
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_owned());
-    let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| "8080".to_owned())
-        .parse()?;
-    let api_upstream =
-        std::env::var("API_UPSTREAM_URL").unwrap_or_else(|_| "http://localhost:3000".to_owned());
-    let static_dir = std::env::var("STATIC_DIR").ok();
+    let config = AppConfig::load_unvalidated()?;
+
+    let host = config.web.host.clone();
+    let port = config.web.port;
+    let api_upstream = config.web.api_upstream_url.clone();
+    let static_dir = config
+        .web
+        .static_dir
+        .as_ref()
+        .map(|p| p.display().to_string());
 
     let proxy_state = ProxyState {
         client: Client::builder(TokioExecutor::new()).build_http(),

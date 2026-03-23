@@ -47,7 +47,7 @@ const SKILL_CACHE_TTL_SECS: u64 = 300;
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Load .env and configuration
-    let config = AppConfig::load_from_env().context("failed to load config")?;
+    let config = AppConfig::load().context("failed to load config")?;
 
     // 2. Initialise telemetry (tracing + metrics + OTel)
     let telemetry = sober_core::init_telemetry(
@@ -56,12 +56,7 @@ async fn main() -> Result<()> {
     );
 
     // 3. Spawn Prometheus metrics HTTP server for scraping
-    const DEFAULT_METRICS_PORT: u16 = 9100;
-    let metrics_port: u16 = std::env::var("METRICS_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_METRICS_PORT);
-    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
+    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), config.agent.metrics_port);
 
     info!("sober-agent starting");
 
@@ -116,12 +111,10 @@ async fn main() -> Result<()> {
     );
 
     // 10. Resolve workspace and sandbox configuration
-    let workspace_root = PathBuf::from(
-        std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
-    );
-    let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
-        Ok("unrestricted") => SandboxProfile::Unrestricted,
-        Ok("locked_down") => SandboxProfile::LockedDown,
+    let workspace_root = config.agent.workspace_root.clone();
+    let sandbox_profile = match config.agent.sandbox_profile.as_str() {
+        "unrestricted" => SandboxProfile::Unrestricted,
+        "locked_down" => SandboxProfile::LockedDown,
         _ => SandboxProfile::Standard,
     };
     let sandbox_policy = sandbox_profile
@@ -257,6 +250,7 @@ async fn main() -> Result<()> {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
         max_tokens: config.llm.max_tokens,
+        workspace_root: config.agent.workspace_root.clone(),
         ..AgentConfig::default()
     };
 
@@ -294,9 +288,7 @@ async fn main() -> Result<()> {
     );
 
     // 20. Bind to Unix domain socket
-    let socket_path =
-        std::env::var("AGENT_SOCKET_PATH").unwrap_or_else(|_| "/run/sober/agent.sock".to_owned());
-    let socket_path = PathBuf::from(&socket_path);
+    let socket_path = config.agent.socket_path.clone();
 
     // Remove stale socket file if it exists
     if socket_path.exists() {

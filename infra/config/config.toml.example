@@ -1,18 +1,79 @@
-[server]
-host = "0.0.0.0"
-port = 3000
+# Sõber Configuration File
+# Docs: https://github.com/sober-io/sober
 
-[storage]
-data_dir = "/opt/sober/data"
-# Override individual subdirectories:
-# workspaces_dir = "/mnt/big-disk/sober/workspaces"
-# blobs_dir = "/mnt/big-disk/sober/blobs"
+# Runtime environment: "production" or "development"
+environment = "development"
 
 [database]
+# PostgreSQL connection URL (required)
+url = ""
+# Maximum connection pool size
 max_connections = 10
 
 [qdrant]
 url = "http://localhost:6334"
+# api_key = ""
 
-[logging]
-level = "info"
+[llm]
+base_url = "https://openrouter.ai/api/v1"
+# api_key = "sk-..."
+model = "anthropic/claude-sonnet-4"
+max_tokens = 4096
+embedding_model = "text-embedding-3-small"
+embedding_dim = 1536
+
+[server]
+host = "0.0.0.0"
+port = 3000
+rate_limit_max_requests = 1200
+rate_limit_window_secs = 60
+
+[auth]
+# session_secret = "change-me-in-production"
+session_ttl_seconds = 2592000
+
+[searxng]
+url = "http://localhost:8080"
+
+[admin]
+socket_path = "/run/sober/admin.sock"
+
+[agent]
+socket_path = "/run/sober/agent.sock"
+metrics_port = 9100
+workspace_root = "/var/lib/sober/workspaces"
+sandbox_profile = "standard"
+
+[scheduler]
+tick_interval_secs = 1
+agent_socket_path = "/run/sober/agent.sock"
+socket_path = "/run/sober/scheduler.sock"
+max_concurrent_jobs = 10
+metrics_port = 9101
+workspace_root = "/var/lib/sober/workspaces"
+sandbox_profile = "standard"
+
+[web]
+host = "0.0.0.0"
+port = 8080
+api_upstream_url = "http://localhost:3000"
+# static_dir = "/opt/sober/static"
+
+[mcp]
+request_timeout_secs = 30
+max_consecutive_failures = 3
+idle_timeout_secs = 300
+
+[memory]
+decay_half_life_days = 30
+retrieval_boost = 0.2
+prune_threshold = 0.1
+
+[crypto]
+# master_encryption_key = "hex-encoded-256-bit-key"
+
+# Optional: local coding agent integration
+# [acp]
+# command = "claude"
+# name = "Claude Code"
+# args = ["acp"]

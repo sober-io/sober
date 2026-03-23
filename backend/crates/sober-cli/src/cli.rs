@@ -109,5 +109,12 @@ pub enum ConfigCommand {
     Validate,
 
     /// Display the resolved configuration (secrets redacted).
-    Show,
+    Show {
+        /// Show where each value came from (default/toml/env).
+        #[arg(long)]
+        source: bool,
+    },
+
+    /// Generate a default configuration file to stdout.
+    Generate,
 }

@@ -237,48 +237,113 @@ download_and_extract() {
 
 write_default_config() {
     cat > "$CONFIG_DIR/config.toml" <<'TOML'
-[server]
-host = "0.0.0.0"
-port = 3000
+# Sõber Configuration File
+# Docs: https://github.com/sober-io/sober
 
-[storage]
-data_dir = "/opt/sober/data"
+# Runtime environment: "production" or "development"
+environment = "production"
 
 [database]
+# PostgreSQL connection URL (required)
+url = ""
+# Maximum connection pool size
 max_connections = 10
 
 [qdrant]
 url = "http://localhost:6334"
+# api_key = ""
 
-[logging]
-level = "info"
+[llm]
+base_url = "https://openrouter.ai/api/v1"
+# api_key = "sk-..."
+model = "anthropic/claude-sonnet-4"
+max_tokens = 4096
+embedding_model = "text-embedding-3-small"
+embedding_dim = 1536
+
+[server]
+host = "0.0.0.0"
+port = 3000
+rate_limit_max_requests = 1200
+rate_limit_window_secs = 60
+
+[auth]
+# session_secret = "change-me-in-production"
+session_ttl_seconds = 2592000
+
+[searxng]
+url = "http://localhost:8080"
+
+[admin]
+socket_path = "/run/sober/admin.sock"
+
+[agent]
+socket_path = "/run/sober/agent.sock"
+metrics_port = 9100
+workspace_root = "/var/lib/sober/workspaces"
+sandbox_profile = "standard"
+
+[scheduler]
+tick_interval_secs = 1
+agent_socket_path = "/run/sober/agent.sock"
+socket_path = "/run/sober/scheduler.sock"
+max_concurrent_jobs = 10
+metrics_port = 9101
+workspace_root = "/var/lib/sober/workspaces"
+sandbox_profile = "standard"
+
+[web]
+host = "0.0.0.0"
+port = 8080
+api_upstream_url = "http://localhost:3000"
+# static_dir = "/opt/sober/static"
+
+[mcp]
+request_timeout_secs = 30
+max_consecutive_failures = 3
+idle_timeout_secs = 300
+
+[memory]
+decay_half_life_days = 30
+retrieval_boost = 0.2
+prune_threshold = 0.1
+
+[crypto]
+# master_encryption_key = "hex-encoded-256-bit-key"
+
+# Optional: local coding agent integration
+# [acp]
+# command = "claude"
+# name = "Claude Code"
+# args = ["acp"]
 TOML
 }
 
 collect_config() {
-    # Skip if config already exists (upgrade)
+    # Skip if config already exists (upgrade — preserves existing .env or config.toml)
+    [ -f "$CONFIG_DIR/config.toml" ] && return
     [ -f "$CONFIG_DIR/.env" ] && return
 
     prompt_required "DATABASE_URL" "PostgreSQL connection string" "postgres://sober:password@localhost/sober"
-    prompt_required "LLM_BASE_URL" "LLM API base URL" ""
+    prompt_required "QDRANT_URL" "Qdrant vector database URL" "http://localhost:6334"
+    prompt_required "LLM_BASE_URL" "LLM API base URL" "https://openrouter.ai/api/v1"
     prompt_required "LLM_API_KEY" "LLM API key" ""
-    prompt_required "LLM_MODEL" "LLM model identifier" ""
+    prompt_required "LLM_MODEL" "LLM model identifier" "anthropic/claude-sonnet-4"
 
     validate_database "$DATABASE_URL"
 
-    # Write .env
-    cat > "$CONFIG_DIR/.env" <<EOF
-DATABASE_URL=$DATABASE_URL
-LLM_BASE_URL=$LLM_BASE_URL
-LLM_API_KEY=$LLM_API_KEY
-LLM_MODEL=$LLM_MODEL
-EOF
-    chmod 0600 "$CONFIG_DIR/.env"
-    chown "$SOBER_USER:$SOBER_USER" "$CONFIG_DIR/.env"
-
-    # Write config.toml from bundled template
+    # Write config.toml from bundled template or generate default
     cp "$EXTRACT_DIR/config/config.toml.example" "$CONFIG_DIR/config.toml" 2>/dev/null \
         || write_default_config
+
+    # Patch user-provided values into config.toml
+    sed -i "s|^url = \"\"$|url = \"$DATABASE_URL\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^url = \"http://localhost:6334\"$|url = \"$QDRANT_URL\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^base_url = \"https://openrouter.ai/api/v1\"$|base_url = \"$LLM_BASE_URL\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^# api_key = \"sk-...\"|api_key = \"$LLM_API_KEY\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$LLM_MODEL\"|" "$CONFIG_DIR/config.toml"
+
+    chmod 0600 "$CONFIG_DIR/config.toml"
     chown "$SOBER_USER:$SOBER_USER" "$CONFIG_DIR/config.toml"
 }
 
@@ -303,7 +368,7 @@ install_systemd() {
 run_migrations() {
     info "Running database migrations"
     sudo -u "$SOBER_USER" "$INSTALL_DIR/bin/sober" migrate run \
-        || die "Migration failed. Check DATABASE_URL in $CONFIG_DIR/.env"
+        || die "Migration failed. Check database.url in $CONFIG_DIR/config.toml"
     info "Migrations complete"
 }
 

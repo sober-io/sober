@@ -5,7 +5,7 @@
 //! domain socket. It connects to the agent via gRPC/UDS to dispatch job
 //! executions and wake notifications.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,18 +36,13 @@ use tracing::{info, warn};
 #[tokio::main]
 async fn main() -> Result<()> {
     // 1. Load .env and configuration
-    let config = AppConfig::load_from_env().context("failed to load config")?;
+    let config = AppConfig::load().context("failed to load config")?;
 
     // 2. Initialise telemetry (tracing + metrics + OTel)
     let telemetry = sober_core::init_telemetry(config.environment, "sober_scheduler=info");
 
     // 3. Spawn Prometheus metrics HTTP server for scraping
-    const DEFAULT_METRICS_PORT: u16 = 9101;
-    let metrics_port: u16 = std::env::var("METRICS_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_METRICS_PORT);
-    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), metrics_port);
+    sober_core::spawn_metrics_server(telemetry.prometheus.clone(), config.scheduler.metrics_port);
 
     info!("sober-scheduler starting");
 
@@ -171,17 +166,16 @@ fn build_executor_registry(
     );
 
     // Artifact executor
-    let workspace_root = PathBuf::from(
-        std::env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/var/lib/sober/workspaces".to_owned()),
-    );
-    let blob_root = workspace_root
+    let blob_root = config
+        .scheduler
+        .workspace_root
         .join(sober_workspace::SOBER_DIR)
         .join("blobs");
     let blob_store = Arc::new(BlobStore::new(blob_root));
 
-    let sandbox_profile = match std::env::var("SANDBOX_PROFILE").as_deref() {
-        Ok("unrestricted") => SandboxProfile::Unrestricted,
-        Ok("locked_down") => SandboxProfile::LockedDown,
+    let sandbox_profile = match config.scheduler.sandbox_profile.as_str() {
+        "unrestricted" => SandboxProfile::Unrestricted,
+        "locked_down" => SandboxProfile::LockedDown,
         _ => SandboxProfile::Standard,
     };
     let sandbox_policy = sandbox_profile
