@@ -25,7 +25,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = AppConfig::load_from_env()?;
+    let config = AppConfig::load()?;
 
     let telemetry =
         sober_core::init_telemetry(config.environment, "sober_api=debug,tower_http=debug,info");
