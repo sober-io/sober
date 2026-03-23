@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 use sober_core::error::AppError;
 use sober_core::types::Job;
+use sober_core::types::input::CreateSandboxExecutionLog;
+use sober_core::types::repo::SandboxExecutionLogRepo;
+use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, SandboxPolicy};
 use sober_workspace::BlobStore;
 use tracing::{info, warn};
@@ -17,14 +20,20 @@ use crate::executor::{ExecutionResult, JobExecutor};
 pub struct ArtifactExecutor {
     blob_store: Arc<BlobStore>,
     sandbox_policy: SandboxPolicy,
+    sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
 }
 
 impl ArtifactExecutor {
     /// Create a new artifact executor.
-    pub fn new(blob_store: Arc<BlobStore>, sandbox_policy: SandboxPolicy) -> Self {
+    pub fn new(
+        blob_store: Arc<BlobStore>,
+        sandbox_policy: SandboxPolicy,
+        sandbox_log_repo: Option<Arc<PgSandboxExecutionLogRepo>>,
+    ) -> Self {
         Self {
             blob_store,
             sandbox_policy,
+            sandbox_log_repo,
         }
     }
 }
@@ -58,10 +67,32 @@ impl JobExecutor for ArtifactExecutor {
 
         // Run in sandbox.
         let sandbox = BwrapSandbox::new(self.sandbox_policy.clone());
-        let (result, _audit_entry) = sandbox
+        let (result, audit_entry) = sandbox
             .execute(&command, &HashMap::new())
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
+
+        // Persist sandbox audit entry.
+        if let Some(repo) = &self.sandbox_log_repo {
+            let repo = Arc::clone(repo);
+            let entry = CreateSandboxExecutionLog {
+                execution_id: audit_entry.execution_id,
+                workspace_id: None,
+                user_id: None,
+                policy_name: audit_entry.policy.name.clone(),
+                command: audit_entry.command.clone(),
+                trigger: format!("{:?}", audit_entry.trigger),
+                duration_ms: audit_entry.duration_ms as i64,
+                exit_code: audit_entry.exit_code,
+                denied_network_requests: audit_entry.denied_network_requests.clone(),
+                outcome: format!("{:?}", audit_entry.outcome),
+            };
+            tokio::spawn(async move {
+                if let Err(e) = repo.create(entry).await {
+                    warn!(error = %e, "failed to persist sandbox audit log for artifact");
+                }
+            });
+        }
 
         if result.exit_code != 0 {
             warn!(

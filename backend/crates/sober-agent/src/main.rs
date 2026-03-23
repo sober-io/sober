@@ -20,10 +20,7 @@ use sober_agent::tools::{MemoryToolConfig, SearchToolConfig, ShellToolConfig, To
 use sober_core::PermissionMode;
 use sober_core::config::AppConfig;
 use sober_crypto::envelope::Mek;
-use sober_db::{
-    PgAgentRepos, PgMessageRepo, PgPluginExecutionLogRepo, PgPluginRepo, PgSandboxExecutionLogRepo,
-    create_pool,
-};
+use sober_db::{PgAgentRepos, PgMessageRepo, PgPluginRepo, PgSandboxExecutionLogRepo, create_pool};
 use sober_llm::OpenAiCompatibleEngine;
 use sober_mcp::{McpConfig, McpPool};
 use sober_memory::{ContextLoader, MemoryStore};
@@ -184,6 +181,7 @@ async fn main() -> Result<()> {
         // -> HostContext -> ToolExecutor -> ToolRegistry). Must be wired via a
         // post-init setter or lazy Arc once the tool registry is constructed.
         tool_executor: None,
+        db_pool: Some(pool.clone()),
         system_prompt: {
             use sober_core::types::access::{CallerContext, TriggerKind};
             let caller = CallerContext {
@@ -275,7 +273,6 @@ async fn main() -> Result<()> {
         mek,
         Some(config.llm.clone()),
         tool_bootstrap,
-        Some(Arc::new(PgPluginExecutionLogRepo::new(pool.clone()))),
     ));
 
     // 18. Spawn the confirmation broker loop

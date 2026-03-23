@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use metrics::{counter, histogram};
+use sober_core::types::ids::{PluginId, UserId, WorkspaceId};
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 
 use crate::host::PluginHost;
@@ -24,6 +25,10 @@ pub struct PluginTool {
     host: Arc<Mutex<PluginHost>>,
     tool_name: String,
     metadata: ToolMetadata,
+    plugin_id: PluginId,
+    user_id: Option<UserId>,
+    workspace_id: Option<WorkspaceId>,
+    db_pool: Option<sqlx::PgPool>,
 }
 
 impl PluginTool {
@@ -32,7 +37,18 @@ impl PluginTool {
     /// The `host` is shared across all tools from the same plugin.
     /// `tool_name` must match a `[[tools]]` entry in the manifest.
     /// `description` comes from the manifest's tool entry.
-    pub fn new(host: Arc<Mutex<PluginHost>>, tool_name: String, description: String) -> Self {
+    ///
+    /// When `db_pool` is `Some`, execution logs are persisted to the
+    /// `plugin_execution_logs` table after each invocation.
+    pub fn new(
+        host: Arc<Mutex<PluginHost>>,
+        tool_name: String,
+        description: String,
+        plugin_id: PluginId,
+        user_id: Option<UserId>,
+        workspace_id: Option<WorkspaceId>,
+        db_pool: Option<sqlx::PgPool>,
+    ) -> Self {
         let metadata = ToolMetadata {
             name: tool_name.clone(),
             description,
@@ -49,6 +65,10 @@ impl PluginTool {
             host,
             tool_name,
             metadata,
+            plugin_id,
+            user_id,
+            workspace_id,
+            db_pool,
         }
     }
 }
@@ -71,6 +91,11 @@ impl Tool for PluginTool {
             .map(|h| h.manifest().plugin.name.clone())
             .unwrap_or_else(|| "<unknown>".to_owned());
 
+        let db_pool = self.db_pool.clone();
+        let plugin_id = self.plugin_id;
+        let user_id = self.user_id;
+        let workspace_id = self.workspace_id;
+
         Box::pin(async move {
             let start = Instant::now();
 
@@ -85,8 +110,9 @@ impl Tool for PluginTool {
             .and_then(|r| r);
 
             let duration_secs = start.elapsed().as_secs_f64();
+            let duration_ms = start.elapsed().as_millis() as i64;
 
-            match result {
+            let output_result = match result {
                 Ok(output) => {
                     counter!(
                         "sober_plugin_executions_total",
@@ -117,11 +143,46 @@ impl Tool for PluginTool {
                         "tool" => meta_tool_name.clone(),
                     )
                     .record(duration_secs);
-                    Ok(ToolOutput {
-                        content: format!("Plugin execution failed: {msg}"),
-                        is_error: true,
-                    })
+                    Err(msg)
                 }
+            };
+
+            // Persist plugin execution log to the database.
+            if let Some(pool) = db_pool {
+                let success = output_result.is_ok();
+                let error_msg = if let Err(ref msg) = output_result {
+                    Some(msg.clone())
+                } else {
+                    None
+                };
+                let log_plugin_name = plugin_name.clone();
+                let log_tool_name = meta_tool_name.clone();
+                tokio::spawn(async move {
+                    let _ = sqlx::query(
+                        "INSERT INTO plugin_execution_logs \
+                         (plugin_id, plugin_name, tool_name, user_id, workspace_id, \
+                          duration_ms, success, error_message) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    )
+                    .bind(plugin_id.as_uuid())
+                    .bind(&log_plugin_name)
+                    .bind(&log_tool_name)
+                    .bind(user_id.map(|id| *id.as_uuid()))
+                    .bind(workspace_id.map(|id| *id.as_uuid()))
+                    .bind(duration_ms)
+                    .bind(success)
+                    .bind(&error_msg)
+                    .execute(&pool)
+                    .await;
+                });
+            }
+
+            match output_result {
+                Ok(output) => Ok(output),
+                Err(msg) => Ok(ToolOutput {
+                    content: format!("Plugin execution failed: {msg}"),
+                    is_error: true,
+                }),
             }
         })
     }

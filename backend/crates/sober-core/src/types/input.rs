@@ -286,8 +286,8 @@ pub struct CreateSandboxExecutionLog {
 pub struct CreatePluginExecutionLog {
     /// The plugin that was invoked (if known).
     pub plugin_id: Option<PluginId>,
-    /// Plugin name (None for non-plugin tools like shell, memory, etc.).
-    pub plugin_name: Option<String>,
+    /// Plugin name.
+    pub plugin_name: String,
     /// Name of the tool that was called.
     pub tool_name: String,
     /// User who triggered the execution.

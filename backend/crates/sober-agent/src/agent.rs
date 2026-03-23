@@ -15,12 +15,9 @@ use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::domain::Message as DomainMessage;
 use sober_core::types::enums::{AgentMode, ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::input::{CreateMessage, CreatePluginExecutionLog};
-use sober_core::types::repo::{
-    ConversationRepo, MessageRepo, PluginExecutionLogRepo, UserRepo, WorkspaceRepo,
-};
+use sober_core::types::input::CreateMessage;
+use sober_core::types::repo::{ConversationRepo, MessageRepo, UserRepo, WorkspaceRepo};
 use sober_crypto::envelope::Mek;
-use sober_db::PgPluginExecutionLogRepo;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::{ContextLoader, LoadRequest, LoadedContext, MemoryStore, StoreChunk};
@@ -115,8 +112,6 @@ struct LoopContext<'a, R: AgentRepos> {
     mek: &'a Option<Arc<Mek>>,
     /// XML listing of all available skills for system prompt injection.
     skill_catalog_xml: String,
-    /// Database pool for tool execution audit logging.
-    tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
 }
 
 /// The core agent that handles messages through an agentic loop.
@@ -145,8 +140,6 @@ pub struct Agent<R: AgentRepos> {
     /// remember) that are identical across conversations. Built once at
     /// construction and reused every turn.
     static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
-    /// Database pool for tool execution audit logging.
-    tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
     /// Per-conversation skill activation tracking. Skills activated in one turn
     /// remain active in subsequent turns of the same conversation.
     skill_activations: std::sync::RwLock<
@@ -170,7 +163,6 @@ impl<R: AgentRepos> Agent<R> {
         mek: Option<Arc<Mek>>,
         llm_config: Option<LlmConfig>,
         tool_bootstrap: Arc<ToolBootstrap<R>>,
-        tool_execution_log: Option<Arc<PgPluginExecutionLogRepo>>,
     ) -> Self {
         let static_tools = tool_bootstrap.build_static_tools();
         Self {
@@ -187,7 +179,6 @@ impl<R: AgentRepos> Agent<R> {
             llm_config,
             tool_bootstrap,
             static_tools,
-            tool_execution_log,
             skill_activations: std::sync::RwLock::new(HashMap::new()),
         }
     }
@@ -542,7 +533,6 @@ impl<R: AgentRepos> Agent<R> {
         let workspace_id = conversation.workspace_id;
         let llm_config = self.llm_config.clone();
         let mek = self.mek.clone();
-        let tool_execution_log = self.tool_execution_log.clone();
 
         let trigger_label = format!("{trigger:?}").to_lowercase();
 
@@ -572,7 +562,6 @@ impl<R: AgentRepos> Agent<R> {
                 llm_config: &llm_config,
                 mek: &mek,
                 skill_catalog_xml,
-                tool_execution_log,
             };
             let result = Self::run_loop_streaming(&ctx).await;
 
@@ -875,7 +864,6 @@ impl<R: AgentRepos> Agent<R> {
                         conversation_id,
                         repos,
                         ctx.workspace_id,
-                        ctx.tool_execution_log.as_ref(),
                     )
                     .await;
 
@@ -1088,7 +1076,6 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         repos: &Arc<R>,
         workspace_id: Option<WorkspaceId>,
-        tool_execution_log: Option<&Arc<PgPluginExecutionLogRepo>>,
     ) -> (Vec<LlmMessage>, bool, bool) {
         use sober_core::types::tool::ToolError;
 
@@ -1159,8 +1146,6 @@ impl<R: AgentRepos> Agent<R> {
             };
 
             let tool_start = Instant::now();
-            let mut tool_success = true;
-            let mut tool_error: Option<String> = None;
             let output = match tool_registry.get_tool(tool_name) {
                 Some(tool) => {
                     if tool.metadata().context_modifying {
@@ -1209,8 +1194,6 @@ impl<R: AgentRepos> Agent<R> {
                         }
                         Err(e) => {
                             any_errors = true;
-                            tool_success = false;
-                            tool_error = Some(e.to_string());
                             metrics::counter!(
                                 "sober_agent_tool_calls_total",
                                 "tool" => tool_name.clone(),
@@ -1223,8 +1206,6 @@ impl<R: AgentRepos> Agent<R> {
                 }
                 None => {
                     any_errors = true;
-                    tool_success = false;
-                    tool_error = Some(format!("Tool not found: {tool_name}"));
                     metrics::counter!(
                         "sober_agent_tool_calls_total",
                         "tool" => tool_name.clone(),
@@ -1234,33 +1215,11 @@ impl<R: AgentRepos> Agent<R> {
                     format!("Tool not found: {tool_name}")
                 }
             };
-            let tool_duration_ms = tool_start.elapsed().as_millis() as i64;
             metrics::histogram!(
                 "sober_agent_tool_call_duration_seconds",
                 "tool" => tool_name.clone(),
             )
             .record(tool_start.elapsed().as_secs_f64());
-
-            // Persist tool execution log via repo.
-            if let Some(repo) = tool_execution_log {
-                let repo = Arc::clone(repo);
-                let entry = CreatePluginExecutionLog {
-                    plugin_id: None,
-                    plugin_name: None,
-                    tool_name: tool_name.clone(),
-                    user_id: Some(user_id),
-                    conversation_id: Some(conversation_id),
-                    workspace_id,
-                    duration_ms: tool_duration_ms,
-                    success: tool_success,
-                    error_message: tool_error,
-                };
-                tokio::spawn(async move {
-                    if let Err(e) = repo.create(entry).await {
-                        tracing::warn!(error = %e, "failed to persist tool execution log");
-                    }
-                });
-            }
 
             let _ = event_tx
                 .send(Ok(AgentEvent::ToolCallResult {
