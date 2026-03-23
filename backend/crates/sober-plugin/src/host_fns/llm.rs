@@ -49,7 +49,7 @@ pub(crate) fn host_llm_complete_impl(
         model,
         messages,
         tools: vec![],
-        max_tokens: Some(req.max_tokens.unwrap_or(1024)),
+        max_tokens: Some(req.max_tokens.unwrap_or(4096)),
         temperature: None,
         stop: vec![],
         stream: false,
@@ -64,6 +64,15 @@ pub(crate) fn host_llm_complete_impl(
         .block_on_async(engine.complete(completion_req))?
         .map_err(|e| extism::Error::msg(format!("llm complete failed: {e}")))?;
 
+    tracing::info!(
+        choices_count = response.choices.len(),
+        first_content = ?response.choices.first().and_then(|c| c.message.content.as_deref()),
+        first_reasoning = ?response.choices.first().and_then(|c| c.message.reasoning_content.as_deref()),
+        first_role = ?response.choices.first().map(|c| &c.message.role),
+        finish_reason = ?response.choices.first().map(|c| &c.finish_reason),
+        "plugin LLM response debug"
+    );
+
     let text = response
         .choices
         .into_iter()
@@ -71,6 +80,7 @@ pub(crate) fn host_llm_complete_impl(
         .map(|c| {
             c.message
                 .content
+                .filter(|s| !s.is_empty())
                 .or(c.message.reasoning_content)
                 .unwrap_or_default()
         })
