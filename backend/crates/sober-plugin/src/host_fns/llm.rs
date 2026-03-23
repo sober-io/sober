@@ -9,6 +9,13 @@ use super::{
     not_yet_connected_error, read_input, write_output,
 };
 
+/// Default max_tokens when the plugin doesn't specify one.
+const DEFAULT_MAX_TOKENS: u32 = 8192;
+
+/// Minimum max_tokens enforced regardless of what the plugin requests.
+/// Thinking models need headroom for reasoning before producing content.
+const MIN_MAX_TOKENS: u32 = 4096;
+
 /// Sends a prompt to an LLM provider.
 ///
 /// Requires the `LlmCall` capability.  Returns an error if no LLM engine is
@@ -49,8 +56,11 @@ pub(crate) fn host_llm_complete_impl(
         model,
         messages,
         tools: vec![],
-        // Enforce a minimum — thinking models need headroom for reasoning.
-        max_tokens: Some(req.max_tokens.unwrap_or(8192).max(4096)),
+        max_tokens: Some(
+            req.max_tokens
+                .unwrap_or(DEFAULT_MAX_TOKENS)
+                .max(MIN_MAX_TOKENS),
+        ),
         temperature: None,
         stop: vec![],
         stream: false,
