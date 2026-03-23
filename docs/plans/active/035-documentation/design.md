@@ -51,7 +51,7 @@ docs/book/
     ├── getting-started/
     │   ├── prerequisites.md
     │   ├── installation.md     # scripts/install.sh (binary), Docker, from source
-    │   ├── configuration.md    # Env vars, .env, config struct
+    │   ├── configuration.md    # config.toml, SOBER_* env vars, layered resolution
     │   └── first-run.md        # Walk through first conversation
     ├── user-guide/
     │   ├── cli.md              # sober + soberctl usage
@@ -106,7 +106,7 @@ New workflow: `.github/workflows/docs.yml`
 
 - Introduction, Quick Start, First Run
 - CLI usage documentation with examples
-- Configuration reference (all env vars with defaults)
+- Configuration reference (config.toml structure, all `SOBER_*` env vars with defaults, layered resolution)
 - Plugin quickstart tutorial
 - Built-in tools reference (all 18 agent tools with descriptions and usage)
 - Frontend page (prerequisites, pnpm install, dev server, production build, how sober-web embeds it)
@@ -124,8 +124,8 @@ New workflow: `.github/workflows/docs.yml`
 | ARCHITECTURE.md event delivery | `architecture/event-delivery.md` |
 | ARCHITECTURE.md plugin system | `plugins/overview.md` + `plugins/capabilities.md` |
 | CLAUDE.md dev rules | `contributing.md` (rewritten for external audience) |
-| `AppConfig` struct / `.env` | `getting-started/configuration.md` |
-| `sober --help` / `soberctl --help` | `user-guide/cli.md` |
+| `AppConfig` struct / `config.toml` / `.env` | `getting-started/configuration.md` |
+| `sober --help` / `soberctl --help` / `sober config` subcommands | `user-guide/cli.md` |
 | `backend/crates/sober-agent/src/tools/` | `user-guide/tools.md` (all 17 built-in tools) |
 | `scripts/install.sh` | `getting-started/installation.md` (document flags: `--user`, `--version`, `--yes`, `--uninstall`, `--database-url`, `--llm-*`) |
 

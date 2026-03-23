@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/harrisiirak/s-ber"
+repository = "https://github.com/sober-io/sober"
 
 [workspace.dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
