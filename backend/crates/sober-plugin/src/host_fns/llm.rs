@@ -49,7 +49,7 @@ pub(crate) fn host_llm_complete_impl(
         model,
         messages,
         tools: vec![],
-        max_tokens: Some(req.max_tokens.unwrap_or(4096)),
+        max_tokens: Some(req.max_tokens.unwrap_or(16384)),
         temperature: None,
         stop: vec![],
         stream: false,
@@ -73,21 +73,23 @@ pub(crate) fn host_llm_complete_impl(
         "plugin LLM response debug"
     );
 
-    let text = response
-        .choices
-        .into_iter()
-        .next()
-        .map(|c| {
-            c.message
-                .content
-                .filter(|s| !s.is_empty())
-                .or(c.message.reasoning_content)
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+    let choice = response.choices.into_iter().next();
+    let text = choice
+        .as_ref()
+        .and_then(|c| c.message.content.as_deref())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_owned();
 
     if text.is_empty() {
-        tracing::warn!("LLM returned empty content for plugin call");
+        let reason = choice
+            .as_ref()
+            .and_then(|c| c.finish_reason.as_deref())
+            .unwrap_or("unknown");
+        tracing::warn!(
+            finish_reason = reason,
+            "LLM returned empty content for plugin call"
+        );
     }
 
     write_output(plugin, outputs, &LlmCompleteResponse { text })
