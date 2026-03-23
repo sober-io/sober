@@ -290,18 +290,20 @@ IMPORTANT: NEVER use `extism_pdk::http` or any other `extism_pdk` I/O module dir
 ALL I/O goes through `sober_pdk` modules. Extism's built-in HTTP is disabled and will crash.
 Only use `extism_pdk::*` for `plugin_fn`, `FnResult`, `Error`, and `Json`.
 
-Available capabilities via `sober_pdk`:
-- `sober_pdk::log::info(msg)` / `warn(msg)` / `error(msg)` — always available
-- `sober_pdk::kv::get(key)` / `set(key, &value)` / `delete(key)` / `list(prefix)` — requires `key_value`
-- `sober_pdk::http::get(url, &headers)` / `post(url, &headers, body)` / `request(method, url, &headers, body)` — requires `network`
-- `sober_pdk::secret::read(name)` — requires `secret_read`
-- `sober_pdk::tool::call(tool_name, input_json)` — requires `tool_call`
-- `sober_pdk::metrics::counter(name)` / `gauge(name, value)` / `histogram(name, value)` — requires `metrics`
-- `sober_pdk::memory::query(query, scope, limit)` / `write(content, scope, metadata)` — requires `memory_read` / `memory_write`
-- `sober_pdk::conversation::read(conversation_id, limit)` — requires `conversation_read`
-- `sober_pdk::schedule::add(cron_expr, &payload)` — requires `schedule`
-- `sober_pdk::fs::read(path)` / `write(path, content)` — requires `filesystem`
-- `sober_pdk::llm::complete(prompt, model, max_tokens)` — requires `llm_call`
+Available capabilities via `sober_pdk` (exact Rust signatures):
+- `sober_pdk::log::info(&str)` / `warn(&str)` / `error(&str)` — always available
+- `sober_pdk::kv::get(&str) -> Result<Option<Value>>` / `set(&str, &Value)` / `delete(&str)` / `list(Option<&str>) -> Result<Vec<String>>` — requires `key_value`
+- `sober_pdk::http::get(&str, &[(&str, &str)]) -> Result<HttpResponse>` / `post(&str, &[(&str, &str)], &str)` / `request(&str, &str, &[(&str, &str)], Option<&str>)` — requires `network`. HttpResponse has `.status: u16` and `.body: String`
+- `sober_pdk::secret::read(&str) -> Result<String>` — requires `secret_read`
+- `sober_pdk::tool::call(&str, Value) -> Result<Value>` — requires `tool_call`
+- `sober_pdk::metrics::counter(&str)` / `gauge(&str, f64)` / `histogram(&str, f64)` — requires `metrics`
+- `sober_pdk::memory::query(&str, Option<&str>, Option<u32>) -> Result<Vec<MemoryHit>>` / `write(&str, Option<&str>, HashMap<String, Value>)` — requires `memory_read` / `memory_write`
+- `sober_pdk::conversation::read(&str, Option<u32>) -> Result<Vec<ConversationMessage>>` — requires `conversation_read`
+- `sober_pdk::schedule::add(&str, &Value) -> Result<String>` — requires `schedule`
+- `sober_pdk::fs::read(&str) -> Result<String>` / `write(&str, &str)` — requires `filesystem`
+- `sober_pdk::llm::complete(&str, Option<&str>, Option<u32>) -> Result<String>` / `complete_raw(&str, Option<&str>, Option<u32>)` — requires `llm_call`
+
+Note: Option parameters use `Some(value)` or `None`. All Result types are `Result<T, extism_pdk::Error>`.
 
 `sober-pdk` is already in Cargo.toml — do NOT add it manually.
 
