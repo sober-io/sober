@@ -35,10 +35,19 @@ pub(crate) fn host_llm_complete_impl(
     };
 
     let model = req.model.unwrap_or_else(|| engine.model_id().to_string());
+    let system_prompt = ctx.system_prompt.clone();
+
+    let mut messages = Vec::new();
+    if !req.raw
+        && let Some(sp) = &system_prompt
+    {
+        messages.push(sober_llm::Message::system(sp));
+    }
+    messages.push(sober_llm::Message::user(req.prompt));
 
     let completion_req = sober_llm::CompletionRequest {
         model,
-        messages: vec![sober_llm::Message::user(req.prompt)],
+        messages,
         tools: vec![],
         max_tokens: req.max_tokens,
         temperature: None,

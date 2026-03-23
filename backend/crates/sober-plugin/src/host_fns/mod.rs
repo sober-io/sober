@@ -154,6 +154,9 @@ pub struct HostContext {
     pub schedule_backend: Option<Arc<dyn ScheduleBackend>>,
     /// Tool execution backend.  `None` when tool registry is not available.
     pub tool_executor: Option<Arc<dyn ToolExecutor>>,
+    /// Agent system prompt for LLM calls.  When set, non-raw LLM calls prepend
+    /// this as a system message for consistent behavior.
+    pub system_prompt: Option<String>,
 }
 
 impl fmt::Debug for HostContext {
@@ -200,6 +203,7 @@ impl HostContext {
             conversation_backend: None,
             schedule_backend: None,
             tool_executor: None,
+            system_prompt: None,
         }
     }
 
@@ -263,6 +267,13 @@ impl HostContext {
     #[must_use]
     pub fn with_tool_executor(mut self, executor: Arc<dyn ToolExecutor>) -> Self {
         self.tool_executor = Some(executor);
+        self
+    }
+
+    /// Sets the system prompt for non-raw LLM calls.
+    #[must_use]
+    pub fn with_system_prompt(mut self, prompt: String) -> Self {
+        self.system_prompt = Some(prompt);
         self
     }
 

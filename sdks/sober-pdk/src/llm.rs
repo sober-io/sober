@@ -24,6 +24,8 @@ struct LlmCompleteRequest {
     model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    raw: bool,
 }
 
 #[derive(Deserialize)]
@@ -42,6 +44,7 @@ fn check_error(response: &str) -> Result<(), extism_pdk::Error> {
 
 /// Sends a prompt to the LLM and returns the completion text.
 ///
+/// By default the agent's system prompt is included for consistent behavior.
 /// `model` and `max_tokens` are optional — the host uses defaults if omitted.
 pub fn complete(
     prompt: &str,
@@ -52,6 +55,29 @@ pub fn complete(
         prompt: prompt.to_string(),
         model: model.map(String::from),
         max_tokens,
+        raw: false,
+    })?;
+
+    let resp = unsafe { host_llm_complete(req)? };
+    check_error(&resp)?;
+
+    let parsed: LlmCompleteResponse = serde_json::from_str(&resp)?;
+    Ok(parsed.text)
+}
+
+/// Sends a raw prompt to the LLM without the agent's system prompt.
+///
+/// Use this when the plugin needs full control over the conversation context.
+pub fn complete_raw(
+    prompt: &str,
+    model: Option<&str>,
+    max_tokens: Option<u32>,
+) -> Result<String, extism_pdk::Error> {
+    let req = serde_json::to_string(&LlmCompleteRequest {
+        prompt: prompt.to_string(),
+        model: model.map(String::from),
+        max_tokens,
+        raw: true,
     })?;
 
     let resp = unsafe { host_llm_complete(req)? };

@@ -237,6 +237,11 @@ pub(crate) struct LlmCompleteRequest {
     pub model: Option<String>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// When `true`, send only the plugin's prompt without the agent's system
+    /// prompt.  Defaults to `false` — the system prompt is included for
+    /// consistent LLM behavior.
+    #[serde(default)]
+    pub raw: bool,
 }
 
 /// Output for `host_llm_complete`.
