@@ -77,6 +77,14 @@ observability-up:
 observability-down:
     docker compose stop prometheus tempo grafana
 
+# Build documentation site
+docs-build:
+    cd docs/book && mdbook build
+
+# Serve documentation locally with hot reload
+docs-serve:
+    cd docs/book && mdbook serve --open
+
 # Tag and push a release manually (e.g., just release 0.2.0)
 # Note: PRs merged to main are auto-tagged and released via CI
 release version:
