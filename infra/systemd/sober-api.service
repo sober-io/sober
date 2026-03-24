@@ -18,7 +18,7 @@ ProtectSystem=strict
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes
-ReadWritePaths=/opt/sober/data
+ReadWritePaths=/opt/sober/data /run/sober
 
 [Install]
 WantedBy=sober.target
