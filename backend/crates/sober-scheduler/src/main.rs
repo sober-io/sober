@@ -97,12 +97,8 @@ async fn main() -> Result<()> {
     // 11. Bind to Unix domain socket
     let socket_path = config.scheduler.socket_path.clone();
 
-    // Remove stale socket file if it exists
-    if socket_path.exists() {
-        std::fs::remove_file(&socket_path).with_context(|| {
-            format!("failed to remove stale socket at {}", socket_path.display())
-        })?;
-    }
+    // Remove stale socket file if it exists (best-effort).
+    let _ = std::fs::remove_file(&socket_path);
 
     // Ensure parent directory exists (best-effort — under systemd,
     // RuntimeDirectory= creates it and ProtectSystem=strict blocks mkdir).
