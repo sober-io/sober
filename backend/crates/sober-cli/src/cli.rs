@@ -105,13 +105,16 @@ pub enum MigrateCommand {
     Revert,
 }
 
+/// Default path for the scheduler Unix domain socket.
+pub const DEFAULT_SCHEDULER_SOCKET: &str = "/run/sober/scheduler.sock";
+
 /// Scheduler management subcommands.
 #[derive(Debug, Subcommand)]
 pub enum SchedulerCommand {
     /// Check scheduler health.
     Health {
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
@@ -126,21 +129,21 @@ pub enum SchedulerCommand {
         status: Option<String>,
 
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
     /// Pause the scheduler tick engine.
     Pause {
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
     /// Resume the scheduler tick engine.
     Resume {
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
@@ -150,7 +153,7 @@ pub enum SchedulerCommand {
         job_id: String,
 
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
@@ -160,7 +163,7 @@ pub enum SchedulerCommand {
         job_id: String,
 
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
@@ -170,7 +173,7 @@ pub enum SchedulerCommand {
         job_id: String,
 
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 
@@ -184,7 +187,7 @@ pub enum SchedulerCommand {
         limit: u32,
 
         /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
         socket: String,
     },
 }
