@@ -47,6 +47,7 @@ just dev | build | test | check | fmt | setup
 - **Confirm before implementing.** After plan approval, ask the user before starting — don't auto-start.
 - **Rebuild Docker after changes.** Run `docker compose up -d --build` after code changes — don't wait to be asked.
 - **`context_modifying` on tools.** Only set `context_modifying: true` on tools that mutate state (memory writes, file edits). Setting it on read-only tools triggers context rebuild which loses `reasoning_content` from DB, breaking thinking-enabled models.
+- **Update docs with code.** When architecture or functionality changes, update `ARCHITECTURE.md` and user-facing documentation (mdBook site in `docs/`) in the same PR.
 
 ## Architecture Guardrails
 
