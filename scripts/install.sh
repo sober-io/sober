@@ -86,34 +86,6 @@ prompt_required() {
     eval "$var_name='$value'"
 }
 
-prompt_yn() {
-    local description="$1"
-    local default="${2:-y}"
-
-    if [ "$NONINTERACTIVE" = "1" ]; then
-        [ "$default" = "y" ] && return 0 || return 1
-    fi
-
-    local hint="Y/n"
-    [ "$default" = "n" ] && hint="y/N"
-    printf "%s [%s]: " "$description" "$hint"
-    read -r answer
-    answer="${answer:-$default}"
-    case "$answer" in
-        [Yy]*) return 0 ;;
-        *)     return 1 ;;
-    esac
-}
-
-generate_password() {
-    local length="${1:-32}"
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -base64 "$length" | tr -d '/+=' | head -c "$length"
-    else
-        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$length"
-    fi
-}
-
 validate_database() {
     local url="$1"
     if command -v pg_isready >/dev/null 2>&1; then
@@ -145,9 +117,7 @@ Options:
   --version=<tag>         Install specific version (default: latest)
   --yes                   Non-interactive mode
   --uninstall             Remove binaries and services, preserve data
-  --database-url=<url>    Set DATABASE_URL (skips PostgreSQL setup)
-  --qdrant-url=<url>      Set QDRANT_URL (skips Qdrant setup)
-  --qdrant-api-key=<key>  Set QDRANT_API_KEY
+  --database-url=<url>    Set DATABASE_URL
   --llm-base-url=<url>    Set LLM_BASE_URL
   --llm-api-key=<key>     Set LLM_API_KEY
   --llm-model=<model>     Set LLM_MODEL
@@ -163,8 +133,6 @@ while [ $# -gt 0 ]; do
         --yes)             NONINTERACTIVE=1 ;;
         --uninstall)       UNINSTALL=1 ;;
         --database-url=*)  DATABASE_URL="${1#*=}" ;;
-        --qdrant-url=*)    QDRANT_URL="${1#*=}" ;;
-        --qdrant-api-key=*) QDRANT_API_KEY="${1#*=}" ;;
         --llm-base-url=*)  LLM_BASE_URL="${1#*=}" ;;
         --llm-api-key=*)   LLM_API_KEY="${1#*=}" ;;
         --llm-model=*)     LLM_MODEL="${1#*=}" ;;
@@ -276,90 +244,6 @@ download_and_extract() {
     ln -sf "$INSTALL_DIR/bin/soberctl" /usr/local/bin/soberctl
 }
 
-# -- PostgreSQL Setup ---------------------------------------------------------
-
-setup_postgres() {
-    # Skip if the user already provided a connection string
-    if [ -n "${DATABASE_URL:-}" ]; then
-        info "DATABASE_URL provided — skipping PostgreSQL setup"
-        return
-    fi
-
-    # Check if PostgreSQL client tools are available
-    if ! command -v psql >/dev/null 2>&1; then
-        warn "psql not found — install PostgreSQL and re-run, or pass --database-url="
-        return
-    fi
-
-    # Check if the local PostgreSQL server is reachable
-    if ! sudo -u postgres psql -c "SELECT 1" >/dev/null 2>&1; then
-        warn "Cannot connect to local PostgreSQL via 'sudo -u postgres psql'"
-        warn "Ensure PostgreSQL is installed and running, or pass --database-url="
-        return
-    fi
-
-    if ! prompt_yn "Set up a PostgreSQL database for Sober?"; then
-        return
-    fi
-
-    local db_name db_user db_password db_host db_port
-    prompt_required "PG_DB_NAME" "Database name" "sober"
-    prompt_required "PG_DB_USER" "Database user" "sober"
-    db_name="$PG_DB_NAME"
-    db_user="$PG_DB_USER"
-    db_host="localhost"
-    db_port="5432"
-    db_password=$(generate_password 32)
-
-    # Create role (idempotent)
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$db_user'" | grep -q 1; then
-        info "PostgreSQL role '$db_user' already exists — updating password"
-        sudo -u postgres psql -c "ALTER ROLE \"$db_user\" WITH PASSWORD '$db_password'" >/dev/null
-    else
-        info "Creating PostgreSQL role '$db_user'"
-        sudo -u postgres psql -c "CREATE ROLE \"$db_user\" WITH LOGIN PASSWORD '$db_password'" >/dev/null
-    fi
-
-    # Create database (idempotent)
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -q 1; then
-        info "Database '$db_name' already exists"
-    else
-        info "Creating database '$db_name' (owner: $db_user)"
-        sudo -u postgres psql -c "CREATE DATABASE \"$db_name\" OWNER \"$db_user\"" >/dev/null
-    fi
-
-    DATABASE_URL="postgres://${db_user}:${db_password}@${db_host}:${db_port}/${db_name}"
-    info "DATABASE_URL configured"
-    info "Generated password saved to $CONFIG_DIR/config.toml (mode 0600)"
-}
-
-# -- Qdrant Setup -------------------------------------------------------------
-
-setup_qdrant() {
-    # Skip if the user already provided a URL
-    if [ -n "${QDRANT_URL:-}" ]; then
-        info "QDRANT_URL provided — skipping Qdrant setup"
-        return
-    fi
-
-    local default_url="http://localhost:6334"
-
-    # Check connectivity
-    if fetch "$default_url/healthz" >/dev/null 2>&1; then
-        info "Qdrant reachable at $default_url"
-        QDRANT_URL="$default_url"
-
-        # Optionally configure API key
-        if prompt_yn "Configure a Qdrant API key?" "n"; then
-            prompt_required "QDRANT_API_KEY" "Qdrant API key" ""
-        fi
-    else
-        warn "Qdrant not reachable at $default_url"
-        warn "Install and start Qdrant, then re-run, or set --qdrant-url="
-        prompt_required "QDRANT_URL" "Qdrant URL (or press Ctrl+C to abort)" "$default_url"
-    fi
-}
-
 # -- Configuration ------------------------------------------------------------
 
 write_default_config() {
@@ -466,9 +350,6 @@ collect_config() {
     # Patch user-provided values into config.toml
     sed -i "s|^url = \"\"$|url = \"$DATABASE_URL\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^url = \"http://localhost:6334\"$|url = \"$QDRANT_URL\"|" "$CONFIG_DIR/config.toml"
-    if [ -n "${QDRANT_API_KEY:-}" ]; then
-        sed -i "s|^# api_key = \"\"$|api_key = \"$QDRANT_API_KEY\"|" "$CONFIG_DIR/config.toml"
-    fi
     sed -i "s|^base_url = \"https://openrouter.ai/api/v1\"$|base_url = \"$LLM_BASE_URL\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^# api_key = \"sk-...\"|api_key = \"$LLM_API_KEY\"|" "$CONFIG_DIR/config.toml"
     sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$LLM_MODEL\"|" "$CONFIG_DIR/config.toml"
@@ -600,8 +481,6 @@ main() {
             ensure_user
             create_directories
             download_and_extract
-            setup_postgres
-            setup_qdrant
             collect_config
             install_systemd
             run_migrations
