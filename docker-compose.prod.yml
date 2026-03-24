@@ -1,11 +1,18 @@
 name: sober
 
+# Production compose — pulls pre-built images from GHCR.
+# Set SOBER_VERSION to pin a release (default: latest).
+#
+#   SOBER_VERSION=v0.3.0 docker compose -f docker-compose.prod.yml up -d
+#   just docker                          # uses latest
+#   SOBER_VERSION=v0.3.0 just docker     # uses pinned version
+
 x-common-env: &common-env
-  SOBER_ENV: development
-  SOBER_DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+  SOBER_ENV: production
+  SOBER_DATABASE_URL: postgres://sober:${POSTGRES_PASSWORD:-sober}@postgres:5432/sober
   SOBER_DATABASE_MAX_CONNECTIONS: "10"
   SOBER_QDRANT_URL: http://qdrant:6334
-  RUST_LOG: info,tower_http=debug
+  RUST_LOG: info
 
 x-llm-env: &llm-env
   SOBER_LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
@@ -41,7 +48,7 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: sober
-      POSTGRES_PASSWORD: sober
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sober}
       POSTGRES_DB: sober
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -115,12 +122,10 @@ services:
   # Database migrations (run-once init container)
   # ---------------------------------------------------------------------------
   migrate:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.cli
+    image: ghcr.io/sober-io/sober/sober-cli:${SOBER_VERSION:-latest}
     entrypoint: ["sober", "migrate", "run"]
     environment:
-      SOBER_DATABASE_URL: postgres://sober:sober@postgres:5432/sober
+      SOBER_DATABASE_URL: postgres://sober:${POSTGRES_PASSWORD:-sober}@postgres:5432/sober
     depends_on:
       postgres:
         condition: service_healthy
@@ -129,9 +134,7 @@ services:
   # Application services
   # ---------------------------------------------------------------------------
   sober-agent:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.agent
+    image: ghcr.io/sober-io/sober/sober-agent:${SOBER_VERSION:-latest}
     privileged: true
     ports:
       - "9100:9100"
@@ -162,9 +165,7 @@ services:
       retries: 10
 
   sober-api:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.api
+    image: ghcr.io/sober-io/sober/sober-api:${SOBER_VERSION:-latest}
     ports:
       - "3000:3000"
     environment:
@@ -172,7 +173,7 @@ services:
       SOBER_SERVER_HOST: "0.0.0.0"
       SOBER_SERVER_PORT: "3000"
       SOBER_ADMIN_SOCKET_PATH: /run/sober/api-admin.sock
-      SOBER_AUTH_SESSION_SECRET: docker-dev-secret
+      SOBER_AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?Set AUTH_SESSION_SECRET in .env}
       SOBER_AUTH_SESSION_TTL_SECONDS: "2592000"
       SOBER_SEARXNG_URL: http://searxng:8080
       OTEL_SERVICE_NAME: sober-api
@@ -188,9 +189,7 @@ services:
       retries: 10
 
   sober-scheduler:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.scheduler
+    image: ghcr.io/sober-io/sober/sober-scheduler:${SOBER_VERSION:-latest}
     ports:
       - "9101:9101"
     environment:
@@ -210,9 +209,7 @@ services:
         condition: service_healthy
 
   sober-cli:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.cli
+    image: ghcr.io/sober-io/sober/sober-cli:${SOBER_VERSION:-latest}
     entrypoint: ["sleep", "infinity"]
     environment:
       <<: *common-env
@@ -223,9 +220,7 @@ services:
         condition: service_healthy
 
   sober-web:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.web
+    image: ghcr.io/sober-io/sober/sober-web:${SOBER_VERSION:-latest}
     ports:
       - "8088:8080"
     environment:

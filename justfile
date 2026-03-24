@@ -85,6 +85,18 @@ docs-build:
 docs-serve:
     cd docs/book && mdbook serve --open
 
+# Run production stack (pre-built images from GHCR)
+docker:
+    docker compose -f docker-compose.prod.yml up -d
+
+# Run development stack (builds from source)
+docker-dev:
+    docker compose up -d --build
+
+# Stop all Docker services
+docker-down:
+    docker compose -f docker-compose.prod.yml down 2>/dev/null; docker compose down 2>/dev/null; true
+
 # Tag and push a release manually (e.g., just release 0.2.0)
 # Note: PRs merged to main are auto-tagged and released via CI
 release version:

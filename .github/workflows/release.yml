@@ -241,5 +241,25 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
-          body: ${{ steps.changelog.outputs.content }}
+          body: |
+            ${{ steps.changelog.outputs.content }}
+
+            ---
+
+            ### Docker Images
+
+            Docker images for this release are published to GHCR and will be available shortly after the release:
+
+            ```bash
+            docker pull ghcr.io/sober-io/sober/sober-web:${{ needs.tag.outputs.tag }}
+            docker pull ghcr.io/sober-io/sober/sober-api:${{ needs.tag.outputs.tag }}
+            docker pull ghcr.io/sober-io/sober/sober-agent:${{ needs.tag.outputs.tag }}
+            docker pull ghcr.io/sober-io/sober/sober-scheduler:${{ needs.tag.outputs.tag }}
+            ```
+
+            Or use `docker-compose.prod.yml` for a full deployment:
+
+            ```bash
+            SOBER_VERSION=${{ needs.tag.outputs.tag }} docker compose -f docker-compose.prod.yml up -d
+            ```
           files: artifacts/*

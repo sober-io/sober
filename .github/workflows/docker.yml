@@ -1,7 +1,8 @@
 name: Docker
 
-# TODO: re-enable push triggers (branches: [main], tags: ["v*"]) when Docker builds are needed
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +27,8 @@ jobs:
             dockerfile: infra/docker/Dockerfile.scheduler
           - service: sober-web
             dockerfile: infra/docker/Dockerfile.web
+          - service: sober-cli
+            dockerfile: infra/docker/Dockerfile.cli
 
     steps:
       - uses: actions/checkout@v4
