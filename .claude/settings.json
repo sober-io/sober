@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/pre-commit-gate.sh",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || echo .)/.claude/hooks/pre-commit-gate.sh\"",
             "timeout": 300,
             "statusMessage": "Running pre-commit quality checks..."
           }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/post-edit-lint.sh",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || echo .)/.claude/hooks/post-edit-lint.sh\"",
             "timeout": 120,
             "asyncRewake": true,
             "statusMessage": "Linting edited file..."
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/stop-verify.sh",
+            "command": "bash \"$(git rev-parse --show-toplevel 2>/dev/null || echo .)/.claude/hooks/stop-verify.sh\"",
             "timeout": 10,
             "statusMessage": "Checking for uncommitted changes..."
           }
