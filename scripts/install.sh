@@ -86,6 +86,10 @@ prompt_required() {
     eval "$var_name='$value'"
 }
 
+sed_escape() {
+    printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+}
+
 validate_database() {
     local url="$1"
     if command -v pg_isready >/dev/null 2>&1; then
@@ -347,12 +351,12 @@ collect_config() {
     cp "$EXTRACT_DIR/config/config.toml.example" "$CONFIG_DIR/config.toml" 2>/dev/null \
         || write_default_config
 
-    # Patch user-provided values into config.toml
-    sed -i "s|^url = \"\"$|url = \"$DATABASE_URL\"|" "$CONFIG_DIR/config.toml"
-    sed -i "s|^url = \"http://localhost:6334\"$|url = \"$QDRANT_URL\"|" "$CONFIG_DIR/config.toml"
-    sed -i "s|^base_url = \"https://openrouter.ai/api/v1\"$|base_url = \"$LLM_BASE_URL\"|" "$CONFIG_DIR/config.toml"
-    sed -i "s|^# api_key = \"sk-...\"|api_key = \"$LLM_API_KEY\"|" "$CONFIG_DIR/config.toml"
-    sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$LLM_MODEL\"|" "$CONFIG_DIR/config.toml"
+    # Patch user-provided values into config.toml (escape sed-special chars)
+    sed -i "s|^url = \"\"$|url = \"$(sed_escape "$DATABASE_URL")\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^url = \"http://localhost:6334\"$|url = \"$(sed_escape "$QDRANT_URL")\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^base_url = \"https://openrouter.ai/api/v1\"$|base_url = \"$(sed_escape "$LLM_BASE_URL")\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^# api_key = \"sk-...\"|api_key = \"$(sed_escape "$LLM_API_KEY")\"|" "$CONFIG_DIR/config.toml"
+    sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$(sed_escape "$LLM_MODEL")\"|" "$CONFIG_DIR/config.toml"
 
     chmod 0600 "$CONFIG_DIR/config.toml"
     chown "$SOBER_USER:$SOBER_GROUP" "$CONFIG_DIR/config.toml"
