@@ -2,13 +2,24 @@
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/utils/api';
 	import { authService } from '$lib/services/auth';
+	import { systemService } from '$lib/services/system';
+	import type { User } from '$lib/types';
 
 	let email = $state('');
 	let username = $state('');
 	let password = $state('');
 	let error = $state<string | null>(null);
 	let submitting = $state(false);
-	let registered = $state(false);
+	let registeredUser = $state<User | null>(null);
+	let initialized = $state<boolean | null>(null);
+
+	$effect(() => {
+		systemService.status().then((s) => {
+			initialized = s.initialized;
+		});
+	});
+
+	let isFirstUser = $derived(initialized === false);
 
 	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
@@ -16,8 +27,7 @@
 		submitting = true;
 
 		try {
-			await authService.register(email, username, password);
-			registered = true;
+			registeredUser = await authService.register(email, username, password);
 		} catch (err) {
 			if (err instanceof ApiError) {
 				error = err.message;
@@ -33,21 +43,41 @@
 <div
 	class="rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 >
-	{#if registered}
+	{#if registeredUser}
 		<div class="text-center">
-			<h1 class="mb-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-				Registration submitted
-			</h1>
-			<p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
-				Your account is pending approval. You'll be able to sign in once an administrator approves
-				your account.
-			</p>
-			<a href={resolve('/login')} class="text-sm text-zinc-900 underline dark:text-zinc-100">
-				Back to sign in
-			</a>
+			{#if registeredUser.status === 'Active'}
+				<h1 class="mb-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+					Account created!
+				</h1>
+				<p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">You can now sign in.</p>
+				<a href={resolve('/login')} class="text-sm text-zinc-900 underline dark:text-zinc-100">
+					Sign in
+				</a>
+			{:else}
+				<h1 class="mb-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+					Registration submitted
+				</h1>
+				<p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
+					Your account is pending approval. You'll be able to sign in once an administrator approves
+					your account.
+				</p>
+				<a href={resolve('/login')} class="text-sm text-zinc-900 underline dark:text-zinc-100">
+					Back to sign in
+				</a>
+			{/if}
 		</div>
 	{:else}
-		<h1 class="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Create account</h1>
+		{#if isFirstUser}
+			<div
+				class="mb-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+			>
+				Welcome to Sober! Create your admin account to get started.
+			</div>
+		{/if}
+
+		<h1 class="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+			{isFirstUser ? 'Create admin account' : 'Create account'}
+		</h1>
 
 		{#if error}
 			<div
@@ -111,7 +141,13 @@
 				disabled={submitting}
 				class="w-full rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
 			>
-				{submitting ? 'Creating account...' : 'Create account'}
+				{#if submitting}
+					Creating account...
+				{:else if isFirstUser}
+					Create Admin Account
+				{:else}
+					Create account
+				{/if}
 			</button>
 		</form>
 

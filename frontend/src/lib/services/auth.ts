@@ -9,7 +9,7 @@ export const authService = {
 		}),
 
 	register: (email: string, username: string, password: string) =>
-		api('/auth/register', {
+		api<User>('/auth/register', {
 			method: 'POST',
 			body: JSON.stringify({ email, username, password })
 		}),

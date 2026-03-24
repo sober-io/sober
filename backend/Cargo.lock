@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -4111,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "sober-auth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4202,7 +4202,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "chrono",
  "metrics",
