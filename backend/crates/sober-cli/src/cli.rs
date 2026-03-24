@@ -2,8 +2,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-/// Sõber — offline admin CLI for database migrations, user management,
-/// and configuration validation.
+/// Sõber — CLI for administration, configuration, and runtime control.
 #[derive(Debug, Parser)]
 #[command(name = "sober", version, about)]
 pub struct Cli {
@@ -26,6 +25,10 @@ pub enum Command {
     /// Validate and display configuration.
     #[command(subcommand)]
     Config(ConfigCommand),
+
+    /// Manage the scheduler (requires running sober-scheduler).
+    #[command(subcommand)]
+    Scheduler(SchedulerCommand),
 }
 
 /// User management subcommands.
@@ -100,6 +103,90 @@ pub enum MigrateCommand {
 
     /// Revert the last applied migration.
     Revert,
+}
+
+/// Scheduler management subcommands.
+#[derive(Debug, Subcommand)]
+pub enum SchedulerCommand {
+    /// Check scheduler health.
+    Health {
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// List scheduled jobs.
+    List {
+        /// Filter by owner type (system, user, agent).
+        #[arg(long)]
+        owner_type: Option<String>,
+
+        /// Filter by status (active, paused, cancelled, running).
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// Pause the scheduler tick engine.
+    Pause {
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// Resume the scheduler tick engine.
+    Resume {
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// Force-run a specific job immediately.
+    Run {
+        /// Job ID (UUID) to run.
+        job_id: String,
+
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// Cancel a scheduled job.
+    Cancel {
+        /// Job ID (UUID) to cancel.
+        job_id: String,
+
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// Show details for a specific job.
+    Get {
+        /// Job ID (UUID).
+        job_id: String,
+
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
+
+    /// List runs for a specific job.
+    Runs {
+        /// Job ID (UUID).
+        job_id: String,
+
+        /// Maximum number of runs to return.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+
+        /// Path to scheduler socket.
+        #[arg(long, default_value = "/run/sober/scheduler.sock")]
+        socket: String,
+    },
 }
 
 /// Configuration subcommands.

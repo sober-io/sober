@@ -1,21 +1,17 @@
 # CLI Reference
 
-Sõber ships two command-line tools:
+Sõber ships a single `sober` command-line tool for both offline administration and runtime control. It is compiled from the `sober-cli` crate via `cargo build -p sober-cli`.
 
-| Binary | Role | Requires running services? |
-|--------|------|---------------------------|
-| `sober` | Offline admin — migrations, user management, config | No (connects directly to PostgreSQL) |
-| `soberctl` | Runtime admin — scheduler control, health checks | Yes (connects via Unix socket) |
-
-Both binaries are compiled from the `sober-cli` crate and built with `cargo build -p sober-cli`.
+```
+sober config ...       # No dependencies required
+sober user ...         # Requires PostgreSQL
+sober migrate ...      # Requires PostgreSQL
+sober scheduler ...    # Requires running sober-scheduler
+```
 
 ---
 
-## `sober` — Offline Admin
-
-`sober` operates directly against the PostgreSQL database. The scheduler and agent do not need to be running.
-
-### `sober migrate`
+## `sober migrate`
 
 Manage database schema migrations. Migrations are embedded in the binary via `sqlx::migrate!()` and applied through `sqlx-cli`.
 
@@ -29,7 +25,7 @@ Requires a valid `DATABASE_URL` (or `database.url` in `config.toml`).
 
 ---
 
-### `sober user`
+## `sober user`
 
 Manage user accounts.
 
@@ -46,11 +42,11 @@ sober user reset-password alice@example.com
 
 ---
 
-### `sober config`
+## `sober config`
 
 Inspect and generate configuration without connecting to a database.
 
-#### `sober config show [--source]`
+### `sober config show [--source]`
 
 Print the fully resolved configuration to stdout with all secrets redacted. Reads from `config.toml` overlaid with `SOBER_*` environment variables.
 
@@ -80,7 +76,7 @@ Example output:
 ...
 ```
 
-#### `sober config validate`
+### `sober config validate`
 
 Load and validate the full configuration. Prints `Configuration is valid.` on success, or a descriptive error on failure. Use this to catch missing required fields before starting services.
 
@@ -88,7 +84,7 @@ Load and validate the full configuration. Prints `Configuration is valid.` on su
 sober config validate
 ```
 
-#### `sober config generate`
+### `sober config generate`
 
 Generate a fully annotated `config.toml` template and print it to stdout. Redirect to a file to create a starting configuration:
 
@@ -100,29 +96,27 @@ The generated template includes all sections and fields with comments explaining
 
 ---
 
-## `soberctl` — Runtime Admin
+## `sober scheduler`
 
-`soberctl` connects to running services via Unix domain sockets. The scheduler must be running at the configured socket path.
-
-### `soberctl scheduler`
+Manage the scheduler at runtime. Connects to `sober-scheduler` via Unix domain socket (gRPC). The scheduler must be running.
 
 All scheduler commands accept a `--socket` flag (default: `/run/sober/scheduler.sock`) to point at a non-default socket path.
 
-#### Health
+### Health
 
 ```
-soberctl scheduler health
-soberctl scheduler health --socket /run/sober/scheduler.sock
+sober scheduler health
+sober scheduler health --socket /run/sober/scheduler.sock
 ```
 
 Prints `healthy: true` and the scheduler's version string.
 
-#### List jobs
+### List jobs
 
 ```
-soberctl scheduler list
-soberctl scheduler list --owner-type user
-soberctl scheduler list --status paused
+sober scheduler list
+sober scheduler list --owner-type user
+sober scheduler list --status paused
 ```
 
 Optional filters: `--owner-type` (`system`, `user`, `agent`), `--status` (`active`, `paused`, `cancelled`, `running`).
@@ -139,40 +133,40 @@ Output per job:
   created_at:   2026-01-15T12:00:00Z
 ```
 
-#### Get a specific job
+### Get a specific job
 
 ```
-soberctl scheduler get <job-id>
+sober scheduler get <job-id>
 ```
 
-#### Cancel a job
+### Cancel a job
 
 ```
-soberctl scheduler cancel <job-id>
+sober scheduler cancel <job-id>
 ```
 
-#### Force-run a job immediately
+### Force-run a job immediately
 
 ```
-soberctl scheduler run <job-id>
+sober scheduler run <job-id>
 ```
 
 Dispatches the job immediately regardless of its next scheduled time. Prints `force run accepted` or `force run rejected`.
 
-#### Pause / resume the tick engine
+### Pause / resume the tick engine
 
 ```
-soberctl scheduler pause
-soberctl scheduler resume
+sober scheduler pause
+sober scheduler resume
 ```
 
 Pausing the tick engine stops all job scheduling globally until resumed. Useful during maintenance.
 
-#### List runs for a job
+### List runs for a job
 
 ```
-soberctl scheduler runs <job-id>
-soberctl scheduler runs <job-id> --limit 10
+sober scheduler runs <job-id>
+sober scheduler runs <job-id> --limit 10
 ```
 
 Prints run IDs, statuses, start and finish times, and any error messages.
@@ -181,7 +175,7 @@ Prints run IDs, statuses, start and finish times, and any error messages.
 
 ## Configuration
 
-Both binaries load configuration via `AppConfig::load()`, which reads from (in priority order):
+The CLI loads configuration via `AppConfig::load()`, which reads from (in priority order):
 
 1. `SOBER_CONFIG` environment variable — path to a `config.toml` file.
 2. `/etc/sober/config.toml` — production default.

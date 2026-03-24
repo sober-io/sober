@@ -102,7 +102,7 @@ pub async fn load_soul_layers(
 /// - **`sober-agent`** — stores learned adaptations after detecting consistent
 ///   interaction patterns (e.g., user prefers formal tone across 5+ conversations).
 /// - **`sober-scheduler`** — persists adopted trait candidates during evolution cycles.
-/// - **`soberctl`** — manual admin tool for soul layer management.
+/// - **`sober` CLI** — manual admin tool for soul layer management.
 pub async fn store_soul_layer(
     memory: &MemoryStore,
     user_id: sober_core::UserId,

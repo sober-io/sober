@@ -22,8 +22,7 @@ cargo fmt --check -q
 # Run
 cargo run -q -p sober-api              # API server
 cargo run -q -p sober-web              # Web server (frontend + reverse proxy)
-cargo run -q --bin sober -- --help     # CLI (offline ops)
-cargo run -q --bin soberctl -- --help  # CLI (runtime ops)
+cargo run -q --bin sober -- --help     # Unified CLI
 
 # Frontend
 cd frontend && pnpm install --silent

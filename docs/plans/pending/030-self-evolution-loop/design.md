@@ -45,7 +45,7 @@ Prompt job to the agent via gRPC.
 | Scope | Channel | Action |
 |-------|---------|--------|
 | User-scoped (user_id set) | Inbox notification + Settings panel | User accepts/dismisses in "Suggested adaptations" section |
-| System-scoped (user_id NULL) | `soberctl evolution list/approve/reject` | Admin reviews via CLI |
+| System-scoped (user_id NULL) | `sober evolution list/approve/reject` | Admin reviews via CLI |
 
 User-scoped proposals that remain pending for 30 days expire automatically
 (status → `expired`, logged in audit trail).
@@ -105,7 +105,7 @@ type = "string"
 **Discover → Audit → Install → Monitor → Remove**
 
 1. **Discover**: Agent calls `propose_plugin` tool, or user runs
-   `soberctl plugin install <path>`.
+   `sober plugin install <path>`.
 2. **Audit** (in `sober-plugin` crate):
    - Validate manifest (required fields, sane capabilities).
    - Static scan: dangerous patterns (exec, eval, network calls) vs declared
@@ -116,7 +116,7 @@ type = "string"
    `PluginToolAdapter` (analogous to `McpToolAdapter`), available to agent.
 4. **Monitor**: Runtime enforcement via bwrap policy matching declared
    capabilities. Each invocation logged in audit trail.
-5. **Remove**: `soberctl plugin remove <name>`. Tool unregistered, files kept
+5. **Remove**: `sober plugin remove <name>`. Tool unregistered, files kept
    for audit.
 
 ### Agent-Generated Plugins
@@ -126,7 +126,7 @@ type = "string"
 - A Prompt job runs: LLM writes code, tests, and manifest.
 - Audit pipeline runs automatically.
 - If capabilities are a subset of agent's existing capabilities → auto-install.
-- If new capabilities requested → queued for admin via `soberctl`.
+- If new capabilities requested → queued for admin via `sober`.
 - Rate limit: max 1 plugin proposal per day.
 
 ### Trust Levels
@@ -155,7 +155,7 @@ All evolution and plugin actions logged via existing `audit_log` table:
 
 - Soul layer changes are versioned (`previous_value` column).
 - User can dismiss an adopted trait from settings (reverts it).
-- `soberctl evolution revert <id>` for admin rollback (post-v1).
+- `sober evolution revert <id>` for admin rollback (post-v1).
 
 ### Rate Limits
 
@@ -165,8 +165,8 @@ All evolution and plugin actions logged via existing `audit_log` table:
 
 ### Kill Switches (post-v1)
 
-- `soberctl evolution pause/resume` — disable autonomous evolution.
-- `soberctl plugin disable-generation` — prevent agent plugin proposals.
+- `sober evolution pause/resume` — disable autonomous evolution.
+- `sober plugin disable-generation` — prevent agent plugin proposals.
 - Per-user: "Allow agent adaptations" toggle in settings.
 
 ---
@@ -253,15 +253,15 @@ CREATE INDEX idx_plugins_status ON plugins(status);
 | GET | `/api/v1/evolution-proposals?status=pending` | List proposals for authenticated user |
 | PATCH | `/api/v1/evolution-proposals/{id}` | Accept/dismiss (body: `{ "status": "adopted" \| "dismissed" }`) |
 
-### soberctl Commands
+### sober Commands
 
 | Command | Purpose |
 |---------|---------|
-| `soberctl evolution list` | List pending system-scoped proposals |
-| `soberctl evolution approve <id>` | Approve a system-scoped proposal |
-| `soberctl evolution reject <id>` | Reject a system-scoped proposal |
+| `sober evolution list` | List pending system-scoped proposals |
+| `sober evolution approve <id>` | Approve a system-scoped proposal |
+| `sober evolution reject <id>` | Reject a system-scoped proposal |
 
-Plugin management via `soberctl plugin install/list/remove` — depends on #019.
+Plugin management via `sober plugin install/list/remove` — depends on #019.
 
 ---
 
@@ -274,7 +274,7 @@ Plugin management via `soberctl plugin install/list/remove` — depends on #019.
 | `sober-mind` | Replace `evaluate_candidate()` stub with confidence threshold logic. Add `propose_trait()` entry point. |
 | `sober-plugin` | **New crate** (depends on #019): manifest parsing, audit pipeline, `PluginToolAdapter`, generation orchestration. |
 | `sober-agent` | New tools: `propose_trait`, `propose_plugin`. Updated `trait_evolution_check` prompt. |
-| `sober-cli` | `soberctl evolution list/approve/reject` subcommands. |
+| `sober-cli` | `sober evolution list/approve/reject` subcommands. |
 | `sober-api` | `evolution_proposals` route module (2 endpoints). |
 | Frontend | Settings panel: "Suggested adaptations" section with Accept/Dismiss. |
 
@@ -288,11 +288,11 @@ Plugin management via `soberctl plugin install/list/remove` — depends on #019.
 - `evaluate_candidate()` real logic
 - API routes + frontend settings section
 - Inbox notification flow
-- `soberctl evolution` commands
+- `sober evolution` commands
 - Updated `trait_evolution_check` prompt
 
 **Phase 2 — Plugin System (after #019 lands):**
 - `sober-plugin` crate: manifest, audit, PluginToolAdapter
 - `propose_plugin` agent tool
 - Plugin generation job flow
-- `soberctl plugin` commands
+- `sober plugin` commands

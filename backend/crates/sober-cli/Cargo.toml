@@ -1,15 +1,11 @@
 [package]
 name = "sober-cli"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 
 [[bin]]
 name = "sober"
 path = "src/sober.rs"
-
-[[bin]]
-name = "soberctl"
-path = "src/soberctl.rs"
 
 [dependencies]
 # Internal crates
@@ -39,7 +35,7 @@ tracing-subscriber = { workspace = true }
 # Domain primitives
 chrono = { workspace = true }
 
-# gRPC (soberctl → scheduler/agent)
+# gRPC (scheduler/agent control)
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 prost = { workspace = true }
 tonic = { workspace = true }

@@ -72,7 +72,7 @@ pub struct CreateJob {
     pub workspace_id: Option<uuid::Uuid>,
     /// User who created the job (None for system jobs).
     pub created_by: Option<uuid::Uuid>,
-    /// Conversation to deliver results to (None for system/soberctl jobs).
+    /// Conversation to deliver results to (None for system/CLI-created jobs).
     pub conversation_id: Option<uuid::Uuid>,
     /// When the job should first run.
     pub next_run_at: DateTime<Utc>,

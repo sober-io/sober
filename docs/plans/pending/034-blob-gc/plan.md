@@ -41,7 +41,7 @@ but not yet linked to a plugin/artifact record).
 
 - Runs as a scheduler `Internal` job via `JobExecutorRegistry`
 - Default schedule: daily at 03:00 UTC (configurable via `BLOB_GC_CRON`)
-- Also triggerable via `soberctl gc blobs` (admin CLI)
+- Also triggerable via `sober gc blobs` (admin CLI)
 - Logs each deletion at `info!` level with blob key + size
 
 ---
@@ -89,8 +89,8 @@ but not yet linked to a plugin/artifact record).
 
 **File:** `sober-cli/src/commands/gc.rs` (new)
 
-- [ ] `soberctl gc blobs` — runs GC immediately via admin socket
-- [ ] `soberctl gc blobs --dry-run` — report what would be deleted
+- [ ] `sober gc blobs` — runs GC immediately via admin socket
+- [ ] `sober gc blobs --dry-run` — report what would be deleted
 - [ ] Print `GcReport` summary
 
 ### Task 6: Wire plugin deletion to cache eviction
@@ -108,6 +108,6 @@ but not yet linked to a plugin/artifact record).
 - [ ] Orphaned blobs are deleted by periodic GC
 - [ ] Grace period prevents race with in-progress installations
 - [ ] Referenced blobs are never deleted
-- [ ] `soberctl gc blobs --dry-run` reports correctly
+- [ ] `sober gc blobs --dry-run` reports correctly
 - [ ] Metrics track GC runs, deletions, bytes freed
 - [ ] Plugin deletion evicts WASM host from cache
