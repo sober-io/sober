@@ -429,12 +429,10 @@ do_upgrade() {
     current_version=$("$INSTALL_DIR/bin/sober-api" --version 2>/dev/null | awk '{print $2}') || true
     info "Current version: ${current_version:-unknown}"
 
-    download_and_extract
-
     info "Stopping services"
     systemctl stop sober.target
 
-    info "Binaries updated. Running migrations and restarting"
+    download_and_extract
     install_systemd
     run_migrations
     start_and_verify

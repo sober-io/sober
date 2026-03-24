@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { uuid } from '$lib/utils/id';
 	import type {
 		ToolCall,
 		ServerWsMessage,
@@ -79,7 +80,7 @@
 					input = tc.function?.arguments ?? '';
 				}
 				return {
-					id: tc.id ?? crypto.randomUUID(),
+					id: tc.id ?? uuid(),
 					name: tc.function?.name ?? 'unknown',
 					input
 				};
@@ -339,7 +340,7 @@
 	const dispatchMessage = (content: string) => {
 		const now = fmtTime();
 		messages.push({
-			id: crypto.randomUUID(),
+			id: uuid(),
 			role: 'user',
 			content,
 			thinkingContent: '',
@@ -348,7 +349,7 @@
 			timestamp: now
 		});
 		messages.push({
-			id: crypto.randomUUID(),
+			id: uuid(),
 			role: 'assistant',
 			content: '',
 			thinkingContent: '',
@@ -373,7 +374,7 @@
 
 	const sendMessage = (content: string) => {
 		if (isBusy) {
-			messageQueue.push({ id: crypto.randomUUID(), content });
+			messageQueue.push({ id: uuid(), content });
 		} else {
 			dispatchMessage(content);
 		}
@@ -410,7 +411,7 @@
 				const last = messages[messages.length - 1];
 				if (!last || last.role !== 'assistant' || (!last.thinking && !last.streaming)) {
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'assistant',
 						content: '',
 						thinkingContent: '',
@@ -430,7 +431,7 @@
 					// No active assistant message — create a thinking placeholder
 					// (happens for other group members who didn't send the message).
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'assistant',
 						content: '',
 						thinkingContent: msg.content,
@@ -451,7 +452,7 @@
 					assistantPhase = 'streaming';
 				} else {
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'assistant',
 						content: msg.content,
 						thinkingContent: '',
@@ -467,7 +468,7 @@
 				const last = messages[messages.length - 1];
 				if (last && last.role === 'assistant') {
 					const tc: ToolCall = {
-						id: crypto.randomUUID(),
+						id: uuid(),
 						name: msg.tool_call.name,
 						input: msg.tool_call.input
 					};
@@ -612,7 +613,7 @@
 					last.content += `\n\nError: ${msg.error}`;
 				} else {
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'system',
 						content: `Error: ${msg.error}`,
 						thinkingContent: '',
@@ -683,7 +684,7 @@
 		switch (command) {
 			case '/help':
 				messages.push({
-					id: crypto.randomUUID(),
+					id: uuid(),
 					role: 'system',
 					content:
 						'**Available commands:**\n- `/help` — Show available commands\n- `/info` — Show conversation info\n- `/clear` — Clear all messages\n- `/reload-skills` — Reload skills from disk\n\nType `/` to see available skills.',
@@ -696,7 +697,7 @@
 				break;
 			case '/info':
 				messages.push({
-					id: crypto.randomUUID(),
+					id: uuid(),
 					role: 'system',
 					content: `**Conversation info:**\n- ID: \`${conversationId}\`\n- Title: ${title || 'Untitled'}\n- Messages: ${messages.length}`,
 					thinkingContent: '',
@@ -714,7 +715,7 @@
 					const reloaded = await skillsService.reload(conversationId || undefined);
 					skills = reloaded;
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'system',
 						content: `Skills reloaded. ${reloaded.length} skill(s) available.`,
 						thinkingContent: '',
@@ -725,7 +726,7 @@
 					});
 				} catch {
 					messages.push({
-						id: crypto.randomUUID(),
+						id: uuid(),
 						role: 'system',
 						content: 'Failed to reload skills.',
 						thinkingContent: '',
