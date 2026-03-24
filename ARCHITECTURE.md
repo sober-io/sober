@@ -25,7 +25,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Clients                              │
-│  PWA (Svelte)  │  Discord Bot  │  WhatsApp  │  CLI (sober/soberctl)  │  API │
+│  PWA (Svelte)  │  Discord Bot  │  WhatsApp  │  CLI (sober)  │  API │
 └──────┬──────────────┬──────────────┬──────────┬──────┬──────┘
        │              │              │          │      │
        ▼              ▼              ▼          ▼      ▼
@@ -98,7 +98,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
-| `sober-cli` | CLI administration: `sober` (offline DB/migration ops) + `soberctl` (runtime agent/system ops via Unix socket) |
+| `sober-cli` | Unified CLI: config, user management, migrations (offline, direct DB), scheduler control (runtime, via UDS) |
 | `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |

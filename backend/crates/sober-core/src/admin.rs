@@ -1,14 +1,13 @@
 //! Admin protocol types for CLI ↔ server communication.
 //!
-//! These types are shared between `sober-cli` (`soberctl`) and the service
-//! processes (`sober-api`, `sober-scheduler`) for communication over Unix
-//! domain sockets.
+//! These types are shared between the `sober` CLI and the service processes
+//! (`sober-api`, `sober-scheduler`) for communication over Unix domain sockets.
 
 use serde::{Deserialize, Serialize};
 
 use crate::types::ScopeId;
 
-/// Commands that can be sent from `soberctl` to a running service.
+/// Commands that can be sent from the `sober` CLI to a running service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdminCommand {
@@ -30,7 +29,7 @@ pub enum AdminCommand {
     },
 }
 
-/// Responses sent from a service back to `soberctl`.
+/// Responses sent from a service back to the `sober` CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdminResponse {

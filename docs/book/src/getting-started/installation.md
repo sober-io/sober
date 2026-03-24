@@ -184,8 +184,7 @@ The compiled binaries are in `backend/target/release/`:
 | `sober-api` | API gateway |
 | `sober-agent` | Agent gRPC server |
 | `sober-scheduler` | Scheduler service |
-| `sober` | CLI admin tool (offline operations) |
-| `soberctl` | CLI admin tool (runtime operations) |
+| `sober` | Unified CLI (admin, config, runtime control) |
 
 ### Configure and Run
 

@@ -1,5 +1,4 @@
-//! `sober` — offline CLI for database migrations, user management, config
-//! validation, and other operations that connect directly to PostgreSQL.
+//! `sober` — unified CLI for administration, configuration, and runtime control.
 
 mod cli;
 mod commands;
@@ -28,6 +27,7 @@ async fn main() -> Result<()> {
         Command::Config(cmd) => run_config(cmd),
         Command::User(cmd) => run_user(cmd).await,
         Command::Migrate(cmd) => run_migrate(cmd).await,
+        Command::Scheduler(cmd) => commands::scheduler::handle(cmd).await,
     }
 }
 

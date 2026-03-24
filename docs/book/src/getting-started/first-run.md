@@ -116,11 +116,11 @@ sober user approve user@example.com
 # Disable a user account
 sober user disable user@example.com
 
-# Check system status (requires sober-api to be running)
-soberctl status
+# Check scheduler health (requires sober-scheduler to be running)
+sober scheduler health
 ```
 
-Run `sober --help` or `soberctl --help` for the full command reference.
+Run `sober --help` for the full command reference.
 
 ---
 
@@ -143,7 +143,7 @@ sober config validate
 sober config show
 ```
 
-Run `sober --help` or `soberctl --help` for the full command reference.
+Run `sober --help` for the full command reference.
 
 ---
 

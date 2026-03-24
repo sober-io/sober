@@ -127,7 +127,7 @@ cargo build -q
 # Build a single binary
 cargo build -q -p sober-api
 cargo build -q --bin sober
-cargo build -q --bin soberctl
+cargo build -q --bin sober
 ```
 
 ### Frontend

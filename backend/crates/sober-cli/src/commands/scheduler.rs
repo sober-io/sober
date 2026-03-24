@@ -1,133 +1,25 @@
-//! `soberctl` — runtime CLI for agent inspection, scheduler control, and
-//! live health checks via Unix domain sockets.
+//! Scheduler management commands via gRPC over Unix domain socket.
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
 use hyper_util::rt::TokioIo;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 /// Generated protobuf types for the scheduler gRPC service.
-mod scheduler_proto {
+mod proto {
     tonic::include_proto!("sober.scheduler.v1");
 }
 
-/// soberctl — runtime admin CLI for Sõber services.
-#[derive(Debug, Parser)]
-#[command(name = "soberctl", version, about)]
-struct Ctl {
-    /// Subcommand to execute.
-    #[command(subcommand)]
-    command: CtlCommand,
-}
+use proto::scheduler_service_client::SchedulerServiceClient;
+use proto::{
+    CancelJobRequest, ForceRunRequest, GetJobRequest, HealthRequest, Job, JobRun,
+    ListJobRunsRequest, ListJobsRequest, PauseRequest, ResumeRequest,
+};
 
-/// Top-level soberctl commands.
-#[derive(Debug, Subcommand)]
-enum CtlCommand {
-    /// Manage the scheduler.
-    #[command(subcommand)]
-    Scheduler(SchedulerCommand),
-}
-
-/// Scheduler management subcommands.
-#[derive(Debug, Subcommand)]
-enum SchedulerCommand {
-    /// Check scheduler health.
-    Health {
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// List scheduled jobs.
-    List {
-        /// Filter by owner type (system, user, agent).
-        #[arg(long)]
-        owner_type: Option<String>,
-
-        /// Filter by status (active, paused, cancelled, running).
-        #[arg(long)]
-        status: Option<String>,
-
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// Pause the scheduler tick engine.
-    Pause {
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// Resume the scheduler tick engine.
-    Resume {
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// Force-run a specific job immediately.
-    Run {
-        /// Job ID (UUID) to run.
-        job_id: String,
-
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// Cancel a scheduled job.
-    Cancel {
-        /// Job ID (UUID) to cancel.
-        job_id: String,
-
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// Show details for a specific job.
-    Get {
-        /// Job ID (UUID).
-        job_id: String,
-
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-
-    /// List runs for a specific job.
-    Runs {
-        /// Job ID (UUID).
-        job_id: String,
-
-        /// Maximum number of runs to return.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
-
-        /// Path to scheduler socket.
-        #[arg(long, default_value = "/run/sober/scheduler.sock")]
-        socket: String,
-    },
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let ctl = Ctl::parse();
-
-    match ctl.command {
-        CtlCommand::Scheduler(cmd) => handle_scheduler(cmd).await,
-    }
-}
+use crate::cli::SchedulerCommand;
 
 /// Connect to the scheduler gRPC service over a Unix domain socket.
-async fn connect_scheduler(
-    socket_path: &str,
-) -> Result<
-    scheduler_proto::scheduler_service_client::SchedulerServiceClient<tonic::transport::Channel>,
-> {
+async fn connect(socket_path: &str) -> Result<SchedulerServiceClient<tonic::transport::Channel>> {
     let path = std::path::PathBuf::from(socket_path);
     if !path.exists() {
         anyhow::bail!(
@@ -148,16 +40,16 @@ async fn connect_scheduler(
         .await
         .with_context(|| format!("failed to connect to scheduler at {socket_path}"))?;
 
-    Ok(scheduler_proto::scheduler_service_client::SchedulerServiceClient::new(channel))
+    Ok(SchedulerServiceClient::new(channel))
 }
 
-/// Handle scheduler subcommands.
-async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
+/// Execute a scheduler subcommand (requires running sober-scheduler).
+pub async fn handle(cmd: SchedulerCommand) -> Result<()> {
     match cmd {
         SchedulerCommand::Health { socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             let resp = client
-                .health(scheduler_proto::HealthRequest {})
+                .health(HealthRequest {})
                 .await
                 .context("health check failed")?;
             let health = resp.into_inner();
@@ -170,9 +62,9 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
             status,
             socket,
         } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             let resp = client
-                .list_jobs(scheduler_proto::ListJobsRequest {
+                .list_jobs(ListJobsRequest {
                     owner_type,
                     owner_id: None,
                     statuses: status.map(|s| vec![s]).unwrap_or_default(),
@@ -194,27 +86,27 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
         }
 
         SchedulerCommand::Pause { socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             client
-                .pause_scheduler(scheduler_proto::PauseRequest {})
+                .pause_scheduler(PauseRequest {})
                 .await
                 .context("failed to pause scheduler")?;
             println!("scheduler paused");
         }
 
         SchedulerCommand::Resume { socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             client
-                .resume_scheduler(scheduler_proto::ResumeRequest {})
+                .resume_scheduler(ResumeRequest {})
                 .await
                 .context("failed to resume scheduler")?;
             println!("scheduler resumed");
         }
 
         SchedulerCommand::Run { job_id, socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             let resp = client
-                .force_run(scheduler_proto::ForceRunRequest {
+                .force_run(ForceRunRequest {
                     job_id: job_id.clone(),
                 })
                 .await
@@ -227,9 +119,9 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
         }
 
         SchedulerCommand::Cancel { job_id, socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             client
-                .cancel_job(scheduler_proto::CancelJobRequest {
+                .cancel_job(CancelJobRequest {
                     job_id: job_id.clone(),
                 })
                 .await
@@ -238,9 +130,9 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
         }
 
         SchedulerCommand::Get { job_id, socket } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             let resp = client
-                .get_job(scheduler_proto::GetJobRequest {
+                .get_job(GetJobRequest {
                     job_id: job_id.clone(),
                 })
                 .await
@@ -253,9 +145,9 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
             limit,
             socket,
         } => {
-            let mut client = connect_scheduler(&socket).await?;
+            let mut client = connect(&socket).await?;
             let resp = client
-                .list_job_runs(scheduler_proto::ListJobRunsRequest {
+                .list_job_runs(ListJobRunsRequest {
                     job_id: job_id.clone(),
                     limit: Some(limit),
                 })
@@ -278,7 +170,7 @@ async fn handle_scheduler(cmd: SchedulerCommand) -> Result<()> {
 }
 
 /// Pretty-print a job.
-fn print_job(job: &scheduler_proto::Job) {
+fn print_job(job: &Job) {
     println!("  id:           {}", job.id);
     println!("  name:         {}", job.name);
     println!("  status:       {}", job.status);
@@ -295,7 +187,7 @@ fn print_job(job: &scheduler_proto::Job) {
 }
 
 /// Pretty-print a job run.
-fn print_job_run(run: &scheduler_proto::JobRun) {
+fn print_job_run(run: &JobRun) {
     println!("  id:          {}", run.id);
     println!("  job_id:      {}", run.job_id);
     println!("  status:      {}", run.status);

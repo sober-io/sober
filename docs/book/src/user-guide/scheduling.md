@@ -51,7 +51,7 @@ Built-in maintenance operations executed locally by the scheduler without involv
 | `VectorIndexOptimize` | Optimise Qdrant vector indices. |
 | `PluginAudit` | Re-audit installed plugins for security. |
 
-These run on fixed system schedules (configured at startup) but can also be triggered manually via `soberctl` or scheduled via the `scheduler` tool.
+These run on fixed system schedules (configured at startup) but can also be triggered manually via `sober scheduler run` or scheduled via the `scheduler` tool.
 
 ### Artifact jobs
 
@@ -178,30 +178,29 @@ Ask Sõber: "Pause the daily briefing job."
 
 ---
 
-## Managing Jobs via soberctl
+## Managing Jobs via CLI
 
 For direct control without going through the agent:
 
 ```bash
 # List all active jobs
-soberctl scheduler list
+sober scheduler list
 
 # Get details on a specific job
-soberctl scheduler get <job-id>
+sober scheduler get <job-id>
 
 # Force a job to run immediately
-soberctl scheduler run <job-id>
+sober scheduler run <job-id>
 
-# Pause a job
-# (use the agent's scheduler tool for pause/cancel — soberctl has cancel)
-soberctl scheduler cancel <job-id>
+# Cancel a job
+sober scheduler cancel <job-id>
 
 # Pause the entire tick engine (maintenance mode)
-soberctl scheduler pause
-soberctl scheduler resume
+sober scheduler pause
+sober scheduler resume
 
 # View run history for a job
-soberctl scheduler runs <job-id> --limit 10
+sober scheduler runs <job-id> --limit 10
 ```
 
 ---
@@ -217,4 +216,4 @@ The scheduler registers several system jobs at startup. These are owned by the `
 | Vector index optimization | Weekly (Sunday 2:00 AM) | Optimise Qdrant indices. |
 | Plugin audit | Weekly (Saturday 3:00 AM) | Re-audit installed plugins. |
 
-System jobs are visible to admin users in `soberctl scheduler list` but cannot be modified via the conversation interface.
+System jobs are visible to admin users in `sober scheduler list` but cannot be modified via the conversation interface.

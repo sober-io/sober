@@ -138,4 +138,4 @@ Snapshots are tracked as `Snapshot`-kind artifacts in the database, making them 
 
 Workspaces are created by the agent when needed. You can also have the agent create one explicitly by asking it to set up a project. The workspace ID is a UUID assigned at creation time.
 
-To point the agent at an existing directory, use the `soberctl` runtime tool or the API directly — the workspace registration creates the database record and `.sober/` scaffold.
+To point the agent at an existing directory, use the API directly — the workspace registration creates the database record and `.sober/` scaffold.

@@ -16,7 +16,7 @@ The backend is a Cargo workspace of focused library and binary crates. Dependenc
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | **Binary.** HTTP/WebSocket gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary.** Reverse proxy + embedded SvelteKit frontend |
-| `sober-cli` | CLI admin tools: `sober` (offline DB/migration ops) and `soberctl` (runtime ops via Unix socket) |
+| `sober-cli` | Unified CLI: config, user management, migrations (offline), scheduler control (runtime via UDS) |
 | `sober-mind` | Agent identity, structured instructions + soul.md layering, prompt assembly, visibility filtering, trait evolution, injection detection |
 | `sober-scheduler` | **Binary.** Autonomous tick engine, interval + cron scheduling, job persistence, local job execution via executor registry |
 | `sober-mcp` | MCP server/client for tool interop; MCP servers run sandboxed via `sober-sandbox` |
@@ -84,4 +84,4 @@ Five crates produce runnable binaries:
 - **`sober-api`** — `sober-api` process
 - **`sober-scheduler`** — `sober-scheduler` process
 - **`sober-agent`** — `sober-agent` process
-- **`sober-cli`** — `sober` (offline ops) and `soberctl` (runtime ops) binaries
+- **`sober-cli`** — `sober` unified CLI binary

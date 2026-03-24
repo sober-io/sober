@@ -24,7 +24,7 @@ Sõber ("friend" in Estonian) is a self-evolving personal AI agent. It assists u
 - **Multi-provider LLM support** — OpenRouter, Ollama, OpenAI, and local agents via ACP (Agent Client Protocol)
 - **Prompt injection defense** — input sanitization, canary tokens, output filtering, and context firewall
 - **Cryptographic agent identity** — ed25519 signing and AES-256-GCM envelope encryption
-- **CLI admin tools** — `sober` (offline DB/migration ops) and `soberctl` (runtime agent/system ops)
+- **Unified CLI** — `sober` for admin, config, migrations, and runtime control
 - **SvelteKit PWA frontend** — real-time streaming UI with WebSocket delivery
 - **Autonomous scheduling** — cron, interval, and persisted job queues
 - **Self-evolution** — autonomous plugin/skill installation, trait evolution, and soul layer adaptation (all audited)

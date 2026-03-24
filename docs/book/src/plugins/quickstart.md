@@ -133,9 +133,4 @@ stage fails the response includes the rejection reason.
 ## Verify
 
 Ask Sõber to greet someone. The agent will discover the new `greet` tool and
-can invoke it when appropriate, or you can call it directly:
-
-```bash
-soberctl tool call greet '{"name": "world"}'
-# {"message": "Hello, world! Greetings from my-plugin."}
-```
+can invoke it when appropriate.
