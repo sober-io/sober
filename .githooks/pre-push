@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Pre-push hook: run clippy + tests for affected pipelines
+# Detects what changed between local HEAD and the remote tracking branch
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Read push info from stdin: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _ LOCAL_SHA _ REMOTE_SHA; do
+    # New branch — compare against main
+    if [ "$REMOTE_SHA" = "0000000000000000000000000000000000000000" ]; then
+        REMOTE_SHA="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD~10)"
+    fi
+
+    CHANGED_FILES="$(git diff --name-only "$REMOTE_SHA" "$LOCAL_SHA" 2>/dev/null || git diff --name-only HEAD~5)"
+
+    HAS_RUST=0
+    HAS_FE=0
+
+    for file in $CHANGED_FILES; do
+        case "$file" in
+            backend/*.rs|backend/Cargo.toml|backend/Cargo.lock) HAS_RUST=1 ;;
+            frontend/*.svelte|frontend/*.ts|frontend/*.js|frontend/*.css|frontend/*.html|frontend/package.json) HAS_FE=1 ;;
+        esac
+    done
+
+    if [ "$HAS_RUST" -eq 0 ] && [ "$HAS_FE" -eq 0 ]; then
+        echo "pre-push: no backend/frontend changes detected, skipping checks."
+        exit 0
+    fi
+
+    if [ "$HAS_RUST" -eq 1 ]; then
+        echo "pre-push: running Rust checks..."
+        (cd "$REPO_ROOT/backend" && cargo clippy -q -- -D warnings) || {
+            echo "pre-push: cargo clippy failed." >&2
+            exit 1
+        }
+        (cd "$REPO_ROOT/backend" && cargo test --workspace -q) || {
+            echo "pre-push: cargo test failed." >&2
+            exit 1
+        }
+        echo "pre-push: Rust checks passed."
+    fi
+
+    if [ "$HAS_FE" -eq 1 ]; then
+        echo "pre-push: running frontend checks..."
+        (cd "$REPO_ROOT/frontend" && pnpm check) || {
+            echo "pre-push: pnpm check failed." >&2
+            exit 1
+        }
+        (cd "$REPO_ROOT/frontend" && pnpm test --silent) || {
+            echo "pre-push: pnpm test failed." >&2
+            exit 1
+        }
+        echo "pre-push: Frontend checks passed."
+    fi
+done
+
+echo "pre-push: all checks passed."

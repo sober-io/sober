@@ -1,21 +1,40 @@
 #!/usr/bin/env bash
-# Pre-commit hook: auto-format staged Rust files with cargo fmt
+# Pre-commit hook: verify formatting for staged files
+# Rust → cargo fmt --check | Frontend → prettier --check
 
-# Find the backend directory relative to the repo root
+set -euo pipefail
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BACKEND_DIR="$REPO_ROOT/backend"
 
-# Check if any .rs files are staged
-STAGED_RS_FILES="$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')"
+STAGED_RS="$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')"
+STAGED_FE="$(git diff --cached --name-only --diff-filter=ACM -- '*.svelte' '*.ts' '*.js' '*.css' '*.html')"
 
-if [ -z "$STAGED_RS_FILES" ]; then
-    exit 0
+FAILED=0
+
+if [ -n "$STAGED_RS" ]; then
+    echo "pre-commit: checking Rust formatting..."
+    if ! (cd "$REPO_ROOT/backend" && cargo fmt --check -q); then
+        echo "pre-commit: Rust formatting check failed. Run 'cargo fmt' in backend/." >&2
+        FAILED=1
+    fi
 fi
 
-# Run cargo fmt on the backend workspace
-(cd "$BACKEND_DIR" && cargo fmt -q) || exit 1
+if [ -n "$STAGED_FE" ]; then
+    echo "pre-commit: checking frontend formatting..."
+    # Build file list relative to frontend/ for prettier
+    FE_FILES=""
+    for file in $STAGED_FE; do
+        rel="${file#frontend/}"
+        if [ "$rel" != "$file" ]; then
+            FE_FILES="$FE_FILES $REPO_ROOT/$file"
+        fi
+    done
+    if [ -n "$FE_FILES" ]; then
+        if ! (cd "$REPO_ROOT/frontend" && npx prettier --check $FE_FILES 2>/dev/null); then
+            echo "pre-commit: Frontend formatting check failed. Run 'pnpm format' in frontend/." >&2
+            FAILED=1
+        fi
+    fi
+fi
 
-# Re-stage any formatted .rs files that were originally staged
-for file in $STAGED_RS_FILES; do
-    git add "$REPO_ROOT/$file"
-done
+exit $FAILED
