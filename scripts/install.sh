@@ -6,6 +6,7 @@ set -euo pipefail
 # =============================================================================
 
 SOBER_USER="${SOBER_USER:-sober}"
+SOBER_GROUP="${SOBER_GROUP:-$SOBER_USER}"
 SOBER_VERSION="${SOBER_VERSION:-latest}"
 INSTALL_DIR="/opt/sober"
 CONFIG_DIR="/etc/sober"
@@ -112,6 +113,7 @@ Usage: install.sh [OPTIONS]
 
 Options:
   --user=<name>           Run services as this user (default: sober)
+  --group=<name>          Run services as this group (default: same as --user)
   --version=<tag>         Install specific version (default: latest)
   --yes                   Non-interactive mode
   --uninstall             Remove binaries and services, preserve data
@@ -126,6 +128,7 @@ USAGE
 while [ $# -gt 0 ]; do
     case "$1" in
         --user=*)          SOBER_USER="${1#*=}" ;;
+        --group=*)         SOBER_GROUP="${1#*=}" ;;
         --version=*)       SOBER_VERSION="${1#*=}" ;;
         --yes)             NONINTERACTIVE=1 ;;
         --uninstall)       UNINSTALL=1 ;;
@@ -176,13 +179,21 @@ ensure_user() {
         return
     fi
 
+    if getent group "$SOBER_GROUP" >/dev/null 2>&1; then
+        info "Group '$SOBER_GROUP' already exists"
+    else
+        info "Creating system group '$SOBER_GROUP'"
+        groupadd --system "$SOBER_GROUP"
+    fi
+
     if id "$SOBER_USER" >/dev/null 2>&1; then
         info "User '$SOBER_USER' already exists"
     else
-        info "Creating system user '$SOBER_USER'"
+        info "Creating system user '$SOBER_USER' (group: $SOBER_GROUP)"
         useradd --system --no-create-home \
             --home-dir "$INSTALL_DIR/data" \
             --shell /usr/sbin/nologin \
+            --gid "$SOBER_GROUP" \
             "$SOBER_USER"
     fi
 }
@@ -196,8 +207,8 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data/keys"
     mkdir -p "$CONFIG_DIR"
 
-    chown -R "$SOBER_USER:$SOBER_USER" "$INSTALL_DIR"
-    chown -R "$SOBER_USER:$SOBER_USER" "$CONFIG_DIR"
+    chown -R "$SOBER_USER:$SOBER_GROUP" "$INSTALL_DIR"
+    chown -R "$SOBER_USER:$SOBER_GROUP" "$CONFIG_DIR"
 }
 
 # -- Download & Extract -------------------------------------------------------
@@ -344,7 +355,7 @@ collect_config() {
     sed -i "s|^model = \"anthropic/claude-sonnet-4\"|model = \"$LLM_MODEL\"|" "$CONFIG_DIR/config.toml"
 
     chmod 0600 "$CONFIG_DIR/config.toml"
-    chown "$SOBER_USER:$SOBER_USER" "$CONFIG_DIR/config.toml"
+    chown "$SOBER_USER:$SOBER_GROUP" "$CONFIG_DIR/config.toml"
 }
 
 # -- Systemd ------------------------------------------------------------------
@@ -352,12 +363,22 @@ collect_config() {
 install_systemd() {
     local services="sober-agent sober-api sober-scheduler sober-web"
 
+    # Resolve systemd source: release tarball or repo infra/
+    local systemd_src=""
+    if [ -d "${EXTRACT_DIR:-}/systemd" ]; then
+        systemd_src="$EXTRACT_DIR/systemd"
+    elif [ -d "infra/systemd" ]; then
+        systemd_src="infra/systemd"
+    else
+        die "No systemd unit files found (checked \$EXTRACT_DIR/systemd and infra/systemd)"
+    fi
+
     for svc in $services; do
-        sed "s/User=sober/User=$SOBER_USER/g; s/Group=sober/Group=$SOBER_USER/g" \
-            "$EXTRACT_DIR/systemd/${svc}.service" > "$SYSTEMD_DIR/${svc}.service"
+        sed "s/User=sober/User=$SOBER_USER/g; s/Group=sober/Group=$SOBER_GROUP/g" \
+            "$systemd_src/${svc}.service" > "$SYSTEMD_DIR/${svc}.service"
     done
 
-    cp "$EXTRACT_DIR/systemd/sober.target" "$SYSTEMD_DIR/sober.target"
+    cp "$systemd_src/sober.target" "$SYSTEMD_DIR/sober.target"
 
     systemctl daemon-reload
     systemctl enable sober.target
@@ -436,7 +457,10 @@ do_uninstall() {
     info ""
     info "To remove manually:"
     info "  rm -rf $CONFIG_DIR $INSTALL_DIR/data"
-    [ "$SOBER_USER" != "root" ] && info "  userdel $SOBER_USER"
+    if [ "$SOBER_USER" != "root" ]; then
+        info "  userdel $SOBER_USER"
+        info "  groupdel $SOBER_GROUP"
+    fi
 }
 
 # -- Main ---------------------------------------------------------------------
