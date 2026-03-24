@@ -6,6 +6,7 @@
 
 - [Prerequisites](getting-started/prerequisites.md)
 - [Database Setup](getting-started/database-setup.md)
+- [Search Setup](getting-started/search-setup.md)
 - [Installation](getting-started/installation.md)
 - [Configuration](getting-started/configuration.md)
 - [First Run](getting-started/first-run.md)

@@ -61,6 +61,9 @@ rate_limit_window_secs = 60
 session_secret = "change-me-in-production-must-be-long-and-random"
 session_ttl_seconds = 2592000  # 30 days
 
+[searxng]
+url = "http://localhost:8080"
+
 [agent]
 socket_path = "/run/sober/agent.sock"
 metrics_port = 9100
@@ -177,6 +180,14 @@ overrides the corresponding TOML key.
 | `SOBER_LLM_MAX_TOKENS` | `llm.max_tokens` | `4096` | Max completion tokens per request |
 | `SOBER_LLM_EMBEDDING_MODEL` | `llm.embedding_model` | `text-embedding-3-small` | Embedding model identifier |
 | `SOBER_LLM_EMBEDDING_DIM` | `llm.embedding_dim` | `1536` | Embedding vector dimensions |
+
+### SearXNG
+
+| Variable | TOML Key | Default | Description |
+|----------|----------|---------|-------------|
+| `SOBER_SEARXNG_URL` | `searxng.url` | `http://localhost:8080` | SearXNG instance URL (required for `web_search` tool) |
+
+See [Search Setup](search-setup.md) for installation and configuration details.
 
 ### Server (sober-api)
 

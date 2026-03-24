@@ -24,9 +24,11 @@ services, and generates a `config.toml`. This is the fastest path to a productio
 |---------|---------|---------|
 | PostgreSQL | 17+ | Primary relational database |
 | Qdrant | Latest stable | Vector store for memory and embeddings |
+| SearXNG | Latest stable | Web search aggregation (required for `web_search` tool) |
 
-Qdrant can be run alongside Sõber using Docker even when the Sõber binaries are installed
-directly. PostgreSQL should be a managed instance or a dedicated server in production.
+Qdrant and SearXNG can be run alongside Sõber using Docker even when the Sõber binaries are
+installed directly. PostgreSQL should be a managed instance or a dedicated server in production.
+See [Search Setup](search-setup.md) for SearXNG installation options.
 
 ---
 

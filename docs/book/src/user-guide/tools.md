@@ -15,7 +15,8 @@ Tools are exposed to the LLM in OpenAI function-calling format. The LLM decides 
 
 #### `web_search`
 
-Search the web via a configured SearXNG instance and return a ranked list of results.
+Search the web via a configured SearXNG instance and return a ranked list of results. Requires
+a running SearXNG instance — see [Search Setup](../getting-started/search-setup.md).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
