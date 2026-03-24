@@ -4,7 +4,7 @@ After=network-online.target
 PartOf=sober.target
 
 [Service]
-Type=notify
+Type=simple
 User=sober
 Group=sober
 ExecStart=/opt/sober/bin/sober-agent

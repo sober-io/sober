@@ -4,7 +4,7 @@ After=network-online.target sober-api.service
 PartOf=sober.target
 
 [Service]
-Type=notify
+Type=simple
 User=sober
 Group=sober
 ExecStart=/opt/sober/bin/sober-web
