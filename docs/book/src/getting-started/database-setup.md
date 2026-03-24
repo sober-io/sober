@@ -41,9 +41,6 @@ CREATE ROLE sober WITH LOGIN PASSWORD 'your-secure-password-here';
 
 -- Create the database owned by that role
 CREATE DATABASE sober OWNER sober;
-
--- Grant full privileges (owner already has them, but explicit for clarity)
-GRANT ALL PRIVILEGES ON DATABASE sober TO sober;
 ```
 
 Generate a strong password:
@@ -83,6 +80,30 @@ Then reload:
 ```bash
 sudo systemctl reload postgresql
 ```
+
+### Passwords with Special Characters
+
+If your database password contains special characters, they must be
+URL-encoded in the connection string. Common characters:
+
+| Character | Encoded |
+|-----------|---------|
+| `@` | `%40` |
+| `:` | `%3A` |
+| `/` | `%2F` |
+| `#` | `%23` |
+| `{` | `%7B` |
+| `}` | `%7D` |
+| `\|` | `%7C` |
+
+For example, a password of `p@ss:word` becomes:
+
+```
+postgres://sober:p%40ss%3Aword@localhost:5432/sober
+```
+
+If you get **"invalid port number"** during migration, this is almost always an
+unescaped special character in the password breaking the URL parser.
 
 ### Remote PostgreSQL
 
@@ -153,12 +174,27 @@ sudo chown qdrant:qdrant /var/lib/qdrant
 sudo systemctl enable --now qdrant
 ```
 
+### Ports
+
+Qdrant exposes two ports:
+
+| Port | Protocol | Used by |
+|------|----------|---------|
+| 6333 | HTTP/REST | Health checks, REST API clients |
+| 6334 | gRPC | **Sõber** (`qdrant-client` Rust crate) |
+
+Sõber connects via gRPC, so `config.toml` should point to port **6334**.
+
 ### Verify Connectivity
 
 ```bash
-curl -s http://localhost:6334/healthz
-# Expected: "ok" or {"title":"qdrant - vectorass engine","version":"..."}
+# REST health check (port 6333)
+curl -s http://localhost:6333/healthz
+# Expected: "healthz check passed"
 ```
+
+> **Note:** The gRPC port (6334) does not respond to HTTP — you cannot health-check it
+> with `curl`. Use the REST port for health checks.
 
 ### API Key (Optional)
 

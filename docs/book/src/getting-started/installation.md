@@ -79,8 +79,33 @@ any new migrations, and restarts the services.
 curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash -s -- --uninstall
 ```
 
-This removes binaries, systemd units, and the `sober` system user. It does **not** delete
-`/etc/sober/config.toml` or the PostgreSQL database, so your data is preserved.
+This removes binaries and systemd units. Configuration and data are preserved.
+To remove everything and start from scratch:
+
+```bash
+# Uninstall binaries and services
+curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash -s -- --uninstall
+
+# Remove configuration and data
+sudo rm -rf /etc/sober /opt/sober/data
+
+# Remove the system user (optional)
+sudo userdel sober
+sudo groupdel sober
+
+# Reinstall
+curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash
+```
+
+### Force Fresh Install
+
+The script detects an existing installation by checking for `/opt/sober/bin/sober-api`
+and switches to upgrade mode. To force a fresh install:
+
+```bash
+sudo rm -rf /opt/sober/bin
+curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash
+```
 
 ### Post-Install
 
