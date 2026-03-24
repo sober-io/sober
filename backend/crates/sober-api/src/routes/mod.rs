@@ -6,6 +6,7 @@ pub mod conversations;
 pub mod health;
 pub mod messages;
 pub mod plugins;
+pub mod system;
 pub mod tags;
 pub mod users;
 pub mod workspaces;
@@ -63,6 +64,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let api = Router::new()
         .merge(health::routes())
+        .merge(system::routes())
         .merge(auth::routes())
         .merge(conversations::routes())
         .merge(collaborators::routes())

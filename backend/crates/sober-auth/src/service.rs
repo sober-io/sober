@@ -56,8 +56,9 @@ where
     /// Registers a new user account.
     ///
     /// Validates the password length, hashes it with Argon2id, and creates
-    /// the user with `Pending` status and the `user` role. An admin must
-    /// approve the account before the user can log in.
+    /// the user. The first user on a fresh instance is automatically granted
+    /// the `Admin` role with `Active` status. Subsequent users get `User`
+    /// role with `Pending` status (requires admin approval).
     #[instrument(skip(self, password), fields(email = %email, username = %username))]
     pub async fn register(
         &self,
@@ -81,7 +82,23 @@ where
             password_hash,
         };
 
-        self.users.create_with_roles(input, &[RoleKind::User]).await
+        let has_users = self.users.has_users().await?;
+        let roles = if has_users {
+            vec![RoleKind::User]
+        } else {
+            vec![RoleKind::Admin, RoleKind::User]
+        };
+        let user = self.users.create_with_roles(input, &roles).await?;
+
+        if !has_users {
+            self.users
+                .update_status(user.id, UserStatus::Active)
+                .await?;
+            // Re-fetch to get the updated status.
+            return self.users.get_by_id(user.id).await;
+        }
+
+        Ok(user)
     }
 
     /// Authenticates a user with email and password.

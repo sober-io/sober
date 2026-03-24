@@ -183,6 +183,14 @@ impl sober_core::types::UserRepo for PgUserRepo {
         Ok(())
     }
 
+    async fn has_users(&self) -> Result<bool, AppError> {
+        let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM users)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Ok(exists)
+    }
+
     async fn search_by_username(&self, query: &str, limit: i64) -> Result<Vec<User>, AppError> {
         let pattern = format!("{}%", query);
         let rows = sqlx::query_as::<_, UserRow>(

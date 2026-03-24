@@ -67,6 +67,9 @@ pub trait UserRepo: Send + Sync {
         status: Option<UserStatus>,
     ) -> impl Future<Output = Result<Vec<User>, AppError>> + Send;
 
+    /// Returns `true` if at least one user exists in the database.
+    fn has_users(&self) -> impl Future<Output = Result<bool, AppError>> + Send;
+
     /// Searches active users whose username starts with the given query (prefix match).
     ///
     /// Results are ordered by username and limited to `limit` rows.
