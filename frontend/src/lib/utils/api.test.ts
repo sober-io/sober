@@ -59,7 +59,7 @@ describe('api', () => {
 			json: () => Promise.resolve({ error: { code: 'validation', message: 'Invalid email' } })
 		});
 
-		const err = await api('/users').catch((e: ApiError) => e);
+		const err = (await api('/users').catch((e) => e)) as ApiError;
 
 		expect(err).toBeInstanceOf(ApiError);
 		expect(err.status).toBe(422);
@@ -74,7 +74,7 @@ describe('api', () => {
 			json: () => Promise.resolve({ unexpected: true })
 		});
 
-		const err = await api('/fail').catch((e: ApiError) => e);
+		const err = (await api('/fail').catch((e) => e)) as ApiError;
 
 		expect(err).toBeInstanceOf(ApiError);
 		expect(err.status).toBe(500);
@@ -89,7 +89,7 @@ describe('api', () => {
 			json: () => Promise.reject(new Error('not json'))
 		});
 
-		const err = await api('/fail').catch((e: ApiError) => e);
+		const err = (await api('/fail').catch((e) => e)) as ApiError;
 
 		expect(err).toBeInstanceOf(ApiError);
 		expect(err.status).toBe(502);
