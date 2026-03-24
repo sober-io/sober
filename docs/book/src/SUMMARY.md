@@ -5,6 +5,7 @@
 # Getting Started
 
 - [Prerequisites](getting-started/prerequisites.md)
+- [Database Setup](getting-started/database-setup.md)
 - [Installation](getting-started/installation.md)
 - [Configuration](getting-started/configuration.md)
 - [First Run](getting-started/first-run.md)

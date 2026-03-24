@@ -42,6 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install
 | Flag | Description |
 |------|-------------|
 | `--user <name>` | System user to create (default: `sober`) |
+| `--group <name>` | System group to create (default: same as `--user`) |
 | `--version <tag>` | Release version to install (default: latest) |
 | `--yes` | Skip confirmation prompts |
 | `--database-url <url>` | PostgreSQL connection string |
