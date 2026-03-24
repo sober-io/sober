@@ -129,40 +129,53 @@ sudo apt install -y bubblewrap socat git curl ca-certificates clang lld iputils-
 | `lld` | agent | Fast linker used by Rust WASM builds |
 | `iputils-ping` | agent | Network diagnostics inside sandboxed shells |
 
-**Plugin compilation** also requires the Rust toolchain with the WASM target. Install
-system-wide so the `sober` user can access it:
+**Plugin compilation** also requires the Rust toolchain with the WASM target.
+
+**Step 1 — Install Rust system-wide:**
 
 ```bash
-# Install Rust toolchain system-wide (both RUSTUP_HOME and CARGO_HOME must be set)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
   | sudo RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
     sh -s -- -y --default-toolchain stable --profile minimal
 
-# Add the WASM compilation target (CARGO_HOME is where the rustup binary lives)
+# Add the WASM compilation target
 sudo RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
   /usr/local/cargo/bin/rustup target add wasm32-wasip1
 
-# Make toolchain accessible to all users
+# Make the toolchain read-only accessible to all users
 sudo chmod -R a+rX /usr/local/rustup /usr/local/cargo
+
+# Symlink binaries onto the default PATH
+sudo ln -sf /usr/local/cargo/bin/{cargo,rustc,rustup} /usr/local/bin/
 ```
 
-Then add to the sober user's environment (append to `/etc/sober/.env` or the systemd
-unit override):
+**Step 2 — Create a writable CARGO_HOME for the sober user:**
 
-```bash
-echo 'RUSTUP_HOME=/usr/local/rustup' | sudo tee -a /etc/sober/.env
-echo 'PATH=/usr/local/cargo/bin:/usr/bin:/bin' | sudo tee -a /etc/sober/.env
-```
-
-The agent also needs a writable `CARGO_HOME` for downloading crates during plugin builds:
+The system-wide `CARGO_HOME` (`/usr/local/cargo`) is read-only. The agent needs a
+writable location to download crates during plugin compilation:
 
 ```bash
 sudo mkdir -p /home/sober/.cargo
 sudo chown sober:sober /home/sober/.cargo
 ```
 
-> **Important:** `rustup` requires both `RUSTUP_HOME` and `CARGO_HOME` to be set for
-> every invocation. Without them, it cannot find the installed toolchain.
+**Step 3 — Set environment variables in `/etc/sober/.env`:**
+
+The systemd units load this file automatically. `RUSTUP_HOME` points to the shared
+toolchain; `CARGO_HOME` points to the sober user's writable directory:
+
+```bash
+cat <<'EOF' | sudo tee -a /etc/sober/.env
+RUSTUP_HOME=/usr/local/rustup
+CARGO_HOME=/home/sober/.cargo
+EOF
+```
+
+Then restart services:
+
+```bash
+sudo systemctl restart sober.target
+```
 
 > **Without `bubblewrap`**, the shell tool will refuse to execute commands.
 > **Without Rust + `wasm32-wasip1`**, the agent cannot generate or compile plugins.
