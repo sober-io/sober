@@ -109,37 +109,60 @@ curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install
 
 ### Runtime Dependencies
 
-The install script installs the Sõber binaries, but several features require additional
-system packages:
+The install script installs the Sõber binaries, but the agent needs additional system
+packages for shell execution, sandboxing, and plugin compilation.
 
-| Package | Required for | Install |
-|---------|-------------|---------|
-| `bubblewrap` | Shell tool sandboxing | `apt install bubblewrap` |
-| `socat` | Network proxy inside sandboxed processes | `apt install socat` |
-| `git` | Workspace git operations | `apt install git` |
-| `tar` | Workspace snapshots | Usually pre-installed |
-| `ca-certificates` | HTTPS connections (LLM APIs, web search) | `apt install ca-certificates` |
-| Rust + `wasm32-wasip1` | Plugin compilation | See below |
-
-**One-liner for Debian/Ubuntu:**
+**Install everything (Debian/Ubuntu):**
 
 ```bash
-sudo apt install -y bubblewrap socat git ca-certificates
+sudo apt install -y bubblewrap socat git curl ca-certificates clang lld iputils-ping
 ```
 
-**Plugin compilation** requires the Rust toolchain with the WASM target. Install as the
-`sober` system user (or whichever user runs the services):
+| Package | Service | Purpose |
+|---------|---------|---------|
+| `bubblewrap` | agent | Sandboxed shell command execution |
+| `socat` | agent | Network proxy for sandboxed processes with filtered network access |
+| `git` | agent | Workspace git operations (clone, commit, push) |
+| `curl` | agent | URL fetching, health checks |
+| `ca-certificates` | all | TLS for outbound HTTPS (LLM APIs, web search, Qdrant) |
+| `clang` | agent | Linker for compiling WASM plugins |
+| `lld` | agent | Fast linker used by Rust WASM builds |
+| `iputils-ping` | agent | Network diagnostics inside sandboxed shells |
+
+**Plugin compilation** also requires the Rust toolchain with the WASM target. Install
+system-wide so the `sober` user can access it:
 
 ```bash
-# Install Rust (as the sober user)
-sudo -u sober bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+# Install Rust toolchain system-wide
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+  | sudo RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
+    sh -s -- -y --default-toolchain stable --profile minimal
 
-# Add the WASM target
-sudo -u sober bash -c 'source ~/.cargo/env && rustup target add wasm32-wasip1'
+# Add the WASM compilation target
+sudo /usr/local/cargo/bin/rustup target add wasm32-wasip1
+
+# Make toolchain accessible to all users
+sudo chmod -R a+rX /usr/local/rustup /usr/local/cargo
 ```
 
-> **Note:** Without `bubblewrap`, the shell tool will refuse to execute commands.
-> Without Rust + `wasm32-wasip1`, the agent cannot generate or compile plugins.
+Then add to the sober user's environment (append to `/etc/sober/.env` or the systemd
+unit override):
+
+```bash
+echo 'RUSTUP_HOME=/usr/local/rustup' | sudo tee -a /etc/sober/.env
+echo 'PATH=/usr/local/cargo/bin:/usr/bin:/bin' | sudo tee -a /etc/sober/.env
+```
+
+The agent also needs a writable `CARGO_HOME` for downloading crates during plugin builds:
+
+```bash
+sudo mkdir -p /home/sober/.cargo
+sudo chown sober:sober /home/sober/.cargo
+```
+
+> **Without `bubblewrap`**, the shell tool will refuse to execute commands.
+> **Without Rust + `wasm32-wasip1`**, the agent cannot generate or compile plugins.
+> Other services (api, web, scheduler) only need `ca-certificates`.
 
 ### Post-Install
 
