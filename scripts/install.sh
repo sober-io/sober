@@ -75,8 +75,8 @@ prompt_required() {
     if [ -n "$default" ]; then
         prompt_text="$prompt_text [$default]"
     fi
-    printf "%s: " "$prompt_text"
-    read -r value
+    printf "%s: " "$prompt_text" > /dev/tty
+    read -r value < /dev/tty
     if [ -z "$value" ] && [ -n "$default" ]; then
         value="$default"
     fi
