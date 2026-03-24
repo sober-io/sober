@@ -8,7 +8,7 @@ Type=notify
 User=sober
 Group=sober
 ExecStart=/opt/sober/bin/sober-web
-EnvironmentFile=/etc/sober/.env
+EnvironmentFile=-/etc/sober/.env
 Environment=SOBER_CONFIG=/etc/sober/config.toml
 RuntimeDirectory=sober
 StateDirectory=sober
