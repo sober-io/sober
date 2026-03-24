@@ -133,13 +133,14 @@ sudo apt install -y bubblewrap socat git curl ca-certificates clang lld iputils-
 system-wide so the `sober` user can access it:
 
 ```bash
-# Install Rust toolchain system-wide
+# Install Rust toolchain system-wide (both RUSTUP_HOME and CARGO_HOME must be set)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
   | sudo RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
     sh -s -- -y --default-toolchain stable --profile minimal
 
-# Add the WASM compilation target
-sudo /usr/local/cargo/bin/rustup target add wasm32-wasip1
+# Add the WASM compilation target (CARGO_HOME is where the rustup binary lives)
+sudo RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
+  /usr/local/cargo/bin/rustup target add wasm32-wasip1
 
 # Make toolchain accessible to all users
 sudo chmod -R a+rX /usr/local/rustup /usr/local/cargo
@@ -159,6 +160,9 @@ The agent also needs a writable `CARGO_HOME` for downloading crates during plugi
 sudo mkdir -p /home/sober/.cargo
 sudo chown sober:sober /home/sober/.cargo
 ```
+
+> **Important:** `rustup` requires both `RUSTUP_HOME` and `CARGO_HOME` to be set for
+> every invocation. Without them, it cannot find the installed toolchain.
 
 > **Without `bubblewrap`**, the shell tool will refuse to execute commands.
 > **Without Rust + `wasm32-wasip1`**, the agent cannot generate or compile plugins.
