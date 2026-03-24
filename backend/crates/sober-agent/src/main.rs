@@ -297,10 +297,10 @@ async fn main() -> Result<()> {
         })?;
     }
 
-    // Ensure parent directory exists
+    // Ensure parent directory exists (best-effort — under systemd,
+    // RuntimeDirectory= creates it and ProtectSystem=strict blocks mkdir).
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create socket directory {}", parent.display()))?;
+        let _ = std::fs::create_dir_all(parent);
     }
 
     let listener = UnixListener::bind(&socket_path)
