@@ -91,8 +91,10 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`) |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
-| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`. |
-| `sober-plugin` | Plugin registry, WASM host functions (11 capabilities via Extism), backend service traits, audit pipeline, blob-backed storage |
+| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
+| `sober-plugin` | Plugin registry, WASM host functions (13 host functions via Extism), backend service traits, audit pipeline, blob-backed storage |
+| `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
+| `sober-skill` | Skill discovery, loading, and activation. Provides `SkillCatalog`, `SkillLoader`, `ActivateSkillTool`, frontmatter parsing. |
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |

@@ -1,199 +1,96 @@
 # CLAUDE.md — Sõber Project Instructions
 
-## Project Overview
+See @ARCHITECTURE.md for system design.
 
-Sõber ("friend" in Estonian) is a self-evolving AI agent system built with Rust (backend)
-and Svelte 5 (frontend). See @ARCHITECTURE.md for full system design.
-
-## Guiding Principles
-
-- **Compiler is your friend.** Lean on Rust's type system and Svelte's compiler checks.
-- **Explicit over implicit.** Prefer clear, readable code over clever abstractions.
-- **Fewer dependencies.** Add crates/packages deliberately. Evaluate maintenance status and API surface.
-- **Progressive enhancement.** Start simple, add complexity only when needed.
-
-## Best Practices & Patterns
+### Best Practices & Patterns
 
 - Rust: @docs/rust-patterns.md
 - Svelte 5: @docs/svelte-patterns.md
-
-## Repository Structure
-
-```
-sober/
-├── backend/          # Rust workspace (Cargo)
-│   ├── crates/       # Individual library/binary crates
-│   │   ├── sober-cli/ # CLI: `sober` (offline) + `soberctl` (runtime)
-│   │   └── sober-mind/instructions/ # Base instruction files (compiled in)
-│   ├── migrations/   # SQL migrations (sqlx)
-│   └── proto/        # Proto definitions for internal gRPC services
-├── frontend/         # SvelteKit PWA
-├── infra/            # Docker, K8s configs
-├── docs/
-│   ├── plans/        # pending/ → active/ → done/
-│   ├── rust-patterns.md
-│   └── svelte-patterns.md
-└── tools/            # Dev scripts, code generators
-```
 
 ## Build & Run
 
 **Prerequisites:** Node.js 24, Rust (latest stable), pnpm, Docker
 
 ```bash
-# Backend — build & test
+# Backend
 cd backend && cargo build -q
-cargo test --workspace -q
-cargo test -p sober-core -q         # Single crate
-
-# Backend — run
-cargo run -q -p sober-api           # API server
-cargo run -q -p sober-web           # Web server (frontend + reverse proxy)
-cargo run -q --bin sober -- --help   # CLI admin tool (offline ops)
-cargo run -q --bin soberctl -- --help # CLI admin tool (runtime ops)
-
-# Backend — lint & format
+cargo test --workspace -q              # All crates
+cargo test -p sober-core -q            # Single crate
 cargo clippy -q -- -D warnings
 cargo fmt --check -q
-cargo audit -q
+
+# Run
+cargo run -q -p sober-api              # API server
+cargo run -q -p sober-web              # Web server (frontend + reverse proxy)
+cargo run -q --bin sober -- --help     # CLI (offline ops)
+cargo run -q --bin soberctl -- --help  # CLI (runtime ops)
 
 # Frontend
 cd frontend && pnpm install --silent
-pnpm dev                             # Dev server on :5173
-pnpm build --silent                  # Production build
-pnpm check                           # Svelte/TS type check
-pnpm test --silent                   # Tests
+pnpm build --silent && pnpm check && pnpm test --silent
 
-# Full stack (Docker)
-docker compose up -d
-
-# Dev workflow (justfile)
-just dev                             # Start dev servers
-just build                           # Build all
-just test                            # Run all tests
-just check                           # Lint + type check
-just fmt                             # Format all
-just setup                           # Configure git hooks
+# Justfile shortcuts
+just dev | build | test | check | fmt | setup
 ```
 
-> Docker required for: integration tests, sqlx compile-time checks, PostgreSQL/Qdrant.
-> Unit tests do **not** require Docker.
-
----
+> Docker required for: integration tests, sqlx compile-time checks, PostgreSQL/Qdrant. Unit tests do not require Docker.
 
 ## Development Rules
 
-### Quiet Output
+- **Quiet output.** Always use `-q` / `--silent` for interactive commands. CI uses normal verbosity for debugging.
+- **Verify before done.** Build → clippy → test. Cross-crate: `cargo test --workspace -q`. Frontend: `pnpm check` + `pnpm test --silent`. Never say "this should work" — run it.
+- **Code style.** Rust: `cargo fmt` + `cargo clippy -D warnings`. Svelte: `prettier` + `eslint`.
+- **User interaction.** Always use AskUserQuestion tool — don't embed questions in output.
+- **Dependencies.** Latest stable versions. Look up — don't guess. Evaluate maintenance status.
+- **Code navigation.** Prefer LSP (Rust + TypeScript) for go-to-definition, find references, and rename. Use over grep/glob when possible.
+- **No `.unwrap()` in library code.** `thiserror` for libs, `anyhow` for bins. Public functions need doc comments.
+- **Confirm before implementing.** After plan approval, ask the user before starting — don't auto-start.
+- **Rebuild Docker after changes.** Run `docker compose up -d --build` after code changes — don't wait to be asked.
+- **`context_modifying` on tools.** Only set `context_modifying: true` on tools that mutate state (memory writes, file edits). Setting it on read-only tools triggers context rebuild which loses `reasoning_content` from DB, breaking thinking-enabled models.
 
-**Always** use quiet flags (`-q`, `--silent`) for all interactive commands. This saves context tokens.
-CI workflows are the exception — use normal verbosity for debugging.
+## Architecture Guardrails
 
-### Verify Before Claiming Done
-
-- After code changes: `cargo build -q`, `cargo clippy -q -- -D warnings`, `cargo test -p <crate> -q`.
-- **Cross-crate changes:** test modified crate **and** downstream dependents. `cargo test --workspace -q` when in doubt.
-- Frontend: `pnpm check` and `pnpm test --silent`.
-- Never say "this should work" — run it and confirm.
-
-### User Interaction
-
-- **Always use AskUserQuestion tool** for user input or decisions — don't embed questions in output.
-
-### Dependencies
-
-- Use **latest stable versions**. Look up versions — don't guess.
-- Evaluate before adding: maintenance status, download count, `unsafe` usage.
-
-### Code Navigation
-
-- Prefer **LSP** for navigation (go-to-definition, find references, rename).
-
-### Planning & Documentation
-
-- Plans live in `docs/plans/` subfolders: `pending/` → `active/` → `done/`.
-- Each plan: `<number>-<topic>/` folder with `design.md` and `plan.md`.
-- **Move entire folders** between directories. Use `git mv`.
-
-### Git Hooks
-
-- Pre-commit hook in `.githooks/` auto-formats Rust files.
-- Run **`just setup`** after cloning or creating a worktree.
-
-### Git Workflow & Worktrees
-
-- **Feature work happens in worktrees only.** Never on main directly.
-- Worktrees at `.worktrees/` (gitignored). Run `just setup` inside after creating.
-- Workflow: `git worktree add .worktrees/<plan>-<name> -b feat/<plan>-<name>` → develop → PR → merge → `git worktree remove`.
-- **Always check existing worktrees** (`git worktree list`) before starting work.
-- Copy `.env` to worktree directory after creating it.
-
-**Branch prefixes** (include plan number, e.g., `feat/003-auth`): `feat/`, `fix/`, `refactor/`, `sec/`, `chore/`.
-
-**Direct to main** (no worktree): docs-only, config changes, non-Rust/Svelte changes.
-
-**Pull requests:**
-- CI must pass. Squash merge. Self-merge OK.
-- Never add `Co-Authored-By` trailers.
-- Plan PRs: prefix title with plan number (e.g., "#005: …").
-- **Never merge PRs unrelated to current worktree.**
-
-**Plan lifecycle:** Move folder `pending/` → `active/` in first commit, `active/` → `done/` in last commit.
-
-### Security
-
-- Never commit secrets. Injection detection on all user input.
-- Crypto: only audited crates (ed25519-dalek, aes-gcm, aws-lc-rs).
-- Plugins sandboxed (wasmtime) before execution.
-
-### Code Style
-
-- Rust: `cargo fmt` + `cargo clippy -D warnings`. `thiserror` for libs, `anyhow` for bins.
-- Svelte: `prettier` + `eslint`.
-- Public functions need doc comments. No `.unwrap()` in library code.
-
-### Architecture
-
-- Each crate has single responsibility. See @ARCHITECTURE.md crate map.
-- Dependencies flow downward: api → agent → mind → memory/crypto → core.
-- `sober-mind` owns prompt assembly. Agent delegates prompt construction to mind.
-- `sober-cli` depends on core + crypto. NOT on api.
+- Deps flow downward: `api → agent → mind → memory/crypto → core`.
 - Never add `sober-api` as a dependency of any other crate.
-- `sober-scheduler` and `sober-agent` communicate via gRPC only — no crate dependency.
-- Internal comms: gRPC/UDS (tonic + prost). Protos in `backend/proto/`.
+- `sober-scheduler` ↔ `sober-agent`: gRPC only — no crate dependency.
+- Never commit secrets. Only audited crypto crates (ed25519-dalek, aes-gcm, aws-lc-rs).
 
-### Database Migrations
+## Database Migrations
 
-- Managed with `sqlx-cli`. Embedded in binary via `sqlx::migrate!()`.
-- Create: `cd backend && sqlx migrate add <description>`.
-- Run: `sober migrate run`. Test against fresh DB (Docker required).
-- CI offline mode: `cargo sqlx prepare` → commit `.sqlx/` directory.
+```bash
+cd backend && sqlx migrate add <description>  # Create
+sober migrate run                              # Run (Docker required)
+cargo sqlx prepare                             # CI offline mode → commit .sqlx/
+```
 
-### Testing
+## Git Workflow
 
-- Unit tests colocated in `#[cfg(test)]` modules.
-- Integration tests use `#[sqlx::test]` with per-test DB.
-- Security-critical code: property-based testing (proptest).
+- **Feature work in worktrees only.** Never commit to main directly.
+- Worktrees at `.worktrees/`. Run `just setup` inside after creating. Copy `.env`.
+- `git worktree add .worktrees/<plan>-<name> -b feat/<plan>-<name>` → develop → PR → merge → remove.
+- Check `git worktree list` before starting work.
+- **All commands run from worktree dir.** Never cd back to main repo — Docker uses CWD as build context.
+- **Direct to main** (no worktree): docs-only, config changes, non-Rust/Svelte changes.
 
-### Authentication
+**Branches:** include plan number — `feat/003-auth`, `fix/012-leak`. Prefixes: `feat/`, `fix/`, `refactor/`, `sec/`, `chore/`.
 
-- Cookie-based sessions (`HttpOnly`) and bearer token auth.
-- Backend middleware validates. Frontend checks in root layout `load`.
+**PRs:** CI must pass. Squash merge. Self-merge OK. Never add `Co-Authored-By` trailers. Plan PRs: prefix title with plan number (e.g., "#005: …"). Never merge PRs unrelated to current worktree.
 
-### Environment & Config
+## Plans
 
-- All config via env vars, `.env` in dev. Backend: typed config struct, fail fast.
-- Frontend: `$env/static/public` and `$env/dynamic/private`. Never expose secrets to client.
+- Location: `docs/plans/` with subfolders: `pending/`, `active/`, `done/`.
+- Each plan: `<number>-<topic>/` folder containing `design.md` and `plan.md`.
+- Move entire folders between directories with `git mv`.
+- **Lifecycle:** `pending/` → `active/` in first commit, `active/` → `done/` in last commit.
 
----
-
-## Versioning
+## Versioning & Commits
 
 **PR version bumps (STRICT):** Every PR bumps the version:
 - `feat/` → **MINOR** (`0.X.0`). Never patch for features.
 - `fix/` → **patch** (`0.0.X`).
 - Bump ALL affected crate `Cargo.toml` versions.
 
-## Commit Convention
+**Commit convention:**
 
 ```
 type(scope): description
