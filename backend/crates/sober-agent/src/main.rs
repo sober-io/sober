@@ -37,6 +37,7 @@ use std::sync::RwLock;
 use tokio::net::UnixListener;
 use tokio::signal;
 use tokio_stream::wrappers::UnixListenerStream;
+use tokio_util::sync::CancellationToken;
 use tonic::transport::{Endpoint, Server, Uri};
 use tower::service_fn;
 use tracing::{info, warn};
@@ -270,13 +271,26 @@ async fn main() -> Result<()> {
     ));
 
     // 18. Spawn the confirmation broker loop
-    tokio::spawn(async move { while confirmation_broker.process_next().await.is_some() {} });
+    let shutdown_token = CancellationToken::new();
+
+    let broker_token = shutdown_token.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                result = confirmation_broker.process_next() => {
+                    if result.is_none() { break; }
+                }
+                () = broker_token.cancelled() => break,
+            }
+        }
+    });
 
     // 19. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
+    let scheduler_token = shutdown_token.clone();
     tokio::spawn(async move {
-        connect_to_scheduler(scheduler_client_bg, &scheduler_socket).await;
+        connect_to_scheduler(scheduler_client_bg, &scheduler_socket, scheduler_token).await;
     });
 
     let grpc_service = AgentGrpcService::new(
@@ -312,6 +326,9 @@ async fn main() -> Result<()> {
         .await
         .context("gRPC server failed")?;
 
+    // Cancel background tasks so the process exits promptly.
+    shutdown_token.cancel();
+
     info!("sober-agent shut down");
     Ok(())
 }
@@ -320,7 +337,11 @@ async fn main() -> Result<()> {
 ///
 /// Runs forever: establishes connection, monitors health, and re-establishes
 /// on failure. This handles scheduler restarts gracefully.
-async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path) {
+async fn connect_to_scheduler(
+    client: SharedSchedulerClient,
+    socket_path: &Path,
+    cancel: CancellationToken,
+) {
     use scheduler_proto::HealthRequest;
 
     let socket_path = socket_path.to_path_buf();
@@ -328,7 +349,10 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
     loop {
         // Wait for the socket file to appear
         while !socket_path.exists() {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::select! {
+                () = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
+                () = cancel.cancelled() => return,
+            }
         }
 
         let path_clone = socket_path.clone();
@@ -362,7 +386,10 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
                 // Monitor connection health
                 let mut sched_client = sched_client;
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    tokio::select! {
+                        () = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+                        () = cancel.cancelled() => return,
+                    }
                     match sched_client.health(HealthRequest {}).await {
                         Ok(_) => {}
                         Err(e) => {
@@ -380,7 +407,10 @@ async fn connect_to_scheduler(client: SharedSchedulerClient, socket_path: &Path)
                     socket = %socket_path.display(),
                     "failed to connect to scheduler, retrying in 5s"
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::select! {
+                    () = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                    () = cancel.cancelled() => return,
+                }
             }
         }
     }

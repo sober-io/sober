@@ -41,6 +41,7 @@ dotenvy = { workspace = true }
 async-trait = "0.1"
 futures = "0.3"
 tokio-stream = "0.1"
+tokio-util = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tower = { workspace = true }
 metrics = { workspace = true }
