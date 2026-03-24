@@ -107,6 +107,40 @@ sudo rm -rf /opt/sober/bin
 curl -fsSL https://raw.githubusercontent.com/sober-io/sober/main/scripts/install.sh | sudo bash
 ```
 
+### Runtime Dependencies
+
+The install script installs the Sõber binaries, but several features require additional
+system packages:
+
+| Package | Required for | Install |
+|---------|-------------|---------|
+| `bubblewrap` | Shell tool sandboxing | `apt install bubblewrap` |
+| `socat` | Network proxy inside sandboxed processes | `apt install socat` |
+| `git` | Workspace git operations | `apt install git` |
+| `tar` | Workspace snapshots | Usually pre-installed |
+| `ca-certificates` | HTTPS connections (LLM APIs, web search) | `apt install ca-certificates` |
+| Rust + `wasm32-wasip1` | Plugin compilation | See below |
+
+**One-liner for Debian/Ubuntu:**
+
+```bash
+sudo apt install -y bubblewrap socat git ca-certificates
+```
+
+**Plugin compilation** requires the Rust toolchain with the WASM target. Install as the
+`sober` system user (or whichever user runs the services):
+
+```bash
+# Install Rust (as the sober user)
+sudo -u sober bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+
+# Add the WASM target
+sudo -u sober bash -c 'source ~/.cargo/env && rustup target add wasm32-wasip1'
+```
+
+> **Note:** Without `bubblewrap`, the shell tool will refuse to execute commands.
+> Without Rust + `wasm32-wasip1`, the agent cannot generate or compile plugins.
+
 ### Post-Install
 
 After the install completes, all four services will be running:
