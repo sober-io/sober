@@ -27,7 +27,7 @@ jobs:
       tag: ${{ steps.bump.outputs.tag }}
       skip: ${{ steps.bump.outputs.skip }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -132,7 +132,7 @@ jobs:
             cross: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install protoc
         run: |
@@ -147,7 +147,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -164,7 +164,7 @@ jobs:
         with:
           package_json_file: frontend/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: pnpm
@@ -207,7 +207,7 @@ jobs:
           sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -219,7 +219,7 @@ jobs:
     needs: [tag, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -231,7 +231,7 @@ jobs:
           args: --latest --strip header
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: release-*
           merge-multiple: true
