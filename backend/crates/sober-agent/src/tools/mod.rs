@@ -53,3 +53,34 @@ pub use snapshots::{
     CreateSnapshotTool, ListSnapshotsTool, RestoreSnapshotTool, SnapshotToolContext,
 };
 pub use web_search::WebSearchTool;
+
+/// User-Agent string for outbound HTTP requests.
+///
+/// Mimics a real browser to avoid being blocked by sites that reject bots,
+/// with a Sõber identifier appended for transparency.
+pub(crate) const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0 Sober/",
+    env!("CARGO_PKG_VERSION"),
+);
+
+/// Builds a [`reqwest::Client`] with browser-like default headers.
+pub(crate) fn http_client() -> reqwest::Client {
+    use reqwest::header::{self, HeaderMap, HeaderValue};
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7"));
+    headers.insert(
+        header::ACCEPT_LANGUAGE,
+        HeaderValue::from_static("en-US,en;q=0.5"),
+    );
+    headers.insert(
+        header::ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, deflate, br"),
+    );
+
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .default_headers(headers)
+        .build()
+        .expect("failed to build HTTP client")
+}

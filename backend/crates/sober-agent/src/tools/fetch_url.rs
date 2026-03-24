@@ -44,12 +44,25 @@ pub struct FetchUrlTool {
 impl FetchUrlTool {
     /// Creates a new fetch-url tool with a default HTTP client.
     pub fn new() -> Self {
-        // reqwest client construction only fails if the TLS backend fails to
-        // initialize, which is unrecoverable. Panicking is appropriate here.
+        use reqwest::header::{self, HeaderMap, HeaderValue};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7"));
+        headers.insert(
+            header::ACCEPT_LANGUAGE,
+            HeaderValue::from_static("en-US,en;q=0.5"),
+        );
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, br"),
+        );
+
         let client = Client::builder()
+            .user_agent(super::USER_AGENT)
+            .default_headers(headers)
             .timeout(REQUEST_TIMEOUT)
             .build()
-            .expect("failed to build reqwest client");
+            .expect("failed to build HTTP client");
         Self { client }
     }
 

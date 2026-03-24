@@ -6,6 +6,8 @@ use reqwest::Client;
 use serde::Deserialize;
 use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 
+use super::http_client;
+
 /// Built-in tool that performs web searches via a SearXNG instance.
 pub struct WebSearchTool {
     client: Client,
@@ -35,7 +37,7 @@ impl WebSearchTool {
     /// Creates a new web search tool targeting the given SearXNG instance.
     pub fn new(searxng_base_url: String) -> Self {
         Self {
-            client: Client::new(),
+            client: http_client(),
             base_url: searxng_base_url,
         }
     }
