@@ -243,9 +243,8 @@ download_and_extract() {
     cp "$EXTRACT_DIR/bin/"* "$INSTALL_DIR/bin/"
     chmod +x "$INSTALL_DIR/bin/"*
 
-    # Symlinks for CLI tools
+    # Symlink for CLI tool
     ln -sf "$INSTALL_DIR/bin/sober" /usr/local/bin/sober
-    ln -sf "$INSTALL_DIR/bin/soberctl" /usr/local/bin/soberctl
 }
 
 # -- Configuration ------------------------------------------------------------
@@ -449,7 +448,7 @@ do_uninstall() {
     systemctl daemon-reload
 
     rm -rf "$INSTALL_DIR/bin"
-    rm -f /usr/local/bin/sober /usr/local/bin/soberctl
+    rm -f /usr/local/bin/sober
 
     info "Sober binaries and services removed."
     info ""

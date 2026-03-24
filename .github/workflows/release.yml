@@ -195,7 +195,7 @@ jobs:
 
           mkdir -p "$STAGING/bin" "$STAGING/systemd" "$STAGING/config"
 
-          for bin in sober soberctl sober-api sober-agent sober-scheduler sober-web; do
+          for bin in sober sober-api sober-agent sober-scheduler sober-web; do
             cp "backend/target/$BUILD_TARGET/release/$bin" "$STAGING/bin/" 2>/dev/null || true
           done
 
