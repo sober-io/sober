@@ -210,10 +210,15 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data/blobs"
     mkdir -p "$INSTALL_DIR/data/keys"
     mkdir -p "$CONFIG_DIR"
-    mkdir -p /run/sober
 
     chown -R "$SOBER_USER:$SOBER_GROUP" "$INSTALL_DIR"
     chown -R "$SOBER_USER:$SOBER_GROUP" "$CONFIG_DIR"
+
+    ensure_runtime_dir
+}
+
+ensure_runtime_dir() {
+    mkdir -p /run/sober
     chown "$SOBER_USER:$SOBER_GROUP" /run/sober
 
     # Ensure /run/sober survives reboots (tmpfs is wiped on restart).
@@ -442,6 +447,7 @@ do_upgrade() {
 
     download_and_extract
     install_systemd
+    ensure_runtime_dir
     run_migrations
     start_and_verify
 }
