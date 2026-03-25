@@ -1547,20 +1547,25 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
     }
 
     // If there are still pending tool_call_ids at the end, the matching tool
-    // results were truncated by the history limit. Strip the dangling
-    // tool_calls from the last assistant message to avoid an API error.
+    // results were never stored (crash, interruption, or history truncation).
+    // Strip dangling tool_calls from ALL affected assistant messages.
     if !pending_tool_ids.is_empty() {
         for msg in result.iter_mut().rev() {
             if msg.role == "assistant"
                 && let Some(ref tcs) = msg.tool_calls
                 && tcs.iter().any(|tc| pending_tool_ids.contains(&tc.id))
             {
+                for tc in tcs {
+                    pending_tool_ids.remove(&tc.id);
+                }
                 let empty_content = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
                 if empty_content {
                     msg.content = Some("[tool calls truncated from history]".to_owned());
                 }
                 msg.tool_calls = None;
-                break;
+                if pending_tool_ids.is_empty() {
+                    break;
+                }
             }
         }
     }
