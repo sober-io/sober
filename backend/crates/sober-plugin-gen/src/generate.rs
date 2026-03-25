@@ -440,7 +440,7 @@ fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String
 }
 
 fn cargo_toml(name: &str) -> String {
-    let pdk = crate::scaffold::pdk_path();
+    let pdk_version = crate::PDK_VERSION_REQ;
     format!(
         r#"[package]
 name = "sober-plugin-{name}"
@@ -451,7 +451,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-sober-pdk = {{ path = "{pdk}" }}
+sober-pdk = "{pdk_version}"
 extism-pdk = "1"
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"

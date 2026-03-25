@@ -15,3 +15,6 @@ pub use compile::compile;
 pub use error::GenError;
 pub use generate::{GeneratedPlugin, PluginGenerator};
 pub use scaffold::scaffold;
+
+/// Version requirement for the published `sober-pdk` crate used in generated plugin templates.
+pub const PDK_VERSION_REQ: &str = "0.1";
