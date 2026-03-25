@@ -53,10 +53,10 @@ export interface Conversation {
 
 export interface Message {
 	id: string;
-	role: 'user' | 'assistant' | 'system' | 'tool' | 'event';
+	role: 'user' | 'assistant' | 'system' | 'event';
 	content: string;
-	tool_calls?: unknown;
-	tool_result?: unknown;
+	reasoning?: string;
+	tool_executions?: ToolExecution[];
 	token_count: number;
 	user_id?: string;
 	metadata?: Record<string, unknown>;
@@ -64,12 +64,17 @@ export interface Message {
 	created_at: string;
 }
 
-export interface ToolCall {
+export interface ToolExecution {
 	id: string;
-	name: string;
+	tool_call_id: string;
+	tool_name: string;
 	input: unknown;
+	source: 'builtin' | 'plugin' | 'mcp';
+	status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 	output?: string;
-	isError?: boolean;
+	error?: string;
+	started_at?: string;
+	completed_at?: string;
 }
 
 export interface ConfirmRequest {
@@ -104,12 +109,16 @@ export type ServerWsMessage =
 	| { type: 'chat.delta'; conversation_id: string; content: string }
 	| { type: 'chat.thinking'; conversation_id: string; content: string }
 	| { type: 'chat.agent_typing'; conversation_id: string }
-	| { type: 'chat.tool_use'; conversation_id: string; tool_call: { name: string; input: unknown } }
 	| {
-			type: 'chat.tool_result';
+			type: 'chat.tool_execution_update';
 			conversation_id: string;
+			id: string;
+			message_id: string;
 			tool_call_id: string;
-			output: string;
+			tool_name: string;
+			status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+			output?: string;
+			error?: string;
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
 	| {

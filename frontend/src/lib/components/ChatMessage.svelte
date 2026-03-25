@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Tag, ToolCall } from '$lib/types';
+	import type { Tag, ToolExecution } from '$lib/types';
 	import { renderMarkdown } from '$lib/utils/markdown';
 	import StreamingText from './StreamingText.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
@@ -11,7 +11,7 @@
 		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
 		thinkingContent?: string;
-		toolCalls?: ToolCall[];
+		toolExecutions?: ToolExecution[];
 		streaming?: boolean;
 		thinking?: boolean;
 		timestamp?: string;
@@ -28,7 +28,7 @@
 		role,
 		content,
 		thinkingContent = '',
-		toolCalls,
+		toolExecutions,
 		streaming = false,
 		thinking = false,
 		timestamp,
@@ -42,7 +42,7 @@
 	}: Props = $props();
 
 	const isUser = $derived(role === 'user');
-	const hasToolCalls = $derived(toolCalls && toolCalls.length > 0);
+	const hasToolExecutions = $derived(toolExecutions && toolExecutions.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
@@ -112,30 +112,33 @@
 					</details>
 				{/if}
 
-				{#if thinking && hasToolCalls}
+				{#if thinking && hasToolExecutions}
 					<details open class="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
 						<summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">
 							Thinking...
 						</summary>
 						<div class="mt-1">
-							{#each toolCalls! as tc (tc.id)}
+							{#each toolExecutions! as te (te.id)}
 								<ToolCallDisplay
-									toolName={tc.name}
-									input={tc.input}
-									output={tc.output}
-									loading={!tc.output}
-									isError={tc.isError}
+									toolName={te.tool_name}
+									input={te.input}
+									output={te.output}
+									loading={te.status === 'pending' || te.status === 'running'}
+									isError={te.status === 'failed'}
+									error={te.error}
 								/>
 							{/each}
 						</div>
 					</details>
-				{:else if hasToolCalls}
-					{#each toolCalls! as tc (tc.id)}
+				{:else if hasToolExecutions}
+					{#each toolExecutions! as te (te.id)}
 						<ToolCallDisplay
-							toolName={tc.name}
-							input={tc.input}
-							output={tc.output}
-							loading={!tc.output}
+							toolName={te.tool_name}
+							input={te.input}
+							output={te.output}
+							loading={te.status === 'pending' || te.status === 'running'}
+							isError={te.status === 'failed'}
+							error={te.error}
 						/>
 					{/each}
 				{/if}

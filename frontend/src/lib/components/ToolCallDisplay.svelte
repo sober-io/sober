@@ -3,12 +3,16 @@
 		toolName: string;
 		input: unknown;
 		output?: string;
+		error?: string;
 		loading?: boolean;
 		isError?: boolean;
 	}
 
-	let { toolName, input, output, loading = false, isError = false }: Props = $props();
+	let { toolName, input, output, error, loading = false, isError = false }: Props = $props();
 	let expanded = $state(false);
+
+	const displayOutput = $derived(error ?? output);
+	const showError = $derived(isError || !!error);
 </script>
 
 <div class="my-2 rounded-md border border-zinc-200 text-sm dark:border-zinc-700">
@@ -20,7 +24,7 @@
 			<span
 				class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"
 			></span>
-		{:else if isError}
+		{:else if showError}
 			<svg
 				class="h-3 w-3 text-red-500"
 				fill="none"
@@ -40,7 +44,7 @@
 			</svg>
 		{/if}
 		<span class="font-mono text-xs">{toolName}</span>
-		{#if isError}
+		{#if showError}
 			<span class="text-xs text-red-500">failed</span>
 		{/if}
 	</button>
@@ -55,13 +59,13 @@
 					2
 				)}</pre>
 
-			{#if output !== undefined}
+			{#if displayOutput !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
 				<pre
 					class={[
 						'overflow-x-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
-						isError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
-					]}>{output}</pre>
+						showError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
+					]}>{displayOutput}</pre>
 			{/if}
 		</div>
 	{/if}

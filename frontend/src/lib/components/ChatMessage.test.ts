@@ -58,12 +58,22 @@ describe('ChatMessage', () => {
 		expect(screen.getByText('Streaming...')).toBeInTheDocument();
 	});
 
-	it('displays tool calls when provided', () => {
+	it('displays tool executions when provided', () => {
 		render(ChatMessage, {
 			props: {
 				role: 'assistant',
 				content: 'Done.',
-				toolCalls: [{ id: 'tc1', name: 'search', input: { query: 'test' }, output: 'found it' }]
+				toolExecutions: [
+					{
+						id: 'te1',
+						tool_call_id: 'tc1',
+						tool_name: 'search',
+						input: { query: 'test' },
+						source: 'builtin' as const,
+						status: 'completed' as const,
+						output: 'found it'
+					}
+				]
 			}
 		});
 
