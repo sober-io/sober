@@ -13,11 +13,9 @@ Environment=SOBER_CONFIG=/etc/sober/config.toml
 StateDirectory=sober
 Restart=on-failure
 RestartSec=5
-ProtectSystem=strict
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateTmp=yes
-ReadWritePaths=/opt/sober/data /run/sober
 
 [Install]
 WantedBy=sober.target

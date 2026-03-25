@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     let _ = std::fs::remove_file(&socket_path);
 
     // Ensure parent directory exists (best-effort — under systemd,
-    // RuntimeDirectory= creates it and ProtectSystem=strict blocks mkdir).
+    // tmpfiles.d creates /run/sober on boot).
     if let Some(parent) = socket_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
