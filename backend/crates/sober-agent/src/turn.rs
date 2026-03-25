@@ -264,11 +264,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 } else {
                     Some(content_buffer.clone())
                 },
-                reasoning_content: if reasoning_buffer.is_empty() {
-                    None
-                } else {
-                    Some(reasoning_buffer.clone())
-                },
+                // Thinking-enabled models require reasoning_content on every
+                // assistant message. Always provide it (empty if not captured).
+                reasoning_content: Some(reasoning_buffer.clone()),
                 tool_calls: Some(tool_calls.clone()),
                 tool_call_id: None,
             });
