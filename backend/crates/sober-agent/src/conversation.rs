@@ -14,27 +14,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
+use sober_core::types::Conversation;
 use sober_core::types::access::TriggerKind;
 use sober_core::types::enums::{AgentMode, MessageRole, ToolExecutionStatus};
 use sober_core::types::ids::{ConversationId, MessageId, UserId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{ConversationRepo, MessageRepo, ToolExecutionRepo, WorkspaceRepo};
-use sober_crypto::envelope::Mek;
-use sober_llm::LlmEngine;
-use sober_memory::{ContextLoader, MemoryStore};
 use sober_mind::assembly::Mind;
 use sober_mind::injection::InjectionVerdict;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::broadcast::ConversationUpdateSender;
-use crate::confirm::ConfirmationRegistrar;
+use crate::context::AgentContext;
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::stream::{AgentEvent, Usage};
-use crate::tools::{ToolBootstrap, TurnContext};
+use crate::tools::TurnContext;
 use crate::turn::{self, TurnParams};
 
 /// A message delivered to a [`ConversationActor`] through its inbox channel.
@@ -55,6 +51,9 @@ pub enum InboxMessage {
     Shutdown,
 }
 
+/// Mention trigger for the agent in group conversations.
+const MENTION_TRIGGER: &str = "@sober";
+
 /// A per-conversation actor that processes messages sequentially.
 ///
 /// Spawned as a tokio task by the [`ActorRegistry`](crate::agent) when a
@@ -71,22 +70,8 @@ pub struct ConversationActor<R: AgentRepos> {
     conversation_id: ConversationId,
     /// Inbox channel receiver — messages arrive here sequentially.
     inbox: mpsc::Receiver<InboxMessage>,
-
-    // -- Shared dependencies (Arc-cloned from the parent Agent) --
-    llm: Arc<dyn LlmEngine>,
-    mind: Arc<Mind>,
-    memory: Arc<MemoryStore>,
-    context_loader: Arc<ContextLoader<R::Msg>>,
-    repos: Arc<R>,
-    config: crate::agent::AgentConfig,
-    memory_config: MemoryConfig,
-    registrar: Option<ConfirmationRegistrar>,
-    broadcast_tx: ConversationUpdateSender,
-    mek: Option<Arc<Mek>>,
-    llm_config: Option<LlmConfig>,
-    tool_bootstrap: Arc<ToolBootstrap<R>>,
-    /// Pre-built static tools (web_search, fetch_url, scheduler, recall, remember).
-    static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
+    /// Shared agent dependencies.
+    ctx: AgentContext<R>,
     /// Per-conversation skill activation tracking.
     skill_activations: Arc<std::sync::Mutex<sober_skill::SkillActivationState>>,
 }
@@ -99,41 +84,16 @@ impl<R: AgentRepos> ConversationActor<R> {
     ///
     /// The `inbox` receiver is the consuming end of the channel; the sender
     /// half is held by the [`ActorRegistry`] for dispatching messages.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         conversation_id: ConversationId,
         inbox: mpsc::Receiver<InboxMessage>,
-        llm: Arc<dyn LlmEngine>,
-        mind: Arc<Mind>,
-        memory: Arc<MemoryStore>,
-        context_loader: Arc<ContextLoader<R::Msg>>,
-        repos: Arc<R>,
-        config: crate::agent::AgentConfig,
-        memory_config: MemoryConfig,
-        registrar: Option<ConfirmationRegistrar>,
-        broadcast_tx: ConversationUpdateSender,
-        mek: Option<Arc<Mek>>,
-        llm_config: Option<LlmConfig>,
-        tool_bootstrap: Arc<ToolBootstrap<R>>,
-        static_tools: Vec<Arc<dyn sober_core::types::tool::Tool>>,
+        ctx: AgentContext<R>,
         skill_activations: Arc<std::sync::Mutex<sober_skill::SkillActivationState>>,
     ) -> Self {
         Self {
             conversation_id,
             inbox,
-            llm,
-            mind,
-            memory,
-            context_loader,
-            repos,
-            config,
-            memory_config,
-            registrar,
-            broadcast_tx,
-            mek,
-            llm_config,
-            tool_bootstrap,
-            static_tools,
+            ctx,
             skill_activations,
         }
     }
@@ -213,7 +173,12 @@ impl<R: AgentRepos> ConversationActor<R> {
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) {
         let request_start = Instant::now();
-        let trigger_label = format!("{trigger:?}").to_lowercase();
+        let trigger_label = match trigger {
+            TriggerKind::Human => "human",
+            TriggerKind::Scheduler => "scheduler",
+            TriggerKind::Replica => "replica",
+            TriggerKind::Admin => "admin",
+        };
 
         let result = self
             .handle_message_inner(user_id, &content, trigger, event_tx)
@@ -222,7 +187,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         let status_label = if result.is_ok() { "success" } else { "error" };
         metrics::counter!(
             "sober_agent_requests_total",
-            "trigger" => trigger_label.clone(),
+            "trigger" => trigger_label,
             "status" => status_label,
         )
         .increment(1);
@@ -240,7 +205,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             );
             let error_msg = e.to_string();
             let _ = event_tx.send(Err(result.unwrap_err())).await;
-            let _ = self.broadcast_tx.send(proto::ConversationUpdate {
+            let _ = self.ctx.broadcast_tx.send(proto::ConversationUpdate {
                 conversation_id: self.conversation_id.to_string(),
                 event: Some(proto::conversation_update::Event::Error(proto::Error {
                     message: error_msg,
@@ -275,69 +240,20 @@ impl<R: AgentRepos> ConversationActor<R> {
         }
 
         // 2. Resolve conversation and workspace
-        let conversation = self
+        let mut conversation = self
+            .ctx
             .repos
             .conversations()
             .get_by_id(self.conversation_id)
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-        let workspace_root = self.config.workspace_root.display().to_string();
-
-        // Provision workspace if the conversation doesn't have one yet.
-        let mut conversation = conversation;
-        if conversation.workspace_id.is_none() {
-            let root_path = format!("{}/{}", workspace_root, self.conversation_id);
-            match self
-                .repos
-                .workspaces()
-                .create(user_id, &self.conversation_id.to_string(), None, &root_path)
-                .await
-            {
-                Ok(ws) => {
-                    if let Err(e) = self
-                        .repos
-                        .conversations()
-                        .update_workspace(self.conversation_id, Some(ws.id))
-                        .await
-                    {
-                        warn!("failed to link workspace to conversation: {e}");
-                    } else {
-                        conversation.workspace_id = Some(ws.id);
-                    }
-                }
-                Err(e) => {
-                    warn!("failed to create workspace: {e}");
-                }
-            }
-        }
-
-        // Resolve workspace directory path.
-        let workspace_dir = if let Some(ws_id) = conversation.workspace_id {
-            match self.repos.workspaces().get_by_id(ws_id).await {
-                Ok(ws) => {
-                    let root = PathBuf::from(&ws.root_path);
-                    match tokio::fs::create_dir_all(&root).await {
-                        Ok(()) => Some(root),
-                        Err(e) => {
-                            warn!(
-                                workspace_id = %ws_id,
-                                root_path = %ws.root_path,
-                                "failed to create workspace dir: {e}"
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
+        let workspace_dir = self.ensure_workspace(&mut conversation, user_id).await;
 
         // 3. Store user message (human-triggered only)
         let user_msg_id = if trigger == TriggerKind::Human {
             let user_msg = self
+                .ctx
                 .repos
                 .messages()
                 .create(CreateMessage {
@@ -360,7 +276,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,
-            AgentMode::Mention => content.to_lowercase().contains("@sober"),
+            AgentMode::Mention => content.to_lowercase().contains(MENTION_TRIGGER),
         };
 
         if !should_respond {
@@ -384,14 +300,19 @@ impl<R: AgentRepos> ConversationActor<R> {
 
         // 5. Build per-turn tool registry
         let tool_registry = {
-            let ctx = TurnContext {
+            let turn_ctx = TurnContext {
                 user_id,
                 conversation_id: self.conversation_id,
                 workspace_id: conversation.workspace_id,
                 workspace_dir: workspace_dir.clone(),
                 skill_activation_state: Some(Arc::clone(&self.skill_activations)),
             };
-            Arc::new(self.tool_bootstrap.build(&ctx, &self.static_tools).await)
+            Arc::new(
+                self.ctx
+                    .tool_bootstrap
+                    .build(&turn_ctx, &self.ctx.static_tools)
+                    .await,
+            )
         };
 
         // 6. Load skill catalog XML for system prompt injection
@@ -399,6 +320,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             let user_home = sober_workspace::user_home_dir();
             let ws_path = workspace_dir.clone().unwrap_or_default();
             match self
+                .ctx
                 .tool_bootstrap
                 .plugin_manager
                 .skill_loader()
@@ -415,31 +337,76 @@ impl<R: AgentRepos> ConversationActor<R> {
 
         // 7. Build TurnParams and run the agentic turn
         let params = TurnParams {
-            llm: &self.llm,
-            mind: &self.mind,
-            memory: &self.memory,
-            context_loader: &self.context_loader,
+            ctx: &self.ctx,
             tool_registry: &tool_registry,
-            repos: &self.repos,
-            config: &self.config,
-            memory_config: &self.memory_config,
             user_id,
             conversation_id: self.conversation_id,
             content,
             user_msg_id,
             event_tx,
-            broadcast_tx: &self.broadcast_tx,
-            registrar: self.registrar.as_ref(),
             trigger,
             conversation_kind: conversation.kind,
             workspace_id: conversation.workspace_id,
             workspace_dir,
-            llm_config: &self.llm_config,
-            mek: &self.mek,
             skill_catalog_xml,
         };
 
         turn::run_turn(&params).await
+    }
+
+    /// Provisions a workspace for the conversation if one doesn't exist yet,
+    /// and resolves the workspace directory path.
+    async fn ensure_workspace(
+        &self,
+        conversation: &mut Conversation,
+        user_id: UserId,
+    ) -> Option<PathBuf> {
+        let workspace_root = self.ctx.config.workspace_root.display().to_string();
+
+        // Provision workspace if the conversation doesn't have one yet.
+        if conversation.workspace_id.is_none() {
+            let root_path = format!("{}/{}", workspace_root, self.conversation_id);
+            match self
+                .ctx
+                .repos
+                .workspaces()
+                .create(user_id, &self.conversation_id.to_string(), None, &root_path)
+                .await
+            {
+                Ok(ws) => {
+                    if let Err(e) = self
+                        .ctx
+                        .repos
+                        .conversations()
+                        .update_workspace(self.conversation_id, Some(ws.id))
+                        .await
+                    {
+                        warn!("failed to link workspace to conversation: {e}");
+                    } else {
+                        conversation.workspace_id = Some(ws.id);
+                    }
+                }
+                Err(e) => {
+                    warn!("failed to create workspace: {e}");
+                }
+            }
+        }
+
+        // Resolve workspace directory path.
+        let ws_id = conversation.workspace_id?;
+        let ws = self.ctx.repos.workspaces().get_by_id(ws_id).await.ok()?;
+        let root = PathBuf::from(&ws.root_path);
+        match tokio::fs::create_dir_all(&root).await {
+            Ok(()) => Some(root),
+            Err(e) => {
+                warn!(
+                    workspace_id = %ws_id,
+                    root_path = %ws.root_path,
+                    "failed to create workspace dir: {e}"
+                );
+                None
+            }
+        }
     }
 
     /// Marks incomplete (pending/running) tool executions as failed.
@@ -450,6 +417,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     /// `Failed` so they don't block future context reconstruction.
     async fn recover_incomplete_executions(&self) {
         match self
+            .ctx
             .repos
             .tool_executions()
             .find_incomplete(self.conversation_id)
@@ -464,6 +432,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 );
                 for exec in incomplete {
                     if let Err(e) = self
+                        .ctx
                         .repos
                         .tool_executions()
                         .update_status(

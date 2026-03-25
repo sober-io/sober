@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::broadcast::ConversationUpdateSender;
-use crate::confirm::ConfirmationRegistrar;
+use crate::context::AgentContext;
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::stream::AgentEvent;
@@ -58,6 +58,24 @@ pub struct DispatchOutcome {
     pub any_errors: bool,
 }
 
+/// Per-dispatch request data for [`execute_tool_calls`].
+pub struct DispatchRequest<'a> {
+    /// Tool calls from the LLM response to dispatch.
+    pub tool_calls: &'a [LlmToolCall],
+    /// The assistant message ID (for FK on tool execution rows).
+    pub assistant_message_id: MessageId,
+    /// The conversation this dispatch belongs to.
+    pub conversation_id: ConversationId,
+    /// Per-turn tool registry.
+    pub tool_registry: &'a ToolRegistry,
+    /// Channel for streaming events back to the caller.
+    pub event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
+    /// The authenticated user.
+    pub user_id: UserId,
+    /// The workspace associated with this conversation, if any.
+    pub workspace_id: Option<WorkspaceId>,
+}
+
 /// Details of a confirmation request extracted from [`ToolError::NeedsConfirmation`].
 struct ConfirmDetail {
     confirm_id: String,
@@ -78,25 +96,16 @@ struct ConfirmDetail {
 ///
 /// Returns a [`DispatchOutcome`] with per-tool results for the next LLM
 /// iteration, plus aggregate flags.
-#[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_calls<R: AgentRepos>(
-    tool_calls: &[LlmToolCall],
-    assistant_message_id: MessageId,
-    conversation_id: ConversationId,
-    repos: &R,
-    tool_registry: &ToolRegistry,
-    event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
-    broadcast_tx: &ConversationUpdateSender,
-    conv_id_str: &str,
-    registrar: Option<&ConfirmationRegistrar>,
-    user_id: UserId,
-    workspace_id: Option<WorkspaceId>,
+    ctx: &AgentContext<R>,
+    req: &DispatchRequest<'_>,
 ) -> DispatchOutcome {
-    let mut results = Vec::with_capacity(tool_calls.len());
+    let conv_id_str = req.conversation_id.to_string();
+    let mut results = Vec::with_capacity(req.tool_calls.len());
     let mut any_context_modifying = false;
     let mut any_errors = false;
 
-    for tc in tool_calls {
+    for tc in req.tool_calls {
         let tool_name = &tc.function.name;
         let mut tool_input: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
             Ok(v) => v,
@@ -114,26 +123,28 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         // and associate results with the originating conversation.
         if let serde_json::Value::Object(ref mut map) = tool_input {
             map.entry("owner_id")
-                .or_insert_with(|| serde_json::Value::String(user_id.to_string()));
+                .or_insert_with(|| serde_json::Value::String(req.user_id.to_string()));
             map.entry("conversation_id")
-                .or_insert_with(|| serde_json::Value::String(conversation_id.to_string()));
+                .or_insert_with(|| serde_json::Value::String(req.conversation_id.to_string()));
             // TODO: resolve from RoleRepo when RBAC is wired into the agent
             map.entry("is_admin")
                 .or_insert(serde_json::Value::Bool(false));
         }
 
-        let _tool_internal = tool_registry
+        let _tool_internal = req
+            .tool_registry
             .get_tool(tool_name)
             .is_some_and(|t| t.metadata().internal);
 
         // -----------------------------------------------------------
         // Step 1: Write-ahead — create pending tool execution row
         // -----------------------------------------------------------
-        let exec = match repos
+        let exec = match ctx
+            .repos
             .tool_executions()
             .create_pending(CreateToolExecution {
-                conversation_id,
-                conversation_message_id: assistant_message_id,
+                conversation_id: req.conversation_id,
+                conversation_message_id: req.assistant_message_id,
                 tool_call_id: tc.id.clone(),
                 tool_name: tool_name.clone(),
                 input: tool_input.clone(),
@@ -164,15 +175,15 @@ pub async fn execute_tool_calls<R: AgentRepos>(
 
         let exec_id = exec.id;
         let exec_id_str = exec_id.to_string();
-        let msg_id_str = assistant_message_id.to_string();
+        let msg_id_str = req.assistant_message_id.to_string();
 
         // -----------------------------------------------------------
         // Step 2: Send pending event
         // -----------------------------------------------------------
         send_execution_update(
-            event_tx,
-            broadcast_tx,
-            conv_id_str,
+            req.event_tx,
+            &ctx.broadcast_tx,
+            &conv_id_str,
             &exec_id_str,
             &msg_id_str,
             &tc.id,
@@ -186,7 +197,8 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         // -----------------------------------------------------------
         // Step 3: Transition to running
         // -----------------------------------------------------------
-        if let Err(e) = repos
+        if let Err(e) = ctx
+            .repos
             .tool_executions()
             .update_status(exec_id, ToolExecutionStatus::Running, None, None)
             .await
@@ -195,9 +207,9 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         }
 
         send_execution_update(
-            event_tx,
-            broadcast_tx,
-            conv_id_str,
+            req.event_tx,
+            &ctx.broadcast_tx,
+            &conv_id_str,
             &exec_id_str,
             &msg_id_str,
             &tc.id,
@@ -222,17 +234,23 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         // Step 4: Execute the tool (with panic catch)
         // -----------------------------------------------------------
         let tool_start = Instant::now();
+        // Check context_modifying before execution.
+        if req
+            .tool_registry
+            .get_tool(tool_name)
+            .is_some_and(|t| t.metadata().context_modifying)
+        {
+            any_context_modifying = true;
+        }
+
         let (output, is_error) = execute_single_tool(
-            tool_registry,
+            ctx,
+            req.tool_registry,
             tool_name,
             tool_input.clone(),
-            &mut any_context_modifying,
-            event_tx,
-            broadcast_tx,
-            conv_id_str,
-            registrar,
-            user_id,
-            repos,
+            req.event_tx,
+            &conv_id_str,
+            req.user_id,
         )
         .await;
 
@@ -260,7 +278,8 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             (Some(output.as_str()), None)
         };
 
-        if let Err(e) = repos
+        if let Err(e) = ctx
+            .repos
             .tool_executions()
             .update_status(exec_id, final_status, db_output, db_error)
             .await
@@ -269,9 +288,9 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         }
 
         send_execution_update(
-            event_tx,
-            broadcast_tx,
-            conv_id_str,
+            req.event_tx,
+            &ctx.broadcast_tx,
+            &conv_id_str,
             &exec_id_str,
             &msg_id_str,
             &tc.id,
@@ -288,12 +307,12 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         // Audit logging for shell tool runs.
         if let Some(ref cmd) = shell_command {
             let _ = crate::audit::log_shell_exec(
-                repos.audit_log(),
-                user_id,
-                workspace_id,
+                ctx.repos.audit_log(),
+                req.user_id,
+                req.workspace_id,
                 serde_json::json!({
                     "command": cmd,
-                    "conversation_id": conversation_id.to_string(),
+                    "conversation_id": req.conversation_id.to_string(),
                 }),
             )
             .await;
@@ -317,25 +336,17 @@ pub async fn execute_tool_calls<R: AgentRepos>(
 /// Executes a single tool, handling the confirmation flow and panic catching.
 ///
 /// Returns `(output_string, is_error)`.
-#[allow(clippy::too_many_arguments)]
 async fn execute_single_tool<R: AgentRepos>(
+    ctx: &AgentContext<R>,
     tool_registry: &ToolRegistry,
     tool_name: &str,
     tool_input: serde_json::Value,
-    any_context_modifying: &mut bool,
     event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
-    broadcast_tx: &ConversationUpdateSender,
     conv_id_str: &str,
-    registrar: Option<&ConfirmationRegistrar>,
     user_id: UserId,
-    repos: &R,
 ) -> (String, bool) {
     match tool_registry.get_tool(tool_name) {
         Some(tool) => {
-            if tool.metadata().context_modifying {
-                *any_context_modifying = true;
-            }
-
             // Wrap execution in tokio::spawn to catch panics — a panicking
             // tool must not tear down the entire agent task.
             let execute_result = {
@@ -382,15 +393,13 @@ async fn execute_single_tool<R: AgentRepos>(
                     )
                     .increment(1);
                     let output = handle_confirmation(
+                        ctx,
                         &tool,
                         tool_input,
                         detail,
                         event_tx,
-                        broadcast_tx,
                         conv_id_str,
-                        registrar,
                         user_id,
-                        repos,
                     )
                     .await;
                     (output, false)
@@ -423,19 +432,16 @@ async fn execute_single_tool<R: AgentRepos>(
 /// Sends the confirmation event to the client, waits for the user's response,
 /// and re-executes the tool if approved. If the tool execution is denied or
 /// times out, an appropriate message is returned.
-#[allow(clippy::too_many_arguments)]
 async fn handle_confirmation<R: AgentRepos>(
+    ctx: &AgentContext<R>,
     tool: &Arc<dyn sober_core::types::tool::Tool>,
     mut tool_input: serde_json::Value,
     confirm: ConfirmDetail,
     event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
-    broadcast_tx: &ConversationUpdateSender,
     conv_id_str: &str,
-    registrar: Option<&ConfirmationRegistrar>,
     user_id: UserId,
-    repos: &R,
 ) -> String {
-    let Some(registrar) = registrar else {
+    let Some(ref registrar) = ctx.registrar else {
         return format!(
             "Command requires confirmation but no confirmation handler is available. \
              Risk level: {}",
@@ -455,7 +461,7 @@ async fn handle_confirmation<R: AgentRepos>(
             reason: confirm.reason.clone(),
         }))
         .await;
-    let _ = broadcast_tx.send(proto::ConversationUpdate {
+    let _ = ctx.broadcast_tx.send(proto::ConversationUpdate {
         conversation_id: conv_id_str.to_owned(),
         event: Some(proto::conversation_update::Event::ConfirmRequest(
             proto::ConfirmRequest {
@@ -472,7 +478,7 @@ async fn handle_confirmation<R: AgentRepos>(
         Ok(Ok(approved)) => {
             // Log the confirmation decision.
             let _ = crate::audit::log_confirmation(
-                repos.audit_log(),
+                ctx.repos.audit_log(),
                 user_id,
                 approved,
                 serde_json::json!({

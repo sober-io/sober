@@ -28,6 +28,7 @@ use tracing::{debug, info, warn};
 
 use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationRegistrar;
+use crate::context::AgentContext;
 use crate::conversation::{ConversationActor, InboxMessage};
 use crate::error::AgentError;
 use crate::stream::{AgentEvent, AgentResponseStream};
@@ -390,22 +391,25 @@ impl<R: AgentRepos> Agent<R> {
         } else {
             // Spawn a new actor.
             let (inbox_tx, inbox_rx) = mpsc::channel(ACTOR_INBOX_BUFFER);
+            let ctx = AgentContext {
+                llm: Arc::clone(&self.llm),
+                mind: Arc::clone(&self.mind),
+                memory: Arc::clone(&self.memory),
+                context_loader: Arc::clone(&self.context_loader),
+                repos: Arc::clone(&self.repos),
+                config: self.config.clone(),
+                memory_config: self.memory_config.clone(),
+                registrar: self.registrar.clone(),
+                broadcast_tx: self.broadcast_tx.clone(),
+                mek: self.mek.clone(),
+                llm_config: self.llm_config.clone(),
+                tool_bootstrap: Arc::clone(&self.tool_bootstrap),
+                static_tools: self.static_tools.clone(),
+            };
             let actor = ConversationActor::new(
                 conversation_id,
                 inbox_rx,
-                Arc::clone(&self.llm),
-                Arc::clone(&self.mind),
-                Arc::clone(&self.memory),
-                Arc::clone(&self.context_loader),
-                Arc::clone(&self.repos),
-                self.config.clone(),
-                self.memory_config.clone(),
-                self.registrar.clone(),
-                self.broadcast_tx.clone(),
-                self.mek.clone(),
-                self.llm_config.clone(),
-                Arc::clone(&self.tool_bootstrap),
-                self.static_tools.clone(),
+                ctx,
                 self.skill_activation_state(conversation_id),
             );
 

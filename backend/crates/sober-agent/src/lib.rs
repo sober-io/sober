@@ -5,6 +5,7 @@ pub mod audit;
 pub mod backends;
 pub mod broadcast;
 pub mod confirm;
+pub mod context;
 pub mod conversation;
 pub mod dispatch;
 pub mod error;

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use sober_core::config::{LlmConfig, MemoryConfig};
+use sober_core::config::LlmConfig;
 use sober_core::types::AgentRepos;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::enums::{ConversationKind, MessageRole};
@@ -25,14 +25,13 @@ use sober_core::types::repo::{ConversationRepo, MessageRepo, ToolExecutionRepo, 
 use sober_crypto::envelope::Mek;
 use sober_llm::types::{CompletionRequest, ToolCall as LlmToolCall};
 use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
-use sober_memory::{ContextLoader, LoadRequest, MemoryStore};
-use sober_mind::assembly::{Mind, TaskContext};
+use sober_memory::LoadRequest;
+use sober_mind::assembly::TaskContext;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-use crate::agent::{AgentConfig, format_memory_context};
-use crate::broadcast::ConversationUpdateSender;
-use crate::confirm::ConfirmationRegistrar;
+use crate::agent::format_memory_context;
+use crate::context::AgentContext;
 use crate::dispatch::{self, DispatchOutcome};
 use crate::error::AgentError;
 use crate::grpc::proto;
@@ -45,31 +44,32 @@ const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 3;
 
 /// All parameters needed to execute a single agentic turn (multi-iteration loop).
 ///
-/// This replaces the old `LoopContext` with individually-typed fields so that
-/// `run_turn` can be called as a free function rather than an `Agent` method.
-#[allow(clippy::too_many_arguments)]
+/// Holds a reference to [`AgentContext`] for shared dependencies plus per-turn
+/// fields specific to the current message being processed.
 pub struct TurnParams<'a, R: AgentRepos> {
-    pub llm: &'a Arc<dyn LlmEngine>,
-    pub mind: &'a Arc<Mind>,
-    pub memory: &'a Arc<MemoryStore>,
-    pub context_loader: &'a Arc<ContextLoader<R::Msg>>,
+    /// Shared agent dependencies.
+    pub ctx: &'a AgentContext<R>,
+    /// Per-turn tool registry (built fresh each turn with workspace context).
     pub tool_registry: &'a Arc<ToolRegistry>,
-    pub repos: &'a Arc<R>,
-    pub config: &'a AgentConfig,
-    pub memory_config: &'a MemoryConfig,
+    /// The authenticated user sending the message.
     pub user_id: UserId,
+    /// The conversation this turn belongs to.
     pub conversation_id: ConversationId,
+    /// The user's message content.
     pub content: &'a str,
+    /// The stored user message ID.
     pub user_msg_id: MessageId,
+    /// Channel for streaming [`AgentEvent`]s back to the caller.
     pub event_tx: &'a mpsc::Sender<Result<AgentEvent, AgentError>>,
-    pub broadcast_tx: &'a ConversationUpdateSender,
-    pub registrar: Option<&'a ConfirmationRegistrar>,
+    /// What triggered this interaction (Human, Scheduler, Admin, Replica).
     pub trigger: TriggerKind,
+    /// Whether this is a direct or group conversation.
     pub conversation_kind: ConversationKind,
+    /// The workspace associated with this conversation, if any.
     pub workspace_id: Option<WorkspaceId>,
+    /// Resolved workspace directory path on disk.
     pub workspace_dir: Option<PathBuf>,
-    pub llm_config: &'a Option<LlmConfig>,
-    pub mek: &'a Option<Arc<Mek>>,
+    /// Skill catalog XML for system prompt injection.
     pub skill_catalog_xml: String,
 }
 
@@ -93,7 +93,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
     // responses end up in a single DB row.
     let mut turn_assistant_msg_id: Option<MessageId> = None;
 
-    for iteration in 0..params.config.max_tool_iterations {
+    for iteration in 0..params.ctx.config.max_tool_iterations {
         debug!(iteration, "agent turn iteration");
         metrics::counter!("sober_agent_loop_iterations_total").increment(1);
 
@@ -140,10 +140,10 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         };
 
         let req = CompletionRequest {
-            model: params.config.model.clone(),
+            model: params.ctx.config.model.clone(),
             messages: llm_messages.clone(),
             tools: tool_definitions,
-            max_tokens: Some(params.config.max_tokens),
+            max_tokens: Some(params.ctx.config.max_tokens),
             temperature: None,
             stop: vec![],
             stream: true,
@@ -151,16 +151,16 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
 
         // Try dynamic key resolution for user-stored LLM credentials.
         let dynamic_engine: Option<OpenAiCompatibleEngine> = try_resolve_dynamic_engine(
-            params.repos,
+            &params.ctx.repos,
             params.user_id,
             params.conversation_id,
-            params.llm_config,
-            params.mek,
+            &params.ctx.llm_config,
+            &params.ctx.mek,
         )
         .await;
         let effective_llm: &dyn LlmEngine = match dynamic_engine {
             Some(ref engine) => engine,
-            None => &**params.llm,
+            None => &*params.ctx.llm,
         };
 
         let mut stream = effective_llm
@@ -188,7 +188,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                         .event_tx
                         .send(Ok(AgentEvent::TextDelta(text.clone())))
                         .await;
-                    let _ = params.broadcast_tx.send(proto::ConversationUpdate {
+                    let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
                         conversation_id: conv_id_str.clone(),
                         event: Some(proto::conversation_update::Event::TextDelta(
                             proto::TextDelta {
@@ -282,6 +282,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     existing_id
                 } else {
                     let assistant_msg = params
+                        .ctx
                         .repos
                         .messages()
                         .create(CreateMessage {
@@ -308,20 +309,17 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             };
 
             // Dispatch tool calls via the write-ahead dispatch module.
-            let outcome: DispatchOutcome = dispatch::execute_tool_calls(
-                &tool_calls,
-                assistant_msg_id,
-                params.conversation_id,
-                params.repos.as_ref(),
-                params.tool_registry,
-                params.event_tx,
-                params.broadcast_tx,
-                &conv_id_str,
-                params.registrar,
-                params.user_id,
-                params.workspace_id,
-            )
-            .await;
+            let dispatch_req = dispatch::DispatchRequest {
+                tool_calls: &tool_calls,
+                assistant_message_id: assistant_msg_id,
+                conversation_id: params.conversation_id,
+                tool_registry: params.tool_registry,
+                event_tx: params.event_tx,
+                user_id: params.user_id,
+                workspace_id: params.workspace_id,
+            };
+            let outcome: DispatchOutcome =
+                dispatch::execute_tool_calls(params.ctx, &dispatch_req).await;
 
             // Append tool result messages to in-memory LLM messages.
             for result in &outcome.results {
@@ -371,6 +369,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         let assistant_msg_id = if let Some(existing_id) = turn_assistant_msg_id {
             // Update the message that was created during tool-call phase.
             params
+                .ctx
                 .repos
                 .messages()
                 .update_content(
@@ -387,6 +386,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             existing_id
         } else {
             let assistant_msg = params
+                .ctx
                 .repos
                 .messages()
                 .create(CreateMessage {
@@ -410,23 +410,29 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         // Spawn background extraction ingestion.
         if !extraction_result.extractions.is_empty() {
             crate::ingestion::spawn_extraction_ingestion(
-                params.llm,
-                params.memory,
+                &params.ctx.llm,
+                &params.ctx.memory,
                 params.user_id,
                 extraction_result.extractions,
-                params.memory_config.decay_half_life_days,
+                params.ctx.memory_config.decay_half_life_days,
             );
         }
 
         // Broadcast NewMessage for the assistant message.
-        let _ = params.broadcast_tx.send(proto::ConversationUpdate {
+        let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
             conversation_id: conv_id_str.clone(),
             event: Some(proto::conversation_update::Event::NewMessage(
                 proto::NewMessage {
                     message_id: assistant_msg_id.to_string(),
                     role: "Assistant".to_owned(),
                     content: text.clone(),
-                    source: format!("{:?}", params.trigger).to_lowercase(),
+                    source: match params.trigger {
+                        TriggerKind::Human => "human",
+                        TriggerKind::Scheduler => "scheduler",
+                        TriggerKind::Replica => "replica",
+                        TriggerKind::Admin => "admin",
+                    }
+                    .to_owned(),
                     user_id: Some(params.user_id.to_string()),
                 },
             )),
@@ -444,7 +450,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 artifact_ref: None,
             }))
             .await;
-        let _ = params.broadcast_tx.send(proto::ConversationUpdate {
+        let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
             conversation_id: conv_id_str.clone(),
             event: Some(proto::conversation_update::Event::Done(proto::Done {
                 message_id: assistant_msg_id.to_string(),
@@ -465,9 +471,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
     }
 
     metrics::histogram!("sober_agent_loop_iterations_per_request")
-        .record(f64::from(params.config.max_tool_iterations));
+        .record(f64::from(params.ctx.config.max_tool_iterations));
     Err(AgentError::MaxIterationsExceeded(
-        params.config.max_tool_iterations,
+        params.ctx.config.max_tool_iterations,
     ))
 }
 
@@ -486,7 +492,7 @@ async fn build_context<R: AgentRepos>(
     _conv_id_str: &str,
 ) -> Result<(String, Vec<LlmMessage>), AgentError> {
     // a. Embed user message for context retrieval
-    let query_vector = match params.llm.embed(&[params.content]).await {
+    let query_vector = match params.ctx.llm.embed(&[params.content]).await {
         Ok(vecs) => vecs.into_iter().next().unwrap_or_default(),
         Err(e) => {
             warn!(error = %e, "embedding failed, proceeding without memory context");
@@ -496,17 +502,18 @@ async fn build_context<R: AgentRepos>(
 
     // b. Load context
     let recent_message_count = if params.trigger == TriggerKind::Human {
-        params.config.conversation_history_limit
+        params.ctx.config.conversation_history_limit
     } else {
         0
     };
     let hits_per_scope = if query_vector.is_empty() {
         0
     } else {
-        params.config.hits_per_scope
+        params.ctx.config.hits_per_scope
     };
 
     let loaded_context = params
+        .ctx
         .context_loader
         .load(
             LoadRequest {
@@ -514,11 +521,11 @@ async fn build_context<R: AgentRepos>(
                 query_text: params.content.to_owned(),
                 user_id: params.user_id,
                 conversation_id: params.conversation_id,
-                token_budget: params.config.context_token_budget,
+                token_budget: params.ctx.config.context_token_budget,
                 recent_message_count,
                 hits_per_scope,
             },
-            params.memory_config,
+            &params.ctx.memory_config,
         )
         .await
         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -541,7 +548,7 @@ async fn build_context<R: AgentRepos>(
             .collect();
         let mut names = HashMap::new();
         for uid in user_ids {
-            if let Ok(user) = params.repos.users().get_by_id(uid).await {
+            if let Ok(user) = params.ctx.repos.users().get_by_id(uid).await {
                 names.insert(uid, user.username);
             }
         }
@@ -574,6 +581,7 @@ async fn build_context<R: AgentRepos>(
 
     let tool_metadata = params.tool_registry.tool_metadata();
     let assembled = params
+        .ctx
         .mind
         .assemble(
             &caller,
@@ -597,11 +605,12 @@ async fn build_context<R: AgentRepos>(
 
     // e. Load messages with tool executions from DB for the conversation history.
     let messages_with_execs = params
+        .ctx
         .repos
         .tool_executions()
         .list_messages_with_executions(
             params.conversation_id,
-            params.config.conversation_history_limit,
+            params.ctx.config.conversation_history_limit,
         )
         .await
         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
@@ -668,6 +677,7 @@ async fn auto_generate_title<R: AgentRepos>(
     }
 
     let conversation = params
+        .ctx
         .repos
         .conversations()
         .get_by_id(params.conversation_id)
@@ -690,7 +700,7 @@ async fn auto_generate_title<R: AgentRepos>(
     );
 
     let title_req = CompletionRequest {
-        model: params.config.model.clone(),
+        model: params.ctx.config.model.clone(),
         messages: vec![LlmMessage::user(title_prompt)],
         tools: vec![],
         max_tokens: Some(200),
@@ -700,7 +710,7 @@ async fn auto_generate_title<R: AgentRepos>(
     };
 
     // Use non-streaming complete() for title generation — it's a short call.
-    if let Ok(title_resp) = params.llm.complete(title_req).await
+    if let Ok(title_resp) = params.ctx.llm.complete(title_req).await
         && let Some(title) = title_resp.choices.into_iter().next().and_then(|c| {
             // Primary: use content field if non-empty
             let title = c
@@ -725,6 +735,7 @@ async fn auto_generate_title<R: AgentRepos>(
             })
         })
         && params
+            .ctx
             .repos
             .conversations()
             .update_title(params.conversation_id, &title)
@@ -735,7 +746,7 @@ async fn auto_generate_title<R: AgentRepos>(
             .event_tx
             .send(Ok(AgentEvent::TitleGenerated(title.clone())))
             .await;
-        let _ = params.broadcast_tx.send(proto::ConversationUpdate {
+        let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
             conversation_id: conv_id_str.to_owned(),
             event: Some(proto::conversation_update::Event::TitleChanged(
                 proto::TitleChanged { title },
