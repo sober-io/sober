@@ -1487,9 +1487,9 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
         // When a non-tool message arrives and there are still pending tool_call_ids,
         // the sequence is broken (e.g., agent crashed mid-execution, or user
         // interrupted). Some tool results may exist while others are missing.
-        // Remove orphaned tool results and strip tool_calls from the assistant.
+        // Keep matched pairs, remove only the unmatched tool_calls.
         if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
-            // Drop tool result messages whose matching tool_call was never completed.
+            // Remove unmatched tool results (shouldn't exist, but be safe).
             result.retain(|msg| {
                 !(msg.role == "tool"
                     && msg
@@ -1497,17 +1497,26 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
                         .as_ref()
                         .is_some_and(|id| pending_tool_ids.contains(id)))
             });
-            // Strip tool_calls from the assistant message that owns the dangling IDs.
+            // Filter the assistant's tool_calls to keep only matched ones.
             for msg in result.iter_mut().rev() {
                 if msg.role == "assistant"
                     && let Some(ref tcs) = msg.tool_calls
                     && tcs.iter().any(|tc| pending_tool_ids.contains(&tc.id))
                 {
-                    let empty_content = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
-                    if empty_content {
-                        msg.content = Some("[tool calls interrupted]".to_owned());
+                    let kept: Vec<_> = tcs
+                        .iter()
+                        .filter(|tc| !pending_tool_ids.contains(&tc.id))
+                        .cloned()
+                        .collect();
+                    if kept.is_empty() {
+                        msg.tool_calls = None;
+                        let empty = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
+                        if empty {
+                            msg.content = Some("[tool calls interrupted]".to_owned());
+                        }
+                    } else {
+                        msg.tool_calls = Some(kept);
                     }
-                    msg.tool_calls = None;
                     break;
                 }
             }
@@ -1571,14 +1580,23 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
                 && let Some(ref tcs) = msg.tool_calls
                 && tcs.iter().any(|tc| pending_tool_ids.contains(&tc.id))
             {
+                let kept: Vec<_> = tcs
+                    .iter()
+                    .filter(|tc| !pending_tool_ids.contains(&tc.id))
+                    .cloned()
+                    .collect();
                 for tc in tcs {
                     pending_tool_ids.remove(&tc.id);
                 }
-                let empty_content = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
-                if empty_content {
-                    msg.content = Some("[tool calls truncated from history]".to_owned());
+                if kept.is_empty() {
+                    msg.tool_calls = None;
+                    let empty = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
+                    if empty {
+                        msg.content = Some("[tool calls truncated from history]".to_owned());
+                    }
+                } else {
+                    msg.tool_calls = Some(kept);
                 }
-                msg.tool_calls = None;
                 if pending_tool_ids.is_empty() {
                     break;
                 }
@@ -1689,6 +1707,122 @@ mod tests {
         assert_eq!(llm_msgs[1].content.as_deref(), Some("Hello!"));
         assert_eq!(llm_msgs[2].role, "assistant");
         assert_eq!(llm_msgs[2].content.as_deref(), Some("Hi there."));
+    }
+
+    /// Helper to build a domain message for tests.
+    fn msg(role: MessageRole, content: &str) -> DomainMessage {
+        DomainMessage {
+            id: sober_core::MessageId::new(),
+            conversation_id: sober_core::ConversationId::new(),
+            role,
+            content: content.to_owned(),
+            tool_calls: None,
+            tool_result: None,
+            token_count: None,
+            user_id: None,
+            metadata: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    fn assistant_with_tool_calls(ids: &[&str]) -> DomainMessage {
+        let tcs: Vec<serde_json::Value> = ids
+            .iter()
+            .map(|id| {
+                serde_json::json!({
+                    "id": id,
+                    "type": "function",
+                    "function": {"name": "test", "arguments": "{}"}
+                })
+            })
+            .collect();
+        let mut m = msg(MessageRole::Assistant, "");
+        m.tool_calls = Some(serde_json::Value::Array(tcs));
+        m
+    }
+
+    fn tool_result(tool_call_id: &str) -> DomainMessage {
+        let mut m = msg(MessageRole::Tool, "result");
+        m.tool_result = Some(serde_json::json!({"tool_call_id": tool_call_id}));
+        m
+    }
+
+    /// Reproduces the exact production bug: assistant has 4 tool_calls, only 1
+    /// result stored, then user message follows. The output must keep the
+    /// matched pair (assistant tool_call + tool result) and drop only the
+    /// unmatched tool_calls.
+    #[test]
+    fn partial_tool_results_mid_conversation() {
+        let msgs = vec![
+            assistant_with_tool_calls(&["me2", "jwQ", "fSb", "tY7"]),
+            tool_result("me2"),
+            // jwQ, fSb, tY7 never stored (agent crashed)
+            msg(MessageRole::User, "Mh, looks like you fetched something"),
+        ];
+
+        let result = domain_to_llm_messages(&msgs);
+
+        // Should have: assistant (tool_calls: [me2]) + tool me2 + user
+        assert_eq!(result.len(), 3, "expected 3 messages, got {result:#?}");
+        assert_eq!(result[0].role, "assistant");
+        let tcs = result[0]
+            .tool_calls
+            .as_ref()
+            .expect("should keep tool_calls");
+        assert_eq!(tcs.len(), 1, "should keep only matched tool_call");
+        assert_eq!(tcs[0].id, "me2");
+        assert_eq!(result[1].role, "tool");
+        assert_eq!(result[1].tool_call_id.as_deref(), Some("me2"));
+        assert_eq!(result[2].role, "user");
+    }
+
+    /// When ALL tool results are missing, strip tool_calls entirely and set
+    /// placeholder content.
+    #[test]
+    fn all_tool_results_missing_mid_conversation() {
+        let msgs = vec![
+            assistant_with_tool_calls(&["a", "b", "c"]),
+            // No tool results stored at all
+            msg(MessageRole::User, "Hello?"),
+        ];
+
+        let result = domain_to_llm_messages(&msgs);
+
+        // assistant (no tool_calls, placeholder content) + user
+        assert_eq!(result.len(), 2, "expected 2 messages, got {result:#?}");
+        assert_eq!(result[0].role, "assistant");
+        assert!(
+            result[0].tool_calls.is_none(),
+            "should strip all tool_calls"
+        );
+        assert_eq!(
+            result[0].content.as_deref(),
+            Some("[tool calls interrupted]")
+        );
+        assert_eq!(result[1].role, "user");
+    }
+
+    /// Same as partial_tool_results but at end of history (no user message after).
+    #[test]
+    fn partial_tool_results_end_of_history() {
+        let msgs = vec![
+            assistant_with_tool_calls(&["x", "y"]),
+            tool_result("x"),
+            // y never stored — history ends here
+        ];
+
+        let result = domain_to_llm_messages(&msgs);
+
+        assert_eq!(result.len(), 2, "expected 2 messages, got {result:#?}");
+        assert_eq!(result[0].role, "assistant");
+        let tcs = result[0]
+            .tool_calls
+            .as_ref()
+            .expect("should keep tool_calls");
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0].id, "x");
+        assert_eq!(result[1].role, "tool");
+        assert_eq!(result[1].tool_call_id.as_deref(), Some("x"));
     }
 
     #[test]
