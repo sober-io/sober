@@ -10,6 +10,7 @@ pub mod input;
 pub mod job_payload;
 pub mod repo;
 pub mod tool;
+pub mod tool_execution;
 
 pub use access::{CallerContext, Permission, TriggerKind};
 pub use agent_repos::AgentRepos;
@@ -22,12 +23,13 @@ pub use domain::{
 pub use enums::{
     AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind,
     ConversationUserRole, JobStatus, MessageRole, PluginKind, PluginOrigin, PluginScope,
-    PluginStatus, RoleKind, ScopeKind, UserStatus, WorkspaceState, WorktreeState,
+    PluginStatus, RoleKind, ScopeKind, ToolExecutionSource, ToolExecutionStatus, UserStatus,
+    WorkspaceState, WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
-    RoleId, ScopeId, SecretId, SessionId, TagId, ToolId, UserId, WorkspaceId, WorkspaceRepoId,
-    WorktreeId,
+    RoleId, ScopeId, SecretId, SessionId, TagId, ToolExecutionId, ToolId, UserId, WorkspaceId,
+    WorkspaceRepoId, WorktreeId,
 };
 pub use input::{
     ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMessage, CreatePlugin,
@@ -42,3 +44,4 @@ pub use repo::{
     SessionRepo, TagRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+pub use tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};

@@ -75,8 +75,6 @@ pub enum MessageRole {
     Assistant,
     /// System prompt or instruction.
     System,
-    /// Tool invocation result.
-    Tool,
     /// System-generated event notification (e.g. user joined/left).
     Event,
 }
@@ -341,6 +339,44 @@ pub enum PluginStatus {
     Failed,
 }
 
+/// Source of a tool execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "tool_execution_source", rename_all = "lowercase")
+)]
+pub enum ToolExecutionSource {
+    /// A built-in tool provided by the agent.
+    Builtin,
+    /// A tool provided by a plugin.
+    Plugin,
+    /// A tool provided via MCP (Model Context Protocol).
+    Mcp,
+}
+
+/// Status of a tool execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "tool_execution_status", rename_all = "lowercase")
+)]
+pub enum ToolExecutionStatus {
+    /// Execution has been created but not yet started.
+    Pending,
+    /// Execution is in progress.
+    Running,
+    /// Execution completed successfully.
+    Completed,
+    /// Execution failed.
+    Failed,
+    /// Execution was cancelled.
+    Cancelled,
+}
+
 /// Authorization role kind.
 ///
 /// Known roles have dedicated variants for compile-time safety.
@@ -505,7 +541,6 @@ mod tests {
             MessageRole::User,
             MessageRole::Assistant,
             MessageRole::System,
-            MessageRole::Tool,
             MessageRole::Event,
         ] {
             let json = serde_json::to_string(&variant).unwrap();
@@ -521,9 +556,37 @@ mod tests {
             "\"assistant\""
         );
         assert_eq!(
-            serde_json::to_string(&MessageRole::Tool).unwrap(),
-            "\"tool\""
+            serde_json::to_string(&MessageRole::Event).unwrap(),
+            "\"event\""
         );
+    }
+
+    #[test]
+    fn tool_execution_source_serde_roundtrip() {
+        for variant in [
+            ToolExecutionSource::Builtin,
+            ToolExecutionSource::Plugin,
+            ToolExecutionSource::Mcp,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ToolExecutionSource = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn tool_execution_status_serde_roundtrip() {
+        for variant in [
+            ToolExecutionStatus::Pending,
+            ToolExecutionStatus::Running,
+            ToolExecutionStatus::Completed,
+            ToolExecutionStatus::Failed,
+            ToolExecutionStatus::Cancelled,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: ToolExecutionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
     }
 
     #[test]
