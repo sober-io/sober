@@ -367,7 +367,15 @@
 			}
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
-				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
+				// Continue appending to the current assistant bubble UNLESS it
+				// already has tool executions — that means this text is a new
+				// response after tool results (separate DB message).
+				if (
+					last &&
+					last.role === 'assistant' &&
+					(last.thinking || last.streaming) &&
+					!last.toolExecutions?.length
+				) {
 					last.thinking = false;
 					last.streaming = true;
 					last.content += msg.content;
