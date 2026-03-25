@@ -81,41 +81,8 @@
 		userId: m.user_id
 	});
 
-	/** Convert raw API messages to ChatMsg format.
-	 *  Merges consecutive assistant messages from multi-step turns:
-	 *  assistant(tool_executions) + assistant(text) → single bubble. */
-	const toChatMessages = (rawMessages: Message[]): ChatMsg[] => {
-		const chatMessages = rawMessages.map(toChat);
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local non-reactive usage
-		const merged = new Set<number>();
-
-		for (let i = 0; i < chatMessages.length; i++) {
-			if (merged.has(i)) continue;
-			const root = chatMessages[i];
-			if (root.role !== 'assistant' || !root.toolExecutions?.length) continue;
-
-			// Look ahead for continuation assistant messages (more tools or final text).
-			let j = i + 1;
-			while (j < chatMessages.length && chatMessages[j].role === 'assistant' && !merged.has(j)) {
-				const next = chatMessages[j];
-				if (next.toolExecutions?.length) {
-					root.toolExecutions = [...root.toolExecutions!, ...next.toolExecutions];
-				}
-				if (next.content) {
-					root.content = root.content ? root.content + next.content : next.content;
-				}
-				if (next.thinkingContent) {
-					root.thinkingContent = root.thinkingContent
-						? root.thinkingContent + '\n' + next.thinkingContent
-						: next.thinkingContent;
-				}
-				merged.add(j);
-				j++;
-			}
-		}
-
-		return chatMessages.filter((_, i) => !merged.has(i));
-	};
+	/** Convert raw API messages to ChatMsg format. Tool executions are inline on assistant messages. */
+	const toChatMessages = (rawMessages: Message[]): ChatMsg[] => rawMessages.map(toChat);
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
@@ -400,15 +367,7 @@
 			}
 			case 'chat.delta': {
 				const last = messages[messages.length - 1];
-				// Continue appending to the current assistant bubble UNLESS it
-				// already has tool executions — that means this text is a new
-				// response after tool results (separate DB message).
-				if (
-					last &&
-					last.role === 'assistant' &&
-					(last.thinking || last.streaming) &&
-					!last.toolExecutions?.length
-				) {
+				if (last && last.role === 'assistant' && (last.thinking || last.streaming)) {
 					last.thinking = false;
 					last.streaming = true;
 					last.content += msg.content;

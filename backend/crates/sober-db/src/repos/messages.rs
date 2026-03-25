@@ -133,4 +133,20 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
 
         Ok(row.into())
     }
+
+    async fn update_content(
+        &self,
+        id: MessageId,
+        content: &str,
+        reasoning: Option<&str>,
+    ) -> Result<(), AppError> {
+        sqlx::query("UPDATE conversation_messages SET content = $2, reasoning = $3 WHERE id = $1")
+            .bind(id.as_uuid())
+            .bind(content)
+            .bind(reasoning)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Ok(())
+    }
 }

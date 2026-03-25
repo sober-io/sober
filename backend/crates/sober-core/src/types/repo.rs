@@ -240,6 +240,14 @@ pub trait MessageRepo: Send + Sync {
 
     /// Gets a single message by ID.
     fn get_by_id(&self, id: MessageId) -> impl Future<Output = Result<Message, AppError>> + Send;
+
+    /// Updates the content and reasoning of an existing message.
+    fn update_content(
+        &self,
+        id: MessageId,
+        content: &str,
+        reasoning: Option<&str>,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
 }
 
 /// Conversation membership and unread tracking operations.

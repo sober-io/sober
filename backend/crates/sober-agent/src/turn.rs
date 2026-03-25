@@ -89,6 +89,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
     let mut system_prompt_len: usize = 0;
     let mut consecutive_tool_errors: u32 = 0;
     let mut assistant_text = String::new();
+    // Track the assistant message across iterations so tool-call and text
+    // responses end up in a single DB row.
+    let mut turn_assistant_msg_id: Option<MessageId> = None;
 
     for iteration in 0..params.config.max_tool_iterations {
         debug!(iteration, "agent turn iteration");
@@ -271,28 +274,34 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     .is_some_and(|t| t.metadata().internal)
             });
 
-            // Write-ahead: store the assistant message BEFORE executing tools
-            // so that tool execution rows can FK to it.
+            // Write-ahead: create the assistant message on first tool-call
+            // iteration, reuse on subsequent iterations. This ensures all tool
+            // executions and the final text live on one message row.
             let assistant_msg_id = if !all_internal {
-                let assistant_msg = params
-                    .repos
-                    .messages()
-                    .create(CreateMessage {
-                        conversation_id: params.conversation_id,
-                        role: MessageRole::Assistant,
-                        content: content_buffer.clone(),
-                        reasoning: if reasoning_buffer.is_empty() {
-                            None
-                        } else {
-                            Some(reasoning_buffer.clone())
-                        },
-                        token_count: usage_stats.map(|u| u.total_tokens as i32),
-                        metadata: None,
-                        user_id: Some(params.user_id),
-                    })
-                    .await
-                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-                assistant_msg.id
+                if let Some(existing_id) = turn_assistant_msg_id {
+                    existing_id
+                } else {
+                    let assistant_msg = params
+                        .repos
+                        .messages()
+                        .create(CreateMessage {
+                            conversation_id: params.conversation_id,
+                            role: MessageRole::Assistant,
+                            content: content_buffer.clone(),
+                            reasoning: if reasoning_buffer.is_empty() {
+                                None
+                            } else {
+                                Some(reasoning_buffer.clone())
+                            },
+                            token_count: usage_stats.map(|u| u.total_tokens as i32),
+                            metadata: None,
+                            user_id: Some(params.user_id),
+                        })
+                        .await
+                        .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+                    turn_assistant_msg_id = Some(assistant_msg.id);
+                    assistant_msg.id
+                }
             } else {
                 // Internal-only tool calls: use a temporary ID (not persisted).
                 MessageId::new()
@@ -357,25 +366,46 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             assistant_text = text.clone();
         }
 
-        // Store the assistant response (cleaned, without extraction block).
-        let assistant_msg = params
-            .repos
-            .messages()
-            .create(CreateMessage {
-                conversation_id: params.conversation_id,
-                role: MessageRole::Assistant,
-                content: text.clone(),
-                reasoning: if reasoning_buffer.is_empty() {
-                    None
-                } else {
-                    Some(reasoning_buffer.clone())
-                },
-                token_count: usage_stats.map(|u| u.total_tokens as i32),
-                metadata: None,
-                user_id: Some(params.user_id),
-            })
-            .await
-            .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+        // Store the assistant response. If tool calls ran earlier in this
+        // turn, update the existing message; otherwise create a new one.
+        let assistant_msg_id = if let Some(existing_id) = turn_assistant_msg_id {
+            // Update the message that was created during tool-call phase.
+            params
+                .repos
+                .messages()
+                .update_content(
+                    existing_id,
+                    &text,
+                    if reasoning_buffer.is_empty() {
+                        None
+                    } else {
+                        Some(&reasoning_buffer)
+                    },
+                )
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            existing_id
+        } else {
+            let assistant_msg = params
+                .repos
+                .messages()
+                .create(CreateMessage {
+                    conversation_id: params.conversation_id,
+                    role: MessageRole::Assistant,
+                    content: text.clone(),
+                    reasoning: if reasoning_buffer.is_empty() {
+                        None
+                    } else {
+                        Some(reasoning_buffer.clone())
+                    },
+                    token_count: usage_stats.map(|u| u.total_tokens as i32),
+                    metadata: None,
+                    user_id: Some(params.user_id),
+                })
+                .await
+                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            assistant_msg.id
+        };
 
         // Spawn background extraction ingestion.
         if !extraction_result.extractions.is_empty() {
@@ -387,8 +417,6 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 params.memory_config.decay_half_life_days,
             );
         }
-
-        let assistant_msg_id = assistant_msg.id;
 
         // Broadcast NewMessage for the assistant message.
         let _ = params.broadcast_tx.send(proto::ConversationUpdate {
