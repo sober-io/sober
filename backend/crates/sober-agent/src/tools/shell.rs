@@ -21,7 +21,7 @@ use sober_workspace::SnapshotManager;
 use super::ShellToolConfig;
 
 /// Maximum output length returned to the LLM to avoid blowing up context.
-const MAX_OUTPUT_LEN: usize = 16_000;
+const MAX_OUTPUT_LEN: usize = 64_000;
 
 /// Default per-command timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u32 = 300;
@@ -225,9 +225,13 @@ impl ShellTool {
             output.push_str(&result.stderr);
         }
 
-        // Truncate if too long
+        // Truncate if too long (find char boundary to avoid splitting UTF-8).
         if output.len() > MAX_OUTPUT_LEN {
-            output.truncate(MAX_OUTPUT_LEN);
+            let mut end = MAX_OUTPUT_LEN;
+            while !output.is_char_boundary(end) {
+                end -= 1;
+            }
+            output.truncate(end);
             output.push_str("\n\n[output truncated]");
         }
 

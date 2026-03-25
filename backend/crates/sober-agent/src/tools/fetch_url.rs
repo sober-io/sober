@@ -12,7 +12,7 @@ use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, Tool
 const MAX_BODY_SIZE: usize = 10_485_760;
 
 /// Maximum output length in characters sent back to the LLM.
-const MAX_OUTPUT_LEN: usize = 8000;
+const MAX_OUTPUT_LEN: usize = 64_000;
 
 /// HTTP request timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -284,9 +284,13 @@ impl FetchUrlTool {
             text.into_owned()
         };
 
-        // Truncate to MAX_OUTPUT_LEN.
+        // Truncate to MAX_OUTPUT_LEN at a char boundary.
         if output.len() > MAX_OUTPUT_LEN {
-            output.truncate(MAX_OUTPUT_LEN);
+            let mut end = MAX_OUTPUT_LEN;
+            while !output.is_char_boundary(end) {
+                end -= 1;
+            }
+            output.truncate(end);
             output.push_str("\n\n[truncated]");
         }
 
