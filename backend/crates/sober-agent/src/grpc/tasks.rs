@@ -170,18 +170,23 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
 
     let inner = match event {
         AgentEvent::TextDelta(content) => Event::TextDelta(proto::TextDelta { content }),
-        AgentEvent::ToolCallStart { name, input } => Event::ToolCallStart(proto::ToolCallStart {
-            name,
-            input_json: input.to_string(),
-            internal: false,
+        AgentEvent::ToolExecutionUpdate {
+            id,
+            message_id,
+            tool_call_id,
+            tool_name,
+            status,
+            output,
+            error,
+        } => Event::ToolExecutionUpdate(proto::ToolExecutionUpdate {
+            id,
+            message_id,
+            tool_call_id,
+            tool_name,
+            status,
+            output,
+            error,
         }),
-        AgentEvent::ToolCallResult { name, output } => {
-            Event::ToolCallResult(proto::ToolCallResult {
-                name,
-                output,
-                internal: false,
-            })
-        }
         AgentEvent::Done {
             message_id,
             usage,

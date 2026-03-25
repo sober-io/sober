@@ -72,8 +72,7 @@ message HealthResponse {
 message AgentEvent {
   oneof event {
     TextDelta text_delta = 1;
-    ToolCallStart tool_call_start = 2;
-    ToolCallResult tool_call_result = 3;
+    ToolExecutionUpdate tool_execution_update = 2;
     Done done = 4;
     Error error = 5;
     ThinkingDelta thinking_delta = 6;
@@ -83,11 +82,14 @@ message AgentEvent {
 }
 
 message TextDelta { string content = 1; }
-message ToolCallStart { string name = 1; string input_json = 2; bool internal = 3; }
-message ToolCallResult {
-  string name = 1;
-  string output = 2;
-  bool internal = 3;
+message ToolExecutionUpdate {
+  string id = 1;                    // tool execution UUID
+  string message_id = 2;            // assistant message UUID
+  string tool_call_id = 3;          // LLM-assigned tool call ID
+  string tool_name = 4;
+  string status = 5;                // pending, running, completed, failed, cancelled
+  optional string output = 6;
+  optional string error = 7;
 }
 message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; string artifact_ref = 4; }
 message Error { string message = 1; }
@@ -170,8 +172,7 @@ message ConversationUpdate {
     NewMessage new_message = 2;
     TitleChanged title_changed = 3;
     TextDelta text_delta = 4;
-    ToolCallStart tool_call_start = 5;
-    ToolCallResult tool_call_result = 6;
+    ToolExecutionUpdate tool_execution_update = 5;
     ThinkingDelta thinking_delta = 7;
     ConfirmRequest confirm_request = 8;
     Done done = 9;

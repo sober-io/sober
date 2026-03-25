@@ -288,18 +288,24 @@ mod tests {
     }
 
     #[test]
-    fn to_proto_event_tool_call_start() {
-        let event = AgentEvent::ToolCallStart {
-            name: "web_search".to_owned(),
-            input: serde_json::json!({"query": "rust"}),
+    fn to_proto_event_tool_execution_update() {
+        let event = AgentEvent::ToolExecutionUpdate {
+            id: "exec-1".to_owned(),
+            message_id: "msg-1".to_owned(),
+            tool_call_id: "tc-1".to_owned(),
+            tool_name: "web_search".to_owned(),
+            status: "running".to_owned(),
+            output: None,
+            error: None,
         };
         let proto = tasks::to_proto_event(event);
         match proto.event {
-            Some(proto::agent_event::Event::ToolCallStart(tcs)) => {
-                assert_eq!(tcs.name, "web_search");
-                assert!(tcs.input_json.contains("rust"));
+            Some(proto::agent_event::Event::ToolExecutionUpdate(teu)) => {
+                assert_eq!(teu.id, "exec-1");
+                assert_eq!(teu.tool_name, "web_search");
+                assert_eq!(teu.status, "running");
             }
-            other => panic!("expected ToolCallStart, got {other:?}"),
+            other => panic!("expected ToolExecutionUpdate, got {other:?}"),
         }
     }
 

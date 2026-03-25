@@ -22,19 +22,22 @@ pub struct Usage {
 pub enum AgentEvent {
     /// Incremental text output from the LLM.
     TextDelta(String),
-    /// A tool call has started.
-    ToolCallStart {
-        /// Name of the tool being called.
-        name: String,
-        /// JSON-encoded input for the tool.
-        input: serde_json::Value,
-    },
-    /// A tool call has completed.
-    ToolCallResult {
-        /// Name of the tool that was called.
-        name: String,
-        /// Output produced by the tool.
-        output: String,
+    /// A tool execution status update.
+    ToolExecutionUpdate {
+        /// Unique ID of the tool execution.
+        id: String,
+        /// The assistant message that triggered this tool call.
+        message_id: String,
+        /// LLM-assigned tool call ID.
+        tool_call_id: String,
+        /// Name of the tool.
+        tool_name: String,
+        /// Current status: pending, running, completed, failed, cancelled.
+        status: String,
+        /// Tool output (when completed).
+        output: Option<String>,
+        /// Error message (when failed).
+        error: Option<String>,
     },
     /// The agent has finished processing.
     Done {
