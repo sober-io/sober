@@ -7,15 +7,6 @@ use std::path::Path;
 
 use crate::GenError;
 
-/// Returns the path to the `sober-pdk` crate.
-///
-/// Checks `SOBER_PDK_PATH` env var first, falls back to the default
-/// container path `/usr/local/share/sober/sdks/sober-pdk`.
-pub fn pdk_path() -> String {
-    std::env::var("SOBER_PDK_PATH")
-        .unwrap_or_else(|_| "/usr/local/share/sober/sdks/sober-pdk".to_string())
-}
-
 /// Scaffolds a new plugin project in the given output directory.
 ///
 /// Creates the directory structure with `plugin.toml`, `Cargo.toml`,
@@ -30,7 +21,7 @@ pub fn scaffold(name: &str, output_dir: &Path) -> Result<(), GenError> {
     std::fs::create_dir_all(output_dir.join("src"))?;
 
     std::fs::write(output_dir.join("plugin.toml"), plugin_toml(name))?;
-    std::fs::write(output_dir.join("Cargo.toml"), cargo_toml(name, &pdk_path()))?;
+    std::fs::write(output_dir.join("Cargo.toml"), cargo_toml(name))?;
     std::fs::write(output_dir.join("src").join("lib.rs"), lib_rs(name))?;
     std::fs::write(output_dir.join("build.rs"), build_rs())?;
 
@@ -60,7 +51,8 @@ description = "TODO: describe what this tool does"
     )
 }
 
-fn cargo_toml(name: &str, pdk_path: &str) -> String {
+fn cargo_toml(name: &str) -> String {
+    let pdk_version = crate::PDK_VERSION_REQ;
     format!(
         r#"[package]
 name = "sober-plugin-{name}"
@@ -71,7 +63,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-sober-pdk = {{ path = "{pdk_path}" }}
+sober-pdk = "{pdk_version}"
 extism-pdk = "1"
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
@@ -99,8 +91,6 @@ pub fn {fn_name}(input: String) -> FnResult<String> {{
 
 fn build_rs() -> &'static str {
     r#"fn main() {
-    // When sober-pdk build_support is available, use:
-    // sober_pdk_build_support::emit_capability_flags("plugin.toml");
     println!("cargo:rerun-if-changed=plugin.toml");
 }
 "#

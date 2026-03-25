@@ -1,0 +1,57 @@
+name: PDK Release
+
+on:
+  push:
+    branches: [main]
+    paths: ["sdks/sober-pdk/**"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (cargo publish --dry-run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish sober-pdk to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check if version already published
+        id: check
+        working-directory: sdks/sober-pdk
+        run: |
+          PKG_VERSION=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version')
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+          # cargo search output: 'sober-pdk = "0.1.0"    # ...'
+          PUBLISHED=$(cargo search sober-pdk --limit 1 2>/dev/null || echo "")
+          if echo "$PUBLISHED" | grep -q "\"$PKG_VERSION\""; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "sober-pdk $PKG_VERSION already published, skipping"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "sober-pdk $PKG_VERSION not yet published"
+          fi
+
+      - name: Publish sober-pdk
+        if: steps.check.outputs.published == 'false'
+        working-directory: sdks/sober-pdk
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          FLAGS=""
+          if [ "$DRY_RUN" = "true" ]; then
+            FLAGS="--dry-run"
+          fi
+          cargo publish $FLAGS
