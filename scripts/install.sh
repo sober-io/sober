@@ -210,9 +210,15 @@ create_directories() {
     mkdir -p "$INSTALL_DIR/data/blobs"
     mkdir -p "$INSTALL_DIR/data/keys"
     mkdir -p "$CONFIG_DIR"
+    mkdir -p /run/sober
 
     chown -R "$SOBER_USER:$SOBER_GROUP" "$INSTALL_DIR"
     chown -R "$SOBER_USER:$SOBER_GROUP" "$CONFIG_DIR"
+    chown "$SOBER_USER:$SOBER_GROUP" /run/sober
+
+    # Ensure /run/sober survives reboots (tmpfs is wiped on restart).
+    printf 'd /run/sober 0755 %s %s -\n' "$SOBER_USER" "$SOBER_GROUP" \
+        > /etc/tmpfiles.d/sober.conf
 }
 
 # -- Download & Extract -------------------------------------------------------
