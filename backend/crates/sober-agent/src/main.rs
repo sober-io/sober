@@ -319,15 +319,35 @@ async fn main() -> Result<()> {
 
     info!(socket = %socket_path.display(), "gRPC server listening");
 
-    // 21. Serve with graceful shutdown
-    Server::builder()
-        .add_service(AgentServiceServer::new(grpc_service))
-        .serve_with_incoming_shutdown(uds_stream, shutdown_signal())
-        .await
-        .context("gRPC server failed")?;
+    // 21. Serve with graceful shutdown.
+    //
+    // `serve_with_incoming_shutdown` stops accepting new connections on signal
+    // but waits for in-flight RPCs (e.g. long-running LLM calls) to finish.
+    // After the signal fires we give in-flight RPCs 5s before force-exiting.
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    // Cancel background tasks so the process exits promptly.
-    shutdown_token.cancel();
+    let signal_token = shutdown_token.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        signal_token.cancel();
+    });
+
+    let server = Server::builder()
+        .add_service(AgentServiceServer::new(grpc_service))
+        .serve_with_incoming_shutdown(uds_stream, shutdown_token.cancelled());
+
+    tokio::select! {
+        result = server => {
+            if let Err(e) = result {
+                anyhow::bail!("gRPC server failed: {e}");
+            }
+        }
+        () = async {
+            shutdown_token.cancelled().await;
+            tokio::time::sleep(DRAIN_TIMEOUT).await;
+            info!("drain timeout reached, forcing exit");
+        } => {}
+    }
 
     info!("sober-agent shut down");
     Ok(())
