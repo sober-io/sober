@@ -66,7 +66,7 @@ impl Default for AgentConfig {
         Self {
             max_tool_iterations: 25,
             context_token_budget: 128_000,
-            conversation_history_limit: 50,
+            conversation_history_limit: 200,
             hits_per_scope: 5,
             model: "anthropic/claude-sonnet-4".to_owned(),
             embedding_model: "text-embedding-3-small".to_owned(),
@@ -1599,7 +1599,7 @@ mod tests {
         let config = AgentConfig::default();
         assert_eq!(config.max_tool_iterations, 25);
         assert_eq!(config.context_token_budget, 128_000);
-        assert_eq!(config.conversation_history_limit, 50);
+        assert_eq!(config.conversation_history_limit, 200);
         assert_eq!(config.hits_per_scope, 5);
         assert_eq!(config.model, "anthropic/claude-sonnet-4");
         assert_eq!(config.embedding_model, "text-embedding-3-small");
