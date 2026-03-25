@@ -54,4 +54,4 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             FLAGS="--dry-run"
           fi
-          cargo publish $FLAGS
+          cargo publish --allow-dirty $FLAGS
