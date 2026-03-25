@@ -151,7 +151,7 @@ done
 detect_mode() {
     if [ "$UNINSTALL" = "1" ]; then
         echo "uninstall"
-    elif [ -x "$INSTALL_DIR/bin/sober-api" ]; then
+    elif [ -x "$INSTALL_DIR/bin/sober" ]; then
         echo "upgrade"
     else
         echo "install"
@@ -425,7 +425,7 @@ start_and_verify() {
 
 do_upgrade() {
     local current_version
-    current_version=$("$INSTALL_DIR/bin/sober-api" --version 2>/dev/null | awk '{print $2}') || true
+    current_version=$("$INSTALL_DIR/bin/sober" --version 2>/dev/null | awk '{print $2}') || true
     info "Current version: ${current_version:-unknown}"
 
     info "Stopping services"
