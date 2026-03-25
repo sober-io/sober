@@ -159,6 +159,18 @@
 			}
 		}
 
+		// Mark any tool calls without output as interrupted (agent crashed).
+		for (const msg of chatMessages) {
+			if (msg.toolCalls) {
+				for (const tc of msg.toolCalls) {
+					if (tc.output === undefined) {
+						tc.output = '[interrupted]';
+						tc.isError = true;
+					}
+				}
+			}
+		}
+
 		return chatMessages.filter((_, i) => !merged.has(i));
 	};
 
@@ -485,6 +497,9 @@
 					const tc = last.toolCalls.find((t) => !t.output);
 					if (tc) {
 						tc.output = msg.output;
+						tc.isError =
+							msg.output.startsWith('Tool error:') ||
+							msg.output.startsWith('Plugin execution failed:');
 						messages = [...messages];
 					}
 				}
@@ -610,6 +625,14 @@
 				if (last && (last.streaming || last.thinking)) {
 					last.streaming = false;
 					last.thinking = false;
+					if (last.toolCalls) {
+						for (const tc of last.toolCalls) {
+							if (!tc.output) {
+								tc.output = msg.error;
+								tc.isError = true;
+							}
+						}
+					}
 					last.content += `\n\nError: ${msg.error}`;
 				} else {
 					messages.push({

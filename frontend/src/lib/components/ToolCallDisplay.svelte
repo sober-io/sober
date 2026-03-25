@@ -4,9 +4,10 @@
 		input: unknown;
 		output?: string;
 		loading?: boolean;
+		isError?: boolean;
 	}
 
-	let { toolName, input, output, loading = false }: Props = $props();
+	let { toolName, input, output, loading = false, isError = false }: Props = $props();
 	let expanded = $state(false);
 </script>
 
@@ -19,6 +20,16 @@
 			<span
 				class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"
 			></span>
+		{:else if isError}
+			<svg
+				class="h-3 w-3 text-red-500"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+				stroke-width="2"
+			>
+				<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+			</svg>
 		{:else}
 			<svg
 				class="h-3 w-3 transition-transform {expanded ? 'rotate-90' : ''}"
@@ -29,6 +40,9 @@
 			</svg>
 		{/if}
 		<span class="font-mono text-xs">{toolName}</span>
+		{#if isError}
+			<span class="text-xs text-red-500">failed</span>
+		{/if}
 	</button>
 
 	{#if expanded}
@@ -44,7 +58,10 @@
 			{#if output !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
 				<pre
-					class="overflow-x-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{output}</pre>
+					class={[
+						'overflow-x-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
+						isError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
+					]}>{output}</pre>
 			{/if}
 		</div>
 	{/if}

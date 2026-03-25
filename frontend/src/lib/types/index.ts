@@ -69,6 +69,7 @@ export interface ToolCall {
 	name: string;
 	input: unknown;
 	output?: string;
+	isError?: boolean;
 }
 
 export interface ConfirmRequest {

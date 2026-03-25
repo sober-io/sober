@@ -124,6 +124,7 @@
 									input={tc.input}
 									output={tc.output}
 									loading={!tc.output}
+									isError={tc.isError}
 								/>
 							{/each}
 						</div>
