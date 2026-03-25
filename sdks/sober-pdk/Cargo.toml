@@ -1,6 +1,6 @@
 [package]
 name = "sober-pdk"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Guest-side SDK for Sober WASM plugin authors"
 license = "MIT"
