@@ -44,10 +44,10 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ┌──────────────┐  ┌────────────────┐  ┌────────────────┐
 │  sober-auth  │  │  sober-agent   │  │  sober-plugin  │
 │              │  │                │  │                │
-│ • Password   │  │ • Orchestrator │  │ • Registry     │
-│ • OIDC       │  │ • Replica Mgmt │  │ • Sandbox      │
-│ • Passkeys   │  │ • Task Queue   │  │ • Audit Engine │
-│ • HW Tokens  │  │ • Delegation   │  │ • Code Gen     │
+│ • Password   │  │ • Actor Model  │  │ • Registry     │
+│ • OIDC       │  │ • Orchestrator │  │ • Sandbox      │
+│ • Passkeys   │  │ • Write-ahead  │  │ • Audit Engine │
+│ • HW Tokens  │  │ • Streaming    │  │ • Code Gen     │
 │ • RBAC/ABAC  │  │                │  │                │
 └──────────────┘  └───────┬────────┘  └────────────────┘
                           │ gRPC/UDS
@@ -91,7 +91,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`) |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
-| `sober-agent` | **Binary crate (gRPC server process).** Agent orchestration, replica lifecycle, task delegation, self-evolution. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
+| `sober-agent` | **Binary crate (gRPC server process).** Actor-model agent: one `ConversationActor` per conversation ensures sequential message processing. Write-ahead persistence for tool executions with crash recovery. Real-time LLM streaming. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
 | `sober-plugin` | Plugin registry, WASM host functions (13 host functions via Extism), backend service traits, audit pipeline, blob-backed storage |
 | `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
 | `sober-skill` | Skill discovery, loading, and activation. Provides `SkillCatalog`, `SkillLoader`, `ActivateSkillTool`, frontmatter parsing. |
@@ -163,7 +163,7 @@ This means any trigger (user via WebSocket, scheduler job, future channels)
 produces events that reach the frontend without the caller needing to relay them.
 
 `ConversationUpdate` carries a typed `oneof event`: `NewMessage`, `TitleChanged`,
-`TextDelta`, `ToolCallStart`, `ToolCallResult`, `ThinkingDelta`, `ConfirmRequest`,
+`TextDelta`, `ToolExecutionUpdate`, `ThinkingDelta`, `ConfirmRequest`,
 `Done`, `Error`.
 
 ### Scheduler Job Routing
@@ -174,6 +174,63 @@ Jobs are routed by payload type:
 - **Artifact** → blob resolved from `sober-workspace`, run in `sober-sandbox`
 
 After local execution, the scheduler notifies the agent via `WakeAgent` RPC.
+
+---
+
+## Agent Processing Model
+
+### Actor Model
+
+Each conversation gets a long-lived `ConversationActor` (tokio task) that processes
+messages sequentially through an inbox channel. An `ActorRegistry` (`DashMap`)
+maps `ConversationId` → `ActorHandle` (sender half of the inbox channel).
+
+```
+HandleMessage RPC
+    → Agent::handle_message()
+        → ActorRegistry.get_or_spawn(conversation_id)
+            → inbox_tx.send(InboxMessage::UserMessage { ... })
+
+ConversationActor (one per conversation):
+    loop {
+        recv from inbox (5 min idle timeout)
+        → handle_message_inner()
+        → run_turn() → LLM stream → dispatch tool calls → loop
+    }
+```
+
+**Key invariant:** One actor per conversation, one message at a time. No concurrent
+processing races within a conversation.
+
+### Write-Ahead Tool Execution Persistence
+
+Tool executions are tracked in a dedicated `conversation_tool_executions` table
+with FK to the assistant message that triggered them. The dispatch pipeline:
+
+1. LLM returns assistant message + `tool_calls`
+2. Store assistant message → `conversation_messages`
+3. For each tool call:
+   - `INSERT` with `status='pending'` (write-ahead)
+   - `UPDATE` to `'running'`
+   - Execute tool
+   - `UPDATE` to `'completed'` or `'failed'` with output/error
+
+`ToolExecutionUpdate` events stream each status transition to the frontend in
+real-time. The unique constraint `(conversation_message_id, tool_call_id)` makes
+orphaned tool calls structurally impossible.
+
+### Crash Recovery
+
+On actor startup, `recover_incomplete_executions()` queries for any tool executions
+still in `pending` or `running` status and marks them `failed` with
+`"Agent restarted during execution"`. This ensures no stale in-progress state
+persists across restarts.
+
+### LLM Streaming
+
+The agent streams LLM responses token-by-token via `llm.stream()`. `TextDelta`
+events are forwarded immediately to the frontend. Tool call fragments are buffered
+until the stream completes, then assembled and dispatched.
 
 ---
 
@@ -294,7 +351,7 @@ Plugins declare capabilities in a TOML manifest (`plugin.toml`) and export tool 
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
-| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry |
+| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Cache | In-memory (moka) | Route/session caching with PostgreSQL-backed sessions |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |
