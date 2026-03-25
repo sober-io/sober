@@ -416,7 +416,24 @@ start_and_verify() {
     info "Starting Sober services"
     systemctl start sober.target
 
-    sleep 3
+    info "Waiting for services to start..."
+    local attempts=0
+    local max_attempts=10
+    local all_up=0
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        sleep 2
+        all_up=1
+        for svc in sober-agent sober-api sober-scheduler sober-web; do
+            if ! systemctl is-active --quiet "$svc"; then
+                all_up=0
+                break
+            fi
+        done
+        if [ "$all_up" = "1" ]; then
+            break
+        fi
+        attempts=$((attempts + 1))
+    done
 
     local failed=0
     for svc in sober-agent sober-api sober-scheduler sober-web; do
