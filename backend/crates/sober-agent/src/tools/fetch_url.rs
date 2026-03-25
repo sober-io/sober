@@ -52,11 +52,6 @@ impl FetchUrlTool {
             header::ACCEPT_LANGUAGE,
             HeaderValue::from_static("en-US,en;q=0.5"),
         );
-        headers.insert(
-            header::ACCEPT_ENCODING,
-            HeaderValue::from_static("gzip, deflate, br"),
-        );
-
         let client = Client::builder()
             .user_agent(super::USER_AGENT)
             .default_headers(headers)
@@ -276,12 +271,13 @@ impl FetchUrlTool {
             )));
         }
 
-        let text = String::from_utf8_lossy(&body);
+        // Strip null bytes: valid UTF-8 but rejected by PostgreSQL TEXT columns.
+        let text = String::from_utf8_lossy(&body).replace('\0', "");
 
         let mut output = if is_html {
             strip_html_tags(&text)
         } else {
-            text.into_owned()
+            text
         };
 
         // Truncate to MAX_OUTPUT_LEN at a char boundary.
@@ -376,6 +372,14 @@ mod tests {
         assert!(text.contains("Also visible"));
         assert!(!text.contains("color"));
         assert!(!text.contains("style"));
+    }
+
+    #[test]
+    fn strip_html_strips_null_bytes() {
+        let html = "<p>Hello\0World</p>";
+        let text = strip_html_tags(&String::from_utf8_lossy(html.as_bytes()).replace('\0', ""));
+        assert!(text.contains("HelloWorld"));
+        assert!(!text.contains('\0'));
     }
 
     #[test]
