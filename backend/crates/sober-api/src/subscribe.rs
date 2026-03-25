@@ -147,32 +147,16 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             content: td.content,
         }),
         proto::conversation_update::Event::ToolExecutionUpdate(teu) => {
-            // Map status to the appropriate WS message type.
-            match teu.status.as_str() {
-                "running" => Some(ServerWsMessage::ChatToolUse {
-                    conversation_id: cid,
-                    tool_call: serde_json::json!({
-                        "id": teu.id,
-                        "tool_call_id": teu.tool_call_id,
-                        "name": teu.tool_name,
-                        "status": teu.status,
-                    }),
-                }),
-                "completed" => Some(ServerWsMessage::ChatToolResult {
-                    conversation_id: cid,
-                    tool_call_id: teu.tool_call_id,
-                    output: teu.output.unwrap_or_default(),
-                }),
-                "failed" => Some(ServerWsMessage::ChatToolResult {
-                    conversation_id: cid,
-                    tool_call_id: teu.tool_call_id,
-                    output: teu
-                        .error
-                        .unwrap_or_else(|| "tool execution failed".to_owned()),
-                }),
-                // pending, cancelled — no WS message needed
-                _ => None,
-            }
+            Some(ServerWsMessage::ChatToolExecutionUpdate {
+                conversation_id: cid,
+                id: teu.id,
+                message_id: teu.message_id,
+                tool_call_id: teu.tool_call_id,
+                tool_name: teu.tool_name,
+                status: teu.status,
+                output: teu.output,
+                error: teu.error,
+            })
         }
         proto::conversation_update::Event::Done(done) => Some(ServerWsMessage::ChatDone {
             conversation_id: cid,

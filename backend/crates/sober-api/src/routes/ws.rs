@@ -89,23 +89,27 @@ pub enum ServerWsMessage {
         /// Text fragment.
         content: String,
     },
-    /// A tool call has started.
-    #[serde(rename = "chat.tool_use")]
-    ChatToolUse {
+    /// A tool execution status update.
+    #[serde(rename = "chat.tool_execution_update")]
+    ChatToolExecutionUpdate {
         /// Conversation this event belongs to.
         conversation_id: String,
-        /// Tool call details.
-        tool_call: serde_json::Value,
-    },
-    /// A tool call has completed.
-    #[serde(rename = "chat.tool_result")]
-    ChatToolResult {
-        /// Conversation this event belongs to.
-        conversation_id: String,
-        /// Name of the tool.
+        /// Tool execution UUID.
+        id: String,
+        /// Assistant message UUID.
+        message_id: String,
+        /// LLM-assigned tool call ID.
         tool_call_id: String,
-        /// Output from the tool.
-        output: String,
+        /// Name of the tool.
+        tool_name: String,
+        /// Execution status: pending, running, completed, failed, cancelled.
+        status: String,
+        /// Tool output (when completed).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        /// Error message (when failed).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     /// The agent has finished processing.
     #[serde(rename = "chat.done")]
