@@ -232,9 +232,14 @@ impl<R: AgentRepos> ConversationActor<R> {
         )
         .record(request_start.elapsed().as_secs_f64());
 
-        if let Err(e) = result {
+        if let Err(ref e) = result {
+            warn!(
+                conversation_id = %self.conversation_id,
+                error = %e,
+                "turn failed"
+            );
             let error_msg = e.to_string();
-            let _ = event_tx.send(Err(e)).await;
+            let _ = event_tx.send(Err(result.unwrap_err())).await;
             let _ = self.broadcast_tx.send(proto::ConversationUpdate {
                 conversation_id: self.conversation_id.to_string(),
                 event: Some(proto::conversation_update::Event::Error(proto::Error {
