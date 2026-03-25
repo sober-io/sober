@@ -20,11 +20,11 @@ second agent loop racing on the same conversation.
 5. **Clean data model** — tool executions as first-class entities, not JSONB hacks
 6. **Backend-generated message IDs** — no frontend UUID generation
 
+7. **Streaming LLM responses** — send `TextDelta` events as tokens arrive
+
 ## Non-Goals
 
 - Parallel tool execution within a single turn (keep sequential for now)
-- Streaming LLM responses (keep `stream: false` for now)
-- Changes to the gRPC contract (API/Scheduler ↔ Agent boundary is unchanged)
 
 ---
 
@@ -257,6 +257,33 @@ Tool is NOT executed. Error returned to LLM as a tool failure result. No orphan 
   includes which tools failed and why
 - Frontend can show tool execution status (pending/running/completed/failed) in real-time
   via existing event stream
+
+---
+
+## Streaming LLM Responses
+
+Switch from `stream: false` (buffered) to `stream: true` (SSE) for the main LLM
+completion call. The plumbing is already built end-to-end:
+
+- `LlmEngine::stream()` — implemented in OpenAI-compatible client and ACP transport
+- `StreamChunk` type + SSE parser in `sober-llm/src/streaming.rs`
+- `TextDelta` event in proto `ConversationUpdate` oneof
+- `AgentEvent::TextDelta` variant in agent event stream
+- Frontend already handles `TextDelta` via WebSocket
+
+**Changes in `turn.rs`:**
+
+Replace `llm.complete(req)` with `llm.stream(req)`. Process chunks in a loop:
+- Text content deltas → send `TextDelta` events immediately to the user
+- Tool call deltas → buffer incrementally (arguments arrive as string fragments)
+- On stream end → assemble final text + complete tool calls, proceed to tool execution
+
+`sober-llm` already provides `collect_stream()` which buffers a stream into a full
+`CompletionResponse`. For the initial implementation, use a hybrid approach:
+1. Forward `TextDelta` events to the user as chunks arrive (real-time text)
+2. Use `collect_stream()` to assemble tool calls (buffer until complete)
+
+Title generation stays non-streaming (short internal call, no user-facing latency).
 
 ---
 
