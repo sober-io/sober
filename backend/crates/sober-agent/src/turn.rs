@@ -136,6 +136,18 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             params.tool_registry.tool_definitions()
         };
 
+        // Debug: log messages with missing reasoning_content
+        for (i, msg) in llm_messages.iter().enumerate() {
+            if msg.role == "assistant" && msg.reasoning_content.is_none() {
+                warn!(
+                    index = i,
+                    has_tool_calls = msg.tool_calls.is_some(),
+                    content_len = msg.content.as_ref().map_or(0, |c| c.len()),
+                    "assistant message missing reasoning_content"
+                );
+            }
+        }
+
         let req = CompletionRequest {
             model: params.config.model.clone(),
             messages: llm_messages.clone(),
