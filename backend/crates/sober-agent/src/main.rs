@@ -293,6 +293,9 @@ async fn main() -> Result<()> {
         connect_to_scheduler(scheduler_client_bg, &scheduler_socket, scheduler_token).await;
     });
 
+    // Clone agent handle for graceful shutdown (before it moves into the gRPC service).
+    let agent_for_shutdown = Arc::clone(&agent);
+
     let grpc_service = AgentGrpcService::new(
         agent,
         confirmation_sender,
@@ -344,6 +347,8 @@ async fn main() -> Result<()> {
         }
         () = async {
             shutdown_token.cancelled().await;
+            // Gracefully shut down all conversation actors before the drain timeout.
+            agent_for_shutdown.shutdown().await;
             tokio::time::sleep(DRAIN_TIMEOUT).await;
             info!("drain timeout reached, forcing exit");
         } => {}

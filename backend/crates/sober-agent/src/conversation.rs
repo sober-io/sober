@@ -37,9 +37,6 @@ use crate::stream::{AgentEvent, Usage};
 use crate::tools::{ToolBootstrap, TurnContext};
 use crate::turn::{self, TurnParams};
 
-/// Buffer size for the per-message event channel.
-const EVENT_CHANNEL_BUFFER: usize = 64;
-
 /// A message delivered to a [`ConversationActor`] through its inbox channel.
 #[derive(Debug)]
 pub enum InboxMessage {

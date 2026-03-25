@@ -15,10 +15,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sober_core::types::AgentRepos;
-use sober_core::types::enums::{MessageRole, ToolExecutionSource, ToolExecutionStatus};
+use sober_core::types::enums::{ToolExecutionSource, ToolExecutionStatus};
 use sober_core::types::ids::{ConversationId, MessageId, UserId, WorkspaceId};
-use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{MessageRepo, ToolExecutionRepo};
+use sober_core::types::repo::ToolExecutionRepo;
 use sober_core::types::tool::ToolError;
 use sober_core::types::tool_execution::CreateToolExecution;
 use sober_llm::types::ToolCall as LlmToolCall;
@@ -123,7 +122,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                 .or_insert(serde_json::Value::Bool(false));
         }
 
-        let tool_internal = tool_registry
+        let _tool_internal = tool_registry
             .get_tool(tool_name)
             .is_some_and(|t| t.metadata().internal);
 
@@ -283,34 +282,8 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         )
         .await;
 
-        // -----------------------------------------------------------
-        // Step 6: Persist tool result message for audit trail
-        // -----------------------------------------------------------
-        if !tool_internal {
-            if let Err(e) = repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id,
-                    role: MessageRole::Tool,
-                    content: output.clone(),
-                    tool_calls: None,
-                    tool_result: Some(serde_json::json!({
-                        "tool_call_id": tc.id,
-                        "name": tool_name,
-                    })),
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
-            {
-                warn!(
-                    tool = %tool_name,
-                    error = %e,
-                    "failed to persist tool result message"
-                );
-            }
-        }
+        // Tool results are now persisted via ToolExecution records (Step 4/5 above).
+        // No separate Tool-role message is needed.
 
         // Audit logging for shell tool runs.
         if let Some(ref cmd) = shell_command {

@@ -24,6 +24,10 @@ pub enum AgentError {
     /// Prompt injection was detected in user input.
     #[error("injection detected: {0}")]
     InjectionDetected(String),
+
+    /// An internal error that doesn't fit other categories.
+    #[error("{0}")]
+    Internal(String),
 }
 
 impl From<AgentError> for AppError {
