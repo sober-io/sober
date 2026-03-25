@@ -1485,21 +1485,30 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
         }
 
         // When a non-tool message arrives and there are still pending tool_call_ids,
-        // the sequence is broken (e.g., user interrupted). Drop the pending assistant
-        // message's tool_calls by replacing the last assistant message.
+        // the sequence is broken (e.g., agent crashed mid-execution, or user
+        // interrupted). Some tool results may exist while others are missing.
+        // Remove orphaned tool results and strip tool_calls from the assistant.
         if m.role == MessageRole::User && !pending_tool_ids.is_empty() {
-            // The sequence was broken by a user message. Remove the preceding
-            // assistant message if it only existed for its tool_calls.
-            if let Some(last) = result.last()
-                && last.role == "assistant"
-                && last.tool_calls.is_some()
-            {
-                let empty_content = last.content.as_ref().is_none_or(|c| c.trim().is_empty());
-                if empty_content {
-                    result.pop();
-                } else {
-                    let last_mut = result.last_mut().unwrap();
-                    last_mut.tool_calls = None;
+            // Drop tool result messages whose matching tool_call was never completed.
+            result.retain(|msg| {
+                !(msg.role == "tool"
+                    && msg
+                        .tool_call_id
+                        .as_ref()
+                        .is_some_and(|id| pending_tool_ids.contains(id)))
+            });
+            // Strip tool_calls from the assistant message that owns the dangling IDs.
+            for msg in result.iter_mut().rev() {
+                if msg.role == "assistant"
+                    && let Some(ref tcs) = msg.tool_calls
+                    && tcs.iter().any(|tc| pending_tool_ids.contains(&tc.id))
+                {
+                    let empty_content = msg.content.as_ref().is_none_or(|c| c.trim().is_empty());
+                    if empty_content {
+                        msg.content = Some("[tool calls interrupted]".to_owned());
+                    }
+                    msg.tool_calls = None;
+                    break;
                 }
             }
             pending_tool_ids.clear();
@@ -1548,8 +1557,15 @@ pub fn domain_to_llm_messages(msgs: &[DomainMessage]) -> Vec<LlmMessage> {
 
     // If there are still pending tool_call_ids at the end, the matching tool
     // results were never stored (crash, interruption, or history truncation).
-    // Strip dangling tool_calls from ALL affected assistant messages.
+    // Drop orphaned tool results and strip tool_calls from affected assistants.
     if !pending_tool_ids.is_empty() {
+        result.retain(|msg| {
+            !(msg.role == "tool"
+                && msg
+                    .tool_call_id
+                    .as_ref()
+                    .is_some_and(|id| pending_tool_ids.contains(id)))
+        });
         for msg in result.iter_mut().rev() {
             if msg.role == "assistant"
                 && let Some(ref tcs) = msg.tool_calls
