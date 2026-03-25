@@ -41,7 +41,8 @@ pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, ConversationUserRepo, JobRepo, JobRunRepo,
     MessageRepo, PluginExecutionLogRepo, PluginRepo, RoleRepo, SandboxExecutionLogRepo, SecretRepo,
-    SessionRepo, TagRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorktreeRepo,
+    SessionRepo, TagRepo, ToolExecutionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo,
+    WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 pub use tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};

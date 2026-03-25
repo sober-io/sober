@@ -11,10 +11,11 @@ use chrono::{DateTime, Utc};
 use super::domain::*;
 use super::enums::{
     AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, PluginScope,
-    PluginStatus, RoleKind, UserStatus,
+    PluginStatus, RoleKind, ToolExecutionStatus, UserStatus,
 };
 use super::ids::*;
 use super::input::*;
+use super::tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};
 use crate::error::AppError;
 
 /// User account operations.
@@ -772,4 +773,41 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
         scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Tool execution tracking operations.
+pub trait ToolExecutionRepo: Send + Sync {
+    /// Creates a pending tool execution (write-ahead).
+    fn create_pending(
+        &self,
+        input: CreateToolExecution,
+    ) -> impl Future<Output = Result<ToolExecution, AppError>> + Send;
+
+    /// Updates status, output, error, and timestamps.
+    fn update_status(
+        &self,
+        id: ToolExecutionId,
+        status: ToolExecutionStatus,
+        output: Option<&str>,
+        error: Option<&str>,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Finds incomplete (pending/running) executions for crash recovery.
+    fn find_incomplete(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ToolExecution>, AppError>> + Send;
+
+    /// Finds all executions for a specific assistant message.
+    fn find_by_message(
+        &self,
+        message_id: MessageId,
+    ) -> impl Future<Output = Result<Vec<ToolExecution>, AppError>> + Send;
+
+    /// Loads messages with their tool executions for LLM context reconstruction.
+    fn list_messages_with_executions(
+        &self,
+        conversation_id: ConversationId,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<MessageWithExecutions>, AppError>> + Send;
 }

@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::rows::MessageRow;
 
 /// Column list for message queries.
-const MSG_COLUMNS: &str = "id, conversation_id, role, content, tool_calls, \
-                            tool_result, token_count, user_id, metadata, created_at";
+const MSG_COLUMNS: &str = "id, conversation_id, role, content, reasoning, \
+                            token_count, user_id, metadata, created_at";
 
 /// PostgreSQL-backed message repository.
 pub struct PgMessageRepo {
@@ -28,8 +28,8 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, MessageRow>(
             &format!(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls, tool_result, token_count, metadata, user_id) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+                "INSERT INTO conversation_messages (id, conversation_id, role, content, reasoning, token_count, metadata, user_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
                  RETURNING {MSG_COLUMNS}"
             ),
         )
@@ -37,8 +37,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .bind(input.conversation_id.as_uuid())
         .bind(input.role)
         .bind(&input.content)
-        .bind(&input.tool_calls)
-        .bind(&input.tool_result)
+        .bind(&input.reasoning)
         .bind(input.token_count)
         .bind(&input.metadata)
         .bind(input.user_id.map(|u| *u.as_uuid()))
@@ -59,7 +58,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         let rows = sqlx::query_as::<_, MessageRow>(&format!(
             "SELECT * FROM (\
                     SELECT {MSG_COLUMNS} \
-                    FROM messages WHERE conversation_id = $1 \
+                    FROM conversation_messages WHERE conversation_id = $1 \
                     ORDER BY created_at DESC \
                     LIMIT $2\
                  ) AS recent ORDER BY created_at ASC"
@@ -80,7 +79,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         limit: i64,
     ) -> Result<Vec<Message>, AppError> {
         let rows = sqlx::query_as::<_, MessageRow>(&format!(
-            "SELECT {MSG_COLUMNS} FROM messages \
+            "SELECT {MSG_COLUMNS} FROM conversation_messages \
                  WHERE conversation_id = $1 AND ($2::uuid IS NULL OR id < $2) \
                  ORDER BY id DESC \
                  LIMIT $3"
@@ -99,7 +98,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
     }
 
     async fn delete(&self, id: MessageId) -> Result<(), AppError> {
-        let result = sqlx::query("DELETE FROM messages WHERE id = $1")
+        let result = sqlx::query("DELETE FROM conversation_messages WHERE id = $1")
             .bind(id.as_uuid())
             .execute(&self.pool)
             .await
@@ -113,7 +112,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
     }
 
     async fn clear_conversation(&self, conversation_id: ConversationId) -> Result<(), AppError> {
-        sqlx::query("DELETE FROM messages WHERE conversation_id = $1")
+        sqlx::query("DELETE FROM conversation_messages WHERE conversation_id = $1")
             .bind(conversation_id.as_uuid())
             .execute(&self.pool)
             .await
@@ -124,7 +123,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
 
     async fn get_by_id(&self, id: MessageId) -> Result<Message, AppError> {
         let row = sqlx::query_as::<_, MessageRow>(&format!(
-            "SELECT {MSG_COLUMNS} FROM messages WHERE id = $1"
+            "SELECT {MSG_COLUMNS} FROM conversation_messages WHERE id = $1"
         ))
         .bind(id.as_uuid())
         .fetch_optional(&self.pool)
