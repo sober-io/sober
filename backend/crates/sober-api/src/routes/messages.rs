@@ -75,11 +75,6 @@ async fn list_messages(
                 .find_by_message(msg.id)
                 .await
                 .unwrap_or_default();
-            tracing::debug!(
-                message_id = %msg.id,
-                exec_count = execs.len(),
-                "tool executions for assistant message"
-            );
             if !execs.is_empty() {
                 exec_map.insert(
                     msg.id.to_string(),

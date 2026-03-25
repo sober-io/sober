@@ -86,6 +86,7 @@
 	 *  assistant(tool_executions) + assistant(text) → single bubble. */
 	const toChatMessages = (rawMessages: Message[]): ChatMsg[] => {
 		const chatMessages = rawMessages.map(toChat);
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local non-reactive usage
 		const merged = new Set<number>();
 
 		for (let i = 0; i < chatMessages.length; i++) {
