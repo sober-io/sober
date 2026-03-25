@@ -930,7 +930,7 @@ impl<R: AgentRepos> Agent<R> {
 
             // Store inline memory extractions (replaces raw conversation ingestion).
             if !extraction_result.extractions.is_empty() {
-                Self::spawn_extraction_ingestion(
+                crate::ingestion::spawn_extraction_ingestion(
                     llm,
                     memory,
                     user_id,
@@ -1366,79 +1366,6 @@ impl<R: AgentRepos> Agent<R> {
             Ok(Err(_)) => "Confirmation cancelled.".to_string(),
             Err(_) => "Command timed out waiting for confirmation.".to_string(),
         }
-    }
-
-    /// Spawns a background task that embeds and stores inline memory extractions.
-    ///
-    /// Extractions are concise facts/preferences parsed from the LLM's
-    /// `<memory_extractions>` block, replacing the old raw conversation ingestion.
-    fn spawn_extraction_ingestion(
-        llm: &Arc<dyn LlmEngine>,
-        memory: &Arc<MemoryStore>,
-        user_id: UserId,
-        extractions: Vec<crate::extraction::MemoryExtraction>,
-        half_life_days: u32,
-    ) {
-        let llm = Arc::clone(llm);
-        let memory = Arc::clone(memory);
-        let scope_id = sober_core::ScopeId::from_uuid(*user_id.as_uuid());
-
-        tokio::spawn(async move {
-            let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
-
-            // Batch embed all extraction contents.
-            let texts: Vec<&str> = extractions.iter().map(|e| e.content.as_str()).collect();
-            let vectors = match llm.embed(&texts).await {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!(error = %e, "extraction ingestion: embedding failed, skipping");
-                    return;
-                }
-            };
-
-            if vectors.len() != extractions.len() {
-                warn!(
-                    "extraction ingestion: expected {} vectors, got {}",
-                    extractions.len(),
-                    vectors.len()
-                );
-                return;
-            }
-
-            for (extraction, dense_vector) in extractions.into_iter().zip(vectors) {
-                let Some(chunk_type) =
-                    crate::extraction::parse_extraction_type(&extraction.chunk_type)
-                else {
-                    debug!(
-                        chunk_type = extraction.chunk_type,
-                        "extraction ingestion: unknown chunk type, skipping"
-                    );
-                    continue;
-                };
-
-                let importance = crate::extraction::extraction_importance(chunk_type);
-
-                if let Err(e) = memory
-                    .store(
-                        user_id,
-                        StoreChunk {
-                            dense_vector,
-                            content: extraction.content,
-                            chunk_type,
-                            scope_id,
-                            source_message_id: None,
-                            importance,
-                            decay_at,
-                        },
-                    )
-                    .await
-                {
-                    warn!(error = %e, "extraction ingestion: failed to store");
-                }
-            }
-
-            debug!("extraction ingestion complete for user {user_id}");
-        });
     }
 }
 

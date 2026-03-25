@@ -8,6 +8,7 @@ pub mod confirm;
 pub mod error;
 pub mod extraction;
 pub mod grpc;
+pub mod ingestion;
 pub mod stream;
 pub mod system_jobs;
 pub mod tools;
