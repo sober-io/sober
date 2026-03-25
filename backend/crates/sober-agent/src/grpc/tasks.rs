@@ -12,13 +12,15 @@ use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use tonic::Status;
 use tracing::error;
 
+use std::sync::Arc;
+
 use crate::agent::Agent;
 use crate::grpc::proto;
 use crate::stream::AgentEvent;
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
 pub(crate) async fn execute_typed_payload<R: AgentRepos>(
-    agent: &Agent<R>,
+    agent: &Arc<Agent<R>>,
     payload: JobPayload,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
@@ -106,7 +108,7 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
 
 /// Executes a prompt payload by delegating to `handle_message` with conversation context.
 pub(crate) async fn execute_prompt_conversational<R: AgentRepos>(
-    agent: &Agent<R>,
+    agent: &Arc<Agent<R>>,
     prompt: &str,
     user_id: Option<UserId>,
     conversation_id: Option<ConversationId>,
@@ -170,18 +172,23 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
 
     let inner = match event {
         AgentEvent::TextDelta(content) => Event::TextDelta(proto::TextDelta { content }),
-        AgentEvent::ToolCallStart { name, input } => Event::ToolCallStart(proto::ToolCallStart {
-            name,
-            input_json: input.to_string(),
-            internal: false,
+        AgentEvent::ToolExecutionUpdate {
+            id,
+            message_id,
+            tool_call_id,
+            tool_name,
+            status,
+            output,
+            error,
+        } => Event::ToolExecutionUpdate(proto::ToolExecutionUpdate {
+            id,
+            message_id,
+            tool_call_id,
+            tool_name,
+            status,
+            output,
+            error,
         }),
-        AgentEvent::ToolCallResult { name, output } => {
-            Event::ToolCallResult(proto::ToolCallResult {
-                name,
-                output,
-                internal: false,
-            })
-        }
         AgentEvent::Done {
             message_id,
             usage,

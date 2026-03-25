@@ -43,10 +43,8 @@ pub struct CreateMessage {
     pub role: super::enums::MessageRole,
     /// Message content.
     pub content: String,
-    /// Tool call requests (JSON).
-    pub tool_calls: Option<serde_json::Value>,
-    /// Tool execution result (JSON).
-    pub tool_result: Option<serde_json::Value>,
+    /// LLM reasoning/thinking content.
+    pub reasoning: Option<String>,
     /// Approximate token count.
     pub token_count: Option<i32>,
     /// Extensible metadata (e.g. event details).

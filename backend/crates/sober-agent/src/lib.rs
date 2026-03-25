@@ -5,12 +5,18 @@ pub mod audit;
 pub mod backends;
 pub mod broadcast;
 pub mod confirm;
+pub mod context;
+pub mod conversation;
+pub mod dispatch;
 pub mod error;
 pub mod extraction;
 pub mod grpc;
+pub mod history;
+pub mod ingestion;
 pub mod stream;
 pub mod system_jobs;
 pub mod tools;
+pub mod turn;
 
 pub use broadcast::{ConversationUpdateReceiver, ConversationUpdateSender};
 pub use confirm::{ConfirmationBroker, ConfirmationRegistrar, ConfirmationSender};

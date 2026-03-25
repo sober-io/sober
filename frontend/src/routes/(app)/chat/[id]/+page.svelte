@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { uuid } from '$lib/utils/id';
 	import type {
-		ToolCall,
+		ToolExecution,
 		ServerWsMessage,
 		Conversation,
 		Message,
@@ -34,7 +34,7 @@
 		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
 		thinkingContent: string;
-		toolCalls?: ToolCall[];
+		toolExecutions?: ToolExecution[];
 		streaming: boolean;
 		thinking: boolean;
 		timestamp: string;
@@ -69,110 +69,20 @@
 		});
 	};
 
-	const parseLlmToolCalls = (toolCalls: unknown): ToolCall[] | undefined => {
-		if (!Array.isArray(toolCalls) || toolCalls.length === 0) return undefined;
-		return toolCalls.map(
-			(tc: { id?: string; function?: { name?: string; arguments?: string } }) => {
-				let input: unknown = {};
-				try {
-					if (tc.function?.arguments) input = JSON.parse(tc.function.arguments);
-				} catch {
-					input = tc.function?.arguments ?? '';
-				}
-				return {
-					id: tc.id ?? uuid(),
-					name: tc.function?.name ?? 'unknown',
-					input
-				};
-			}
-		);
-	};
-
-	const extractThinkingContent = (metadata: Record<string, unknown> | undefined): string => {
-		if (!metadata) return '';
-		const rc = metadata.reasoning_content;
-		return typeof rc === 'string' ? rc : '';
-	};
-
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
-		role: m.role === 'tool' ? 'system' : m.role,
+		role: m.role,
 		content: m.content,
-		thinkingContent: extractThinkingContent(m.metadata),
-		toolCalls: parseLlmToolCalls(m.tool_calls),
+		thinkingContent: m.reasoning ?? '',
+		toolExecutions: m.tool_executions,
 		streaming: false,
 		thinking: false,
 		timestamp: fmtTime(m.created_at),
 		userId: m.user_id
 	});
 
-	const mergeToolResults = (rawMessages: Message[]): ChatMsg[] => {
-		const chatMessages = rawMessages.map(toChat);
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local non-reactive usage
-		const merged = new Set<number>();
-
-		// Pass 1: merge tool-role messages into parent assistant by tool_call_id.
-		for (let i = 0; i < rawMessages.length; i++) {
-			const raw = rawMessages[i];
-			if (raw.role !== 'tool' || !raw.tool_result) continue;
-			const result = raw.tool_result as { tool_call_id?: string };
-			if (!result.tool_call_id) continue;
-
-			for (let j = i - 1; j >= 0; j--) {
-				const parent = chatMessages[j];
-				if (parent.role !== 'assistant' || !parent.toolCalls) continue;
-				const tc = parent.toolCalls.find((t) => t.id === result.tool_call_id);
-				if (tc) {
-					tc.output = raw.content;
-					merged.add(i);
-					break;
-				}
-			}
-		}
-
-		// Pass 2: merge follow-up assistant messages into the chain root.
-		// DB stores: assistant(tool_calls) → tool… → assistant(text) per round.
-		// During streaming these are one bubble — reconstruct that here.
-		for (let i = 0; i < chatMessages.length; i++) {
-			if (merged.has(i)) continue;
-			const root = chatMessages[i];
-			if (root.role !== 'assistant' || !root.toolCalls) continue;
-
-			let j = i + 1;
-			while (j < chatMessages.length) {
-				if (merged.has(j)) {
-					j++;
-					continue;
-				}
-				const next = chatMessages[j];
-				if (next.role !== 'assistant') break;
-
-				// Merge continuation assistant (may have more tool calls or final text)
-				if (next.toolCalls) {
-					root.toolCalls = [...root.toolCalls!, ...next.toolCalls];
-				}
-				if (next.content) {
-					root.content = root.content ? root.content + next.content : next.content;
-				}
-				merged.add(j);
-				j++;
-			}
-		}
-
-		// Mark any tool calls without output as interrupted (agent crashed).
-		for (const msg of chatMessages) {
-			if (msg.toolCalls) {
-				for (const tc of msg.toolCalls) {
-					if (tc.output === undefined) {
-						tc.output = '[interrupted]';
-						tc.isError = true;
-					}
-				}
-			}
-		}
-
-		return chatMessages.filter((_, i) => !merged.has(i));
-	};
+	/** Convert raw API messages to ChatMsg format. Tool executions are inline on assistant messages. */
+	const toChatMessages = (rawMessages: Message[]): ChatMsg[] => rawMessages.map(toChat);
 
 	let messages = $state<ChatMsg[]>([]);
 	let loadingMore = $state(false);
@@ -238,7 +148,7 @@
 	// Reset state when conversation changes
 	$effect(() => {
 		void conversationId;
-		messages = mergeToolResults(data.messages);
+		messages = toChatMessages(data.messages);
 		allLoaded = data.messages.length < PAGE_SIZE;
 		assistantPhase = 'idle';
 		messageQueue = [];
@@ -323,7 +233,7 @@
 		if (older.length < PAGE_SIZE) allLoaded = true;
 		if (older.length > 0 && container) {
 			const prevHeight = container.scrollHeight;
-			messages = [...mergeToolResults(older), ...messages];
+			messages = [...toChatMessages(older), ...messages];
 			// Merge tags from older messages.
 			for (const m of older) {
 				if (m.tags && m.tags.length > 0) {
@@ -476,33 +386,41 @@
 				}
 				break;
 			}
-			case 'chat.tool_use': {
-				const last = messages[messages.length - 1];
-				if (last && last.role === 'assistant') {
-					const tc: ToolCall = {
-						id: uuid(),
-						name: msg.tool_call.name,
-						input: msg.tool_call.input
-					};
-					last.toolCalls = [...(last.toolCalls ?? []), tc];
-					last.streaming = true;
-					last.thinking = false;
-					messages = [...messages];
+			case 'chat.tool_execution_update': {
+				// Find the assistant message by message_id, or fall back to the last assistant.
+				let target = messages.find((m) => m.id === msg.message_id && m.role === 'assistant');
+				if (!target) {
+					target = messages[messages.length - 1];
+					if (!target || target.role !== 'assistant') break;
 				}
-				break;
-			}
-			case 'chat.tool_result': {
-				const last = messages[messages.length - 1];
-				if (last?.toolCalls) {
-					const tc = last.toolCalls.find((t) => !t.output);
-					if (tc) {
-						tc.output = msg.output;
-						tc.isError =
-							msg.output.startsWith('Tool error:') ||
-							msg.output.startsWith('Plugin execution failed:');
-						messages = [...messages];
-					}
+
+				if (!target.toolExecutions) target.toolExecutions = [];
+
+				// Upsert by execution id.
+				const existing = target.toolExecutions.find((te) => te.id === msg.id);
+				if (existing) {
+					existing.status = msg.status;
+					if (msg.output !== undefined) existing.output = msg.output;
+					if (msg.error !== undefined) existing.error = msg.error;
+				} else {
+					target.toolExecutions = [
+						...target.toolExecutions,
+						{
+							id: msg.id,
+							tool_call_id: msg.tool_call_id,
+							tool_name: msg.tool_name,
+							input: {},
+							source: 'builtin',
+							status: msg.status,
+							output: msg.output,
+							error: msg.error
+						}
+					];
 				}
+
+				target.streaming = true;
+				target.thinking = false;
+				messages = [...messages];
 				break;
 			}
 			case 'chat.new_message': {
@@ -625,11 +543,11 @@
 				if (last && (last.streaming || last.thinking)) {
 					last.streaming = false;
 					last.thinking = false;
-					if (last.toolCalls) {
-						for (const tc of last.toolCalls) {
-							if (!tc.output) {
-								tc.output = msg.error;
-								tc.isError = true;
+					if (last.toolExecutions) {
+						for (const te of last.toolExecutions) {
+							if (te.status === 'pending' || te.status === 'running') {
+								te.status = 'failed';
+								te.error = msg.error;
 							}
 						}
 					}
@@ -871,7 +789,7 @@
 					role={msg.role}
 					content={msg.content}
 					thinkingContent={msg.thinkingContent}
-					toolCalls={msg.toolCalls}
+					toolExecutions={msg.toolExecutions}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
 					timestamp={msg.timestamp}

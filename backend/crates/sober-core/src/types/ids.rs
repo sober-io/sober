@@ -155,6 +155,11 @@ define_id!(
     PluginId
 );
 
+define_id!(
+    /// Unique identifier for a tool execution.
+    ToolExecutionId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);

@@ -109,14 +109,12 @@ pub struct Message {
     pub id: MessageId,
     /// The conversation this message belongs to.
     pub conversation_id: ConversationId,
-    /// Author type (user, assistant, system, tool).
+    /// Author type (user, assistant, system, event).
     pub role: MessageRole,
     /// Message content.
     pub content: String,
-    /// Tool call requests (JSON), if this is an assistant message with tool use.
-    pub tool_calls: Option<serde_json::Value>,
-    /// Tool execution result (JSON), if this is a tool response.
-    pub tool_result: Option<serde_json::Value>,
+    /// LLM reasoning/thinking content (extended thinking output).
+    pub reasoning: Option<String>,
     /// Approximate token count for context budgeting.
     pub token_count: Option<i32>,
     /// The user who sent this message (None for assistant/system/tool messages).
@@ -535,23 +533,20 @@ mod tests {
     }
 
     #[test]
-    fn message_with_tool_calls() {
+    fn message_fields() {
         let msg = Message {
             id: MessageId::new(),
             conversation_id: ConversationId::new(),
             role: MessageRole::Assistant,
             content: "Let me search for that.".into(),
-            tool_calls: Some(
-                serde_json::json!([{"name": "web_search", "input": {"query": "rust"}}]),
-            ),
-            tool_result: None,
+            reasoning: Some("I should search the web.".into()),
             token_count: Some(42),
             user_id: None,
             metadata: None,
             created_at: Utc::now(),
         };
         let json = serde_json::to_value(&msg).unwrap();
-        assert!(json["tool_calls"].is_array());
+        assert_eq!(json["reasoning"], "I should search the web.");
         assert_eq!(json["token_count"], 42);
     }
 

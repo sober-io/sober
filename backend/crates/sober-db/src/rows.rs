@@ -8,13 +8,13 @@ use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
     ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, MessageId,
     MessageRole, PluginId, PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleId, ScopeId,
-    SecretId, SessionId, TagId, UserId, UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState,
-    WorktreeId, WorktreeState,
+    SecretId, SessionId, TagId, ToolExecutionId, ToolExecutionSource, ToolExecutionStatus, UserId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
     JobRun, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
-    Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
 };
 use uuid::Uuid;
 
@@ -147,8 +147,7 @@ pub(crate) struct MessageRow {
     pub conversation_id: Uuid,
     pub role: MessageRole,
     pub content: String,
-    pub tool_calls: Option<serde_json::Value>,
-    pub tool_result: Option<serde_json::Value>,
+    pub reasoning: Option<String>,
     pub token_count: Option<i32>,
     pub user_id: Option<Uuid>,
     pub metadata: Option<serde_json::Value>,
@@ -162,12 +161,50 @@ impl From<MessageRow> for Message {
             conversation_id: ConversationId::from_uuid(row.conversation_id),
             role: row.role,
             content: row.content,
-            tool_calls: row.tool_calls,
-            tool_result: row.tool_result,
+            reasoning: row.reasoning,
             token_count: row.token_count,
             user_id: row.user_id.map(UserId::from_uuid),
             metadata: row.metadata,
             created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct ToolExecutionRow {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub conversation_message_id: Uuid,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub input: serde_json::Value,
+    pub source: ToolExecutionSource,
+    pub status: ToolExecutionStatus,
+    pub output: Option<String>,
+    pub error: Option<String>,
+    pub plugin_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl From<ToolExecutionRow> for ToolExecution {
+    fn from(row: ToolExecutionRow) -> Self {
+        ToolExecution {
+            id: ToolExecutionId::from_uuid(row.id),
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            conversation_message_id: MessageId::from_uuid(row.conversation_message_id),
+            tool_call_id: row.tool_call_id,
+            tool_name: row.tool_name,
+            input: row.input,
+            source: row.source,
+            status: row.status,
+            output: row.output,
+            error: row.error,
+            plugin_id: row.plugin_id.map(PluginId::from_uuid),
+            created_at: row.created_at,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
         }
     }
 }

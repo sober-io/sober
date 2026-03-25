@@ -146,22 +146,16 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             conversation_id: cid,
             content: td.content,
         }),
-        proto::conversation_update::Event::ToolCallStart(ref tcs) if tcs.internal => None,
-        proto::conversation_update::Event::ToolCallStart(tcs) => {
-            Some(ServerWsMessage::ChatToolUse {
+        proto::conversation_update::Event::ToolExecutionUpdate(teu) => {
+            Some(ServerWsMessage::ChatToolExecutionUpdate {
                 conversation_id: cid,
-                tool_call: serde_json::json!({
-                    "name": tcs.name,
-                    "input": tcs.input_json,
-                }),
-            })
-        }
-        proto::conversation_update::Event::ToolCallResult(ref tcr) if tcr.internal => None,
-        proto::conversation_update::Event::ToolCallResult(tcr) => {
-            Some(ServerWsMessage::ChatToolResult {
-                conversation_id: cid,
-                tool_call_id: tcr.name.clone(),
-                output: tcr.output,
+                id: teu.id,
+                message_id: teu.message_id,
+                tool_call_id: teu.tool_call_id,
+                tool_name: teu.tool_name,
+                status: teu.status,
+                output: teu.output,
+                error: teu.error,
             })
         }
         proto::conversation_update::Event::Done(done) => Some(ServerWsMessage::ChatDone {

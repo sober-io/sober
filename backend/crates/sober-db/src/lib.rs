@@ -22,6 +22,6 @@ pub use pool::{DatabaseConfig, create_pool};
 pub use repos::{
     PgAgentRepos, PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgConversationUserRepo,
     PgJobRepo, PgJobRunRepo, PgMessageRepo, PgPluginExecutionLogRepo, PgPluginRepo, PgRoleRepo,
-    PgSandboxExecutionLogRepo, PgSecretRepo, PgSessionRepo, PgTagRepo, PgUserRepo, PgWorkspaceRepo,
-    PgWorkspaceRepoRepo, PgWorktreeRepo,
+    PgSandboxExecutionLogRepo, PgSecretRepo, PgSessionRepo, PgTagRepo, PgToolExecutionRepo,
+    PgUserRepo, PgWorkspaceRepo, PgWorkspaceRepoRepo, PgWorktreeRepo,
 };
