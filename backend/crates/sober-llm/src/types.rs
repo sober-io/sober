@@ -41,6 +41,10 @@ pub struct CompletionRequest {
 }
 
 /// A single message in the conversation.
+// TODO: Replace `role: String` with a `Role` enum (System, User, Assistant, Tool)
+// and use `#[serde(rename_all = "lowercase")]` for serialization. This would
+// eliminate string comparisons throughout sober-agent's domain_to_llm_messages
+// and improve type safety. Requires updating all call sites in sober-agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     /// Role: `"system"`, `"user"`, `"assistant"`, or `"tool"`.
