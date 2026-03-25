@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Guest-side SDK for Sober WASM plugin authors"
 license = "MIT"
+repository = "https://github.com/sober-io/sober"
+keywords = ["wasm", "plugin", "extism", "agent", "sdk"]
+categories = ["wasm", "development-tools"]
 
 [lib]
 crate-type = ["rlib"]
