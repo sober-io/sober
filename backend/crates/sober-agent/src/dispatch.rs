@@ -369,6 +369,12 @@ async fn execute_single_tool<R: AgentRepos>(
                     risk_level,
                     reason,
                 }) => {
+                    tracing::info!(
+                        tool = %tool_name,
+                        confirm_id = %confirm_id,
+                        command = %command,
+                        "tool needs confirmation"
+                    );
                     let detail = ConfirmDetail {
                         confirm_id,
                         command,
