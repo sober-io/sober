@@ -249,6 +249,9 @@ download_and_extract() {
     cp "$EXTRACT_DIR/bin/"* "$INSTALL_DIR/bin/"
     chmod +x "$INSTALL_DIR/bin/"*
 
+    # Record installed version for upgrade detection
+    printf '%s\n' "$SOBER_VERSION" > "$INSTALL_DIR/.version"
+
     # Symlink for CLI tool
     ln -sf "$INSTALL_DIR/bin/sober" /usr/local/bin/sober
 }
@@ -431,7 +434,7 @@ start_and_verify() {
 
 do_upgrade() {
     local current_version
-    current_version=$("$INSTALL_DIR/bin/sober" --version 2>/dev/null | awk '{print $2}') || true
+    current_version=$(cat "$INSTALL_DIR/.version" 2>/dev/null) || true
     info "Current version: ${current_version:-unknown}"
 
     info "Stopping services"
