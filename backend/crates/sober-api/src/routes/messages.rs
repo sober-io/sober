@@ -11,9 +11,10 @@ use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
-    ApiResponse, ConversationId, CreateTag, MessageId, MessageRepo, Tag, TagId, TagRepo,
+    ApiResponse, ConversationId, CreateTag, MessageId, MessageRepo, MessageRole, Tag, TagId,
+    TagRepo, ToolExecutionRepo,
 };
-use sober_db::{PgMessageRepo, PgTagRepo};
+use sober_db::{PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
 
 use crate::state::AppState;
 
@@ -44,6 +45,7 @@ async fn list_messages(
 ) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
     let msg_repo = PgMessageRepo::new(state.db.clone());
     let tag_repo = PgTagRepo::new(state.db.clone());
+    let tool_exec_repo = PgToolExecutionRepo::new(state.db.clone());
 
     // Verify membership.
     let _membership = super::verify_membership(&state.db, id, auth_user.user_id).await?;
@@ -65,7 +67,27 @@ async fn list_messages(
             .push(serde_json::to_value(tag).unwrap_or_default());
     }
 
-    // Attach tags to each message.
+    // Fetch tool executions for assistant messages.
+    let mut exec_map: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    for msg in &messages {
+        if msg.role == MessageRole::Assistant {
+            let execs: Vec<sober_core::types::ToolExecution> = tool_exec_repo
+                .find_by_message(msg.id)
+                .await
+                .unwrap_or_default();
+            if !execs.is_empty() {
+                exec_map.insert(
+                    msg.id.to_string(),
+                    execs
+                        .iter()
+                        .map(|e| serde_json::to_value(e).unwrap_or_default())
+                        .collect(),
+                );
+            }
+        }
+    }
+
+    // Attach tags and tool executions to each message.
     let response: Vec<serde_json::Value> = messages
         .iter()
         .map(|m| {
@@ -73,6 +95,13 @@ async fn list_messages(
             let tags = tag_map.remove(&m.id.to_string()).unwrap_or_default();
             if let Some(obj) = val.as_object_mut() {
                 obj.insert("tags".to_string(), serde_json::Value::Array(tags));
+                if m.role == MessageRole::Assistant {
+                    let execs = exec_map.remove(&m.id.to_string()).unwrap_or_default();
+                    obj.insert(
+                        "tool_executions".to_string(),
+                        serde_json::Value::Array(execs),
+                    );
+                }
             }
             val
         })
