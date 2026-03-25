@@ -49,7 +49,9 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
                         content: Some(msg.content.clone()),
-                        reasoning_content: msg.reasoning.clone(),
+                        // Thinking-enabled models require reasoning_content on
+                        // every assistant message. Use empty string when absent.
+                        reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
                         tool_calls: None,
                         tool_call_id: None,
                     });
@@ -69,7 +71,9 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                         } else {
                             Some(msg.content.clone())
                         },
-                        reasoning_content: msg.reasoning.clone(),
+                        // Thinking-enabled models require reasoning_content on
+                        // every assistant message. Use empty string when absent.
+                        reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
                         tool_calls: Some(tool_calls),
                         tool_call_id: None,
                     });
