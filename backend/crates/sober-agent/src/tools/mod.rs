@@ -73,11 +73,6 @@ pub(crate) fn http_client() -> reqwest::Client {
         header::ACCEPT_LANGUAGE,
         HeaderValue::from_static("en-US,en;q=0.5"),
     );
-    headers.insert(
-        header::ACCEPT_ENCODING,
-        HeaderValue::from_static("gzip, deflate, br"),
-    );
-
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .default_headers(headers)
