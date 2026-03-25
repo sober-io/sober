@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::StreamExt;
 use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
 use sober_core::types::access::{CallerContext, TriggerKind};
@@ -142,11 +143,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             max_tokens: Some(params.config.max_tokens),
             temperature: None,
             stop: vec![],
-            // Use buffered (non-streaming) mode: streaming doesn't capture
-            // reasoning_content from thinking-enabled models, and the API
-            // requires it echoed back on subsequent calls. Switch to stream:true
-            // once sober-llm supports streaming reasoning chunks.
-            stream: false,
+            stream: true,
         };
 
         // Try dynamic key resolution for user-stored LLM credentials.
@@ -163,38 +160,85 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             None => &**params.llm,
         };
 
-        let response = effective_llm
-            .complete(req)
+        let mut stream = effective_llm
+            .stream(req)
             .await
             .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
 
-        let choice = response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| AgentError::LlmCallFailed("no choices in response".to_owned()))?;
-        let usage_stats = response.usage;
+        let mut content_buffer = String::new();
+        let mut reasoning_buffer = String::new();
+        let mut tool_call_buffers: HashMap<u32, (String, String, String)> = HashMap::new();
+        let mut usage_stats: Option<sober_llm::types::Usage> = None;
 
-        let content_buffer = choice.message.content.clone().unwrap_or_default();
-        let reasoning_buffer = choice.message.reasoning_content.clone().unwrap_or_default();
-        let tool_calls: Vec<LlmToolCall> = choice.message.tool_calls.clone().unwrap_or_default();
-        let has_tool_calls = !tool_calls.is_empty();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
 
-        // Send text delta as a single event (non-streaming).
-        if !content_buffer.is_empty() {
-            let _ = params
-                .event_tx
-                .send(Ok(AgentEvent::TextDelta(content_buffer.clone())))
-                .await;
-            let _ = params.broadcast_tx.send(proto::ConversationUpdate {
-                conversation_id: conv_id_str.clone(),
-                event: Some(proto::conversation_update::Event::TextDelta(
-                    proto::TextDelta {
-                        content: content_buffer.clone(),
-                    },
-                )),
-            });
+            if chunk.usage.is_some() {
+                usage_stats = chunk.usage;
+            }
+
+            for choice in &chunk.choices {
+                // Text content delta — forward immediately.
+                if let Some(ref text) = choice.delta.content {
+                    content_buffer.push_str(text);
+                    let _ = params
+                        .event_tx
+                        .send(Ok(AgentEvent::TextDelta(text.clone())))
+                        .await;
+                    let _ = params.broadcast_tx.send(proto::ConversationUpdate {
+                        conversation_id: conv_id_str.clone(),
+                        event: Some(proto::conversation_update::Event::TextDelta(
+                            proto::TextDelta {
+                                content: text.clone(),
+                            },
+                        )),
+                    });
+                }
+
+                // Reasoning content delta — accumulate silently.
+                if let Some(ref reasoning) = choice.delta.reasoning_content {
+                    reasoning_buffer.push_str(reasoning);
+                }
+
+                // Tool call deltas — buffer until stream ends.
+                if let Some(ref tool_calls) = choice.delta.tool_calls {
+                    for tc_delta in tool_calls {
+                        let entry = tool_call_buffers
+                            .entry(tc_delta.index)
+                            .or_insert_with(|| (String::new(), String::new(), String::new()));
+                        if let Some(ref id) = tc_delta.id {
+                            entry.0.clone_from(id);
+                        }
+                        if let Some(ref func) = tc_delta.function {
+                            if let Some(ref name) = func.name {
+                                entry.1.clone_from(name);
+                            }
+                            if let Some(ref args) = func.arguments {
+                                entry.2.push_str(args);
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // Assemble tool calls from buffered deltas.
+        let tool_calls: Vec<LlmToolCall> = {
+            let mut entries: Vec<_> = tool_call_buffers.into_iter().collect();
+            entries.sort_by_key(|(idx, _)| *idx);
+            entries
+                .into_iter()
+                .map(|(_, (id, name, args))| LlmToolCall {
+                    id,
+                    r#type: "function".to_owned(),
+                    function: sober_llm::types::FunctionCall {
+                        name,
+                        arguments: args,
+                    },
+                })
+                .collect()
+        };
+        let has_tool_calls = !tool_calls.is_empty();
 
         // -----------------------------------------------------------------
         // Phase 3: Handle tool calls

@@ -336,6 +336,7 @@ impl LlmEngine for AcpEngine {
                         delta: MessageDelta {
                             role: Some(choice.message.role),
                             content: choice.message.content,
+                            reasoning_content: choice.message.reasoning_content,
                             tool_calls: None,
                         },
                         finish_reason: choice.finish_reason,
