@@ -5,7 +5,7 @@ use sqlx::PgPool;
 
 use super::{
     PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgMessageRepo, PgPluginRepo, PgSecretRepo,
-    PgToolExecutionRepo, PgUserRepo, PgWorkspaceRepo,
+    PgToolExecutionRepo, PgUserRepo, PgWorkspaceRepo, PgWorkspaceSettingsRepo,
 };
 
 /// Bundles all Pg repository implementations required by the agent.
@@ -20,6 +20,7 @@ pub struct PgAgentRepos {
     audit_log: PgAuditLogRepo,
     artifacts: PgArtifactRepo,
     workspaces: PgWorkspaceRepo,
+    workspace_settings: PgWorkspaceSettingsRepo,
     plugins: PgPluginRepo,
     tool_executions: PgToolExecutionRepo,
 }
@@ -35,6 +36,7 @@ impl PgAgentRepos {
             audit_log: PgAuditLogRepo::new(pool.clone()),
             artifacts: PgArtifactRepo::new(pool.clone()),
             workspaces: PgWorkspaceRepo::new(pool.clone()),
+            workspace_settings: PgWorkspaceSettingsRepo::new(pool.clone()),
             plugins: PgPluginRepo::new(pool.clone()),
             tool_executions: PgToolExecutionRepo::new(pool),
         }
@@ -51,6 +53,7 @@ impl AgentRepos for PgAgentRepos {
     type Workspace = PgWorkspaceRepo;
     type Plg = PgPluginRepo;
     type ToolExec = PgToolExecutionRepo;
+    type WsSettings = PgWorkspaceSettingsRepo;
 
     fn messages(&self) -> &PgMessageRepo {
         &self.messages
@@ -86,5 +89,9 @@ impl AgentRepos for PgAgentRepos {
 
     fn tool_executions(&self) -> &PgToolExecutionRepo {
         &self.tool_executions
+    }
+
+    fn workspace_settings(&self) -> &PgWorkspaceSettingsRepo {
+        &self.workspace_settings
     }
 }

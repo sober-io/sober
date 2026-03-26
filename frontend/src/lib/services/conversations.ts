@@ -1,5 +1,11 @@
 import { api } from '$lib/utils/api';
-import type { AgentMode, Collaborator, Conversation, Message, PermissionMode } from '$lib/types';
+import type {
+	AgentMode,
+	Collaborator,
+	Conversation,
+	ConversationSettings,
+	Message
+} from '$lib/types';
 
 export const conversationService = {
 	list: (params?: { archived?: boolean; kind?: string; tag?: string; search?: string }) => {
@@ -22,10 +28,12 @@ export const conversationService = {
 			body: JSON.stringify({ title })
 		}),
 
-	updatePermissionMode: (id: string, mode: PermissionMode) =>
-		api<{ id: string; permission_mode: PermissionMode }>(`/conversations/${id}`, {
+	getSettings: (id: string) => api<ConversationSettings>(`/conversations/${id}/settings`),
+
+	updateSettings: (id: string, settings: Partial<ConversationSettings>) =>
+		api<ConversationSettings>(`/conversations/${id}/settings`, {
 			method: 'PATCH',
-			body: JSON.stringify({ permission_mode: mode })
+			body: JSON.stringify(settings)
 		}),
 
 	archive: (id: string, archived: boolean) =>
@@ -47,17 +55,8 @@ export const conversationService = {
 
 	deleteMessage: (id: string) => api<{ deleted: boolean }>(`/messages/${id}`, { method: 'DELETE' }),
 
-	updateWorkspace: (id: string, workspaceId: string | null) =>
-		api(`/conversations/${id}`, {
-			method: 'PATCH',
-			body: JSON.stringify({ workspace_id: workspaceId })
-		}),
-
 	updateAgentMode: (id: string, agentMode: AgentMode) =>
-		api(`/conversations/${id}`, {
-			method: 'PATCH',
-			body: JSON.stringify({ agent_mode: agentMode })
-		}),
+		conversationService.updateSettings(id, { agent_mode: agentMode }),
 
 	listCollaborators: (id: string) => api<Collaborator[]>(`/conversations/${id}/collaborators`),
 

@@ -17,14 +17,15 @@ pub use agent_repos::AgentRepos;
 pub use api::ApiResponse;
 pub use domain::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername,
-    ConversationWithDetails, Job, JobRun, Message, Plugin, PluginAuditLog, Role, SecretMetadata,
-    SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    ConversationWithDetails, Job, JobRun, Message, Observation, Plugin, PluginAuditLog, Role,
+    SecretMetadata, SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace,
+    WorkspaceAgentState, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
 };
 pub use enums::{
     AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind,
-    ConversationUserRole, JobStatus, MessageRole, PluginKind, PluginOrigin, PluginScope,
-    PluginStatus, RoleKind, ScopeKind, ToolExecutionSource, ToolExecutionStatus, UserStatus,
-    WorkspaceState, WorktreeState,
+    ConversationUserRole, JobStatus, MessageRole, PermissionMode, PluginKind, PluginOrigin,
+    PluginScope, PluginStatus, RoleKind, SandboxNetMode, ScopeKind, ToolExecutionSource,
+    ToolExecutionStatus, UserStatus, WorkspaceState, WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
@@ -42,7 +43,7 @@ pub use repo::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, ConversationUserRepo, JobRepo, JobRunRepo,
     MessageRepo, PluginExecutionLogRepo, PluginRepo, RoleRepo, SandboxExecutionLogRepo, SecretRepo,
     SessionRepo, TagRepo, ToolExecutionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo,
-    WorktreeRepo,
+    WorkspaceSettingsRepo, WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
 pub use tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};

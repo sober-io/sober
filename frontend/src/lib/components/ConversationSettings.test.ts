@@ -42,7 +42,6 @@ function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
 		title: 'Test Conversation',
 		kind: 'direct',
 		is_archived: false,
-		permission_mode: 'interactive',
 		agent_mode: 'always',
 		unread_count: 0,
 		tags: [],

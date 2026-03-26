@@ -21,6 +21,7 @@ mod tags;
 mod tool_executions;
 mod users;
 mod workspace_repos;
+mod workspace_settings;
 mod workspaces;
 mod worktrees;
 
@@ -41,5 +42,6 @@ pub use tags::PgTagRepo;
 pub use tool_executions::PgToolExecutionRepo;
 pub use users::PgUserRepo;
 pub use workspace_repos::PgWorkspaceRepoRepo;
+pub use workspace_settings::PgWorkspaceSettingsRepo;
 pub use workspaces::PgWorkspaceRepo;
 pub use worktrees::PgWorktreeRepo;

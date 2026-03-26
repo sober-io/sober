@@ -351,11 +351,27 @@ Plugins declare capabilities in a TOML manifest (`plugin.toml`) and export tool 
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
-| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions |
+| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions, workspace settings |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Cache | In-memory (moka) | Route/session caching with PostgreSQL-backed sessions |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |
 | Search | SearXNG | Meta-search aggregation for web queries |
+
+### Workspace Settings
+
+All workspace-level configuration is stored in the `workspace_settings` table
+(one row per workspace). This is the single source of truth for:
+
+- **Permission mode** — controls shell command approval (interactive, policy-based, autonomous).
+- **Sandbox policy** — profile name + optional overrides (network mode, allowed domains, timeout, spawn).
+- **Snapshot settings** — auto-snapshot flag and max snapshot count.
+
+Settings are created atomically alongside the workspace via `WorkspaceRepo::provision()`.
+The API exposes `GET/PATCH /conversations/{id}/settings` for a combined view including
+`agent_mode` (from the conversation) and all workspace settings. The agent loads settings
+at the start of each turn and uses them to resolve `SandboxPolicy` for shell executions.
+
+`.sober/config.toml` no longer controls sandbox, permission, or snapshot settings.
 
 ---
 

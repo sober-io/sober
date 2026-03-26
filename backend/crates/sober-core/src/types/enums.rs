@@ -157,6 +157,56 @@ pub enum JobStatus {
     Running,
 }
 
+/// How much autonomy the agent has when executing shell commands.
+///
+/// Maps to the `permission_mode` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "permission_mode", rename_all = "snake_case")
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    /// Every command requires explicit user approval.
+    Interactive,
+    /// Safe/moderate commands auto-approve; dangerous commands require approval.
+    #[default]
+    PolicyBased,
+    /// All commands auto-approve within sandbox constraints.
+    Autonomous,
+}
+
+impl PermissionMode {
+    /// Returns the canonical string representation for API serialization.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PermissionMode::Interactive => "interactive",
+            PermissionMode::PolicyBased => "policy_based",
+            PermissionMode::Autonomous => "autonomous",
+        }
+    }
+}
+
+/// Network access mode for sandbox execution.
+///
+/// Maps to the `sandbox_net_mode` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "sandbox_net_mode", rename_all = "snake_case")
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxNetMode {
+    /// No network access (loopback only).
+    None,
+    /// Only specified domains are accessible.
+    AllowedDomains,
+    /// Full unrestricted network access.
+    Full,
+}
+
 /// Lifecycle state of a workspace.
 ///
 /// Maps to the `workspace_state` PostgreSQL enum.
@@ -594,6 +644,37 @@ mod tests {
         for variant in [JobStatus::Active, JobStatus::Paused, JobStatus::Cancelled] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: JobStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn permission_mode_serde_roundtrip() {
+        for variant in [
+            PermissionMode::Interactive,
+            PermissionMode::PolicyBased,
+            PermissionMode::Autonomous,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: PermissionMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn permission_mode_default_is_policy_based() {
+        assert_eq!(PermissionMode::default(), PermissionMode::PolicyBased);
+    }
+
+    #[test]
+    fn sandbox_net_mode_serde_roundtrip() {
+        for variant in [
+            SandboxNetMode::None,
+            SandboxNetMode::AllowedDomains,
+            SandboxNetMode::Full,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: SandboxNetMode = serde_json::from_str(&json).unwrap();
             assert_eq!(variant, deserialized);
         }
     }
