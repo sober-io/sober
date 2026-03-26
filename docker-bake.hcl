@@ -13,7 +13,7 @@ group "default" {
 target "_common" {
   dockerfile = "infra/docker/Dockerfile.ci"
   context    = "."
-  platforms  = ["linux/amd64", "linux/arm64"]
+  platforms  = ["linux/amd64"]
   cache-from = ["type=gha"]
   cache-to   = ["type=gha,mode=max"]
 }
