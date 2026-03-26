@@ -89,6 +89,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
     let mut system_prompt_len: usize = 0;
     let mut consecutive_tool_errors: u32 = 0;
     let mut assistant_text = String::new();
+    // Accumulate reasoning across all iterations so multi-turn tool loops
+    // don't lose earlier reasoning content.
+    let mut reasoning_buffer = String::new();
     // Track the assistant message across iterations so tool-call and text
     // responses end up in a single DB row.
     let mut turn_assistant_msg_id: Option<MessageId> = None;
@@ -169,7 +172,6 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             .map_err(|e| AgentError::LlmCallFailed(e.to_string()))?;
 
         let mut content_buffer = String::new();
-        let mut reasoning_buffer = String::new();
         let mut tool_call_buffers: HashMap<u32, (String, String, String)> = HashMap::new();
         let mut usage_stats: Option<sober_llm::types::Usage> = None;
 
