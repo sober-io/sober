@@ -126,6 +126,10 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                 .or_insert_with(|| serde_json::Value::String(req.user_id.to_string()));
             map.entry("conversation_id")
                 .or_insert_with(|| serde_json::Value::String(req.conversation_id.to_string()));
+            if let Some(ws_id) = req.workspace_id {
+                map.entry("workspace_id")
+                    .or_insert_with(|| serde_json::Value::String(ws_id.to_string()));
+            }
             // TODO: resolve from RoleRepo when RBAC is wired into the agent
             map.entry("is_admin")
                 .or_insert(serde_json::Value::Bool(false));
