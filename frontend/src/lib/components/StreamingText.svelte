@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { renderMarkdown } from '$lib/utils/markdown';
+	import { renderMarkdown, highlighterReady } from '$lib/utils/markdown.svelte';
 
 	interface Props {
 		content: string;
@@ -8,6 +8,8 @@
 
 	let { content, streaming = false }: Props = $props();
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read to trigger re-derive when shiki loads
+	const _hlv = $derived(highlighterReady.version);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 </script>
 

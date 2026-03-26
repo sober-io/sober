@@ -156,6 +156,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 status: teu.status,
                 output: teu.output,
                 error: teu.error,
+                input: teu.input,
             })
         }
         proto::conversation_update::Event::Done(done) => Some(ServerWsMessage::ChatDone {

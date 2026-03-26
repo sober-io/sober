@@ -38,6 +38,8 @@ pub enum AgentEvent {
         output: Option<String>,
         /// Error message (when failed).
         error: Option<String>,
+        /// JSON-encoded tool arguments (sent on first event for this execution).
+        input: Option<String>,
     },
     /// The agent has finished processing.
     Done {

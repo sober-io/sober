@@ -180,6 +180,7 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             status,
             output,
             error,
+            input,
         } => Event::ToolExecutionUpdate(proto::ToolExecutionUpdate {
             id,
             message_id,
@@ -188,6 +189,7 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             status,
             output,
             error,
+            input,
         }),
         AgentEvent::Done {
             message_id,

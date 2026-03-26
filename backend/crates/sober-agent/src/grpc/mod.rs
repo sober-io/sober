@@ -297,6 +297,7 @@ mod tests {
             status: "running".to_owned(),
             output: None,
             error: None,
+            input: None,
         };
         let proto = tasks::to_proto_event(event);
         match proto.event {

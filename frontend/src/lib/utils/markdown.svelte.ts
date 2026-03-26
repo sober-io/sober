@@ -6,6 +6,22 @@ import { createHighlighter, type Highlighter } from 'shiki';
 
 let highlighter: Highlighter | null = null;
 
+/**
+ * Reactive version counter — bumps when shiki finishes loading so
+ * `$derived` blocks that read `highlighterReady.version` re-render.
+ */
+export const highlighterReady = (() => {
+	let version = $state(0);
+	return {
+		get version() {
+			return version;
+		},
+		bump() {
+			version++;
+		}
+	};
+})();
+
 const SHIKI_LANGS = [
 	'typescript',
 	'javascript',
@@ -44,6 +60,7 @@ if (typeof window !== 'undefined') {
 		langs: [...SHIKI_LANGS]
 	}).then((h) => {
 		highlighter = h;
+		highlighterReady.bump();
 	});
 }
 

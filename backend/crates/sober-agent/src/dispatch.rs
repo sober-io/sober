@@ -178,8 +178,9 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         let msg_id_str = req.assistant_message_id.to_string();
 
         // -----------------------------------------------------------
-        // Step 2: Send pending event
+        // Step 2: Send pending event (include input so the frontend can display it)
         // -----------------------------------------------------------
+        let input_json = serde_json::to_string(&tool_input).ok();
         send_execution_update(
             req.event_tx,
             &ctx.broadcast_tx,
@@ -191,6 +192,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             ToolExecutionStatus::Pending,
             None,
             None,
+            input_json.as_deref(),
         )
         .await;
 
@@ -215,6 +217,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             &tc.id,
             tool_name,
             ToolExecutionStatus::Running,
+            None,
             None,
             None,
         )
@@ -298,6 +301,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             final_status,
             if !is_error { Some(&output) } else { None },
             if is_error { Some(&output) } else { None },
+            None,
         )
         .await;
 
@@ -532,6 +536,7 @@ async fn send_execution_update(
     status: ToolExecutionStatus,
     output: Option<&str>,
     error: Option<&str>,
+    input: Option<&str>,
 ) {
     let status_str = status_to_str(status);
 
@@ -544,6 +549,7 @@ async fn send_execution_update(
             status: status_str.to_owned(),
             output: output.map(str::to_owned),
             error: error.map(str::to_owned),
+            input: input.map(str::to_owned),
         }))
         .await;
 
@@ -558,6 +564,7 @@ async fn send_execution_update(
                 status: status_str.to_owned(),
                 output: output.map(str::to_owned),
                 error: error.map(str::to_owned),
+                input: input.map(str::to_owned),
             },
         )),
     });

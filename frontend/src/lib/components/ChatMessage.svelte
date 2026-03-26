@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Tag, ToolExecution } from '$lib/types';
-	import { renderMarkdown } from '$lib/utils/markdown';
+	import { renderMarkdown, highlighterReady } from '$lib/utils/markdown.svelte';
 	import StreamingText from './StreamingText.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
@@ -44,6 +44,8 @@
 	const isUser = $derived(role === 'user');
 	const hasToolExecutions = $derived(toolExecutions && toolExecutions.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read to trigger re-derive when shiki loads
+	const _hlv = $derived(highlighterReady.version);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
 	const runningToolCount = $derived(

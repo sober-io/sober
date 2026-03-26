@@ -416,7 +416,7 @@
 							id: msg.id,
 							tool_call_id: msg.tool_call_id,
 							tool_name: msg.tool_name,
-							input: {},
+							input: msg.input ? JSON.parse(msg.input) : {},
 							source: 'builtin',
 							status: msg.status,
 							output: msg.output,

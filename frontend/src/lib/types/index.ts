@@ -119,6 +119,7 @@ export type ServerWsMessage =
 			status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 			output?: string;
 			error?: string;
+			input?: string;
 	  }
 	| { type: 'chat.done'; conversation_id: string; message_id: string }
 	| {

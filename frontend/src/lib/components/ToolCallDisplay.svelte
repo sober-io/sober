@@ -10,9 +10,20 @@
 
 	let { toolName, input, output, error, loading = false, isError = false }: Props = $props();
 	let expanded = $state(false);
+	let outputExpanded = $state(false);
 
 	const displayOutput = $derived(error ?? output);
 	const showError = $derived(isError || !!error);
+
+	const OUTPUT_LIMIT = 2000;
+	const isOutputTruncated = $derived(
+		displayOutput !== undefined && displayOutput.length > OUTPUT_LIMIT
+	);
+	const visibleOutput = $derived.by(() => {
+		if (displayOutput === undefined) return undefined;
+		if (outputExpanded || displayOutput.length <= OUTPUT_LIMIT) return displayOutput;
+		return displayOutput.slice(0, OUTPUT_LIMIT);
+	});
 
 	/** Format a JSON value into colored HTML spans. */
 	function formatJson(value: unknown, indent = 0): string {
@@ -105,16 +116,24 @@
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
 			<!-- eslint-disable svelte/no-at-html-tags -- manually HTML-escaped in formatJson -->
 			<pre
-				class="overflow-x-auto rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
+				class="max-h-60 max-w-full overflow-auto rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
 			<!-- eslint-enable svelte/no-at-html-tags -->
 
-			{#if displayOutput !== undefined}
+			{#if visibleOutput !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
 				<pre
 					class={[
-						'overflow-x-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
+						'max-h-80 max-w-full overflow-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
 						showError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
-					]}>{displayOutput}</pre>
+					]}>{visibleOutput}</pre>
+				{#if isOutputTruncated && !outputExpanded}
+					<button
+						onclick={() => (outputExpanded = true)}
+						class="mt-1 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+					>
+						Show full output ({displayOutput?.length.toLocaleString()} chars)
+					</button>
+				{/if}
 			{/if}
 		</div>
 	{/if}

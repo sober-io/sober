@@ -110,6 +110,9 @@ pub enum ServerWsMessage {
         /// Error message (when failed).
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// JSON-encoded tool arguments (sent on pending event).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
     },
     /// The agent has finished processing.
     #[serde(rename = "chat.done")]
