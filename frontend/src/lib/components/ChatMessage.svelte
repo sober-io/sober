@@ -129,6 +129,16 @@
 								/>
 							</svg>
 							<span class="font-mono text-xs">reasoning</span>
+							<svg
+								class={[
+									'ml-auto h-3 w-3 shrink-0 transition-transform',
+									reasoningExpanded && 'rotate-90'
+								]}
+								fill="currentColor"
+								viewBox="0 0 20 20"
+							>
+								<path d="M6 4l8 6-8 6V4z" />
+							</svg>
 						</button>
 						{#if reasoningExpanded}
 							<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">

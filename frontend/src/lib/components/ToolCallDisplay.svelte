@@ -15,6 +15,26 @@
 	const displayOutput = $derived(error ?? output);
 	const showError = $derived(isError || !!error);
 
+	// Track duration client-side: start when loading becomes true, stop when it becomes false.
+	let startTime = $state<number | null>(null);
+	let durationMs = $state<number | null>(null);
+
+	$effect(() => {
+		if (loading && startTime === null) {
+			startTime = Date.now();
+			durationMs = null;
+		} else if (!loading && startTime !== null) {
+			durationMs = Date.now() - startTime;
+			startTime = null;
+		}
+	});
+
+	const durationLabel = $derived.by(() => {
+		if (durationMs === null) return null;
+		if (durationMs < 1000) return `${durationMs}ms`;
+		return `${(durationMs / 1000).toFixed(1)}s`;
+	});
+
 	const OUTPUT_LIMIT = 2000;
 	const isOutputTruncated = $derived(
 		displayOutput !== undefined && displayOutput.length > OUTPUT_LIMIT
@@ -109,6 +129,16 @@
 		{#if showError}
 			<span class="text-xs text-red-500">failed</span>
 		{/if}
+		{#if durationLabel}
+			<span class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-500">{durationLabel}</span>
+		{/if}
+		<svg
+			class={['h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90']}
+			fill="currentColor"
+			viewBox="0 0 20 20"
+		>
+			<path d="M6 4l8 6-8 6V4z" />
+		</svg>
 	</button>
 
 	{#if expanded}
