@@ -75,6 +75,10 @@ export interface ToolExecution {
 	error?: string;
 	started_at?: string;
 	completed_at?: string;
+	/** Client-side timestamp when execution first appeared (ms since epoch). */
+	_startedAt?: number;
+	/** Client-side computed duration in ms (set when execution completes). */
+	_durationMs?: number;
 }
 
 export interface ConfirmRequest {

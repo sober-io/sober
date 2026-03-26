@@ -59,6 +59,15 @@
 	const canShowActions = $derived(!streaming && !ephemeral && !thinking);
 	const hasTags = $derived(tags && tags.length > 0);
 
+	/** Compute tool execution duration from client-side timestamps or DB timestamps. */
+	function getToolDurationMs(te: ToolExecution): number | undefined {
+		if (te._durationMs !== undefined) return te._durationMs;
+		if (te.started_at && te.completed_at) {
+			return new Date(te.completed_at).getTime() - new Date(te.started_at).getTime();
+		}
+		return undefined;
+	}
+
 	let showTagPopover = $state(false);
 	let showAllTags = $state(false);
 	let reasoningExpanded = $state(live);
@@ -168,6 +177,7 @@
 							loading={te.status === 'pending' || te.status === 'running'}
 							isError={te.status === 'failed'}
 							error={te.error}
+							durationMs={getToolDurationMs(te)}
 						/>
 					{/each}
 				{/if}

@@ -402,15 +402,19 @@
 				if (!target.toolExecutions) target.toolExecutions = [];
 
 				// Upsert by execution id — replace with new object to trigger Svelte reactivity.
+				const now = Date.now();
 				const idx = target.toolExecutions.findIndex((te) => te.id === msg.id);
 				if (idx >= 0) {
+					const done =
+						msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
 					target.toolExecutions = target.toolExecutions.map((te) =>
 						te.id === msg.id
 							? {
 									...te,
 									status: msg.status,
 									output: msg.output ?? te.output,
-									error: msg.error ?? te.error
+									error: msg.error ?? te.error,
+									_durationMs: done && te._startedAt ? now - te._startedAt : te._durationMs
 								}
 							: te
 					);
@@ -425,7 +429,9 @@
 							source: 'builtin',
 							status: msg.status,
 							output: msg.output,
-							error: msg.error
+							error: msg.error,
+							_startedAt: now,
+							_durationMs: undefined
 						}
 					];
 				}
