@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pre-commit hook: verify formatting for staged files
 # Rust → cargo fmt --check | Frontend → prettier --check
+# Quiet on success — only prints on failure.
 
 set -euo pipefail
 
@@ -12,16 +13,13 @@ STAGED_FE="$(git diff --cached --name-only --diff-filter=ACM -- '*.svelte' '*.ts
 FAILED=0
 
 if [ -n "$STAGED_RS" ]; then
-    echo "pre-commit: checking Rust formatting..."
-    if ! (cd "$REPO_ROOT/backend" && cargo fmt --check -q); then
+    if ! (cd "$REPO_ROOT/backend" && cargo fmt --check -q) >/dev/null 2>&1; then
         echo "pre-commit: Rust formatting check failed. Run 'cargo fmt' in backend/." >&2
         FAILED=1
     fi
 fi
 
 if [ -n "$STAGED_FE" ]; then
-    echo "pre-commit: checking frontend formatting..."
-    # Build file list relative to frontend/ for prettier
     FE_FILES=""
     for file in $STAGED_FE; do
         rel="${file#frontend/}"
@@ -30,7 +28,7 @@ if [ -n "$STAGED_FE" ]; then
         fi
     done
     if [ -n "$FE_FILES" ]; then
-        if ! (cd "$REPO_ROOT/frontend" && npx prettier --check $FE_FILES 2>/dev/null); then
+        if ! (cd "$REPO_ROOT/frontend" && npx prettier --check $FE_FILES) >/dev/null 2>&1; then
             echo "pre-commit: Frontend formatting check failed. Run 'pnpm format' in frontend/." >&2
             FAILED=1
         fi

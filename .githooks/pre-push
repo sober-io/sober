@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Pre-push hook: run clippy + tests for affected pipelines
-# Detects what changed between local HEAD and the remote tracking branch
+# Detects what changed between local HEAD and the remote tracking branch.
+# Quiet on success — only prints on failure.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# Read push info from stdin: <local ref> <local sha> <remote ref> <remote sha>
 while read -r _ LOCAL_SHA _ REMOTE_SHA; do
     # New branch — compare against main
     if [ "$REMOTE_SHA" = "0000000000000000000000000000000000000000" ]; then
@@ -25,36 +25,27 @@ while read -r _ LOCAL_SHA _ REMOTE_SHA; do
         esac
     done
 
-    if [ "$HAS_RUST" -eq 0 ] && [ "$HAS_FE" -eq 0 ]; then
-        echo "pre-push: no backend/frontend changes detected, skipping checks."
-        exit 0
-    fi
+    [ "$HAS_RUST" -eq 0 ] && [ "$HAS_FE" -eq 0 ] && exit 0
 
     if [ "$HAS_RUST" -eq 1 ]; then
-        echo "pre-push: running Rust checks..."
-        (cd "$REPO_ROOT/backend" && cargo clippy -q -- -D warnings) || {
+        (cd "$REPO_ROOT/backend" && cargo clippy -q -- -D warnings) 2>&1 || {
             echo "pre-push: cargo clippy failed." >&2
             exit 1
         }
-        (cd "$REPO_ROOT/backend" && cargo test --workspace -q) || {
+        (cd "$REPO_ROOT/backend" && cargo test --workspace -q) 2>&1 || {
             echo "pre-push: cargo test failed." >&2
             exit 1
         }
-        echo "pre-push: Rust checks passed."
     fi
 
     if [ "$HAS_FE" -eq 1 ]; then
-        echo "pre-push: running frontend checks..."
-        (cd "$REPO_ROOT/frontend" && pnpm check) || {
+        (cd "$REPO_ROOT/frontend" && pnpm check) >/dev/null 2>&1 || {
             echo "pre-push: pnpm check failed." >&2
             exit 1
         }
-        (cd "$REPO_ROOT/frontend" && pnpm test --silent) || {
+        (cd "$REPO_ROOT/frontend" && pnpm test --silent) >/dev/null 2>&1 || {
             echo "pre-push: pnpm test failed." >&2
             exit 1
         }
-        echo "pre-push: Frontend checks passed."
     fi
 done
-
-echo "pre-push: all checks passed."
