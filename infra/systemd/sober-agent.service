@@ -14,9 +14,8 @@ StateDirectory=sober
 Restart=on-failure
 RestartSec=5
 ProtectHome=yes
+NoNewPrivileges=yes
 PrivateTmp=yes
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
 
 [Install]
 WantedBy=sober.target
