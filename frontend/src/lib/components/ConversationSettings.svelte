@@ -1,10 +1,12 @@
 <script lang="ts">
 	import type {
 		Conversation,
+		ConversationSettings as ConversationSettingsType,
 		Tag,
 		Job,
 		PermissionMode,
 		AgentMode,
+		SandboxNetMode,
 		Collaborator,
 		ConversationUserRole
 	} from '$lib/types';
@@ -72,6 +74,18 @@
 		{ value: 'silent', label: 'Silent', description: 'Agent does not respond', color: 'zinc' }
 	];
 
+	const SANDBOX_PROFILES = [
+		{ value: 'standard', label: 'Standard', description: 'Balanced defaults' },
+		{ value: 'locked_down', label: 'Locked Down', description: 'Most restrictive' },
+		{ value: 'unrestricted', label: 'Unrestricted', description: 'Least restrictive' }
+	] as const;
+
+	const NET_MODES: ReadonlyArray<{ value: SandboxNetMode; label: string }> = [
+		{ value: 'none', label: 'None' },
+		{ value: 'allowed_domains', label: 'Allowed Domains' },
+		{ value: 'full', label: 'Full' }
+	];
+
 	// Local state
 	let editingTitle = $state('');
 	let jobs = $state<Job[]>([]);
@@ -83,6 +97,16 @@
 	let collaborators = $state<Collaborator[]>([]);
 	let collaboratorsLoading = $state(false);
 	let kind = $state(conversation.kind);
+
+	// Sandbox / workspace settings (loaded from API)
+	let settingsLoading = $state(false);
+	let sandboxProfile = $state('standard');
+	let sandboxNetMode = $state<SandboxNetMode | undefined>(undefined);
+	let sandboxAllowedDomains = $state<string[]>([]);
+	let sandboxTimeout = $state<number | undefined>(undefined);
+	let sandboxAllowSpawn = $state<boolean | undefined>(undefined);
+	let autoSnapshot = $state(true);
+	let newDomain = $state('');
 
 	// Derived
 	let createdDate = $derived(
@@ -110,6 +134,7 @@
 			kind = conversation.kind;
 			loadJobs();
 			loadCollaborators();
+			loadSettings();
 		});
 	});
 
@@ -145,6 +170,73 @@
 		} finally {
 			collaboratorsLoading = false;
 		}
+	}
+
+	async function loadSettings() {
+		settingsLoading = true;
+		try {
+			const s = await conversationService.getSettings(conversation.id);
+			sandboxProfile = s.sandbox_profile;
+			sandboxNetMode = s.sandbox_net_mode;
+			sandboxAllowedDomains = s.sandbox_allowed_domains ?? [];
+			sandboxTimeout = s.sandbox_max_execution_seconds;
+			sandboxAllowSpawn = s.sandbox_allow_spawn;
+			autoSnapshot = s.auto_snapshot;
+		} catch {
+			// Settings may not exist for legacy conversations
+		} finally {
+			settingsLoading = false;
+		}
+	}
+
+	async function saveSetting(patch: Partial<ConversationSettingsType>) {
+		try {
+			await conversationService.updateSettings(conversation.id, patch);
+		} catch {
+			// Could show error toast in the future
+		}
+	}
+
+	async function handleProfileChange(profile: string) {
+		sandboxProfile = profile;
+		await saveSetting({ sandbox_profile: profile });
+	}
+
+	async function handleNetModeChange(mode: SandboxNetMode) {
+		sandboxNetMode = mode;
+		await saveSetting({ sandbox_net_mode: mode });
+	}
+
+	function addDomain() {
+		const d = newDomain.trim().toLowerCase();
+		if (d && !sandboxAllowedDomains.includes(d)) {
+			sandboxAllowedDomains = [...sandboxAllowedDomains, d];
+			newDomain = '';
+			saveSetting({ sandbox_allowed_domains: sandboxAllowedDomains });
+		}
+	}
+
+	function removeDomain(domain: string) {
+		sandboxAllowedDomains = sandboxAllowedDomains.filter((d) => d !== domain);
+		saveSetting({ sandbox_allowed_domains: sandboxAllowedDomains });
+	}
+
+	async function handleTimeoutChange(e: Event) {
+		const val = parseInt((e.target as HTMLInputElement).value, 10);
+		if (!isNaN(val) && val > 0) {
+			sandboxTimeout = val;
+			await saveSetting({ sandbox_max_execution_seconds: val });
+		}
+	}
+
+	async function handleSpawnToggle() {
+		sandboxAllowSpawn = !sandboxAllowSpawn;
+		await saveSetting({ sandbox_allow_spawn: sandboxAllowSpawn });
+	}
+
+	async function handleAutoSnapshotToggle() {
+		autoSnapshot = !autoSnapshot;
+		await saveSetting({ auto_snapshot: autoSnapshot });
 	}
 
 	async function handleAgentModeChange(mode: AgentMode) {
@@ -362,6 +454,151 @@
 					{/if}
 				</SettingsSection>
 			{/if}
+
+			<!-- Sandbox -->
+			<SettingsSection title="Sandbox" description="Execution security policy">
+				{#if settingsLoading}
+					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+				{:else}
+					<div class="space-y-3">
+						<!-- Profile -->
+						<div>
+							<label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400"
+								>Profile</label
+							>
+							<div class="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+								{#each SANDBOX_PROFILES as p (p.value)}
+									<button
+										onclick={() => handleProfileChange(p.value)}
+										class={[
+											'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+											sandboxProfile === p.value
+												? 'bg-zinc-700 text-white dark:bg-zinc-600'
+												: 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+										]}
+										title={p.description}
+									>
+										{p.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+
+						<!-- Network mode -->
+						<div>
+							<label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400"
+								>Network</label
+							>
+							<div class="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+								{#each NET_MODES as m (m.value)}
+									<button
+										onclick={() => handleNetModeChange(m.value)}
+										class={[
+											'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+											sandboxNetMode === m.value
+												? 'bg-zinc-700 text-white dark:bg-zinc-600'
+												: 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+										]}
+									>
+										{m.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+
+						<!-- Allowed domains (shown only when net mode is allowed_domains) -->
+						{#if sandboxNetMode === 'allowed_domains'}
+							<div>
+								<label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400"
+									>Allowed domains</label
+								>
+								<div class="space-y-1">
+									{#each sandboxAllowedDomains as domain (domain)}
+										<div
+											class="flex items-center justify-between rounded bg-zinc-100 px-2 py-1 dark:bg-zinc-800"
+										>
+											<span class="font-mono text-xs text-zinc-700 dark:text-zinc-300"
+												>{domain}</span
+											>
+											<button
+												onclick={() => removeDomain(domain)}
+												class="text-zinc-400 hover:text-red-500 dark:text-zinc-500 dark:hover:text-red-400"
+												aria-label="Remove {domain}"
+											>
+												<svg viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+													<path
+														d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"
+													/>
+												</svg>
+											</button>
+										</div>
+									{/each}
+									<form
+										class="flex gap-1"
+										onsubmit={(e) => {
+											e.preventDefault();
+											addDomain();
+										}}
+									>
+										<input
+											type="text"
+											bind:value={newDomain}
+											placeholder="github.com"
+											class="flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 font-mono text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
+										/>
+										<button
+											type="submit"
+											class="rounded-md bg-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+										>
+											Add
+										</button>
+									</form>
+								</div>
+							</div>
+						{/if}
+
+						<!-- Timeout + Spawn row -->
+						<div class="flex items-center gap-3">
+							<div class="flex-1">
+								<label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400"
+									>Timeout (s)</label
+								>
+								<input
+									type="number"
+									min="1"
+									max="3600"
+									value={sandboxTimeout ?? ''}
+									onchange={handleTimeoutChange}
+									placeholder="default"
+									class="w-full rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
+								/>
+							</div>
+							<label class="flex items-center gap-2 pt-4">
+								<input
+									type="checkbox"
+									checked={sandboxAllowSpawn ?? false}
+									onchange={handleSpawnToggle}
+									class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
+								/>
+								<span class="text-xs text-zinc-600 dark:text-zinc-400">Allow spawn</span>
+							</label>
+						</div>
+
+						<!-- Auto-snapshot -->
+						<label class="flex items-center gap-2">
+							<input
+								type="checkbox"
+								checked={autoSnapshot}
+								onchange={handleAutoSnapshotToggle}
+								class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
+							/>
+							<span class="text-xs text-zinc-600 dark:text-zinc-400"
+								>Auto-snapshot before dangerous commands</span
+							>
+						</label>
+					</div>
+				{/if}
+			</SettingsSection>
 
 			<!-- Workspace -->
 			<SettingsSection title="Workspace" description="Linked project workspace">
