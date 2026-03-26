@@ -115,6 +115,102 @@ describe('ChatMessage', () => {
 		expect(screen.queryByText('+1 more')).not.toBeInTheDocument();
 	});
 
+	it('shows reasoning content inside thinking indicator during thinking phase', () => {
+		render(ChatMessage, {
+			props: {
+				role: 'assistant',
+				content: '',
+				thinking: true,
+				thinkingContent: 'Let me analyze this request'
+			}
+		});
+
+		expect(screen.getByRole('status', { name: /thinking/i })).toBeInTheDocument();
+		expect(screen.getByText('Let me analyze this request')).toBeInTheDocument();
+	});
+
+	it('hides reasoning details section while still thinking', () => {
+		const { container } = render(ChatMessage, {
+			props: {
+				role: 'assistant',
+				content: '',
+				thinking: true,
+				thinkingContent: 'Analyzing...'
+			}
+		});
+
+		// The <details> summary with "Reasoning" should not be present during thinking
+		const details = container.querySelector('details');
+		expect(details).not.toBeInTheDocument();
+	});
+
+	it('shows reasoning in collapsible details after thinking completes', () => {
+		const { container } = render(ChatMessage, {
+			props: {
+				role: 'assistant',
+				content: 'Here is my answer.',
+				thinking: false,
+				thinkingContent: 'Let me think about this'
+			}
+		});
+
+		const summary = container.querySelector('summary');
+		expect(summary).toBeInTheDocument();
+		expect(summary?.textContent?.trim()).toBe('Reasoning');
+	});
+
+	it('shows running tools summary line', () => {
+		render(ChatMessage, {
+			props: {
+				role: 'assistant',
+				content: 'Working on it...',
+				streaming: true,
+				toolExecutions: [
+					{
+						id: 'te1',
+						tool_call_id: 'tc1',
+						tool_name: 'read_file',
+						input: {},
+						source: 'builtin' as const,
+						status: 'running' as const
+					},
+					{
+						id: 'te2',
+						tool_call_id: 'tc2',
+						tool_name: 'search',
+						input: {},
+						source: 'builtin' as const,
+						status: 'running' as const
+					}
+				]
+			}
+		});
+
+		expect(screen.getByText('2 tools running')).toBeInTheDocument();
+	});
+
+	it('hides tools summary line when all tools complete', () => {
+		render(ChatMessage, {
+			props: {
+				role: 'assistant',
+				content: 'Done.',
+				toolExecutions: [
+					{
+						id: 'te1',
+						tool_call_id: 'tc1',
+						tool_name: 'search',
+						input: {},
+						source: 'builtin' as const,
+						status: 'completed' as const,
+						output: 'result'
+					}
+				]
+			}
+		});
+
+		expect(screen.queryByText(/tools? running/)).not.toBeInTheDocument();
+	});
+
 	it('hides action bar during streaming, ephemeral, and thinking', () => {
 		const { container } = render(ChatMessage, {
 			props: { role: 'assistant', content: 'test', streaming: true }

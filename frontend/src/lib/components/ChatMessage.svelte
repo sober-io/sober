@@ -46,6 +46,9 @@
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
 	const renderedContent = $derived(content ? renderMarkdown(content) : '');
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
+	const runningToolCount = $derived(
+		toolExecutions?.filter((te) => te.status === 'pending' || te.status === 'running').length ?? 0
+	);
 	const canDelete = $derived(isUser && !!onDelete && !streaming && !ephemeral);
 	const canShowActions = $derived(!streaming && !ephemeral && !thinking);
 	const hasTags = $derived(tags && tags.length > 0);
@@ -91,7 +94,7 @@
 				]}
 			>
 				{#if thinking && !content}
-					<ThinkingIndicator />
+					<ThinkingIndicator {thinkingContent} />
 				{:else if streaming}
 					<StreamingText {content} {streaming} />
 				{:else}
@@ -99,10 +102,10 @@
 					<div class="chat-prose prose prose-sm max-w-none">{@html renderedContent}</div>
 				{/if}
 
-				{#if hasThinkingContent}
+				{#if hasThinkingContent && !thinking}
 					<details class="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
 						<summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">
-							{thinking ? 'Reasoning...' : 'Reasoning'}
+							Reasoning
 						</summary>
 						<div
 							class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400"
@@ -112,25 +115,17 @@
 					</details>
 				{/if}
 
-				{#if thinking && hasToolExecutions}
-					<details open class="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
-						<summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">
-							Thinking...
-						</summary>
-						<div class="mt-1">
-							{#each toolExecutions! as te (te.id)}
-								<ToolCallDisplay
-									toolName={te.tool_name}
-									input={te.input}
-									output={te.output}
-									loading={te.status === 'pending' || te.status === 'running'}
-									isError={te.status === 'failed'}
-									error={te.error}
-								/>
-							{/each}
+				{#if hasToolExecutions}
+					{#if runningToolCount > 0}
+						<div class="mt-2 flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+							<span
+								class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"
+							></span>
+							<span class="animate-pulse"
+								>{runningToolCount} tool{runningToolCount > 1 ? 's' : ''} running</span
+							>
 						</div>
-					</details>
-				{:else if hasToolExecutions}
+					{/if}
 					{#each toolExecutions! as te (te.id)}
 						<ToolCallDisplay
 							toolName={te.tool_name}

@@ -396,12 +396,19 @@
 
 				if (!target.toolExecutions) target.toolExecutions = [];
 
-				// Upsert by execution id.
-				const existing = target.toolExecutions.find((te) => te.id === msg.id);
-				if (existing) {
-					existing.status = msg.status;
-					if (msg.output !== undefined) existing.output = msg.output;
-					if (msg.error !== undefined) existing.error = msg.error;
+				// Upsert by execution id — replace with new object to trigger Svelte reactivity.
+				const idx = target.toolExecutions.findIndex((te) => te.id === msg.id);
+				if (idx >= 0) {
+					target.toolExecutions = target.toolExecutions.map((te) =>
+						te.id === msg.id
+							? {
+									...te,
+									status: msg.status,
+									output: msg.output ?? te.output,
+									error: msg.error ?? te.error
+								}
+							: te
+					);
 				} else {
 					target.toolExecutions = [
 						...target.toolExecutions,
