@@ -15,22 +15,8 @@ env:
 
 jobs:
   build-and-push:
-    name: ${{ matrix.service }}
+    name: Build & Push All Images
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - service: sober-api
-            dockerfile: infra/docker/Dockerfile.api
-          - service: sober-agent
-            dockerfile: infra/docker/Dockerfile.agent
-          - service: sober-scheduler
-            dockerfile: infra/docker/Dockerfile.scheduler
-          - service: sober-web
-            dockerfile: infra/docker/Dockerfile.web
-          - service: sober-cli
-            dockerfile: infra/docker/Dockerfile.cli
-
     steps:
       - uses: actions/checkout@v5
 
@@ -45,24 +31,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.service }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      - name: Build and push all images
+        uses: docker/bake-action@v6
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          files: docker-bake.hcl
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        env:
+          REGISTRY: ${{ env.REGISTRY }}/${{ github.repository }}
+          TAG: ${{ steps.tag.outputs.tag }}
