@@ -103,9 +103,10 @@
 	{#if expanded}
 		<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
-			<!-- eslint-disable-next-line svelte/no-at-html-tags -- manually HTML-escaped in formatJson -->
+			<!-- eslint-disable svelte/no-at-html-tags -- manually HTML-escaped in formatJson -->
 			<pre
 				class="overflow-x-auto rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
+			<!-- eslint-enable svelte/no-at-html-tags -->
 
 			{#if displayOutput !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
