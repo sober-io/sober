@@ -371,3 +371,20 @@ Docker Compose (dev) → Kubernetes (prod). Four independent processes:
 | `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
 
 Each process can be started, stopped, and scaled independently.
+
+### Docker Image Builds
+
+Two Dockerfile strategies serve different purposes:
+
+| Context | Dockerfiles | Tool | Purpose |
+|---------|-------------|------|---------|
+| Local dev | `infra/docker/Dockerfile.<service>` (×5) | `docker compose up --build` | Fast single-service iteration |
+| CI / prod | `infra/docker/Dockerfile.ci` (×1) | `docker buildx bake -f docker-bake.hcl` | Optimized multi-image publishing |
+
+**CI builds** use a unified multi-stage Dockerfile with [cargo-chef](https://github.com/LukeMathWalker/cargo-chef)
+to separate dependency compilation (slow, cacheable) from application code compilation (fast).
+All 5 binaries are compiled in a single `cargo build --release`, then each service image copies
+its binary into a minimal `debian:trixie-slim` runtime stage. `docker-bake.hcl` defines all 5
+targets for `docker buildx bake`, sharing the builder layers across all images.
+
+**Dev builds** keep per-service Dockerfiles for fast iteration — `docker-compose.yml` is unchanged.
