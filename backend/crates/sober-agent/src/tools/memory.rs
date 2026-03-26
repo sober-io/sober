@@ -201,13 +201,16 @@ impl Tool for RecallTool {
         ToolMetadata {
             name: "recall".to_owned(),
             description: "Search your long-term memory for stored facts, preferences, code, \
-                skills, and conversation history. You MUST use this tool proactively:\n\
+                skills, and conversation history across ALL conversations. You MUST use this tool proactively:\n\
                 - At the START of every new conversation to load relevant context about the user\n\
                 - Whenever the user references something from the past\n\
                 - Before answering any question that might depend on stored knowledge\n\
                 - Before saying \"I don't know\" — always check memory first\n\
                 Your passive context only includes user preferences. All facts, skills, \
-                code snippets, and conversation history require explicit recall."
+                code snippets, and conversation history require explicit recall.\n\
+                When recalling knowledge about yourself (the agent) — your identity, \
+                capabilities, configuration, learned behaviors — use scope 'system'. \
+                When recalling personal details about the user — use scope 'user'."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -271,7 +274,7 @@ impl RememberTool {
 
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
-        let scope_id = ScopeId::from_uuid(*user_id.as_uuid());
+        let scope_id = resolve_scope(&input, user_id);
 
         let content = input
             .get("content")
@@ -347,7 +350,11 @@ impl Tool for RememberTool {
                 in memory for future recall. Use this when the user shares personal facts or \
                 preferences, when you learn something useful for future conversations, when \
                 the user explicitly asks you to remember something, or after extracting key \
-                decisions/outcomes from a conversation."
+                decisions/outcomes from a conversation.\n\
+                When storing knowledge about yourself (the agent) — your capabilities, \
+                configuration, identity, learned behaviors — always use scope 'system'. \
+                When storing personal details about the user — their preferences, facts, \
+                habits — always use scope 'user'."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -364,6 +371,11 @@ impl Tool for RememberTool {
                     "importance": {
                         "type": "number",
                         "description": "Importance score 0.0-1.0 (optional). Defaults vary by type: soul=0.9, preference=0.8, fact/skill=0.7, code=0.6, conversation=0.5."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["user", "system"],
+                        "description": "Storage scope: 'user' for personal memories (default), 'system' for knowledge about the agent itself (identity, capabilities, learned behaviors)."
                     }
                 },
                 "required": ["content", "chunk_type"]
