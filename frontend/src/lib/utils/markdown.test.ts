@@ -55,4 +55,32 @@ describe('renderMarkdown', () => {
 		expect(html).not.toContain('data-evil');
 		expect(html).toContain('content');
 	});
+
+	it('renders code blocks with pre tag', () => {
+		const html = renderMarkdown('```js\nconst x = 1;\n```');
+
+		expect(html).toContain('<pre');
+		expect(html).toContain('<code>');
+		// Content may be tokenized into spans by shiki or rendered plain
+		expect(html).toMatch(/const/);
+		expect(html).toMatch(/x/);
+	});
+
+	it('closes unclosed code fences during streaming', () => {
+		// Simulates partial streaming where the closing fence hasn't arrived
+		const html = renderMarkdown('```python\ndef hello():');
+
+		// Should render as a code block, not raw backticks
+		expect(html).toContain('<pre');
+		expect(html).toMatch(/def/);
+		expect(html).toMatch(/hello/);
+		expect(html).not.toContain('```');
+	});
+
+	it('does not alter content with matched code fences', () => {
+		const html = renderMarkdown('```\ncode\n```\ntext after');
+
+		expect(html).toContain('<pre');
+		expect(html).toContain('text after');
+	});
 });

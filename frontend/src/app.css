@@ -24,3 +24,35 @@
 		--tw-prose-pre-bg: rgb(0 0 0 / 0.3);
 	}
 }
+
+/* Shiki code blocks */
+.chat-prose pre.shiki {
+	border-radius: 0.375rem;
+	padding: 0.75rem 1rem;
+	overflow-x: auto;
+	font-size: 0.8125rem;
+	line-height: 1.5;
+}
+
+/* Override prose pre background for shiki blocks (they have their own bg) */
+.chat-prose pre.shiki,
+.chat-prose :where(pre.shiki) {
+	background-color: var(--shiki-color-background, #24292e) !important;
+}
+
+/* Table improvements for chat context */
+.chat-prose table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.8125rem;
+}
+
+.chat-prose th,
+.chat-prose td {
+	padding: 0.375rem 0.75rem;
+	text-align: left;
+}
+
+.chat-prose th {
+	font-weight: 600;
+}

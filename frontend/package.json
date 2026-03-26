@@ -44,6 +44,7 @@
 	"dependencies": {
 		"dayjs": "^1.11.20",
 		"isomorphic-dompurify": "^3.5.0",
-		"marked": "^17.0.4"
+		"marked": "^17.0.4",
+		"shiki": "^4.0.2"
 	}
 }
