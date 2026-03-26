@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { uuid } from '$lib/utils/id';
 	import type {
@@ -92,6 +92,20 @@
 	let sentinel: HTMLDivElement | undefined = $state();
 	let assistantPhase = $state<AssistantPhase>('idle');
 	const isBusy = $derived(assistantPhase !== 'idle');
+
+	// Warn before navigating away while the assistant is processing.
+	beforeNavigate(({ cancel }) => {
+		if (isBusy && !confirm('The assistant is still processing. Leave this page?')) {
+			cancel();
+		}
+	});
+
+	$effect(() => {
+		if (!isBusy) return;
+		const handler = (e: BeforeUnloadEvent) => e.preventDefault();
+		window.addEventListener('beforeunload', handler);
+		return () => window.removeEventListener('beforeunload', handler);
+	});
 
 	let messageQueue = $state<QueuedMessage[]>([]);
 	let editingQueueId = $state<string | null>(null);
