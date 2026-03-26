@@ -44,9 +44,10 @@
 	const isUser = $derived(role === 'user');
 	const hasToolExecutions = $derived(toolExecutions && toolExecutions.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read to trigger re-derive when shiki loads
-	const _hlv = $derived(highlighterReady.version);
-	const renderedContent = $derived(content ? renderMarkdown(content) : '');
+	const renderedContent = $derived(
+		// Read highlighterReady.version to re-derive when shiki finishes loading
+		content ? (highlighterReady.version, renderMarkdown(content)) : ''
+	);
 	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
 	const runningToolCount = $derived(
 		toolExecutions?.filter((te) => te.status === 'pending' || te.status === 'running').length ?? 0

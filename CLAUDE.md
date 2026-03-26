@@ -44,7 +44,7 @@ just dev | build | test | check | fmt | setup
 - **Code navigation.** Prefer LSP (Rust + TypeScript) for go-to-definition, find references, and rename. Use over grep/glob when possible.
 - **No `.unwrap()` in library code.** `thiserror` for libs, `anyhow` for bins. Public functions need doc comments.
 - **Confirm before implementing.** After plan approval, ask the user before starting — don't auto-start.
-- **Rebuild Docker after changes.** Run `docker compose up -d --build -q` after code changes — don't wait to be asked. Always use `-q` to suppress build output.
+- **Rebuild Docker after changes.** Run `docker compose up -d --build --quiet-pull` after code changes — don't wait to be asked. Pipe verbose build output to `tail -15` to show only final status.
 - **`context_modifying` on tools.** Only set `context_modifying: true` on tools that mutate state (memory writes, file edits). Setting it on read-only tools triggers context rebuild which loses `reasoning_content` from DB, breaking thinking-enabled models.
 - **Update docs with code.** When architecture or functionality changes, update `ARCHITECTURE.md` and user-facing documentation (mdBook site in `docs/`) in the same PR.
 

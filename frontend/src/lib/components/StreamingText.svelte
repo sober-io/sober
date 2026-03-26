@@ -8,9 +8,10 @@
 
 	let { content, streaming = false }: Props = $props();
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read to trigger re-derive when shiki loads
-	const _hlv = $derived(highlighterReady.version);
-	const renderedContent = $derived(content ? renderMarkdown(content) : '');
+	const renderedContent = $derived(
+		// Read highlighterReady.version to re-derive when shiki finishes loading
+		content ? (highlighterReady.version, renderMarkdown(content)) : ''
+	);
 </script>
 
 <div class="chat-prose prose prose-sm max-w-none inline">
