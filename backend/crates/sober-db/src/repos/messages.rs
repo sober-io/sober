@@ -140,7 +140,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         content: &str,
         reasoning: Option<&str>,
     ) -> Result<(), AppError> {
-        sqlx::query("UPDATE conversation_messages SET content = $2, reasoning = $3 WHERE id = $1")
+        sqlx::query("UPDATE conversation_messages SET content = $2, reasoning = COALESCE($3, reasoning) WHERE id = $1")
             .bind(id.as_uuid())
             .bind(content)
             .bind(reasoning)
