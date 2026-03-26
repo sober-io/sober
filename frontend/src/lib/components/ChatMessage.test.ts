@@ -129,8 +129,8 @@ describe('ChatMessage', () => {
 		expect(screen.getByText('Let me analyze this request')).toBeInTheDocument();
 	});
 
-	it('hides reasoning details section while still thinking', () => {
-		const { container } = render(ChatMessage, {
+	it('hides reasoning panel while still thinking', () => {
+		render(ChatMessage, {
 			props: {
 				role: 'assistant',
 				content: '',
@@ -139,13 +139,12 @@ describe('ChatMessage', () => {
 			}
 		});
 
-		// The <details> summary with "Reasoning" should not be present during thinking
-		const details = container.querySelector('details');
-		expect(details).not.toBeInTheDocument();
+		// Reasoning panel (with "reasoning" label) should not be present during thinking
+		expect(screen.queryByText('reasoning')).not.toBeInTheDocument();
 	});
 
-	it('shows reasoning in collapsible details after thinking completes', () => {
-		const { container } = render(ChatMessage, {
+	it('shows reasoning panel after thinking completes', () => {
+		render(ChatMessage, {
 			props: {
 				role: 'assistant',
 				content: 'Here is my answer.',
@@ -154,9 +153,7 @@ describe('ChatMessage', () => {
 			}
 		});
 
-		const summary = container.querySelector('summary');
-		expect(summary).toBeInTheDocument();
-		expect(summary?.textContent?.trim()).toBe('Reasoning');
+		expect(screen.getByText('reasoning')).toBeInTheDocument();
 	});
 
 	it('shows running tools summary line', () => {

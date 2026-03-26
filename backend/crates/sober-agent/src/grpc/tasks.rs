@@ -172,6 +172,9 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
 
     let inner = match event {
         AgentEvent::TextDelta(content) => Event::TextDelta(proto::TextDelta { content }),
+        AgentEvent::ThinkingDelta(content) => {
+            Event::ThinkingDelta(proto::ThinkingDelta { content })
+        }
         AgentEvent::ToolExecutionUpdate {
             id,
             message_id,

@@ -58,6 +58,7 @@
 
 	let showTagPopover = $state(false);
 	let showAllTags = $state(false);
+	let reasoningExpanded = $state(false);
 
 	const visibleTags = $derived.by(() => {
 		if (!tags || tags.length === 0) return [];
@@ -106,16 +107,33 @@
 				{/if}
 
 				{#if hasThinkingContent && !thinking}
-					<details class="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
-						<summary class="cursor-pointer text-xs text-zinc-500 dark:text-zinc-400">
-							Reasoning
-						</summary>
-						<div
-							class="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400"
+					<div class="my-2 rounded-md border border-zinc-200 text-sm dark:border-zinc-700">
+						<button
+							onclick={() => (reasoningExpanded = !reasoningExpanded)}
+							class="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-500 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
 						>
-							{thinkingContent}
-						</div>
-					</details>
+							<svg
+								class="h-3 w-3"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+								/>
+							</svg>
+							<span class="font-mono text-xs">reasoning</span>
+						</button>
+						{#if reasoningExpanded}
+							<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
+								<pre
+									class="max-h-60 max-w-full overflow-auto whitespace-pre-wrap break-words text-xs text-zinc-500 dark:text-zinc-400">{thinkingContent}</pre>
+							</div>
+						{/if}
+					</div>
 				{/if}
 
 				{#if hasToolExecutions}

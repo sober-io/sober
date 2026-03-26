@@ -198,9 +198,21 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     });
                 }
 
-                // Reasoning content delta — accumulate silently.
+                // Reasoning content delta — stream to frontend and accumulate.
                 if let Some(ref reasoning) = choice.delta.reasoning_content {
                     reasoning_buffer.push_str(reasoning);
+                    let _ = params
+                        .event_tx
+                        .send(Ok(AgentEvent::ThinkingDelta(reasoning.clone())))
+                        .await;
+                    let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
+                        conversation_id: conv_id_str.clone(),
+                        event: Some(proto::conversation_update::Event::ThinkingDelta(
+                            proto::ThinkingDelta {
+                                content: reasoning.clone(),
+                            },
+                        )),
+                    });
                 }
 
                 // Tool call deltas — buffer until stream ends.

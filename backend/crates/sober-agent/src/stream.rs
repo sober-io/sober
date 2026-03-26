@@ -22,6 +22,8 @@ pub struct Usage {
 pub enum AgentEvent {
     /// Incremental text output from the LLM.
     TextDelta(String),
+    /// Incremental reasoning/thinking content from the LLM.
+    ThinkingDelta(String),
     /// A tool execution status update.
     ToolExecutionUpdate {
         /// Unique ID of the tool execution.
