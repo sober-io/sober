@@ -19,6 +19,8 @@
 		ephemeral?: boolean;
 		messageId?: string;
 		senderUsername?: string;
+		/** True for messages created during this session (not loaded from DB). */
+		live?: boolean;
 		tags?: Tag[];
 		onTagsChange?: (tags: Tag[]) => void;
 		onDelete?: () => void;
@@ -34,6 +36,7 @@
 		timestamp,
 		source,
 		ephemeral = false,
+		live = false,
 		messageId,
 		senderUsername,
 		tags,
@@ -58,7 +61,7 @@
 
 	let showTagPopover = $state(false);
 	let showAllTags = $state(false);
-	let reasoningExpanded = $state(false);
+	let reasoningExpanded = $state(live);
 
 	const visibleTags = $derived.by(() => {
 		if (!tags || tags.length === 0) return [];

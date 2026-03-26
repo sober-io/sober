@@ -41,6 +41,8 @@
 		source?: string;
 		ephemeral?: boolean;
 		userId?: string;
+		/** True for messages created during this session (not loaded from DB). */
+		live?: boolean;
 	}
 
 	interface QueuedMessage {
@@ -277,7 +279,8 @@
 			thinkingContent: '',
 			streaming: false,
 			thinking: true,
-			timestamp: now
+			timestamp: now,
+			live: true
 		});
 		assistantPhase = 'thinking';
 		websocket.send({
@@ -339,7 +342,8 @@
 						thinkingContent: '',
 						streaming: false,
 						thinking: true,
-						timestamp: fmtTime()
+						timestamp: fmtTime(),
+						live: true
 					});
 					assistantPhase = 'thinking';
 				}
@@ -359,7 +363,8 @@
 						thinkingContent: msg.content,
 						streaming: false,
 						thinking: true,
-						timestamp: fmtTime()
+						timestamp: fmtTime(),
+						live: true
 					});
 					assistantPhase = 'thinking';
 				}
@@ -799,6 +804,7 @@
 					toolExecutions={msg.toolExecutions}
 					streaming={msg.streaming}
 					thinking={msg.thinking}
+					live={msg.live}
 					timestamp={msg.timestamp}
 					source={msg.source}
 					ephemeral={msg.ephemeral}
