@@ -388,6 +388,17 @@ Docker Compose (dev) → Kubernetes (prod). Four independent processes:
 
 Each process can be started, stopped, and scaled independently.
 
+### Runtime Dependencies
+
+The `sober-agent` image requires these system binaries at runtime:
+
+| Binary | Purpose | Required? |
+|--------|---------|-----------|
+| `bwrap` (bubblewrap) | Process-level sandboxing | Always |
+| `socat` | Network bridge for `AllowedDomains` sandbox mode | When using domain-filtered network |
+| `git` | Workspace git operations (libgit2 fallback) | Always |
+| `clang`, `lld` | WASM plugin compilation | When generating plugins |
+
 ### Docker Image Builds
 
 Two Dockerfile strategies serve different purposes:
