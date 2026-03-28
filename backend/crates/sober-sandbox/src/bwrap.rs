@@ -230,7 +230,7 @@ impl BwrapSandbox {
     }
 
     /// Build the bwrap argument list from the current policy.
-    fn build_args(&self, command: &[String], _proxy: Option<&ProxyBridge>) -> Vec<String> {
+    fn build_args(&self, command: &[String], proxy: Option<&ProxyBridge>) -> Vec<String> {
         let mut args = Vec::new();
 
         // Always applied: PID isolation, die-with-parent, new session.
@@ -295,11 +295,12 @@ impl BwrapSandbox {
                 args.push("--unshare-net".to_owned());
             }
             NetMode::AllowedDomains(_) => {
-                // AllowedDomains keeps host networking so the sandboxed process
-                // can reach the proxy on loopback. The proxy itself enforces the
-                // domain allowlist — only CONNECT requests to listed domains are
-                // forwarded. This trades network namespace isolation for a
-                // working proxy setup; the proxy IS the security boundary.
+                args.push("--unshare-net".to_owned());
+                // If proxy is active, bind-mount the socat bridge socket.
+                if let Some(proxy) = proxy {
+                    let sock = proxy.socket_path().to_string_lossy().to_string();
+                    args.extend(["--bind".to_owned(), sock.clone(), sock]);
+                }
             }
             NetMode::Full => {
                 // No network namespace restriction.
@@ -394,13 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn args_no_unshare_net_for_allowed_domains() {
-        // AllowedDomains keeps host networking — the proxy enforces filtering.
+    fn args_unshare_net_for_allowed_domains() {
         let sandbox = BwrapSandbox::new(test_policy(NetMode::AllowedDomains(vec![
             "example.com".into(),
         ])));
         let args = sandbox.build_args(&["echo".into()], None);
-        assert!(!args.contains(&"--unshare-net".to_owned()));
+        assert!(args.contains(&"--unshare-net".to_owned()));
     }
 
     #[test]

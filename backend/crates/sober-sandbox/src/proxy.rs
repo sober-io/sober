@@ -65,9 +65,6 @@ impl ProxyBridge {
             std::env::temp_dir().join(format!("sober-proxy-{}.sock", uuid::Uuid::now_v7()));
 
         // Start socat: bridge sandbox_port -> proxy_addr.
-        // AllowedDomains mode keeps host networking (no --unshare-net), so
-        // the sandboxed process reaches socat on loopback. The proxy itself
-        // enforces the domain allowlist.
         let socat_child = tokio::process::Command::new(&socat_path)
             .arg(format!(
                 "TCP-LISTEN:{sandbox_port},bind=127.0.0.1,fork,reuseaddr"
