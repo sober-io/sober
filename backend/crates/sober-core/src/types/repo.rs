@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use super::domain::*;
 use super::enums::{
-    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, JobStatus, PluginScope,
-    PluginStatus, RoleKind, ToolExecutionStatus, UserStatus,
+    AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, EvolutionStatus,
+    EvolutionType, JobStatus, PluginScope, PluginStatus, RoleKind, ToolExecutionStatus, UserStatus,
 };
 use super::ids::*;
 use super::input::*;
@@ -803,6 +803,69 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
         scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
+
+/// Evolution event operations.
+pub trait EvolutionRepo: Send + Sync {
+    /// Creates a new evolution event.
+    fn create(
+        &self,
+        input: CreateEvolutionEvent,
+    ) -> impl Future<Output = Result<EvolutionEvent, AppError>> + Send;
+
+    /// Finds an event by ID.
+    fn get_by_id(
+        &self,
+        id: EvolutionEventId,
+    ) -> impl Future<Output = Result<EvolutionEvent, AppError>> + Send;
+
+    /// Lists events with optional type and status filters.
+    fn list(
+        &self,
+        r#type: Option<EvolutionType>,
+        status: Option<EvolutionStatus>,
+    ) -> impl Future<Output = Result<Vec<EvolutionEvent>, AppError>> + Send;
+
+    /// Lists all active events (for detection context).
+    fn list_active(&self) -> impl Future<Output = Result<Vec<EvolutionEvent>, AppError>> + Send;
+
+    /// Updates status, appends to status_history, sets decided_by and reverted_at as appropriate.
+    fn update_status(
+        &self,
+        id: EvolutionEventId,
+        status: EvolutionStatus,
+        decided_by: Option<UserId>,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Updates the result JSONB field (execution output or error).
+    fn update_result(
+        &self,
+        id: EvolutionEventId,
+        result: serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Counts events auto-approved today (decided_by IS NULL, status IN (approved, executing, active)).
+    fn count_auto_approved_today(&self) -> impl Future<Output = Result<i64, AppError>> + Send;
+
+    /// Counts events currently in executing status.
+    fn count_executing(&self) -> impl Future<Output = Result<i64, AppError>> + Send;
+
+    /// Lists events ordered by created_at DESC for timeline view.
+    fn list_timeline(
+        &self,
+        limit: i64,
+        r#type: Option<EvolutionType>,
+        status: Option<EvolutionStatus>,
+    ) -> impl Future<Output = Result<Vec<EvolutionEvent>, AppError>> + Send;
+
+    /// Returns the singleton evolution autonomy config from DB.
+    fn get_config(&self) -> impl Future<Output = Result<EvolutionConfigRow, AppError>> + Send;
+
+    /// Updates autonomy levels in the singleton evolution config row.
+    fn update_config(
+        &self,
+        config: EvolutionConfigRow,
+    ) -> impl Future<Output = Result<EvolutionConfigRow, AppError>> + Send;
 }
 
 /// Tool execution tracking operations.
