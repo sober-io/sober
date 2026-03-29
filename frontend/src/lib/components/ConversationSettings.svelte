@@ -720,11 +720,11 @@
 								{#each disabledPluginNames as plugin (plugin.id)}
 									<button
 										onclick={() => enablePlugin(plugin.id)}
-										class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
+										class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50"
 									>
 										{plugin.name}
-										<span class="text-xs text-amber-500 dark:text-amber-400">plugin</span>
-										<span class="text-amber-400 dark:text-amber-500">&times;</span>
+										<span class="text-xs text-purple-500 dark:text-purple-400">plugin</span>
+										<span class="text-purple-400 dark:text-purple-500">&times;</span>
 									</button>
 								{/each}
 								{#each disabledTools as toolName (toolName)}
@@ -736,19 +736,19 @@
 										class={[
 											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
 											fromPlugin
-												? 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50'
+												? 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:hover:bg-sky-900/50'
 												: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
 										]}
 									>
 										{toolName}
 										{#if fromPlugin}
-											<span class="text-xs text-orange-500 dark:text-orange-400"
+											<span class="text-xs text-sky-500 dark:text-sky-400"
 												>{fromPlugin.plugin_name}</span
 											>
 										{/if}
 										<span
 											class={fromPlugin
-												? 'text-orange-400 dark:text-orange-500'
+												? 'text-sky-400 dark:text-sky-500'
 												: 'text-red-400 dark:text-red-500'}>&times;</span
 										>
 									</button>
@@ -792,7 +792,7 @@
 											class={[
 												'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs',
 												item.type === 'plugin'
-													? 'hover:bg-amber-50 dark:hover:bg-amber-900/20'
+													? 'hover:bg-purple-50 dark:hover:bg-purple-900/20'
 													: 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
 											]}
 										>
@@ -800,7 +800,9 @@
 												<span
 													class={[
 														'h-1.5 w-1.5 rounded-full',
-														item.type === 'plugin' ? 'bg-amber-400' : 'bg-zinc-400 dark:bg-zinc-500'
+														item.type === 'plugin'
+															? 'bg-purple-400'
+															: 'bg-zinc-400 dark:bg-zinc-500'
 													]}
 												></span>
 												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
@@ -809,7 +811,7 @@
 												class={[
 													'text-xs',
 													item.type === 'plugin'
-														? 'text-amber-500 dark:text-amber-400'
+														? 'text-purple-500 dark:text-purple-400'
 														: 'text-zinc-400 dark:text-zinc-500'
 												]}>{item.detail}</span
 											>
