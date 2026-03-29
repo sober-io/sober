@@ -118,6 +118,7 @@
 	let disabledTools = $state<string[]>([]);
 	let disabledPlugins = $state<string[]>([]);
 	let capabilitySearch = $state('');
+	let capabilityFocused = $state(false);
 
 	// Derived
 	let createdDate = $derived(
@@ -260,26 +261,13 @@
 	}
 
 	let filteredCapabilities = $derived.by(() => {
+		if (!capabilityFocused) return [];
 		const q = capabilitySearch.toLowerCase();
-		if (!q) return [];
 		const items: Array<{ type: 'tool' | 'plugin'; id: string; name: string; detail: string }> = [];
-		for (const tool of availableTools) {
-			if (
-				!disabledTools.includes(tool.name) &&
-				(tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q))
-			) {
-				items.push({
-					type: 'tool',
-					id: tool.name,
-					name: tool.name,
-					detail: tool.plugin_name ? `plugin: ${tool.plugin_name}` : tool.source
-				});
-			}
-		}
 		for (const plugin of availablePlugins) {
 			if (
 				!disabledPlugins.includes(plugin.id) &&
-				(plugin.name.toLowerCase().includes(q) || plugin.kind.toLowerCase().includes(q))
+				(!q || plugin.name.toLowerCase().includes(q) || plugin.kind.toLowerCase().includes(q))
 			) {
 				items.push({
 					type: 'plugin',
@@ -289,7 +277,20 @@
 				});
 			}
 		}
-		return items.slice(0, 10);
+		for (const tool of availableTools) {
+			if (
+				!disabledTools.includes(tool.name) &&
+				(!q || tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q))
+			) {
+				items.push({
+					type: 'tool',
+					id: tool.name,
+					name: tool.name,
+					detail: tool.plugin_name ? `plugin: ${tool.plugin_name}` : tool.source
+				});
+			}
+		}
+		return items.slice(0, 15);
 	});
 
 	let disabledPluginNames = $derived(
@@ -743,16 +744,24 @@
 							<input
 								type="text"
 								bind:value={capabilitySearch}
-								onblur={() => setTimeout(() => (capabilitySearch = ''), 150)}
+								onfocus={() => (capabilityFocused = true)}
+								onblur={() =>
+									setTimeout(() => {
+										capabilityFocused = false;
+										capabilitySearch = '';
+									}, 150)}
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Enter') addCapabilityFromSearch();
-									if (e.key === 'Escape') capabilitySearch = '';
+									if (e.key === 'Escape') {
+										capabilityFocused = false;
+										capabilitySearch = '';
+									}
 								}}
 								placeholder="Search tools or plugins to disable..."
 								class="w-full rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
 							/>
 
-							{#if capabilitySearch && filteredCapabilities.length > 0}
+							{#if capabilityFocused && filteredCapabilities.length > 0}
 								<div
 									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 								>
@@ -762,7 +771,6 @@
 												e.preventDefault();
 												if (item.type === 'plugin') disablePlugin(item.id);
 												else disableTool(item.id);
-												capabilitySearch = '';
 											}}
 											class="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700"
 										>
