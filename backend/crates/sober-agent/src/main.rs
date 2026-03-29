@@ -287,10 +287,17 @@ async fn main() -> Result<()> {
 
     // 19. Connect to scheduler gRPC service (background — retries until available)
     let scheduler_socket = config.scheduler.socket_path.clone();
+    let evolution_config = config.evolution.clone();
     let scheduler_client_bg = Arc::clone(&scheduler_client);
     let scheduler_token = shutdown_token.clone();
     tokio::spawn(async move {
-        connect_to_scheduler(scheduler_client_bg, &scheduler_socket, scheduler_token).await;
+        connect_to_scheduler(
+            scheduler_client_bg,
+            &scheduler_socket,
+            &evolution_config,
+            scheduler_token,
+        )
+        .await;
     });
 
     // Clone agent handle for graceful shutdown (before it moves into the gRPC service).
@@ -365,6 +372,7 @@ async fn main() -> Result<()> {
 async fn connect_to_scheduler(
     client: SharedSchedulerClient,
     socket_path: &Path,
+    evolution_config: &sober_core::config::EvolutionConfig,
     cancel: CancellationToken,
 ) {
     use scheduler_proto::HealthRequest;
@@ -406,7 +414,7 @@ async fn connect_to_scheduler(
                 );
 
                 // Register predefined system jobs idempotently
-                sober_agent::system_jobs::register_system_jobs(&client).await;
+                sober_agent::system_jobs::register_system_jobs(&client, evolution_config).await;
 
                 // Monitor connection health
                 let mut sched_client = sched_client;

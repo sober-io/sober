@@ -8,15 +8,19 @@
 use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
+use sober_core::types::enums::EvolutionStatus;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
+use sober_core::types::repo::EvolutionRepo;
 use tonic::Status;
-use tracing::error;
+use tracing::{error, info, warn};
 
 use std::sync::Arc;
 
 use crate::agent::Agent;
+use crate::evolution::execute_evolution;
 use crate::grpc::proto;
 use crate::stream::AgentEvent;
+use crate::system_jobs::SELF_EVOLUTION_CHECK_PROMPT;
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
 pub(crate) async fn execute_typed_payload<R: AgentRepos>(
@@ -29,6 +33,10 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
 ) {
     match payload {
+        JobPayload::Prompt { ref text, .. } if text == SELF_EVOLUTION_CHECK_PROMPT => {
+            // Custom handler: 4-phase self-evolution cycle.
+            execute_self_evolution_check(agent, task_id, tx).await;
+        }
         JobPayload::Prompt { text, .. } => {
             // Resolve delivery conversation for the result.
             let resolved_cid = if let Some(uid) = user_id {
@@ -46,7 +54,7 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
             } else {
                 // No conversation context — use autonomous prompt assembly.
                 // This validates the SOUL.md chain and prompt construction for
-                // system-level scheduled jobs (e.g. trait_evolution_check).
+                // system-level scheduled jobs.
                 let caller = CallerContext {
                     user_id,
                     trigger: TriggerKind::Scheduler,
@@ -104,6 +112,161 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
             let _ = tx.send(Ok(proto_event)).await;
         }
     }
+}
+
+/// Runs the 4-phase self-evolution check cycle.
+///
+/// This is the custom handler for the `self_evolution_check` system job.
+/// Instead of sending a prompt to the LLM, it:
+///
+/// 1. **Execute approved** — queries approved evolution events and executes them.
+/// 2. **Gather data** — queries recent conversations for pattern detection (stub).
+/// 3. **Active context** — loads active evolutions for detection context.
+/// 4. **Detect** — builds a structured prompt for the LLM to detect new
+///    evolution opportunities (stub — logs context, skips LLM call).
+///
+/// After detection, executes any newly auto-approved events.
+async fn execute_self_evolution_check<R: AgentRepos>(
+    agent: &Arc<Agent<R>>,
+    task_id: &str,
+    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
+) {
+    info!(task_id = %task_id, "starting self-evolution check cycle");
+
+    // -----------------------------------------------------------------------
+    // Phase 1: Execute pending approved evolution events
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 1: executing approved evolution events");
+
+    let approved_events = match agent
+        .repos()
+        .evolution()
+        .list(None, Some(EvolutionStatus::Approved))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query approved evolution events");
+            vec![]
+        }
+    };
+
+    let approved_count = approved_events.len();
+    if approved_count > 0 {
+        info!(
+            task_id = %task_id,
+            count = approved_count,
+            "found approved evolution events to execute"
+        );
+    }
+
+    for event in &approved_events {
+        if let Err(e) = execute_evolution(event, agent.repos(), agent.mind()).await {
+            warn!(
+                task_id = %task_id,
+                event_id = %event.id,
+                error = %e,
+                "failed to execute approved evolution event"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Gather recent conversation data for pattern detection (stub)
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 2: gathering conversation data (stub)");
+    // TODO: Query MessageRepo for recent conversations, summarize into a
+    // compact format for the detection prompt. For now, use a placeholder.
+    let _conversation_summary = "placeholder: no conversation data gathered yet";
+
+    // -----------------------------------------------------------------------
+    // Phase 3: Load active evolutions for context
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 3: loading active evolution context");
+
+    let active_events = match agent.repos().evolution().list_active().await {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query active evolution events");
+            vec![]
+        }
+    };
+
+    // Build a context string summarising active evolutions.
+    let active_context = if active_events.is_empty() {
+        "No active evolutions.".to_owned()
+    } else {
+        active_events
+            .iter()
+            .map(|e| {
+                format!(
+                    "- [{}] {} (type: {:?}, since: {})",
+                    e.id, e.title, e.evolution_type, e.updated_at
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // -----------------------------------------------------------------------
+    // Phase 4: Detection — build prompt and call LLM (stub)
+    // -----------------------------------------------------------------------
+    info!(
+        task_id = %task_id,
+        active_evolutions = active_events.len(),
+        "phase 4: detection prompt assembly (stub — skipping LLM call)"
+    );
+
+    // Log the assembled context for debugging. The actual LLM call will be
+    // wired in a future iteration once the detection prompt is finalised.
+    tracing::debug!(
+        task_id = %task_id,
+        active_context = %active_context,
+        "assembled evolution detection context"
+    );
+
+    // -----------------------------------------------------------------------
+    // Post-detection: execute any newly auto-approved events
+    // -----------------------------------------------------------------------
+    let post_approved = match agent
+        .repos()
+        .evolution()
+        .list(None, Some(EvolutionStatus::Approved))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query post-detection approved events");
+            vec![]
+        }
+    };
+
+    // Only execute events that were not already processed in Phase 1.
+    let new_approved: Vec<_> = post_approved
+        .iter()
+        .filter(|e| !approved_events.iter().any(|prev| prev.id == e.id))
+        .collect();
+
+    if !new_approved.is_empty() {
+        info!(
+            task_id = %task_id,
+            count = new_approved.len(),
+            "executing newly auto-approved evolution events"
+        );
+        for event in new_approved {
+            if let Err(e) = execute_evolution(event, agent.repos(), agent.mind()).await {
+                warn!(
+                    task_id = %task_id,
+                    event_id = %event.id,
+                    error = %e,
+                    "failed to execute newly auto-approved evolution event"
+                );
+            }
+        }
+    }
+
+    info!(task_id = %task_id, "self-evolution check cycle complete");
+    send_done_stub(tx).await;
 }
 
 /// Executes a prompt payload by delegating to `handle_message` with conversation context.
