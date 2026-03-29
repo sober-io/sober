@@ -112,6 +112,41 @@
 	let autoSnapshot = $state(true);
 	let newDomain = $state('');
 
+	// Capability colors — purple for plugins, sky for plugin tools, red for built-in
+	const CAP = {
+		plugin: {
+			chip: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50',
+			badge: 'text-purple-500 dark:text-purple-400',
+			close: 'text-purple-400 dark:text-purple-500',
+			dot: 'bg-purple-400',
+			row: 'hover:bg-purple-50 dark:hover:bg-purple-900/20',
+			detail: 'text-purple-500 dark:text-purple-400'
+		},
+		pluginTool: {
+			chip: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:hover:bg-sky-900/50',
+			badge: 'text-sky-500 dark:text-sky-400',
+			close: 'text-sky-400 dark:text-sky-500',
+			dot: 'bg-sky-400',
+			row: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		},
+		builtin: {
+			chip: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50',
+			badge: '',
+			close: 'text-red-400 dark:text-red-500',
+			dot: 'bg-red-400',
+			row: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		}
+	} as const;
+
+	type CapVariant = keyof typeof CAP;
+
+	function capVariant(item: { type: string; detail?: string }): CapVariant {
+		if (item.type === 'plugin') return 'plugin';
+		return item.detail?.startsWith('plugin:') ? 'pluginTool' : 'builtin';
+	}
+
 	// Capabilities (tool/plugin filtering)
 	let availableTools = $state<ToolInfo[]>([]);
 	let availablePlugins = $state<Plugin[]>([]);
@@ -718,25 +753,36 @@
 						{#if disabledTools.length > 0 || disabledPluginNames.length > 0}
 							<div class="flex flex-wrap gap-1">
 								{#each disabledPluginNames as plugin (plugin.id)}
-									<button onclick={() => enablePlugin(plugin.id)} class="cap-chip cap-plugin">
+									{@const c = CAP.plugin}
+									<button
+										onclick={() => enablePlugin(plugin.id)}
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											c.chip
+										]}
+									>
 										{plugin.name}
-										<span class="cap-badge">plugin</span>
-										<span class="cap-close">&times;</span>
+										<span class={['text-xs', c.badge]}>plugin</span>
+										<span class={c.close}>&times;</span>
 									</button>
 								{/each}
 								{#each disabledTools as toolName (toolName)}
 									{@const fromPlugin = availableTools.find(
 										(t) => t.name === toolName && t.plugin_name
 									)}
+									{@const c = fromPlugin ? CAP.pluginTool : CAP.builtin}
 									<button
 										onclick={() => enableTool(toolName)}
-										class={['cap-chip', fromPlugin ? 'cap-plugin-tool' : 'cap-builtin']}
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											c.chip
+										]}
 									>
 										{toolName}
 										{#if fromPlugin}
-											<span class="cap-badge">{fromPlugin.plugin_name}</span>
+											<span class={['text-xs', c.badge]}>{fromPlugin.plugin_name}</span>
 										{/if}
-										<span class="cap-close">&times;</span>
+										<span class={c.close}>&times;</span>
 									</button>
 								{/each}
 							</div>
@@ -769,6 +815,7 @@
 									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 								>
 									{#each filteredCapabilities as item (item.type + item.id)}
+										{@const c = CAP[capVariant(item)]}
 										<button
 											onmousedown={(e: MouseEvent) => {
 												e.preventDefault();
@@ -776,19 +823,15 @@
 												else disableTool(item.id);
 											}}
 											class={[
-												'cap-dropdown-item',
-												item.type === 'plugin'
-													? 'cap-plugin'
-													: item.detail.startsWith('plugin:')
-														? 'cap-plugin-tool'
-														: 'cap-builtin'
+												'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs',
+												c.row
 											]}
 										>
 											<div class="flex items-center gap-1.5">
-												<span class="cap-dot"></span>
+												<span class={['h-1.5 w-1.5 shrink-0 rounded-full', c.dot]}></span>
 												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
 											</div>
-											<span class="cap-detail">{item.detail}</span>
+											<span class={['text-xs', c.detail]}>{item.detail}</span>
 										</button>
 									{/each}
 								</div>
@@ -903,166 +946,3 @@
 	onConfirm={confirmConvertAndAdd}
 	onCancel={() => (confirmConvertPending = null)}
 />
-
-<style>
-	/* Capability chip base */
-	.cap-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		border-radius: 9999px;
-		padding: 0.125rem 0.5rem;
-		font-size: 0.75rem;
-		line-height: 1rem;
-	}
-
-	/* Capability dropdown item base */
-	.cap-dropdown-item {
-		display: flex;
-		width: 100%;
-		align-items: center;
-		justify-content: space-between;
-		padding: 0.375rem 0.625rem;
-		text-align: left;
-		font-size: 0.75rem;
-		line-height: 1rem;
-	}
-
-	/* -- Plugin (purple) -- */
-	.cap-plugin.cap-chip {
-		background: rgb(243 232 255); /* purple-100 */
-		color: rgb(126 34 206); /* purple-700 */
-	}
-	.cap-plugin.cap-chip:hover {
-		background: rgb(233 213 255); /* purple-200 */
-	}
-	.cap-plugin .cap-badge {
-		color: rgb(168 85 247); /* purple-500 */
-	}
-	.cap-plugin .cap-close {
-		color: rgb(192 132 252); /* purple-400 */
-	}
-	.cap-plugin.cap-dropdown-item:hover {
-		background: rgb(250 245 255); /* purple-50 */
-	}
-	.cap-plugin .cap-dot {
-		background: rgb(192 132 252); /* purple-400 */
-	}
-	.cap-plugin .cap-detail {
-		color: rgb(168 85 247); /* purple-500 */
-	}
-
-	/* -- Plugin tool (sky) -- */
-	.cap-plugin-tool.cap-chip {
-		background: rgb(224 242 254); /* sky-100 */
-		color: rgb(3 105 161); /* sky-700 */
-	}
-	.cap-plugin-tool.cap-chip:hover {
-		background: rgb(186 230 253); /* sky-200 */
-	}
-	.cap-plugin-tool .cap-badge {
-		color: rgb(14 165 233); /* sky-500 */
-	}
-	.cap-plugin-tool .cap-close {
-		color: rgb(56 189 248); /* sky-400 */
-	}
-	.cap-plugin-tool.cap-dropdown-item:hover {
-		background: rgb(244 244 245); /* zinc-100 */
-	}
-	.cap-plugin-tool .cap-dot {
-		background: rgb(56 189 248); /* sky-400 */
-	}
-	.cap-plugin-tool .cap-detail {
-		color: rgb(161 161 170); /* zinc-400 */
-	}
-
-	/* -- Built-in tool (red) -- */
-	.cap-builtin.cap-chip {
-		background: rgb(254 226 226); /* red-100 */
-		color: rgb(185 28 28); /* red-700 */
-	}
-	.cap-builtin.cap-chip:hover {
-		background: rgb(254 202 202); /* red-200 */
-	}
-	.cap-builtin .cap-close {
-		color: rgb(248 113 113); /* red-400 */
-	}
-	.cap-builtin.cap-dropdown-item:hover {
-		background: rgb(244 244 245); /* zinc-100 */
-	}
-	.cap-builtin .cap-dot {
-		background: rgb(248 113 113); /* red-400 */
-	}
-	.cap-builtin .cap-detail {
-		color: rgb(161 161 170); /* zinc-400 */
-	}
-
-	/* Shared sub-elements */
-	.cap-dot {
-		width: 0.375rem;
-		height: 0.375rem;
-		border-radius: 9999px;
-		flex-shrink: 0;
-	}
-	.cap-badge {
-		font-size: 0.75rem;
-	}
-	.cap-detail {
-		font-size: 0.75rem;
-	}
-
-	/* Dark mode */
-	:global(.dark) .cap-plugin.cap-chip {
-		background: rgb(88 28 135 / 0.3); /* purple-900/30 */
-		color: rgb(192 132 252); /* purple-400 */
-	}
-	:global(.dark) .cap-plugin.cap-chip:hover {
-		background: rgb(88 28 135 / 0.5);
-	}
-	:global(.dark) .cap-plugin .cap-close {
-		color: rgb(168 85 247); /* purple-500 */
-	}
-	:global(.dark) .cap-plugin.cap-dropdown-item:hover {
-		background: rgb(88 28 135 / 0.2);
-	}
-	:global(.dark) .cap-plugin .cap-detail {
-		color: rgb(192 132 252); /* purple-400 */
-	}
-
-	:global(.dark) .cap-plugin-tool.cap-chip {
-		background: rgb(12 74 110 / 0.3); /* sky-900/30 */
-		color: rgb(56 189 248); /* sky-400 */
-	}
-	:global(.dark) .cap-plugin-tool.cap-chip:hover {
-		background: rgb(12 74 110 / 0.5);
-	}
-	:global(.dark) .cap-plugin-tool .cap-badge {
-		color: rgb(56 189 248); /* sky-400 */
-	}
-	:global(.dark) .cap-plugin-tool .cap-close {
-		color: rgb(14 165 233); /* sky-500 */
-	}
-	:global(.dark) .cap-plugin-tool.cap-dropdown-item:hover {
-		background: rgb(63 63 70); /* zinc-700 */
-	}
-	:global(.dark) .cap-plugin-tool .cap-detail {
-		color: rgb(113 113 122); /* zinc-500 */
-	}
-
-	:global(.dark) .cap-builtin.cap-chip {
-		background: rgb(127 29 29 / 0.3); /* red-900/30 */
-		color: rgb(248 113 113); /* red-400 */
-	}
-	:global(.dark) .cap-builtin.cap-chip:hover {
-		background: rgb(127 29 29 / 0.5);
-	}
-	:global(.dark) .cap-builtin .cap-close {
-		color: rgb(239 68 68); /* red-500 */
-	}
-	:global(.dark) .cap-builtin.cap-dropdown-item:hover {
-		background: rgb(63 63 70); /* zinc-700 */
-	}
-	:global(.dark) .cap-builtin .cap-detail {
-		color: rgb(113 113 122); /* zinc-500 */
-	}
-</style>
