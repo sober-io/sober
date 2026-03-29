@@ -28,6 +28,10 @@ service AgentService {
   rpc ChangePluginScope(ChangePluginScopeRequest) returns (ChangePluginScopeResponse);
   // List all available tools (built-in + plugin-exported) for the settings UI.
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  // Execute an approved evolution event immediately.
+  rpc ExecuteEvolution(ExecuteEvolutionRequest) returns (ExecuteEvolutionResponse);
+  // Revert an active evolution event.
+  rpc RevertEvolution(RevertEvolutionRequest) returns (RevertEvolutionResponse);
 }
 
 message ConfirmAck {}
@@ -279,4 +283,24 @@ message ToolInfoEntry {
 
 message ListToolsResponse {
   repeated ToolInfoEntry tools = 1;
+}
+
+// --- Evolution RPCs ---
+
+message ExecuteEvolutionRequest {
+  string evolution_event_id = 1;
+}
+
+message ExecuteEvolutionResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message RevertEvolutionRequest {
+  string evolution_event_id = 1;
+}
+
+message RevertEvolutionResponse {
+  bool success = 1;
+  string error = 2;
 }

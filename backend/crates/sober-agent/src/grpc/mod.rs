@@ -274,6 +274,22 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
     ) -> Result<Response<proto::ListToolsResponse>, Status> {
         plugins::handle_list_tools(self, request).await
     }
+
+    async fn execute_evolution(
+        &self,
+        _request: Request<proto::ExecuteEvolutionRequest>,
+    ) -> Result<Response<proto::ExecuteEvolutionResponse>, Status> {
+        // Stub — wired in Task 6 (execution engine).
+        Err(Status::unimplemented("evolution execution not yet wired"))
+    }
+
+    async fn revert_evolution(
+        &self,
+        _request: Request<proto::RevertEvolutionRequest>,
+    ) -> Result<Response<proto::RevertEvolutionResponse>, Status> {
+        // Stub — wired in Task 6 (execution engine).
+        Err(Status::unimplemented("evolution revert not yet wired"))
+    }
 }
 
 #[cfg(test)]
