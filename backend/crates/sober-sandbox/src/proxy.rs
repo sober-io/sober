@@ -56,12 +56,14 @@ impl ProxyBridge {
             std::env::temp_dir().join(format!("sober-proxy-{}.sock", uuid::Uuid::now_v7()));
 
         // Start socat: UDS socket → TCP proxy on host loopback.
+        // Stderr suppressed — broken pipe on teardown is expected and noisy.
         let socat_child = tokio::process::Command::new(&socat_path)
             .arg(format!(
                 "UNIX-LISTEN:{},fork,unlink-early",
                 socket_path.display()
             ))
             .arg(format!("TCP:127.0.0.1:{}", proxy_addr.port()))
+            .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| SandboxError::ProxyFailed(format!("failed to start socat: {e}")))?;
@@ -203,14 +205,25 @@ async fn handle_connection(
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(443);
 
+            debug!(host, port, "connecting to upstream");
             match tokio::net::TcpStream::connect((host, port)).await {
                 Ok(mut upstream) => {
+                    debug!(host, port, "upstream connected, sending 200");
                     stream
                         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                         .await?;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+                    debug!(host, "starting bidirectional copy");
+                    match tokio::io::copy_bidirectional(&mut stream, &mut upstream).await {
+                        Ok((up, down)) => {
+                            debug!(host, up, down, "tunnel closed normally");
+                        }
+                        Err(e) => {
+                            debug!(host, error = %e, "tunnel copy error");
+                        }
+                    }
                 }
                 Err(e) => {
+                    warn!(host, port, error = %e, "upstream connection failed");
                     let msg = format!("HTTP/1.1 502 Bad Gateway\r\n\r\n{e}");
                     stream.write_all(msg.as_bytes()).await?;
                 }
