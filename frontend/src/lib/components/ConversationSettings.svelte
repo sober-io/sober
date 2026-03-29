@@ -117,7 +117,8 @@
 	let availablePlugins = $state<Plugin[]>([]);
 	let disabledTools = $state<string[]>([]);
 	let disabledPlugins = $state<string[]>([]);
-	let customToolName = $state('');
+	let capabilitySearch = $state('');
+	let capabilityDropdownOpen = $state(false);
 
 	// Derived
 	let createdDate = $derived(
@@ -219,31 +220,85 @@
 		}
 	}
 
-	function toggleTool(name: string) {
-		if (disabledTools.includes(name)) {
-			disabledTools = disabledTools.filter((t) => t !== name);
-		} else {
-			disabledTools = [...disabledTools, name];
-		}
+	function disableTool(name: string) {
+		if (disabledTools.includes(name)) return;
+		disabledTools = [...disabledTools, name];
 		saveSetting({ disabled_tools: disabledTools });
 	}
 
-	function togglePlugin(id: string) {
-		if (disabledPlugins.includes(id)) {
-			disabledPlugins = disabledPlugins.filter((p) => p !== id);
-		} else {
-			disabledPlugins = [...disabledPlugins, id];
-		}
+	function enableTool(name: string) {
+		disabledTools = disabledTools.filter((t) => t !== name);
+		saveSetting({ disabled_tools: disabledTools });
+	}
+
+	function disablePlugin(id: string) {
+		if (disabledPlugins.includes(id)) return;
+		disabledPlugins = [...disabledPlugins, id];
 		saveSetting({ disabled_plugins: disabledPlugins });
 	}
 
-	function addCustomTool() {
-		const name = customToolName.trim();
-		if (!name || disabledTools.includes(name)) return;
-		disabledTools = [...disabledTools, name];
-		customToolName = '';
-		saveSetting({ disabled_tools: disabledTools });
+	function enablePlugin(id: string) {
+		disabledPlugins = disabledPlugins.filter((p) => p !== id);
+		saveSetting({ disabled_plugins: disabledPlugins });
 	}
+
+	function addCapabilityFromSearch() {
+		const q = capabilitySearch.trim().toLowerCase();
+		if (!q) return;
+		// Check if it matches a plugin
+		const plugin = availablePlugins.find((p) => p.name.toLowerCase() === q);
+		if (plugin) {
+			disablePlugin(plugin.id);
+		} else {
+			// Treat as tool name (exact or matched)
+			const tool = availableTools.find((t) => t.name.toLowerCase() === q);
+			disableTool(tool ? tool.name : capabilitySearch.trim());
+		}
+		capabilitySearch = '';
+		capabilityDropdownOpen = false;
+	}
+
+	let filteredCapabilities = $derived.by(() => {
+		const q = capabilitySearch.toLowerCase();
+		if (!q) return [];
+		const items: Array<{ type: 'tool' | 'plugin'; id: string; name: string; detail: string }> = [];
+		for (const tool of availableTools) {
+			if (
+				!disabledTools.includes(tool.name) &&
+				(tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q))
+			) {
+				items.push({
+					type: 'tool',
+					id: tool.name,
+					name: tool.name,
+					detail: tool.plugin_name ? `plugin: ${tool.plugin_name}` : tool.source
+				});
+			}
+		}
+		for (const plugin of availablePlugins) {
+			if (
+				!disabledPlugins.includes(plugin.id) &&
+				(plugin.name.toLowerCase().includes(q) || plugin.kind.toLowerCase().includes(q))
+			) {
+				items.push({
+					type: 'plugin',
+					id: plugin.id,
+					name: plugin.name,
+					detail: `${plugin.kind} plugin`
+				});
+			}
+		}
+		return items.slice(0, 10);
+	});
+
+	let disabledPluginNames = $derived(
+		disabledPlugins
+			.map((id) => {
+				const p = availablePlugins.find((pl) => pl.id === id);
+				return p ? { id, name: p.name, type: 'plugin' as const } : null;
+			})
+			.filter(Boolean) as Array<{ id: string; name: string; type: 'plugin' }>
+	);
 
 	async function handleProfileChange(profile: string) {
 		sandboxProfile = profile;
@@ -651,87 +706,80 @@
 			<!-- Capabilities -->
 			<SettingsSection
 				title="Capabilities"
-				description="Control which tools and plugins the agent can use"
+				description="Disable tools or plugins the agent should not use"
 			>
 				{#if settingsLoading}
 					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
 				{:else}
-					<div class="space-y-4">
-						<!-- Plugins -->
-						{#if availablePlugins.length > 0}
-							<div>
-								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Plugins</p>
-								<div class="space-y-1">
-									{#each availablePlugins as plugin (plugin.id)}
-										<label class="flex items-center gap-2">
-											<input
-												type="checkbox"
-												checked={!disabledPlugins.includes(plugin.id)}
-												onchange={() => togglePlugin(plugin.id)}
-												class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
-											/>
-											<span class="text-xs text-zinc-700 dark:text-zinc-300">
-												{plugin.name}
-											</span>
-											<span class="text-xs text-zinc-400 dark:text-zinc-500">
-												{plugin.kind}
-											</span>
-										</label>
-									{/each}
-								</div>
+					<div class="space-y-3">
+						<!-- Disabled items as chips -->
+						{#if disabledTools.length > 0 || disabledPluginNames.length > 0}
+							<div class="flex flex-wrap gap-1">
+								{#each disabledTools as toolName (toolName)}
+									<button
+										onclick={() => enableTool(toolName)}
+										class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+									>
+										{toolName}
+										<span class="text-red-400 dark:text-red-500">&times;</span>
+									</button>
+								{/each}
+								{#each disabledPluginNames as plugin (plugin.id)}
+									<button
+										onclick={() => enablePlugin(plugin.id)}
+										class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
+									>
+										{plugin.name}
+										<span class="text-xs text-amber-500">plugin</span>
+										<span class="text-amber-400 dark:text-amber-500">&times;</span>
+									</button>
+								{/each}
 							</div>
 						{/if}
 
-						<!-- Tools -->
-						{#if availableTools.length > 0}
-							<div>
-								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Tools</p>
-								<div class="space-y-1">
-									{#each availableTools as tool (tool.name)}
-										<label class="flex items-center gap-2">
-											<input
-												type="checkbox"
-												checked={!disabledTools.includes(tool.name)}
-												onchange={() => toggleTool(tool.name)}
-												class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
-											/>
-											<span class="text-xs text-zinc-700 dark:text-zinc-300">
-												{tool.name}
-											</span>
-											{#if tool.plugin_name}
-												<span class="text-xs text-zinc-400 dark:text-zinc-500">
-													({tool.plugin_name})
-												</span>
-											{/if}
-										</label>
-									{/each}
-								</div>
-							</div>
-						{/if}
+						<!-- Searchable dropdown -->
+						<div class="relative">
+							<input
+								type="text"
+								bind:value={capabilitySearch}
+								onfocus={() => (capabilityDropdownOpen = true)}
+								onblur={() => setTimeout(() => (capabilityDropdownOpen = false), 150)}
+								onkeydown={(e: KeyboardEvent) => {
+									if (e.key === 'Enter') addCapabilityFromSearch();
+									if (e.key === 'Escape') capabilityDropdownOpen = false;
+								}}
+								placeholder="Search tools or plugins to disable..."
+								class="w-full rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
+							/>
 
-						<!-- Custom tool name (power user) -->
-						<div>
-							<p class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-								Disable by name
-							</p>
-							<div class="flex gap-1">
-								<input
-									type="text"
-									bind:value={customToolName}
-									placeholder="tool_name"
-									onkeydown={(e: KeyboardEvent) => {
-										if (e.key === 'Enter') addCustomTool();
-									}}
-									class="flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
-								/>
-								<button
-									onclick={addCustomTool}
-									class="rounded-md bg-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+							{#if capabilityDropdownOpen && filteredCapabilities.length > 0}
+								<div
+									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 								>
-									Add
-								</button>
-							</div>
+									{#each filteredCapabilities as item (item.type + item.id)}
+										<button
+											onmousedown={(e: MouseEvent) => {
+												e.preventDefault();
+												if (item.type === 'plugin') disablePlugin(item.id);
+												else disableTool(item.id);
+												capabilitySearch = '';
+												capabilityDropdownOpen = false;
+											}}
+											class="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700"
+										>
+											<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
+											<span class="text-zinc-400 dark:text-zinc-500">{item.detail}</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
 						</div>
+
+						{#if disabledTools.length === 0 && disabledPluginNames.length === 0}
+							<p class="text-xs text-zinc-400 dark:text-zinc-500">
+								All tools and plugins are enabled
+							</p>
+						{/if}
 					</div>
 				{/if}
 			</SettingsSection>
