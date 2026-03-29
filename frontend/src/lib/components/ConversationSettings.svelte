@@ -112,6 +112,40 @@
 	let autoSnapshot = $state(true);
 	let newDomain = $state('');
 
+	// Capability color scheme — purple for plugins, sky for plugin tools, red for built-in tools
+	const capColors = {
+		plugin: {
+			chip: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50',
+			badge: 'text-purple-500 dark:text-purple-400',
+			close: 'text-purple-400 dark:text-purple-500',
+			dot: 'bg-purple-400',
+			hover: 'hover:bg-purple-50 dark:hover:bg-purple-900/20',
+			detail: 'text-purple-500 dark:text-purple-400'
+		},
+		pluginTool: {
+			chip: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:hover:bg-sky-900/50',
+			badge: 'text-sky-500 dark:text-sky-400',
+			close: 'text-sky-400 dark:text-sky-500',
+			dot: 'bg-sky-400',
+			hover: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		},
+		builtin: {
+			chip: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50',
+			badge: '',
+			close: 'text-red-400 dark:text-red-500',
+			dot: 'bg-red-400',
+			hover: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		}
+	} as const;
+
+	function capColorKey(item: { type: string; detail?: string }): keyof typeof capColors {
+		if (item.type === 'plugin') return 'plugin';
+		if (item.detail?.startsWith('plugin:')) return 'pluginTool';
+		return 'builtin';
+	}
+
 	// Capabilities (tool/plugin filtering)
 	let availableTools = $state<ToolInfo[]>([]);
 	let availablePlugins = $state<Plugin[]>([]);
@@ -718,39 +752,36 @@
 						{#if disabledTools.length > 0 || disabledPluginNames.length > 0}
 							<div class="flex flex-wrap gap-1">
 								{#each disabledPluginNames as plugin (plugin.id)}
+									{@const c = capColors.plugin}
 									<button
 										onclick={() => enablePlugin(plugin.id)}
-										class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50"
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											c.chip
+										]}
 									>
 										{plugin.name}
-										<span class="text-xs text-purple-500 dark:text-purple-400">plugin</span>
-										<span class="text-purple-400 dark:text-purple-500">&times;</span>
+										<span class={['text-xs', c.badge]}>plugin</span>
+										<span class={c.close}>&times;</span>
 									</button>
 								{/each}
 								{#each disabledTools as toolName (toolName)}
 									{@const fromPlugin = availableTools.find(
 										(t) => t.name === toolName && t.plugin_name
 									)}
+									{@const c = fromPlugin ? capColors.pluginTool : capColors.builtin}
 									<button
 										onclick={() => enableTool(toolName)}
 										class={[
 											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
-											fromPlugin
-												? 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:hover:bg-sky-900/50'
-												: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
+											c.chip
 										]}
 									>
 										{toolName}
 										{#if fromPlugin}
-											<span class="text-xs text-sky-500 dark:text-sky-400"
-												>{fromPlugin.plugin_name}</span
-											>
+											<span class={['text-xs', c.badge]}>{fromPlugin.plugin_name}</span>
 										{/if}
-										<span
-											class={fromPlugin
-												? 'text-sky-400 dark:text-sky-500'
-												: 'text-red-400 dark:text-red-500'}>&times;</span
-										>
+										<span class={c.close}>&times;</span>
 									</button>
 								{/each}
 							</div>
@@ -783,6 +814,7 @@
 									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 								>
 									{#each filteredCapabilities as item (item.type + item.id)}
+										{@const c = capColors[capColorKey(item)]}
 										<button
 											onmousedown={(e: MouseEvent) => {
 												e.preventDefault();
@@ -791,32 +823,14 @@
 											}}
 											class={[
 												'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs',
-												item.type === 'plugin'
-													? 'hover:bg-purple-50 dark:hover:bg-purple-900/20'
-													: 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
+												c.hover
 											]}
 										>
 											<div class="flex items-center gap-1.5">
-												<span
-													class={[
-														'h-1.5 w-1.5 rounded-full',
-														item.type === 'plugin'
-															? 'bg-purple-400'
-															: item.detail.startsWith('plugin:')
-																? 'bg-sky-400'
-																: 'bg-red-400'
-													]}
-												></span>
+												<span class={['h-1.5 w-1.5 rounded-full', c.dot]}></span>
 												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
 											</div>
-											<span
-												class={[
-													'text-xs',
-													item.type === 'plugin'
-														? 'text-purple-500 dark:text-purple-400'
-														: 'text-zinc-400 dark:text-zinc-500'
-												]}>{item.detail}</span
-											>
+											<span class={['text-xs', c.detail]}>{item.detail}</span>
 										</button>
 									{/each}
 								</div>
