@@ -485,7 +485,7 @@ pub trait WorkspaceRepo: Send + Sync {
 /// Workspace settings operations.
 pub trait WorkspaceSettingsRepo: Send + Sync {
     /// Returns the settings for a workspace, or `NotFound` if none exist.
-    fn get(
+    fn get_by_workspace(
         &self,
         workspace_id: WorkspaceId,
     ) -> impl Future<Output = Result<WorkspaceSettings, AppError>> + Send;

@@ -423,7 +423,13 @@ impl<R: AgentRepos> ConversationActor<R> {
         };
 
         // Load workspace settings from DB.
-        let settings = self.ctx.repos.workspace_settings().get(ws_id).await.ok();
+        let settings = self
+            .ctx
+            .repos
+            .workspace_settings()
+            .get_by_workspace(ws_id)
+            .await
+            .ok();
 
         (dir, settings)
     }

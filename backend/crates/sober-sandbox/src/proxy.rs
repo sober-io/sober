@@ -69,11 +69,15 @@ impl ProxyBridge {
             .map_err(|e| SandboxError::ProxyFailed(format!("failed to start socat: {e}")))?;
 
         // Wait for socat to create the socket file (needed before bwrap bind-mount).
-        for _ in 0..50 {
+        const SOCKET_POLL_INTERVAL_MS: u64 = 10;
+        const SOCKET_POLL_TIMEOUT_MS: u64 = 500;
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_millis(SOCKET_POLL_TIMEOUT_MS);
+        while tokio::time::Instant::now() < deadline {
             if socket_path.exists() {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(SOCKET_POLL_INTERVAL_MS)).await;
         }
         if !socket_path.exists() {
             return Err(SandboxError::ProxyFailed(

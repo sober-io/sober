@@ -52,6 +52,9 @@ pub fn routes() -> Router<Arc<AppState>> {
 // List / Create / Get / Update / Delete conversations
 // ---------------------------------------------------------------------------
 
+/// Maximum length for auto-generated workspace names (truncated from conversation title).
+const MAX_WORKSPACE_NAME_LEN: usize = 80;
+
 /// Query parameters for `GET /conversations`.
 #[derive(Deserialize)]
 struct ListConversationsQuery {
@@ -102,7 +105,7 @@ async fn create_conversation(
         .as_deref()
         .unwrap_or("untitled")
         .chars()
-        .take(80)
+        .take(MAX_WORKSPACE_NAME_LEN)
         .collect::<String>();
     let ws_root = format!(
         "{}/{}",
@@ -268,8 +271,7 @@ async fn get_settings(
     Path(id): Path<uuid::Uuid>,
 ) -> Result<ApiResponse<SettingsResponse>, AppError> {
     let conversation_id = ConversationId::from_uuid(id);
-    let _membership =
-        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
     let conv_repo = PgConversationRepo::new(state.db.clone());
     let ws_settings_repo = PgWorkspaceSettingsRepo::new(state.db.clone());
@@ -280,7 +282,7 @@ async fn get_settings(
         .workspace_id
         .ok_or_else(|| AppError::NotFound("workspace_settings".into()))?;
 
-    let settings = ws_settings_repo.get(ws_id).await?;
+    let settings = ws_settings_repo.get_by_workspace(ws_id).await?;
 
     Ok(ApiResponse::new(SettingsResponse {
         permission_mode: settings.permission_mode,
@@ -319,8 +321,7 @@ async fn update_settings(
     Json(body): Json<UpdateSettingsRequest>,
 ) -> Result<ApiResponse<SettingsResponse>, AppError> {
     let conversation_id = ConversationId::from_uuid(id);
-    let _membership =
-        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
     let conv_repo = PgConversationRepo::new(state.db.clone());
     let ws_settings_repo = PgWorkspaceSettingsRepo::new(state.db.clone());
@@ -339,7 +340,7 @@ async fn update_settings(
     }
 
     // Load current settings and apply partial updates.
-    let mut settings = ws_settings_repo.get(ws_id).await?;
+    let mut settings = ws_settings_repo.get_by_workspace(ws_id).await?;
 
     if let Some(mode) = body.permission_mode {
         settings.permission_mode = mode;

@@ -19,7 +19,10 @@ impl PgWorkspaceSettingsRepo {
 }
 
 impl sober_core::types::WorkspaceSettingsRepo for PgWorkspaceSettingsRepo {
-    async fn get(&self, workspace_id: WorkspaceId) -> Result<WorkspaceSettings, AppError> {
+    async fn get_by_workspace(
+        &self,
+        workspace_id: WorkspaceId,
+    ) -> Result<WorkspaceSettings, AppError> {
         let row = sqlx::query_as::<_, WorkspaceSettingsRow>(
             "SELECT workspace_id, permission_mode, auto_snapshot, max_snapshots, \
                     sandbox_profile, sandbox_net_mode, sandbox_allowed_domains, \
