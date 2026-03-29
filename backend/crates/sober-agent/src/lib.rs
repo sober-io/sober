@@ -9,6 +9,7 @@ pub mod context;
 pub mod conversation;
 pub mod dispatch;
 pub mod error;
+pub mod evolution;
 pub mod extraction;
 pub mod grpc;
 pub mod history;

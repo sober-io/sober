@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use sober_core::types::AgentRepos;
-use sober_core::types::ids::{ConversationId, WorkspaceId};
-use sober_core::types::repo::ConversationRepo;
+use sober_core::types::ids::{ConversationId, EvolutionEventId, WorkspaceId};
+use sober_core::types::repo::{ConversationRepo, EvolutionRepo};
 use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
 
@@ -277,18 +277,68 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
 
     async fn execute_evolution(
         &self,
-        _request: Request<proto::ExecuteEvolutionRequest>,
+        request: Request<proto::ExecuteEvolutionRequest>,
     ) -> Result<Response<proto::ExecuteEvolutionResponse>, Status> {
-        // Stub — wired in Task 6 (execution engine).
-        Err(Status::unimplemented("evolution execution not yet wired"))
+        let req = request.into_inner();
+        let event_id = req
+            .evolution_event_id
+            .parse::<uuid::Uuid>()
+            .map(EvolutionEventId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid evolution_event_id"))?;
+
+        let event = self
+            .agent()
+            .repos()
+            .evolution()
+            .get_by_id(event_id)
+            .await
+            .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
+
+        match crate::evolution::execute_evolution(&event, self.agent().repos(), self.agent().mind())
+            .await
+        {
+            Ok(()) => Ok(Response::new(proto::ExecuteEvolutionResponse {
+                success: true,
+                error: String::new(),
+            })),
+            Err(e) => Ok(Response::new(proto::ExecuteEvolutionResponse {
+                success: false,
+                error: e.to_string(),
+            })),
+        }
     }
 
     async fn revert_evolution(
         &self,
-        _request: Request<proto::RevertEvolutionRequest>,
+        request: Request<proto::RevertEvolutionRequest>,
     ) -> Result<Response<proto::RevertEvolutionResponse>, Status> {
-        // Stub — wired in Task 6 (execution engine).
-        Err(Status::unimplemented("evolution revert not yet wired"))
+        let req = request.into_inner();
+        let event_id = req
+            .evolution_event_id
+            .parse::<uuid::Uuid>()
+            .map(EvolutionEventId::from_uuid)
+            .map_err(|_| Status::invalid_argument("invalid evolution_event_id"))?;
+
+        let event = self
+            .agent()
+            .repos()
+            .evolution()
+            .get_by_id(event_id)
+            .await
+            .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
+
+        match crate::evolution::revert_evolution(&event, self.agent().repos(), self.agent().mind())
+            .await
+        {
+            Ok(()) => Ok(Response::new(proto::RevertEvolutionResponse {
+                success: true,
+                error: String::new(),
+            })),
+            Err(e) => Ok(Response::new(proto::RevertEvolutionResponse {
+                success: false,
+                error: e.to_string(),
+            })),
+        }
     }
 }
 
