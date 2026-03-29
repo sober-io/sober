@@ -772,10 +772,30 @@
 												if (item.type === 'plugin') disablePlugin(item.id);
 												else disableTool(item.id);
 											}}
-											class="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700"
+											class={[
+												'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs',
+												item.type === 'plugin'
+													? 'hover:bg-amber-50 dark:hover:bg-amber-900/20'
+													: 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
+											]}
 										>
-											<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
-											<span class="text-zinc-400 dark:text-zinc-500">{item.detail}</span>
+											<div class="flex items-center gap-1.5">
+												<span
+													class={[
+														'h-1.5 w-1.5 rounded-full',
+														item.type === 'plugin' ? 'bg-amber-400' : 'bg-zinc-400 dark:bg-zinc-500'
+													]}
+												></span>
+												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
+											</div>
+											<span
+												class={[
+													'text-xs',
+													item.type === 'plugin'
+														? 'text-amber-500 dark:text-amber-400'
+														: 'text-zinc-400 dark:text-zinc-500'
+												]}>{item.detail}</span
+											>
 										</button>
 									{/each}
 								</div>
