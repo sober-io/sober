@@ -59,8 +59,7 @@ workspace_root = "/var/lib/sober/workspaces"
 ```
 
 > **Note:** These paths only set the filesystem root. All workspace-level settings
-> (sandbox policy, permission mode, snapshots) are stored in the database and
-> managed via the `/conversations/{id}/settings` API endpoint.
+> (sandbox policy, permission mode, snapshots) are stored in the database.
 
 ---
 
@@ -70,7 +69,7 @@ Each workspace contains a `.sober/` directory that Sõber manages for internal s
 
 ### Workspace Settings (DB-backed)
 
-All workspace-level configuration — sandbox profile, network mode, allowed domains, permission mode, auto-snapshot — is stored in the `workspace_settings` database table and managed via the `GET/PATCH /conversations/{id}/settings` API. Settings are created atomically when the conversation and workspace are provisioned.
+All workspace-level configuration — sandbox profile, network mode, allowed domains, permission mode, auto-snapshot — is stored in the `workspace_settings` database table. Settings are created atomically when the conversation and workspace are provisioned.
 
 ### `soul.md` (optional)
 

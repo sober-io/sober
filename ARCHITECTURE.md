@@ -367,9 +367,8 @@ All workspace-level configuration is stored in the `workspace_settings` table
 - **Snapshot settings** — auto-snapshot flag and max snapshot count.
 
 Settings are created atomically alongside the workspace via `WorkspaceRepo::provision()`.
-The API exposes `GET/PATCH /conversations/{id}/settings` for a combined view including
-`agent_mode` (from the conversation) and all workspace settings. The agent loads settings
-at the start of each turn and uses them to resolve `SandboxPolicy` for shell executions.
+The agent loads settings at the start of each turn and uses them to resolve
+`SandboxPolicy` for shell executions.
 
 `.sober/config.toml` no longer controls sandbox, permission, or snapshot settings.
 
