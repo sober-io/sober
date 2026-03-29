@@ -259,7 +259,7 @@ impl Mind {
     /// instructions if the caller has a workspace_id.
     fn get_instructions(&self, caller: &CallerContext) -> Result<Vec<InstructionFile>, MindError> {
         match caller.workspace_id {
-            None => Ok(self.instruction_loader.cached().to_vec()),
+            None => Ok(self.instruction_loader.cached()),
             Some(id) => {
                 // Check cache (read lock)
                 {
@@ -276,7 +276,7 @@ impl Mind {
                 // Workspace loading requires a filesystem path which is not
                 // available from workspace_id alone. For now, return base only.
                 // The caller can pre-populate the cache via `cache_workspace()`.
-                Ok(self.instruction_loader.cached().to_vec())
+                Ok(self.instruction_loader.cached())
             }
         }
     }
@@ -297,6 +297,15 @@ impl Mind {
             .map_err(|_| MindError::AssemblyFailed("workspace cache lock poisoned".into()))?;
         cache.insert(workspace_id, ws_files);
         Ok(())
+    }
+
+    /// Clears cached overlay instructions, forcing re-read from disk on next
+    /// prompt assembly.
+    ///
+    /// Called by the execution engine after writing instruction overlay files
+    /// so that newly written overlays take effect without restarting the agent.
+    pub fn reload_instructions(&self) -> Result<(), MindError> {
+        self.instruction_loader.reload()
     }
 }
 

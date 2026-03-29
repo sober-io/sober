@@ -6,7 +6,9 @@
 //! - **User** (`~/.sober/*.md`) — loaded once at startup
 //! - **Workspace** (`.sober/*.md`) — lazily loaded per workspace
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use sober_core::types::access::TriggerKind;
 use tracing::debug;
@@ -133,45 +135,61 @@ const EMBEDDED_FILES: &[EmbeddedFile] = &[
 // InstructionLoader — parse, load, merge
 // ---------------------------------------------------------------------------
 
-/// Loads and caches instruction files from base (embedded) and user layers.
+/// Loads and caches instruction files from base (embedded), overlay, and user layers.
 ///
-/// Base files are compiled in. User files are loaded from `~/.sober/*.md` at
-/// construction time and merged with base instructions. Workspace files are
-/// loaded on-demand via [`load_workspace`](InstructionLoader::load_workspace).
+/// Base files are compiled in. Overlay files from `~/.sober/instructions/` can
+/// replace individual base files (same filename = full replacement). User
+/// extension/standalone files from `~/.sober/*.md` are then merged on top.
+/// Workspace files are loaded on-demand via
+/// [`load_workspace`](InstructionLoader::load_workspace).
 #[derive(Debug)]
 pub struct InstructionLoader {
-    /// Pre-merged base + user instructions (immutable after construction).
-    cached: Vec<InstructionFile>,
+    /// Pre-merged base + overlay + user instructions.
+    cached: RwLock<Vec<InstructionFile>>,
+    /// Path to the overlay directory (`~/.sober/instructions/`), if provided.
+    overlay_dir: Option<PathBuf>,
+    /// Path to the user extension directory (`~/.sober/`), if provided.
+    user_dir: Option<PathBuf>,
 }
 
 impl InstructionLoader {
-    /// Creates a new loader: parses embedded base files, optionally loads and
-    /// merges user layer files from `user_dir`.
+    /// Creates a new loader: parses embedded base files, applies overlays from
+    /// `~/.sober/instructions/`, then optionally loads and merges user layer
+    /// files from `user_dir`.
+    ///
+    /// The overlay directory is derived from `user_dir` by appending
+    /// `instructions/` (e.g., `~/.sober/` → `~/.sober/instructions/`).
     pub fn new(user_dir: Option<&Path>) -> Result<Self, MindError> {
-        // 1. Parse embedded base files
-        let mut instructions: Vec<InstructionFile> = EMBEDDED_FILES
-            .iter()
-            .map(|ef| parse_embedded(ef.filename, ef.content))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // 2. Load user layer files (if directory exists)
-        if let Some(dir) = user_dir
-            && dir.is_dir()
-        {
-            let user_files = load_directory(dir)?;
-            merge_extensions(&mut instructions, user_files, false)?;
-        }
-
-        debug!(count = instructions.len(), "instruction files loaded");
+        let overlay_dir = user_dir.map(|d| d.join("instructions"));
+        let instructions = Self::load_all(overlay_dir.as_deref(), user_dir)?;
 
         Ok(Self {
-            cached: instructions,
+            cached: RwLock::new(instructions),
+            overlay_dir: overlay_dir.filter(|d| d.is_dir()),
+            user_dir: user_dir.map(Path::to_path_buf),
         })
     }
 
-    /// Returns the pre-cached base + user instructions.
-    pub fn cached(&self) -> &[InstructionFile] {
-        &self.cached
+    /// Returns a clone of the cached base + overlay + user instructions.
+    pub fn cached(&self) -> Vec<InstructionFile> {
+        self.cached
+            .read()
+            .expect("instruction cache lock not poisoned")
+            .clone()
+    }
+
+    /// Clears the cached instructions and re-reads overlays + user files
+    /// from disk. Call this after writing new overlay files so they take
+    /// effect without restarting the agent process.
+    pub fn reload(&self) -> Result<(), MindError> {
+        let instructions = Self::load_all(self.overlay_dir.as_deref(), self.user_dir.as_deref())?;
+        let mut cached = self
+            .cached
+            .write()
+            .map_err(|_| MindError::InstructionLoadFailed("cache lock poisoned".into()))?;
+        *cached = instructions;
+        debug!("instruction overlays reloaded");
+        Ok(())
     }
 
     /// Loads workspace instruction files from the given directory.
@@ -194,9 +212,47 @@ impl InstructionLoader {
         &self,
         workspace_files: Vec<InstructionFile>,
     ) -> Result<Vec<InstructionFile>, MindError> {
-        let mut merged = self.cached.clone();
+        let mut merged = self.cached();
         merge_extensions(&mut merged, workspace_files, true)?;
         Ok(merged)
+    }
+
+    /// Loads all instruction files: base (embedded) → overlays → user extensions.
+    fn load_all(
+        overlay_dir: Option<&Path>,
+        user_dir: Option<&Path>,
+    ) -> Result<Vec<InstructionFile>, MindError> {
+        // 1. Parse embedded base files
+        let mut instructions: Vec<InstructionFile> = EMBEDDED_FILES
+            .iter()
+            .map(|ef| parse_embedded(ef.filename, ef.content))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // 2. Apply overlays: for each embedded file, check if an overlay exists.
+        //    Overlay replaces the entire instruction file (frontmatter + body).
+        if let Some(dir) = overlay_dir
+            && dir.is_dir()
+        {
+            let overlays = load_directory_indexed(dir)?;
+            for inst in &mut instructions {
+                if let Some(overlay) = overlays.get(&inst.filename) {
+                    debug!(filename = %inst.filename, "applying instruction overlay");
+                    inst.frontmatter = overlay.frontmatter.clone();
+                    inst.body = overlay.body.clone();
+                }
+            }
+        }
+
+        // 3. Load user layer files (if directory exists)
+        if let Some(dir) = user_dir
+            && dir.is_dir()
+        {
+            let user_files = load_directory(dir)?;
+            merge_extensions(&mut instructions, user_files, false)?;
+        }
+
+        debug!(count = instructions.len(), "instruction files loaded");
+        Ok(instructions)
     }
 }
 
@@ -252,6 +308,12 @@ fn load_directory(dir: &Path) -> Result<Vec<InstructionFile>, MindError> {
     }
 
     Ok(files)
+}
+
+/// Reads all `.md` files from a directory and returns them indexed by filename.
+fn load_directory_indexed(dir: &Path) -> Result<HashMap<String, InstructionFile>, MindError> {
+    let files = load_directory(dir)?;
+    Ok(files.into_iter().map(|f| (f.filename.clone(), f)).collect())
 }
 
 /// Merges extension files into the base set.
@@ -470,11 +532,8 @@ mod tests {
         .unwrap();
 
         let loader = InstructionLoader::new(Some(dir.path())).unwrap();
-        let memory = loader
-            .cached()
-            .iter()
-            .find(|f| f.filename == "memory.md")
-            .unwrap();
+        let cached = loader.cached();
+        let memory = cached.iter().find(|f| f.filename == "memory.md").unwrap();
         assert!(memory.body.contains("User memory extension."));
     }
 
@@ -488,12 +547,9 @@ mod tests {
         .unwrap();
 
         let loader = InstructionLoader::new(Some(dir.path())).unwrap();
-        assert_eq!(loader.cached().len(), 11); // 10 base + 1 standalone
-        let custom = loader
-            .cached()
-            .iter()
-            .find(|f| f.filename == "custom.md")
-            .unwrap();
+        let cached = loader.cached();
+        assert_eq!(cached.len(), 11); // 10 base + 1 standalone
+        let custom = cached.iter().find(|f| f.filename == "custom.md").unwrap();
         assert!(custom.body.contains("Custom user behavior."));
     }
 
@@ -562,5 +618,116 @@ mod tests {
         let loader = InstructionLoader::new(Some(dir.path()));
         assert!(loader.is_err());
         assert!(loader.unwrap_err().to_string().contains("does not exist"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overlay tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overlay_replaces_base_instruction() {
+        let dir = TempDir::new().unwrap();
+        let overlay_dir = dir.path().join("instructions");
+        fs::create_dir(&overlay_dir).unwrap();
+
+        // Write an overlay for memory.md
+        fs::write(
+            overlay_dir.join("memory.md"),
+            "---\ncategory: behavior\npriority: 30\n---\nOverlay memory content.",
+        )
+        .unwrap();
+
+        let loader = InstructionLoader::new(Some(dir.path())).unwrap();
+        let cached = loader.cached();
+        let memory = cached.iter().find(|f| f.filename == "memory.md").unwrap();
+        assert_eq!(memory.body, "Overlay memory content.");
+        assert_eq!(memory.frontmatter.priority, 30);
+        // Count should still be 10 — overlay replaces, doesn't add.
+        assert_eq!(cached.len(), 10);
+    }
+
+    #[test]
+    fn overlay_does_not_affect_non_overlaid_files() {
+        let dir = TempDir::new().unwrap();
+        let overlay_dir = dir.path().join("instructions");
+        fs::create_dir(&overlay_dir).unwrap();
+
+        // Only overlay memory.md
+        fs::write(
+            overlay_dir.join("memory.md"),
+            "---\ncategory: behavior\n---\nOverlaid.",
+        )
+        .unwrap();
+
+        let loader = InstructionLoader::new(Some(dir.path())).unwrap();
+        let cached = loader.cached();
+        // soul.md should still have original content.
+        let soul = cached.iter().find(|f| f.filename == "soul.md").unwrap();
+        assert!(soul.body.contains("Sõber"));
+    }
+
+    #[test]
+    fn no_overlay_dir_uses_base() {
+        // No overlay directory at all — base instructions used as-is.
+        let loader = InstructionLoader::new(None).unwrap();
+        let cached = loader.cached();
+        assert_eq!(cached.len(), 10);
+        let memory = cached.iter().find(|f| f.filename == "memory.md").unwrap();
+        assert!(memory.body.contains("Memory"));
+    }
+
+    #[test]
+    fn reload_picks_up_new_overlay() {
+        let dir = TempDir::new().unwrap();
+        let overlay_dir = dir.path().join("instructions");
+        fs::create_dir(&overlay_dir).unwrap();
+
+        let loader = InstructionLoader::new(Some(dir.path())).unwrap();
+
+        // Before overlay: base content.
+        let cached = loader.cached();
+        let memory = cached.iter().find(|f| f.filename == "memory.md").unwrap();
+        assert!(!memory.body.contains("Reloaded overlay"));
+
+        // Write overlay file.
+        fs::write(
+            overlay_dir.join("memory.md"),
+            "---\ncategory: behavior\n---\nReloaded overlay content.",
+        )
+        .unwrap();
+
+        // After reload: overlay takes effect.
+        loader.reload().unwrap();
+        let cached = loader.cached();
+        let memory = cached.iter().find(|f| f.filename == "memory.md").unwrap();
+        assert_eq!(memory.body, "Reloaded overlay content.");
+    }
+
+    #[test]
+    fn reload_without_overlay_dir_succeeds() {
+        let loader = InstructionLoader::new(None).unwrap();
+        // Reload with no overlay dir should succeed (no-op for overlays).
+        loader.reload().unwrap();
+        assert_eq!(loader.cached().len(), 10);
+    }
+
+    #[test]
+    fn overlay_only_replaces_matching_base_files() {
+        let dir = TempDir::new().unwrap();
+        let overlay_dir = dir.path().join("instructions");
+        fs::create_dir(&overlay_dir).unwrap();
+
+        // Write an overlay for a filename that doesn't match any embedded file.
+        fs::write(
+            overlay_dir.join("custom-new.md"),
+            "---\ncategory: behavior\n---\nThis should be ignored by overlay.",
+        )
+        .unwrap();
+
+        let loader = InstructionLoader::new(Some(dir.path())).unwrap();
+        let cached = loader.cached();
+        // Overlay files that don't match a base file are ignored.
+        assert_eq!(cached.len(), 10);
+        assert!(cached.iter().all(|f| f.filename != "custom-new.md"));
     }
 }

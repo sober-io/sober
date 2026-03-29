@@ -7,6 +7,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::frontmatter::{InstructionCategory, parse_frontmatter};
+
+/// Hardcoded files that can never be modified by evolution, regardless of frontmatter.
+const GUARDRAIL_BLOCKLIST: &[&str] = &["safety.md"];
+
 /// A candidate trait observation for potential adoption into a soul layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraitCandidate {
@@ -44,6 +49,26 @@ pub enum EvolutionDecision {
 pub fn evaluate_candidate(_candidate: &TraitCandidate) -> EvolutionDecision {
     // v1: all candidates require review. No autonomous adoption yet.
     EvolutionDecision::QueueForReview
+}
+
+/// Returns `true` if the instruction file is a guardrail (cannot be modified by evolution).
+///
+/// Checks both the hardcoded blocklist (by filename) and the YAML frontmatter
+/// `category: guardrail` field. Either condition is sufficient.
+#[must_use]
+pub fn is_guardrail_file(relative_path: &str, content: &str) -> bool {
+    // 1. Check hardcoded blocklist — extract just the filename from the path.
+    let filename = relative_path.rsplit('/').next().unwrap_or(relative_path);
+    if GUARDRAIL_BLOCKLIST.contains(&filename) {
+        return true;
+    }
+
+    // 2. Parse YAML frontmatter and check category.
+    if let Ok((fm, _)) = parse_frontmatter(content) {
+        return fm.category == InstructionCategory::Guardrail;
+    }
+
+    false
 }
 
 /// An audit log entry for a proposed soul layer change.
@@ -115,5 +140,56 @@ mod tests {
             deserialized.candidate.observation,
             "User prefers formal tone"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Guardrail blocklist tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn blocklist_file_is_guardrail_regardless_of_frontmatter() {
+        // safety.md is in the blocklist, so even with non-guardrail frontmatter
+        // it should be detected as a guardrail.
+        let content = "---\ncategory: behavior\npriority: 10\n---\nSome behavior content.";
+        assert!(is_guardrail_file("safety.md", content));
+    }
+
+    #[test]
+    fn blocklist_file_with_path_prefix() {
+        let content = "---\ncategory: personality\n---\nContent.";
+        assert!(is_guardrail_file("instructions/safety.md", content));
+        assert!(is_guardrail_file("some/deep/path/safety.md", content));
+    }
+
+    #[test]
+    fn guardrail_category_detected_from_frontmatter() {
+        let content = "---\ncategory: guardrail\npriority: 10\n---\n# Custom Guardrail\nDo not do bad things.";
+        assert!(is_guardrail_file("custom-rules.md", content));
+    }
+
+    #[test]
+    fn non_guardrail_file_returns_false() {
+        let content =
+            "---\ncategory: behavior\npriority: 20\n---\n# Memory Rules\nRemember things.";
+        assert!(!is_guardrail_file("memory.md", content));
+    }
+
+    #[test]
+    fn non_guardrail_personality_returns_false() {
+        let content = "---\ncategory: personality\npriority: 10\n---\n# Soul\nI am Sober.";
+        assert!(!is_guardrail_file("soul.md", content));
+    }
+
+    #[test]
+    fn invalid_frontmatter_non_blocklist_returns_false() {
+        let content = "No frontmatter here.";
+        assert!(!is_guardrail_file("random.md", content));
+    }
+
+    #[test]
+    fn blocklist_file_with_invalid_frontmatter_still_detected() {
+        // safety.md without valid frontmatter should still be detected via blocklist.
+        let content = "No frontmatter at all.";
+        assert!(is_guardrail_file("safety.md", content));
     }
 }
