@@ -717,23 +717,40 @@
 						<!-- Disabled items as chips -->
 						{#if disabledTools.length > 0 || disabledPluginNames.length > 0}
 							<div class="flex flex-wrap gap-1">
-								{#each disabledTools as toolName (toolName)}
-									<button
-										onclick={() => enableTool(toolName)}
-										class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
-									>
-										{toolName}
-										<span class="text-red-400 dark:text-red-500">&times;</span>
-									</button>
-								{/each}
 								{#each disabledPluginNames as plugin (plugin.id)}
 									<button
 										onclick={() => enablePlugin(plugin.id)}
 										class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
 									>
 										{plugin.name}
-										<span class="text-xs text-amber-500">plugin</span>
+										<span class="text-xs text-amber-500 dark:text-amber-400">plugin</span>
 										<span class="text-amber-400 dark:text-amber-500">&times;</span>
+									</button>
+								{/each}
+								{#each disabledTools as toolName (toolName)}
+									{@const fromPlugin = availableTools.find(
+										(t) => t.name === toolName && t.plugin_name
+									)}
+									<button
+										onclick={() => enableTool(toolName)}
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											fromPlugin
+												? 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50'
+												: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
+										]}
+									>
+										{toolName}
+										{#if fromPlugin}
+											<span class="text-xs text-orange-500 dark:text-orange-400"
+												>{fromPlugin.plugin_name}</span
+											>
+										{/if}
+										<span
+											class={fromPlugin
+												? 'text-orange-400 dark:text-orange-500'
+												: 'text-red-400 dark:text-red-500'}>&times;</span
+										>
 									</button>
 								{/each}
 							</div>
