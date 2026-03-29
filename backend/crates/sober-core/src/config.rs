@@ -73,6 +73,8 @@ pub const DEFAULT_MEMORY_RETRIEVAL_BOOST: f64 = 0.2;
 pub const DEFAULT_MEMORY_PRUNE_THRESHOLD: f64 = 0.1;
 /// Default ACP agent CLI args.
 pub const DEFAULT_ACP_ARGS: &str = "acp";
+/// Default evolution check interval.
+pub const DEFAULT_EVOLUTION_INTERVAL: &str = "2h";
 
 /// Top-level application configuration.
 ///
@@ -111,6 +113,8 @@ pub struct AppConfig {
     pub agent: AgentProcessConfig,
     /// Web reverse-proxy settings.
     pub web: WebConfig,
+    /// Self-evolution loop settings.
+    pub evolution: EvolutionConfig,
 }
 
 /// Runtime environment.
@@ -434,6 +438,27 @@ impl Default for WebConfig {
     }
 }
 
+/// Self-evolution loop settings.
+///
+/// Only the check interval lives here — autonomy levels are DB-backed
+/// in the `evolution_config` table.
+///
+/// Configurable via `[evolution]` TOML section or `SOBER_EVOLUTION_*` env vars.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct EvolutionConfig {
+    /// How often the evolution check job runs (e.g. `"2h"`, `"30m"`).
+    pub interval: String,
+}
+
+impl Default for EvolutionConfig {
+    fn default() -> Self {
+        Self {
+            interval: DEFAULT_EVOLUTION_INTERVAL.to_owned(),
+        }
+    }
+}
+
 impl std::fmt::Debug for CryptoConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CryptoConfig")
@@ -677,6 +702,11 @@ impl AppConfig {
         // crypto
         if let Some(v) = get_var("SOBER_CRYPTO_MASTER_ENCRYPTION_KEY") {
             self.crypto.master_encryption_key = Some(v);
+        }
+
+        // evolution
+        if let Some(v) = get_var("SOBER_EVOLUTION_INTERVAL") {
+            self.evolution.interval = v;
         }
 
         // acp (optional section — any SOBER_ACP_* env var triggers Some)

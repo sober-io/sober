@@ -17,26 +17,26 @@ pub use agent_repos::AgentRepos;
 pub use api::ApiResponse;
 pub use domain::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername,
-    ConversationWithDetails, Job, JobRun, Message, Observation, Plugin, PluginAuditLog, Role,
-    SecretMetadata, SecretRow, Session, StoredDek, Tag, User, UserRole, Workspace,
-    WorkspaceAgentState, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
+    ConversationWithDetails, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message, Observation,
+    Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, User,
+    UserRole, Workspace, WorkspaceAgentState, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
 };
 pub use enums::{
-    AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, ConversationKind,
-    ConversationUserRole, JobStatus, MessageRole, PermissionMode, PluginKind, PluginOrigin,
-    PluginScope, PluginStatus, RoleKind, SandboxNetMode, ScopeKind, ToolExecutionSource,
-    ToolExecutionStatus, UserStatus, WorkspaceState, WorktreeState,
+    AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, AutonomyLevel, ConversationKind,
+    ConversationUserRole, EvolutionStatus, EvolutionType, JobStatus, MessageRole, PermissionMode,
+    PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleKind, SandboxNetMode, ScopeKind,
+    ToolExecutionSource, ToolExecutionStatus, UserStatus, WorkspaceState, WorktreeState,
 };
 pub use ids::{
-    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
-    RoleId, ScopeId, SecretId, SessionId, TagId, ToolExecutionId, ToolId, UserId, WorkspaceId,
-    WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, EvolutionEventId, JobId, JobRunId,
+    MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId, TagId, ToolExecutionId, ToolId,
+    UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 pub use input::{
-    ArtifactFilter, CreateArtifact, CreateAuditLog, CreateJob, CreateMessage, CreatePlugin,
-    CreatePluginAuditLog, CreatePluginExecutionLog, CreateSandboxExecutionLog, CreateSession,
-    CreateTag, CreateUser, ListConversationsFilter, NewSecret, PluginFilter, RegisterRepo,
-    UpdateSecret,
+    ArtifactFilter, CreateArtifact, CreateAuditLog, CreateEvolutionEvent, CreateJob, CreateMessage,
+    CreatePlugin, CreatePluginAuditLog, CreatePluginExecutionLog, CreateSandboxExecutionLog,
+    CreateSession, CreateTag, CreateUser, ListConversationsFilter, NewSecret, PluginFilter,
+    RegisterRepo, UpdateSecret,
 };
 pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
