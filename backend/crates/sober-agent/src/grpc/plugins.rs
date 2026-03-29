@@ -119,13 +119,22 @@ pub(crate) async fn handle_list_plugins<R: AgentRepos>(
         ..Default::default()
     };
 
-    let plugins = service
+    let mut plugins = service
         .agent()
         .repos()
         .plugins()
         .list(filter)
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
+
+    // When workspace_id is provided, filter out workspace-scoped plugins
+    // that belong to a different workspace.
+    if let Some(ws_id_str) = &req.workspace_id
+        && let Ok(ws_uuid) = uuid::Uuid::parse_str(ws_id_str)
+    {
+        let ws_id = WorkspaceId::from_uuid(ws_uuid);
+        plugins.retain(|p| p.scope != PluginScope::Workspace || p.workspace_id == Some(ws_id));
+    }
 
     let plugin_infos = plugins.iter().map(plugin_to_proto).collect();
 

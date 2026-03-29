@@ -200,6 +200,8 @@ message PluginInfo {
 message ListPluginsRequest {
   optional string kind = 1;
   optional string status = 2;
+  // When set, only return system/user plugins and workspace plugins belonging to this workspace.
+  optional string workspace_id = 3;
 }
 
 message ListPluginsResponse {

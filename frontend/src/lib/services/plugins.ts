@@ -9,10 +9,11 @@ import type {
 } from '$lib/types/plugin';
 
 export const pluginService = {
-	list: (params?: { kind?: PluginKind; status?: PluginStatus }) => {
+	list: (params?: { kind?: PluginKind; status?: PluginStatus; workspace_id?: string }) => {
 		const searchParams = new URLSearchParams();
 		if (params?.kind) searchParams.set('kind', params.kind);
 		if (params?.status) searchParams.set('status', params.status);
+		if (params?.workspace_id) searchParams.set('workspace_id', params.workspace_id);
 		const query = searchParams.toString();
 		return api<Plugin[]>(`/plugins${query ? `?${query}` : ''}`);
 	},

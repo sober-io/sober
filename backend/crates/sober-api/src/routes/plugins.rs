@@ -39,6 +39,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct ListPluginsParams {
     kind: Option<String>,
     status: Option<String>,
+    workspace_id: Option<String>,
 }
 
 /// `GET /api/v1/plugins` — list plugins with optional filters.
@@ -56,6 +57,7 @@ async fn list_plugins(
         .list_plugins(proto::ListPluginsRequest {
             kind: params.kind,
             status: params.status,
+            workspace_id: params.workspace_id,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -191,6 +193,7 @@ async fn get_plugin(
         .list_plugins(proto::ListPluginsRequest {
             kind: None,
             status: None,
+            workspace_id: None,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -276,6 +279,7 @@ async fn update_plugin(
         .list_plugins(proto::ListPluginsRequest {
             kind: None,
             status: None,
+            workspace_id: None,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;

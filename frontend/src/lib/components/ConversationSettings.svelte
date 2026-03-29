@@ -118,7 +118,6 @@
 	let disabledTools = $state<string[]>([]);
 	let disabledPlugins = $state<string[]>([]);
 	let capabilitySearch = $state('');
-	let capabilityDropdownOpen = $state(false);
 
 	// Derived
 	let createdDate = $derived(
@@ -204,7 +203,10 @@
 
 		// Load available tools and plugins for the capabilities section
 		try {
-			const [tools, plugins] = await Promise.all([toolService.list(), pluginService.list()]);
+			const [tools, plugins] = await Promise.all([
+				toolService.list(),
+				pluginService.list({ workspace_id: conversation.workspace_id })
+			]);
 			availableTools = tools;
 			availablePlugins = plugins;
 		} catch {
@@ -255,7 +257,6 @@
 			disableTool(tool ? tool.name : capabilitySearch.trim());
 		}
 		capabilitySearch = '';
-		capabilityDropdownOpen = false;
 	}
 
 	let filteredCapabilities = $derived.by(() => {
@@ -742,17 +743,16 @@
 							<input
 								type="text"
 								bind:value={capabilitySearch}
-								onfocus={() => (capabilityDropdownOpen = true)}
-								onblur={() => setTimeout(() => (capabilityDropdownOpen = false), 150)}
+								onblur={() => setTimeout(() => (capabilitySearch = ''), 150)}
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Enter') addCapabilityFromSearch();
-									if (e.key === 'Escape') capabilityDropdownOpen = false;
+									if (e.key === 'Escape') capabilitySearch = '';
 								}}
 								placeholder="Search tools or plugins to disable..."
 								class="w-full rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
 							/>
 
-							{#if capabilityDropdownOpen && filteredCapabilities.length > 0}
+							{#if capabilitySearch && filteredCapabilities.length > 0}
 								<div
 									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 								>
@@ -763,7 +763,6 @@
 												if (item.type === 'plugin') disablePlugin(item.id);
 												else disableTool(item.id);
 												capabilitySearch = '';
-												capabilityDropdownOpen = false;
 											}}
 											class="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-700"
 										>
