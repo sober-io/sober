@@ -225,6 +225,11 @@ impl<R: AgentRepos> Agent<R> {
         &self.repos
     }
 
+    /// Returns the tool bootstrap for enumerating built-in tools.
+    pub fn tool_bootstrap(&self) -> &ToolBootstrap<R> {
+        &self.tool_bootstrap
+    }
+
     /// Resolves the workspace directory path for a conversation.
     ///
     /// Returns `None` if the conversation has no workspace or the workspace

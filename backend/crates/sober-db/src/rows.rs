@@ -744,6 +744,8 @@ pub(crate) struct WorkspaceSettingsRow {
     pub sandbox_allowed_domains: Option<Vec<String>>,
     pub sandbox_max_execution_seconds: Option<i32>,
     pub sandbox_allow_spawn: Option<bool>,
+    pub disabled_tools: Vec<String>,
+    pub disabled_plugins: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -760,6 +762,12 @@ impl From<WorkspaceSettingsRow> for WorkspaceSettings {
             sandbox_allowed_domains: row.sandbox_allowed_domains,
             sandbox_max_execution_seconds: row.sandbox_max_execution_seconds,
             sandbox_allow_spawn: row.sandbox_allow_spawn,
+            disabled_tools: row.disabled_tools,
+            disabled_plugins: row
+                .disabled_plugins
+                .into_iter()
+                .map(PluginId::from_uuid)
+                .collect(),
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

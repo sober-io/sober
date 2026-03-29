@@ -160,6 +160,15 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         Err(tonic::Status::unimplemented("not used in tests"))
     }
 
+    async fn list_tools(
+        &self,
+        _request: tonic::Request<proto::ListToolsRequest>,
+    ) -> Result<tonic::Response<proto::ListToolsResponse>, tonic::Status> {
+        Ok(tonic::Response::new(proto::ListToolsResponse {
+            tools: vec![],
+        }))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

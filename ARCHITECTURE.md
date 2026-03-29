@@ -365,10 +365,11 @@ All workspace-level configuration is stored in the `workspace_settings` table
 - **Permission mode** — controls shell command approval (interactive, policy-based, autonomous).
 - **Sandbox policy** — profile name + optional overrides (network mode, allowed domains, timeout, spawn).
 - **Snapshot settings** — auto-snapshot flag and max snapshot count.
+- **Capability filtering** — blacklist of disabled tools (`TEXT[]`) and disabled plugins (`UUID[]`). Disabled capabilities are silently excluded from the agent's available tools each turn.
 
 Settings are created atomically alongside the workspace via `WorkspaceRepo::provision()`.
 The agent loads settings at the start of each turn and uses them to resolve
-`SandboxPolicy` for shell executions.
+`SandboxPolicy` for shell executions and filter available tools/plugins.
 
 `.sober/config.toml` no longer controls sandbox, permission, or snapshot settings.
 

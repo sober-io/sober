@@ -151,6 +151,7 @@ impl<R: PluginRepo> PluginManager<R> {
         workspace_dir: &Path,
         workspace_id: Option<sober_core::types::WorkspaceId>,
         skill_activation_state: Option<Arc<Mutex<SkillActivationState>>>,
+        disabled_plugins: &[PluginId],
     ) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
         let filter = PluginFilter {
             status: Some(PluginStatus::Enabled),
@@ -162,6 +163,11 @@ impl<R: PluginRepo> PluginManager<R> {
         let mut tools: Vec<Arc<dyn Tool>> = Vec::new();
 
         for plugin in &plugins {
+            if disabled_plugins.contains(&plugin.id) {
+                debug!(plugin_id = %plugin.id, plugin_name = %plugin.name, "plugin disabled by workspace settings, skipping");
+                continue;
+            }
+
             let result = match plugin.kind {
                 PluginKind::Mcp => self.mcp_tools(plugin).await,
                 PluginKind::Skill => {
@@ -201,6 +207,36 @@ impl<R: PluginRepo> PluginManager<R> {
         }
 
         Ok(tools)
+    }
+
+    /// Returns `(name, description)` pairs for tools exported by an MCP plugin.
+    pub async fn mcp_tool_names(
+        &self,
+        plugin: &Plugin,
+    ) -> Result<Vec<(String, String)>, PluginError> {
+        let tools = self.mcp_tools(plugin).await?;
+        Ok(tools
+            .into_iter()
+            .map(|t| {
+                let meta = t.metadata();
+                (meta.name, meta.description)
+            })
+            .collect())
+    }
+
+    /// Returns `(name, description)` pairs for tools exported by a WASM plugin.
+    pub async fn wasm_tool_names(
+        &self,
+        plugin: &Plugin,
+    ) -> Result<Vec<(String, String)>, PluginError> {
+        let tools = self.wasm_tools(plugin).await?;
+        Ok(tools
+            .into_iter()
+            .map(|t| {
+                let meta = t.metadata();
+                (meta.name, meta.description)
+            })
+            .collect())
     }
 
     /// Returns tool adapters from the MCP pool for a given plugin.
@@ -800,6 +836,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed");
@@ -823,6 +860,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed");
@@ -850,6 +888,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed despite bad plugin config");
@@ -876,6 +915,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed despite unconnected MCP server");
@@ -936,6 +976,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed");
@@ -961,6 +1002,7 @@ mod tests {
                 Path::new("/nonexistent"),
                 None,
                 None,
+                &[],
             )
             .await
             .expect("should succeed");

@@ -11,8 +11,8 @@ use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, ApiResponse, ConversationId, ConversationKind, ConversationRepo,
     ConversationUserRepo, ConversationUserRole, ConversationWithDetails, JobRepo,
-    ListConversationsFilter, MessageRepo, PermissionMode, SandboxNetMode, TagRepo, WorkspaceRepo,
-    WorkspaceSettingsRepo,
+    ListConversationsFilter, MessageRepo, PermissionMode, PluginId, SandboxNetMode, TagRepo,
+    WorkspaceRepo, WorkspaceSettingsRepo,
 };
 use sober_db::{
     PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
@@ -262,6 +262,8 @@ struct SettingsResponse {
     auto_snapshot: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_snapshots: Option<i32>,
+    disabled_tools: Vec<String>,
+    disabled_plugins: Vec<String>,
 }
 
 /// `GET /api/v1/conversations/:id/settings` — read combined settings.
@@ -294,6 +296,12 @@ async fn get_settings(
         sandbox_allow_spawn: settings.sandbox_allow_spawn,
         auto_snapshot: settings.auto_snapshot,
         max_snapshots: settings.max_snapshots,
+        disabled_tools: settings.disabled_tools,
+        disabled_plugins: settings
+            .disabled_plugins
+            .iter()
+            .map(|id| id.to_string())
+            .collect(),
     }))
 }
 
@@ -311,6 +319,8 @@ struct UpdateSettingsRequest {
     sandbox_allow_spawn: Option<bool>,
     auto_snapshot: Option<bool>,
     max_snapshots: Option<i32>,
+    disabled_tools: Option<Vec<String>>,
+    disabled_plugins: Option<Vec<String>>,
 }
 
 /// `PATCH /api/v1/conversations/:id/settings` — partial update.
@@ -366,6 +376,15 @@ async fn update_settings(
     if let Some(max) = body.max_snapshots {
         settings.max_snapshots = Some(max);
     }
+    if let Some(tools) = body.disabled_tools {
+        settings.disabled_tools = tools;
+    }
+    if let Some(plugins) = body.disabled_plugins {
+        settings.disabled_plugins = plugins
+            .into_iter()
+            .filter_map(|s| uuid::Uuid::parse_str(&s).ok().map(PluginId::from_uuid))
+            .collect();
+    }
 
     let updated = ws_settings_repo.upsert(&settings).await?;
 
@@ -382,6 +401,12 @@ async fn update_settings(
         sandbox_allow_spawn: updated.sandbox_allow_spawn,
         auto_snapshot: updated.auto_snapshot,
         max_snapshots: updated.max_snapshots,
+        disabled_tools: updated.disabled_tools,
+        disabled_plugins: updated
+            .disabled_plugins
+            .iter()
+            .map(|id| id.to_string())
+            .collect(),
     }))
 }
 

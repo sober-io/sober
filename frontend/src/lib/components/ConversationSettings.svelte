@@ -8,10 +8,14 @@
 		AgentMode,
 		SandboxNetMode,
 		Collaborator,
-		ConversationUserRole
+		ConversationUserRole,
+		ToolInfo
 	} from '$lib/types';
+	import type { Plugin } from '$lib/types/plugin';
 	import { jobService } from '$lib/services/jobs';
 	import { conversationService } from '$lib/services/conversations';
+	import { toolService } from '$lib/services/tools';
+	import { pluginService } from '$lib/services/plugins';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
@@ -108,6 +112,49 @@
 	let autoSnapshot = $state(true);
 	let newDomain = $state('');
 
+	// Capability colors — purple for plugins, sky for plugin tools, red for built-in
+	const CAP = {
+		plugin: {
+			chip: 'bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50',
+			badge: 'text-purple-500 dark:text-purple-400',
+			close: 'text-purple-400 dark:text-purple-500',
+			dot: 'bg-purple-400',
+			row: 'hover:bg-purple-50 dark:hover:bg-purple-900/20',
+			detail: 'text-purple-500 dark:text-purple-400'
+		},
+		pluginTool: {
+			chip: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:hover:bg-sky-900/50',
+			badge: 'text-sky-500 dark:text-sky-400',
+			close: 'text-sky-400 dark:text-sky-500',
+			dot: 'bg-sky-400',
+			row: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		},
+		builtin: {
+			chip: 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50',
+			badge: '',
+			close: 'text-red-400 dark:text-red-500',
+			dot: 'bg-red-400',
+			row: 'hover:bg-zinc-100 dark:hover:bg-zinc-700',
+			detail: 'text-zinc-400 dark:text-zinc-500'
+		}
+	} as const;
+
+	type CapVariant = keyof typeof CAP;
+
+	function capVariant(item: { type: string; detail?: string }): CapVariant {
+		if (item.type === 'plugin') return 'plugin';
+		return item.detail?.startsWith('plugin:') ? 'pluginTool' : 'builtin';
+	}
+
+	// Capabilities (tool/plugin filtering)
+	let availableTools = $state<ToolInfo[]>([]);
+	let availablePlugins = $state<Plugin[]>([]);
+	let disabledTools = $state<string[]>([]);
+	let disabledPlugins = $state<string[]>([]);
+	let capabilitySearch = $state('');
+	let capabilityFocused = $state(false);
+
 	// Derived
 	let createdDate = $derived(
 		new Date(conversation.created_at).toLocaleDateString(undefined, {
@@ -182,10 +229,24 @@
 			sandboxTimeout = s.sandbox_max_execution_seconds;
 			sandboxAllowSpawn = s.sandbox_allow_spawn;
 			autoSnapshot = s.auto_snapshot;
+			disabledTools = s.disabled_tools ?? [];
+			disabledPlugins = s.disabled_plugins ?? [];
 		} catch {
 			// Settings may not exist for legacy conversations
 		} finally {
 			settingsLoading = false;
+		}
+
+		// Load available tools and plugins for the capabilities section
+		try {
+			const [tools, plugins] = await Promise.all([
+				toolService.list(),
+				pluginService.list({ workspace_id: conversation.workspace_id })
+			]);
+			availableTools = tools;
+			availablePlugins = plugins;
+		} catch {
+			// Non-critical — capabilities section just won't show items
 		}
 	}
 
@@ -196,6 +257,85 @@
 			// Could show error toast in the future
 		}
 	}
+
+	function disableTool(name: string) {
+		if (disabledTools.includes(name)) return;
+		disabledTools = [...disabledTools, name];
+		saveSetting({ disabled_tools: disabledTools });
+	}
+
+	function enableTool(name: string) {
+		disabledTools = disabledTools.filter((t) => t !== name);
+		saveSetting({ disabled_tools: disabledTools });
+	}
+
+	function disablePlugin(id: string) {
+		if (disabledPlugins.includes(id)) return;
+		disabledPlugins = [...disabledPlugins, id];
+		saveSetting({ disabled_plugins: disabledPlugins });
+	}
+
+	function enablePlugin(id: string) {
+		disabledPlugins = disabledPlugins.filter((p) => p !== id);
+		saveSetting({ disabled_plugins: disabledPlugins });
+	}
+
+	function addCapabilityFromSearch() {
+		const q = capabilitySearch.trim().toLowerCase();
+		if (!q) return;
+		// Check if it matches a plugin
+		const plugin = availablePlugins.find((p) => p.name.toLowerCase() === q);
+		if (plugin) {
+			disablePlugin(plugin.id);
+		} else {
+			// Treat as tool name (exact or matched)
+			const tool = availableTools.find((t) => t.name.toLowerCase() === q);
+			disableTool(tool ? tool.name : capabilitySearch.trim());
+		}
+		capabilitySearch = '';
+	}
+
+	let filteredCapabilities = $derived.by(() => {
+		if (!capabilityFocused) return [];
+		const q = capabilitySearch.toLowerCase();
+		const items: Array<{ type: 'tool' | 'plugin'; id: string; name: string; detail: string }> = [];
+		for (const plugin of availablePlugins) {
+			if (
+				!disabledPlugins.includes(plugin.id) &&
+				(!q || plugin.name.toLowerCase().includes(q) || plugin.kind.toLowerCase().includes(q))
+			) {
+				items.push({
+					type: 'plugin',
+					id: plugin.id,
+					name: plugin.name,
+					detail: `${plugin.kind} plugin`
+				});
+			}
+		}
+		for (const tool of availableTools) {
+			if (
+				!disabledTools.includes(tool.name) &&
+				(!q || tool.name.toLowerCase().includes(q) || tool.description.toLowerCase().includes(q))
+			) {
+				items.push({
+					type: 'tool',
+					id: tool.name,
+					name: tool.name,
+					detail: tool.plugin_name ? `plugin: ${tool.plugin_name}` : tool.source
+				});
+			}
+		}
+		return items.slice(0, 15);
+	});
+
+	let disabledPluginNames = $derived(
+		disabledPlugins
+			.map((id) => {
+				const p = availablePlugins.find((pl) => pl.id === id);
+				return p ? { id, name: p.name, type: 'plugin' as const } : null;
+			})
+			.filter(Boolean) as Array<{ id: string; name: string; type: 'plugin' }>
+	);
 
 	async function handleProfileChange(profile: string) {
 		sandboxProfile = profile;
@@ -596,6 +736,113 @@
 								>Auto-snapshot before dangerous commands</span
 							>
 						</label>
+					</div>
+				{/if}
+			</SettingsSection>
+
+			<!-- Capabilities -->
+			<SettingsSection
+				title="Capabilities"
+				description="Disable tools or plugins the agent should not use"
+			>
+				{#if settingsLoading}
+					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+				{:else}
+					<div class="space-y-3">
+						<!-- Disabled items as chips -->
+						{#if disabledTools.length > 0 || disabledPluginNames.length > 0}
+							<div class="flex flex-wrap gap-1">
+								{#each disabledPluginNames as plugin (plugin.id)}
+									{@const c = CAP.plugin}
+									<button
+										onclick={() => enablePlugin(plugin.id)}
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											c.chip
+										]}
+									>
+										{plugin.name}
+										<span class={['text-xs', c.badge]}>plugin</span>
+										<span class={c.close}>&times;</span>
+									</button>
+								{/each}
+								{#each disabledTools as toolName (toolName)}
+									{@const fromPlugin = availableTools.find(
+										(t) => t.name === toolName && t.plugin_name
+									)}
+									{@const c = fromPlugin ? CAP.pluginTool : CAP.builtin}
+									<button
+										onclick={() => enableTool(toolName)}
+										class={[
+											'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs',
+											c.chip
+										]}
+									>
+										{toolName}
+										{#if fromPlugin}
+											<span class={['text-xs', c.badge]}>{fromPlugin.plugin_name}</span>
+										{/if}
+										<span class={c.close}>&times;</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+
+						<!-- Searchable dropdown -->
+						<div class="relative">
+							<input
+								type="text"
+								bind:value={capabilitySearch}
+								onfocus={() => (capabilityFocused = true)}
+								onblur={() =>
+									setTimeout(() => {
+										capabilityFocused = false;
+										capabilitySearch = '';
+									}, 150)}
+								onkeydown={(e: KeyboardEvent) => {
+									if (e.key === 'Enter') addCapabilityFromSearch();
+									if (e.key === 'Escape') {
+										capabilityFocused = false;
+										capabilitySearch = '';
+									}
+								}}
+								placeholder="Search tools or plugins to disable..."
+								class="w-full rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
+							/>
+
+							{#if capabilityFocused && filteredCapabilities.length > 0}
+								<div
+									class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+								>
+									{#each filteredCapabilities as item (item.type + item.id)}
+										{@const c = CAP[capVariant(item)]}
+										<button
+											onmousedown={(e: MouseEvent) => {
+												e.preventDefault();
+												if (item.type === 'plugin') disablePlugin(item.id);
+												else disableTool(item.id);
+											}}
+											class={[
+												'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs',
+												c.row
+											]}
+										>
+											<div class="flex items-center gap-1.5">
+												<span class={['h-1.5 w-1.5 shrink-0 rounded-full', c.dot]}></span>
+												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
+											</div>
+											<span class={['text-xs', c.detail]}>{item.detail}</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+
+						{#if disabledTools.length === 0 && disabledPluginNames.length === 0}
+							<p class="text-xs text-zinc-400 dark:text-zinc-500">
+								All tools and plugins are enabled
+							</p>
+						{/if}
 					</div>
 				{/if}
 			</SettingsSection>

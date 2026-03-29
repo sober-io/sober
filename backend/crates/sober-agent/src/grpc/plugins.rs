@@ -119,13 +119,22 @@ pub(crate) async fn handle_list_plugins<R: AgentRepos>(
         ..Default::default()
     };
 
-    let plugins = service
+    let mut plugins = service
         .agent()
         .repos()
         .plugins()
         .list(filter)
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
+
+    // When workspace_id is provided, filter out workspace-scoped plugins
+    // that belong to a different workspace.
+    if let Some(ws_id_str) = &req.workspace_id
+        && let Ok(ws_uuid) = uuid::Uuid::parse_str(ws_id_str)
+    {
+        let ws_id = WorkspaceId::from_uuid(ws_uuid);
+        plugins.retain(|p| p.scope != PluginScope::Workspace || p.workspace_id == Some(ws_id));
+    }
 
     let plugin_infos = plugins.iter().map(plugin_to_proto).collect();
 
@@ -586,6 +595,80 @@ pub(crate) async fn handle_reload_skills<R: AgentRepos>(
         .collect();
 
     Ok(Response::new(proto::ReloadSkillsResponse { skills }))
+}
+
+// ---------------------------------------------------------------------------
+// List Tools RPC
+// ---------------------------------------------------------------------------
+
+/// Lists all available tools (built-in and plugin-exported) for the settings UI.
+///
+/// Returns the unfiltered catalog — the frontend compares against workspace
+/// settings to render enabled/disabled state.
+pub(crate) async fn handle_list_tools<R: AgentRepos>(
+    service: &AgentGrpcService<R>,
+    _request: Request<proto::ListToolsRequest>,
+) -> Result<Response<proto::ListToolsResponse>, Status> {
+    let agent = service.agent();
+
+    // All built-in tools (static + per-turn) from ToolBootstrap.
+    let mut tools: Vec<proto::ToolInfoEntry> = agent
+        .tool_bootstrap()
+        .builtin_tool_names()
+        .into_iter()
+        .map(|(name, description)| proto::ToolInfoEntry {
+            name,
+            description,
+            source: "builtin".into(),
+            plugin_id: None,
+            plugin_name: None,
+        })
+        .collect();
+
+    // Plugin-exported tools — enumerate from the plugin registry.
+    let filter = PluginFilter {
+        status: Some(PluginStatus::Enabled),
+        ..Default::default()
+    };
+    if let Ok(plugins) = agent.repos().plugins().list(filter).await {
+        let plugin_manager = &agent.tool_bootstrap().plugin_manager;
+        for plugin in &plugins {
+            match plugin.kind {
+                PluginKind::Mcp => {
+                    if let Ok(mcp_tools) = plugin_manager.mcp_tool_names(plugin).await {
+                        for (name, description) in mcp_tools {
+                            tools.push(proto::ToolInfoEntry {
+                                name,
+                                description,
+                                source: "plugin".into(),
+                                plugin_id: Some(plugin.id.to_string()),
+                                plugin_name: Some(plugin.name.clone()),
+                            });
+                        }
+                    }
+                }
+                PluginKind::Wasm => {
+                    // WASM plugins export tool names via their metadata.
+                    if let Ok(wasm_tools) = plugin_manager.wasm_tool_names(plugin).await {
+                        for (name, description) in wasm_tools {
+                            tools.push(proto::ToolInfoEntry {
+                                name,
+                                description,
+                                source: "plugin".into(),
+                                plugin_id: Some(plugin.id.to_string()),
+                                plugin_name: Some(plugin.name.clone()),
+                            });
+                        }
+                    }
+                }
+                PluginKind::Skill => {
+                    // Skills are listed via their own endpoint.
+                }
+            }
+        }
+    }
+
+    Ok(Response::new(proto::ListToolsResponse { tools }))
 }
 
 #[cfg(test)]

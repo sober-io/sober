@@ -30,6 +30,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         // Skill discovery routes (used by the slash command palette)
         .route("/skills", get(list_skills))
         .route("/skills/reload", post(reload_skills))
+        // Tool catalog (built-in + plugin-exported, for capability settings UI)
+        .route("/tools", get(list_tools))
 }
 
 /// Query parameters for `GET /api/v1/plugins`.
@@ -37,6 +39,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct ListPluginsParams {
     kind: Option<String>,
     status: Option<String>,
+    workspace_id: Option<String>,
 }
 
 /// `GET /api/v1/plugins` — list plugins with optional filters.
@@ -54,6 +57,7 @@ async fn list_plugins(
         .list_plugins(proto::ListPluginsRequest {
             kind: params.kind,
             status: params.status,
+            workspace_id: params.workspace_id,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -189,6 +193,7 @@ async fn get_plugin(
         .list_plugins(proto::ListPluginsRequest {
             kind: None,
             status: None,
+            workspace_id: None,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -274,6 +279,7 @@ async fn update_plugin(
         .list_plugins(proto::ListPluginsRequest {
             kind: None,
             status: None,
+            workspace_id: None,
         })
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -418,6 +424,51 @@ async fn reload_skills(
         .collect();
 
     Ok(ApiResponse::new(skills))
+}
+
+// ---------------------------------------------------------------------------
+// Tool catalog
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v1/tools` — list all available tools (built-in + plugin-exported).
+///
+/// Returns the unfiltered catalog for the capability settings UI. The frontend
+/// compares this against `workspace_settings.disabled_tools` to render toggles.
+async fn list_tools(
+    State(state): State<Arc<AppState>>,
+    _auth_user: AuthUser,
+) -> Result<ApiResponse<Vec<serde_json::Value>>, AppError> {
+    let mut client = state.agent_client.clone();
+
+    let response = client
+        .list_tools(proto::ListToolsRequest {
+            user_id: String::new(),
+            workspace_id: None,
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let tools: Vec<serde_json::Value> = response
+        .into_inner()
+        .tools
+        .into_iter()
+        .map(|t| {
+            let mut json = serde_json::json!({
+                "name": t.name,
+                "description": t.description,
+                "source": t.source,
+            });
+            if let Some(pid) = t.plugin_id {
+                json["plugin_id"] = serde_json::Value::String(pid);
+            }
+            if let Some(pname) = t.plugin_name {
+                json["plugin_name"] = serde_json::Value::String(pname);
+            }
+            json
+        })
+        .collect();
+
+    Ok(ApiResponse::new(tools))
 }
 
 // ---------------------------------------------------------------------------

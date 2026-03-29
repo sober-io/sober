@@ -162,6 +162,7 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
              RETURNING workspace_id, permission_mode, auto_snapshot, max_snapshots, \
                        sandbox_profile, sandbox_net_mode, sandbox_allowed_domains, \
                        sandbox_max_execution_seconds, sandbox_allow_spawn, \
+                       disabled_tools, disabled_plugins, \
                        created_at, updated_at",
         )
         .bind(id)
