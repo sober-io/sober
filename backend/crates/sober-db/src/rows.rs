@@ -7,14 +7,15 @@ use chrono::{DateTime, Utc};
 use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
     ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, MessageId,
-    MessageRole, PluginId, PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleId, ScopeId,
-    SecretId, SessionId, TagId, ToolExecutionId, ToolExecutionSource, ToolExecutionStatus, UserId,
-    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    MessageRole, PermissionMode, PluginId, PluginKind, PluginOrigin, PluginScope, PluginStatus,
+    RoleId, SandboxNetMode, ScopeId, SecretId, SessionId, TagId, ToolExecutionId,
+    ToolExecutionSource, ToolExecutionStatus, UserId, UserStatus, WorkspaceId, WorkspaceRepoId,
+    WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
     JobRun, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
-    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, Worktree,
+    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
 };
 use uuid::Uuid;
 
@@ -113,19 +114,12 @@ pub(crate) struct ConversationRow {
     pub kind: ConversationKind,
     pub agent_mode: AgentMode,
     pub is_archived: bool,
-    pub permission_mode: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl From<ConversationRow> for Conversation {
     fn from(row: ConversationRow) -> Self {
-        use sober_core::PermissionMode;
-        let permission_mode = match row.permission_mode.as_str() {
-            "interactive" => PermissionMode::Interactive,
-            "autonomous" => PermissionMode::Autonomous,
-            _ => PermissionMode::PolicyBased,
-        };
         Conversation {
             id: ConversationId::from_uuid(row.id),
             user_id: UserId::from_uuid(row.user_id),
@@ -134,7 +128,6 @@ impl From<ConversationRow> for Conversation {
             kind: row.kind,
             agent_mode: row.agent_mode,
             is_archived: row.is_archived,
-            permission_mode,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -618,7 +611,6 @@ pub(crate) struct ConversationWithUnreadRow {
     pub kind: ConversationKind,
     pub agent_mode: AgentMode,
     pub is_archived: bool,
-    pub permission_mode: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub unread_count: i32,
@@ -738,5 +730,38 @@ mod tests {
         assert_eq!(job.name, "test_job");
         assert_eq!(job.status, JobStatus::Active);
         assert_eq!(job.owner_type, "system");
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct WorkspaceSettingsRow {
+    pub workspace_id: Uuid,
+    pub permission_mode: PermissionMode,
+    pub auto_snapshot: bool,
+    pub max_snapshots: Option<i32>,
+    pub sandbox_profile: String,
+    pub sandbox_net_mode: Option<SandboxNetMode>,
+    pub sandbox_allowed_domains: Option<Vec<String>>,
+    pub sandbox_max_execution_seconds: Option<i32>,
+    pub sandbox_allow_spawn: Option<bool>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<WorkspaceSettingsRow> for WorkspaceSettings {
+    fn from(row: WorkspaceSettingsRow) -> Self {
+        WorkspaceSettings {
+            workspace_id: WorkspaceId::from_uuid(row.workspace_id),
+            permission_mode: row.permission_mode,
+            auto_snapshot: row.auto_snapshot,
+            max_snapshots: row.max_snapshots,
+            sandbox_profile: row.sandbox_profile,
+            sandbox_net_mode: row.sandbox_net_mode,
+            sandbox_allowed_domains: row.sandbox_allowed_domains,
+            sandbox_max_execution_seconds: row.sandbox_max_execution_seconds,
+            sandbox_allow_spawn: row.sandbox_allow_spawn,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
     }
 }

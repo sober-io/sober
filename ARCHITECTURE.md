@@ -102,9 +102,9 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |
-| `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering, audit |
+| `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering via UDS proxy bridge, audit |
 | `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
-| `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage, config parsing. Used by agent, CLI, and scheduler. |
+| `sober-workspace` | Workspace business logic: filesystem layout, git operations (git2), blob storage. Used by agent, CLI, and scheduler. |
 
 ---
 
@@ -351,11 +351,61 @@ Plugins declare capabilities in a TOML manifest (`plugin.toml`) and export tool 
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
-| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions |
+| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions, workspace settings |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Cache | In-memory (moka) | Route/session caching with PostgreSQL-backed sessions |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |
 | Search | SearXNG | Meta-search aggregation for web queries |
+
+### Workspace Settings
+
+All workspace-level configuration is stored in the `workspace_settings` table
+(one row per workspace). This is the single source of truth for:
+
+- **Permission mode** — controls shell command approval (interactive, policy-based, autonomous).
+- **Sandbox policy** — profile name + optional overrides (network mode, allowed domains, timeout, spawn).
+- **Snapshot settings** — auto-snapshot flag and max snapshot count.
+
+Settings are created atomically alongside the workspace via `WorkspaceRepo::provision()`.
+The agent loads settings at the start of each turn and uses them to resolve
+`SandboxPolicy` for shell executions.
+
+`.sober/config.toml` no longer controls sandbox, permission, or snapshot settings.
+
+### Sandbox Network Modes
+
+Shell commands run inside bubblewrap (`bwrap`) with one of three network modes:
+
+| Mode | `--unshare-net` | Network access |
+|------|-----------------|---------------|
+| `None` | Yes | Loopback only — no outbound access |
+| `AllowedDomains` | Yes | Only listed domains, via HTTPS CONNECT proxy |
+| `Full` | No | Unrestricted host networking |
+
+**AllowedDomains proxy bridge:**
+
+`--unshare-net` isolates the sandbox's network namespace — the process can't
+reach the host's loopback. To reach the filtering proxy, a UDS (Unix domain
+socket) bridge connects the two namespaces via the filesystem:
+
+```
+[sandboxed command]
+  → HTTP_PROXY=127.0.0.1:18080  (sandbox loopback)
+  → inner socat: TCP-LISTEN:18080 → UNIX-CONNECT:/tmp/sober-proxy-<uuid>.sock
+  → bind-mounted UDS socket (crosses namespace boundary)
+  → outer socat: UNIX-LISTEN → TCP:127.0.0.1:<proxy-port>
+  → HTTP CONNECT proxy (domain allowlist enforcement)
+  → internet
+```
+
+- **Outer socat** (host): listens on a UDS socket, forwards to the TCP proxy.
+- **bwrap**: bind-mounts the UDS socket + socat binary into the sandbox.
+- **Inner socat** (sandbox): translates `HTTP_PROXY` TCP traffic to the UDS.
+- **Proxy**: Rust async HTTP CONNECT proxy that checks each domain against the
+  allowlist. Allowed → tunnel established. Denied → 403 + logged.
+
+Port 18080 is private to each sandbox's network namespace — concurrent
+executions don't collide.
 
 ---
 
@@ -371,6 +421,17 @@ Docker Compose (dev) → Kubernetes (prod). Four independent processes:
 | `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
 
 Each process can be started, stopped, and scaled independently.
+
+### Runtime Dependencies
+
+The `sober-agent` image requires these system binaries at runtime:
+
+| Binary | Purpose | Required? |
+|--------|---------|-----------|
+| `bwrap` (bubblewrap) | Process-level sandboxing | Always |
+| `socat` | Network bridge for `AllowedDomains` sandbox mode | When using domain-filtered network |
+| `git` | Workspace git operations (libgit2 fallback) | Always |
+| `clang`, `lld` | WASM plugin compilation | When generating plugins |
 
 ### Docker Image Builds
 

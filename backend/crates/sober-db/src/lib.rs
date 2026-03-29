@@ -23,5 +23,5 @@ pub use repos::{
     PgAgentRepos, PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgConversationUserRepo,
     PgJobRepo, PgJobRunRepo, PgMessageRepo, PgPluginExecutionLogRepo, PgPluginRepo, PgRoleRepo,
     PgSandboxExecutionLogRepo, PgSecretRepo, PgSessionRepo, PgTagRepo, PgToolExecutionRepo,
-    PgUserRepo, PgWorkspaceRepo, PgWorkspaceRepoRepo, PgWorktreeRepo,
+    PgUserRepo, PgWorkspaceRepo, PgWorkspaceRepoRepo, PgWorkspaceSettingsRepo, PgWorktreeRepo,
 };

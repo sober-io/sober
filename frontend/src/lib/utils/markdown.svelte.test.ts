@@ -60,7 +60,7 @@ describe('renderMarkdown', () => {
 		const html = renderMarkdown('```js\nconst x = 1;\n```');
 
 		expect(html).toContain('<pre');
-		expect(html).toContain('<code>');
+		expect(html).toContain('<code');
 		// Content may be tokenized into spans by shiki or rendered plain
 		expect(html).toMatch(/const/);
 		expect(html).toMatch(/x/);

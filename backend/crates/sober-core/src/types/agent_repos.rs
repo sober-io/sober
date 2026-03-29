@@ -2,7 +2,7 @@
 
 use super::{
     ArtifactRepo, AuditLogRepo, ConversationRepo, MessageRepo, PluginRepo, SecretRepo,
-    ToolExecutionRepo, UserRepo, WorkspaceRepo,
+    ToolExecutionRepo, UserRepo, WorkspaceRepo, WorkspaceSettingsRepo,
 };
 
 /// Bundles all repository traits needed by the agent.
@@ -22,6 +22,7 @@ pub trait AgentRepos: Send + Sync + 'static {
     type Workspace: WorkspaceRepo;
     type Plg: PluginRepo;
     type ToolExec: ToolExecutionRepo;
+    type WsSettings: WorkspaceSettingsRepo;
 
     fn messages(&self) -> &Self::Msg;
     fn conversations(&self) -> &Self::Conv;
@@ -32,4 +33,5 @@ pub trait AgentRepos: Send + Sync + 'static {
     fn workspaces(&self) -> &Self::Workspace;
     fn plugins(&self) -> &Self::Plg;
     fn tool_executions(&self) -> &Self::ToolExec;
+    fn workspace_settings(&self) -> &Self::WsSettings;
 }

@@ -67,7 +67,7 @@ ENTRYPOINT ["sober-api"]
 # ============================================================
 FROM debian:trixie-slim AS sober-agent
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates bubblewrap iputils-ping curl git \
+    ca-certificates bubblewrap socat iputils-ping curl git \
     clang lld \
     && rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/usr/local/rustup

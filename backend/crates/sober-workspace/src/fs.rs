@@ -97,8 +97,9 @@ mod tests {
         let content = tokio::fs::read_to_string(root.join(".sober/config.toml"))
             .await
             .unwrap();
-        let config = sober_core::WorkspaceConfig::from_toml(&content).unwrap();
-        assert!(config.llm.is_none());
+        // Default config is comment-only, so it parses as an empty TOML table.
+        let table: toml::Table = toml::from_str(&content).unwrap();
+        assert!(table.is_empty());
     }
 
     #[tokio::test]

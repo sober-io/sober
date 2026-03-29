@@ -134,13 +134,6 @@ pub trait ConversationRepo: Send + Sync {
         title: &str,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Updates the permission mode of a conversation.
-    fn update_permission_mode(
-        &self,
-        id: ConversationId,
-        mode: crate::PermissionMode,
-    ) -> impl Future<Output = Result<(), AppError>> + Send;
-
     /// Deletes a conversation and all its messages.
     fn delete(&self, id: ConversationId) -> impl Future<Output = Result<(), AppError>> + Send;
 
@@ -475,6 +468,35 @@ pub trait WorkspaceRepo: Send + Sync {
 
     /// Soft-deletes a workspace (archived -> deleted).
     fn delete(&self, id: WorkspaceId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Provisions a new workspace with default settings atomically.
+    ///
+    /// Creates both a `workspaces` row and a `workspace_settings` row in one
+    /// transaction. Used by both the API (conversation creation) and the agent
+    /// (fallback for pre-migration conversations).
+    fn provision(
+        &self,
+        user_id: UserId,
+        name: &str,
+        root_path: &str,
+    ) -> impl Future<Output = Result<(Workspace, WorkspaceSettings), AppError>> + Send;
+}
+
+/// Workspace settings operations.
+pub trait WorkspaceSettingsRepo: Send + Sync {
+    /// Returns the settings for a workspace, or `NotFound` if none exist.
+    fn get_by_workspace(
+        &self,
+        workspace_id: WorkspaceId,
+    ) -> impl Future<Output = Result<WorkspaceSettings, AppError>> + Send;
+
+    /// Creates or updates workspace settings.
+    ///
+    /// INSERT ON CONFLICT UPDATE — omitted fields retain their current values.
+    fn upsert(
+        &self,
+        settings: &WorkspaceSettings,
+    ) -> impl Future<Output = Result<WorkspaceSettings, AppError>> + Send;
 }
 
 /// Workspace git repository operations.

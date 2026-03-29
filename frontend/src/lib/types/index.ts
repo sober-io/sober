@@ -43,7 +43,6 @@ export interface Conversation {
 	workspace_path?: string;
 	kind: ConversationKind;
 	is_archived: boolean;
-	permission_mode: PermissionMode;
 	agent_mode: AgentMode;
 	unread_count: number;
 	tags: Tag[];
@@ -167,6 +166,21 @@ export interface Workspace {
 	created_at: string;
 }
 
+export type SandboxNetMode = 'none' | 'allowed_domains' | 'full';
+
+export interface ConversationSettings {
+	permission_mode: PermissionMode;
+	agent_mode: AgentMode;
+	sandbox_profile: string;
+	sandbox_net_mode?: SandboxNetMode;
+	sandbox_allowed_domains?: string[];
+	sandbox_max_execution_seconds?: number;
+	sandbox_allow_spawn?: boolean;
+	auto_snapshot: boolean;
+	max_snapshots?: number;
+}
+
+/** @deprecated Use ConversationSettings instead */
 export interface WorkspaceSettings {
 	permission_mode: PermissionMode;
 	auto_snapshot: boolean;

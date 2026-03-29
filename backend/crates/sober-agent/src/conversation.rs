@@ -17,10 +17,13 @@ use std::time::{Duration, Instant};
 use sober_core::types::AgentRepos;
 use sober_core::types::Conversation;
 use sober_core::types::access::TriggerKind;
+use sober_core::types::domain::WorkspaceSettings;
 use sober_core::types::enums::{AgentMode, MessageRole, ToolExecutionStatus};
 use sober_core::types::ids::{ConversationId, MessageId, UserId};
 use sober_core::types::input::CreateMessage;
-use sober_core::types::repo::{ConversationRepo, MessageRepo, ToolExecutionRepo, WorkspaceRepo};
+use sober_core::types::repo::{
+    ConversationRepo, MessageRepo, ToolExecutionRepo, WorkspaceRepo, WorkspaceSettingsRepo,
+};
 use sober_mind::assembly::Mind;
 use sober_mind::injection::InjectionVerdict;
 use tokio::sync::mpsc;
@@ -248,7 +251,8 @@ impl<R: AgentRepos> ConversationActor<R> {
             .await
             .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-        let workspace_dir = self.ensure_workspace(&mut conversation, user_id).await;
+        let (workspace_dir, workspace_settings) =
+            self.ensure_workspace(&mut conversation, user_id).await;
 
         // 3. Store user message (human-triggered only)
         let user_msg_id = if trigger == TriggerKind::Human {
@@ -305,6 +309,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 conversation_id: self.conversation_id,
                 workspace_id: conversation.workspace_id,
                 workspace_dir: workspace_dir.clone(),
+                workspace_settings: workspace_settings.clone(),
                 skill_activation_state: Some(Arc::clone(&self.skill_activations)),
             };
             Arc::new(
@@ -355,25 +360,26 @@ impl<R: AgentRepos> ConversationActor<R> {
     }
 
     /// Provisions a workspace for the conversation if one doesn't exist yet,
-    /// and resolves the workspace directory path.
+    /// resolves the workspace directory path, and loads workspace settings.
     async fn ensure_workspace(
         &self,
         conversation: &mut Conversation,
         user_id: UserId,
-    ) -> Option<PathBuf> {
+    ) -> (Option<PathBuf>, Option<WorkspaceSettings>) {
         let workspace_root = self.ctx.config.workspace_root.display().to_string();
 
-        // Provision workspace if the conversation doesn't have one yet.
+        // Provision workspace + settings if the conversation doesn't have one yet
+        // (fallback for pre-migration conversations).
         if conversation.workspace_id.is_none() {
             let root_path = format!("{}/{}", workspace_root, self.conversation_id);
             match self
                 .ctx
                 .repos
                 .workspaces()
-                .create(user_id, &self.conversation_id.to_string(), None, &root_path)
+                .provision(user_id, &self.conversation_id.to_string(), &root_path)
                 .await
             {
-                Ok(ws) => {
+                Ok((ws, _settings)) => {
                     if let Err(e) = self
                         .ctx
                         .repos
@@ -387,16 +393,24 @@ impl<R: AgentRepos> ConversationActor<R> {
                     }
                 }
                 Err(e) => {
-                    warn!("failed to create workspace: {e}");
+                    warn!("failed to provision workspace: {e}");
                 }
             }
         }
 
         // Resolve workspace directory path.
-        let ws_id = conversation.workspace_id?;
-        let ws = self.ctx.repos.workspaces().get_by_id(ws_id).await.ok()?;
+        let ws_id = match conversation.workspace_id {
+            Some(id) => id,
+            None => return (None, None),
+        };
+
+        let ws = match self.ctx.repos.workspaces().get_by_id(ws_id).await {
+            Ok(ws) => ws,
+            Err(_) => return (None, None),
+        };
+
         let root = PathBuf::from(&ws.root_path);
-        match tokio::fs::create_dir_all(&root).await {
+        let dir = match tokio::fs::create_dir_all(&root).await {
             Ok(()) => Some(root),
             Err(e) => {
                 warn!(
@@ -406,7 +420,18 @@ impl<R: AgentRepos> ConversationActor<R> {
                 );
                 None
             }
-        }
+        };
+
+        // Load workspace settings from DB.
+        let settings = self
+            .ctx
+            .repos
+            .workspace_settings()
+            .get_by_workspace(ws_id)
+            .await
+            .ok();
+
+        (dir, settings)
     }
 
     /// Marks incomplete (pending/running) tool executions as failed.

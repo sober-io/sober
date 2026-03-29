@@ -12,10 +12,14 @@ use tokio::time::{Duration, timeout};
 use tracing::{debug, info, warn};
 
 use crate::audit::{ExecutionTrigger, SandboxAuditEntry};
-use crate::detect::detect_bwrap;
+use crate::detect::{detect_bwrap, detect_socat};
 use crate::error::SandboxError;
 use crate::policy::{NetMode, SandboxPolicy};
 use crate::proxy::ProxyBridge;
+
+/// Fixed port for the inner socat bridge inside the sandbox namespace.
+/// The sandboxed process's HTTP_PROXY points here.
+const SANDBOX_PROXY_PORT: u16 = 18080;
 
 /// Result of a completed sandbox execution.
 #[derive(Debug, Clone)]
@@ -74,8 +78,9 @@ impl BwrapSandbox {
         let mut env_vars = env.clone();
 
         // Set proxy env vars if proxy is active.
-        if let Some(ref proxy) = proxy {
-            let proxy_url = format!("http://127.0.0.1:{}", proxy.sandbox_port());
+        // Points to the inner socat on sandbox loopback (SANDBOX_PROXY_PORT).
+        if proxy.is_some() {
+            let proxy_url = format!("http://127.0.0.1:{SANDBOX_PROXY_PORT}");
             env_vars.insert("HTTP_PROXY".to_owned(), proxy_url.clone());
             env_vars.insert("HTTPS_PROXY".to_owned(), proxy_url.clone());
             env_vars.insert("http_proxy".to_owned(), proxy_url.clone());
@@ -296,10 +301,37 @@ impl BwrapSandbox {
             }
             NetMode::AllowedDomains(_) => {
                 args.push("--unshare-net".to_owned());
-                // If proxy is active, bind-mount the socat bridge socket.
                 if let Some(proxy) = proxy {
+                    // Bind-mount the UDS socket into the sandbox.
                     let sock = proxy.socket_path().to_string_lossy().to_string();
-                    args.extend(["--bind".to_owned(), sock.clone(), sock]);
+                    args.extend(["--bind".to_owned(), sock.clone(), sock.clone()]);
+
+                    // Bind-mount socat binary so the inner bridge can run.
+                    if let Ok(socat_path) = detect_socat() {
+                        let socat_str = socat_path.to_string_lossy().to_string();
+                        args.extend([
+                            "--ro-bind".to_owned(),
+                            socat_str,
+                            "/usr/bin/socat".to_owned(),
+                        ]);
+                    }
+
+                    // Wrap the command: start inner socat bridge, then exec the real command.
+                    // Inner socat: TCP on sandbox loopback → UDS socket → host proxy.
+                    args.push("--".to_owned());
+                    let inner_cmd = command
+                        .iter()
+                        .map(|a| shell_escape(a))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    args.extend([
+                        "sh".to_owned(),
+                        "-c".to_owned(),
+                        format!(
+                            "/usr/bin/socat TCP-LISTEN:{SANDBOX_PROXY_PORT},bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:{sock} & exec {inner_cmd}"
+                        ),
+                    ]);
+                    return args;
                 }
             }
             NetMode::Full => {
@@ -322,6 +354,17 @@ impl BwrapSandbox {
             format!("{home}/.aws"),
             format!("{home}/.gnupg"),
         ]
+    }
+}
+
+/// Escape a string for safe inclusion in a shell command.
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./=:@".contains(c))
+    {
+        s.to_owned()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
 
@@ -395,12 +438,20 @@ mod tests {
     }
 
     #[test]
-    fn args_unshare_net_for_allowed_domains() {
+    fn args_unshare_net_for_allowed_domains_without_proxy() {
+        // Without a proxy, AllowedDomains still gets --unshare-net.
         let sandbox = BwrapSandbox::new(test_policy(NetMode::AllowedDomains(vec![
             "example.com".into(),
         ])));
         let args = sandbox.build_args(&["echo".into()], None);
         assert!(args.contains(&"--unshare-net".to_owned()));
+    }
+
+    #[test]
+    fn shell_escape_simple() {
+        assert_eq!(shell_escape("echo"), "echo");
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
     }
 
     #[test]

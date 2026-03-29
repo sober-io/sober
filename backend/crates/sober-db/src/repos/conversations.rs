@@ -1,6 +1,5 @@
 //! PostgreSQL implementation of [`ConversationRepo`].
 
-use sober_core::PermissionMode;
 use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, Conversation, ConversationId, ConversationKind, ConversationWithDetails,
@@ -12,8 +11,8 @@ use uuid::Uuid;
 use crate::rows::ConversationRow;
 
 /// Column list for conversation queries.
-const CONV_COLUMNS: &str = "id, user_id, title, workspace_id, kind, agent_mode, is_archived, \
-                             permission_mode, created_at, updated_at";
+const CONV_COLUMNS: &str =
+    "id, user_id, title, workspace_id, kind, agent_mode, is_archived, created_at, updated_at";
 
 /// PostgreSQL-backed conversation repository.
 pub struct PgConversationRepo {
@@ -114,32 +113,6 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         Ok(())
     }
 
-    async fn update_permission_mode(
-        &self,
-        id: ConversationId,
-        mode: PermissionMode,
-    ) -> Result<(), AppError> {
-        let mode_str = match mode {
-            PermissionMode::Interactive => "interactive",
-            PermissionMode::PolicyBased => "policy_based",
-            PermissionMode::Autonomous => "autonomous",
-        };
-        let result = sqlx::query(
-            "UPDATE conversations SET permission_mode = $1, updated_at = now() WHERE id = $2",
-        )
-        .bind(mode_str)
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound("conversation".into()));
-        }
-
-        Ok(())
-    }
-
     async fn delete(&self, id: ConversationId) -> Result<(), AppError> {
         // Check that the conversation is not an inbox — inboxes cannot be deleted.
         let kind = sqlx::query_scalar::<_, ConversationKind>(
@@ -206,7 +179,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         // Build the main query dynamically.
         let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
             "SELECT c.id, c.user_id, c.title, c.workspace_id, c.kind, c.agent_mode, c.is_archived, \
-             c.permission_mode, c.created_at, c.updated_at, \
+             c.created_at, c.updated_at, \
              COALESCE(cu.unread_count, 0) AS unread_count, \
              w.name AS workspace_name, w.root_path AS workspace_path \
              FROM conversations c \
@@ -295,11 +268,6 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
             .into_iter()
             .map(|r| {
                 let conv_id = r.id;
-                let permission_mode = match r.permission_mode.as_str() {
-                    "interactive" => sober_core::PermissionMode::Interactive,
-                    "autonomous" => sober_core::PermissionMode::Autonomous,
-                    _ => sober_core::PermissionMode::PolicyBased,
-                };
                 ConversationWithDetails {
                     conversation: Conversation {
                         id: sober_core::types::ConversationId::from_uuid(r.id),
@@ -311,7 +279,6 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                         kind: r.kind,
                         agent_mode: r.agent_mode,
                         is_archived: r.is_archived,
-                        permission_mode,
                         created_at: r.created_at,
                         updated_at: r.updated_at,
                     },

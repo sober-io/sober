@@ -21,8 +21,6 @@ use crate::error::SandboxError;
 pub struct ProxyBridge {
     /// Path to the host-side Unix domain socket.
     socket_path: PathBuf,
-    /// Loopback port inside the sandbox.
-    sandbox_port: u16,
     /// Socat child process.
     socat_child: Option<Child>,
     /// Proxy server task handle.
@@ -53,26 +51,39 @@ impl ProxyBridge {
             .local_addr()
             .map_err(|e| SandboxError::ProxyFailed(format!("failed to get proxy addr: {e}")))?;
 
-        // Choose a second random port for the sandbox side.
-        let sandbox_listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| SandboxError::ProxyFailed(format!("failed to bind sandbox port: {e}")))?;
-        let sandbox_port = sandbox_listener.local_addr().unwrap().port();
-        drop(sandbox_listener); // Free the port for socat.
-
-        // UDS path for the bridge.
+        // UDS path for the bridge — bind-mounted into the bwrap namespace.
         let socket_path =
             std::env::temp_dir().join(format!("sober-proxy-{}.sock", uuid::Uuid::now_v7()));
 
-        // Start socat: bridge sandbox_port -> proxy_addr.
+        // Start socat: UDS socket → TCP proxy on host loopback.
+        // Stderr suppressed — broken pipe on teardown is expected and noisy.
         let socat_child = tokio::process::Command::new(&socat_path)
             .arg(format!(
-                "TCP-LISTEN:{sandbox_port},bind=127.0.0.1,fork,reuseaddr"
+                "UNIX-LISTEN:{},fork,unlink-early",
+                socket_path.display()
             ))
             .arg(format!("TCP:127.0.0.1:{}", proxy_addr.port()))
+            .stderr(std::process::Stdio::null())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| SandboxError::ProxyFailed(format!("failed to start socat: {e}")))?;
+
+        // Wait for socat to create the socket file (needed before bwrap bind-mount).
+        const SOCKET_POLL_INTERVAL_MS: u64 = 10;
+        const SOCKET_POLL_TIMEOUT_MS: u64 = 500;
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_millis(SOCKET_POLL_TIMEOUT_MS);
+        while tokio::time::Instant::now() < deadline {
+            if socket_path.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(SOCKET_POLL_INTERVAL_MS)).await;
+        }
+        if !socket_path.exists() {
+            return Err(SandboxError::ProxyFailed(
+                "socat did not create socket file in time".into(),
+            ));
+        }
 
         let denied_log = Arc::new(Mutex::new(Vec::new()));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -86,14 +97,12 @@ impl ProxyBridge {
 
         info!(
             proxy_port = proxy_addr.port(),
-            sandbox_port,
             socket = %socket_path.display(),
             "proxy bridge started"
         );
 
         Ok(Self {
             socket_path,
-            sandbox_port,
             socat_child: Some(socat_child),
             proxy_handle: Some(proxy_handle),
             denied_log,
@@ -104,11 +113,6 @@ impl ProxyBridge {
     /// Path to the host-side Unix domain socket.
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
-    }
-
-    /// Loopback port inside the sandbox.
-    pub fn sandbox_port(&self) -> u16 {
-        self.sandbox_port
     }
 
     /// Stop the proxy bridge and return the list of denied domains.
@@ -205,14 +209,25 @@ async fn handle_connection(
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(443);
 
+            debug!(host, port, "connecting to upstream");
             match tokio::net::TcpStream::connect((host, port)).await {
                 Ok(mut upstream) => {
+                    debug!(host, port, "upstream connected, sending 200");
                     stream
                         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                         .await?;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+                    debug!(host, "starting bidirectional copy");
+                    match tokio::io::copy_bidirectional(&mut stream, &mut upstream).await {
+                        Ok((up, down)) => {
+                            debug!(host, up, down, "tunnel closed normally");
+                        }
+                        Err(e) => {
+                            debug!(host, error = %e, "tunnel copy error");
+                        }
+                    }
                 }
                 Err(e) => {
+                    warn!(host, port, error = %e, "upstream connection failed");
                     let msg = format!("HTTP/1.1 502 Bad Gateway\r\n\r\n{e}");
                     stream.write_all(msg.as_bytes()).await?;
                 }

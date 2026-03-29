@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use sober_core::config::MemoryConfig;
 use sober_core::types::AgentRepos;
+use sober_core::types::domain::WorkspaceSettings;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::tool::Tool;
 use sober_crypto::envelope::Mek;
@@ -24,7 +25,7 @@ use sober_llm::LlmEngine;
 use sober_memory::MemoryStore;
 use sober_plugin::PluginManager;
 use sober_plugin_gen::PluginGenerator;
-use sober_sandbox::{CommandPolicy, SandboxPolicy};
+use sober_sandbox::{CommandPolicy, NetMode, SandboxPolicy, SandboxProfile};
 use sober_skill::SkillActivationState;
 use sober_workspace::{BlobStore, SnapshotManager};
 
@@ -93,6 +94,8 @@ pub struct TurnContext {
     pub workspace_id: Option<WorkspaceId>,
     /// Resolved filesystem path for the conversation workspace directory.
     pub workspace_dir: Option<PathBuf>,
+    /// Workspace settings loaded from the DB (None if no workspace exists).
+    pub workspace_settings: Option<WorkspaceSettings>,
     /// Tracks which skills have already been activated in this conversation.
     /// Prevents the same skill from being injected twice across multiple turns.
     /// NOT the skill cache — that's managed by [`SkillLoader`]'s TTL cache.
@@ -171,12 +174,47 @@ impl<R: AgentRepos> ToolBootstrap<R> {
         let mut tools: Vec<Arc<dyn Tool>> = static_tools.to_vec();
 
         // 1. Shell tool — use workspace_dir when available, otherwise the default root.
+        //    If workspace settings exist, resolve sandbox policy from them.
         let shell_workspace = ctx
             .workspace_dir
             .clone()
             .unwrap_or_else(|| self.shell.default_workspace_root.clone());
+
+        let resolved_config = if let Some(ref ws_settings) = ctx.workspace_settings {
+            let mut policy = resolve_sandbox_policy(ws_settings, &self.shell.sandbox_policy);
+            // Ensure the workspace directory is in the policy's read/write paths.
+            if let Some(ref ws_dir) = ctx.workspace_dir {
+                if !policy.fs_read.contains(ws_dir) {
+                    policy.fs_read.push(ws_dir.clone());
+                }
+                if !policy.fs_write.contains(ws_dir) {
+                    policy.fs_write.push(ws_dir.clone());
+                }
+            }
+            ShellToolConfig {
+                command_policy: self.shell.command_policy.clone(),
+                permission_mode: Arc::clone(&self.shell.permission_mode),
+                default_workspace_root: self.shell.default_workspace_root.clone(),
+                sandbox_policy: policy,
+                auto_snapshot: ws_settings.auto_snapshot,
+                max_snapshots: ws_settings.max_snapshots.map(|n| n as u32),
+                sandbox_log_repo: self.shell.sandbox_log_repo.clone(),
+            }
+        } else {
+            // No workspace settings — use startup defaults.
+            ShellToolConfig {
+                command_policy: self.shell.command_policy.clone(),
+                permission_mode: Arc::clone(&self.shell.permission_mode),
+                default_workspace_root: self.shell.default_workspace_root.clone(),
+                sandbox_policy: self.shell.sandbox_policy.clone(),
+                auto_snapshot: self.shell.auto_snapshot,
+                max_snapshots: self.shell.max_snapshots,
+                sandbox_log_repo: self.shell.sandbox_log_repo.clone(),
+            }
+        };
+
         let shell_tool = ShellTool::new(
-            &self.shell,
+            &resolved_config,
             shell_workspace,
             Some((*self.snapshot_manager).clone()),
             Some(ctx.user_id),
@@ -274,6 +312,54 @@ impl<R: AgentRepos> ToolBootstrap<R> {
     }
 }
 
+/// Resolves a [`SandboxPolicy`] from workspace settings.
+///
+/// Starts with the profile specified in settings (falling back to `standard`
+/// for unknown names), then applies any non-null overrides from the settings.
+fn resolve_sandbox_policy(settings: &WorkspaceSettings, fallback: &SandboxPolicy) -> SandboxPolicy {
+    let profile = match settings.sandbox_profile.as_str() {
+        "locked_down" => SandboxProfile::LockedDown,
+        "standard" => SandboxProfile::Standard,
+        "unrestricted" => SandboxProfile::Unrestricted,
+        custom => SandboxProfile::Custom(custom.to_owned()),
+    };
+
+    // Resolve profile. For built-in profiles we pass an empty map since they
+    // don't need custom lookup. For unknown custom profiles, fall back to the
+    // startup default policy.
+    let empty = std::collections::HashMap::new();
+    let mut policy = profile.resolve(&empty).unwrap_or_else(|_| {
+        tracing::warn!(
+            profile = %settings.sandbox_profile,
+            "unknown sandbox profile, falling back to startup default"
+        );
+        fallback.clone()
+    });
+
+    // Apply non-null overrides from workspace settings.
+    if let Some(net_mode) = settings.sandbox_net_mode {
+        use sober_core::types::SandboxNetMode;
+        policy.net_mode = match net_mode {
+            SandboxNetMode::None => NetMode::None,
+            SandboxNetMode::AllowedDomains => {
+                let domains = settings.sandbox_allowed_domains.clone().unwrap_or_default();
+                NetMode::AllowedDomains(domains)
+            }
+            SandboxNetMode::Full => NetMode::Full,
+        };
+    }
+
+    if let Some(seconds) = settings.sandbox_max_execution_seconds {
+        policy.max_execution_seconds = seconds as u32;
+    }
+
+    if let Some(allow_spawn) = settings.sandbox_allow_spawn {
+        policy.allow_spawn = allow_spawn;
+    }
+
+    policy
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,11 +371,82 @@ mod tests {
             conversation_id: ConversationId::new(),
             workspace_id: None,
             workspace_dir: None,
+            workspace_settings: None,
             skill_activation_state: None,
         };
-        // Sanity: context is constructible without workspace.
         assert!(ctx.workspace_id.is_none());
         assert!(ctx.workspace_dir.is_none());
+        assert!(ctx.workspace_settings.is_none());
         assert!(ctx.skill_activation_state.is_none());
+    }
+
+    #[test]
+    fn resolve_sandbox_policy_standard_profile() {
+        let settings = WorkspaceSettings {
+            workspace_id: WorkspaceId::new(),
+            permission_mode: sober_core::types::PermissionMode::PolicyBased,
+            auto_snapshot: true,
+            max_snapshots: None,
+            sandbox_profile: "standard".into(),
+            sandbox_net_mode: None,
+            sandbox_allowed_domains: None,
+            sandbox_max_execution_seconds: None,
+            sandbox_allow_spawn: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let fallback = SandboxProfile::Standard
+            .resolve(&Default::default())
+            .unwrap();
+        let policy = resolve_sandbox_policy(&settings, &fallback);
+        assert_eq!(policy.max_execution_seconds, 60);
+        assert!(!policy.allow_spawn);
+    }
+
+    #[test]
+    fn resolve_sandbox_policy_with_overrides() {
+        let settings = WorkspaceSettings {
+            workspace_id: WorkspaceId::new(),
+            permission_mode: sober_core::types::PermissionMode::Autonomous,
+            auto_snapshot: false,
+            max_snapshots: Some(5),
+            sandbox_profile: "locked_down".into(),
+            sandbox_net_mode: Some(sober_core::types::SandboxNetMode::Full),
+            sandbox_allowed_domains: None,
+            sandbox_max_execution_seconds: Some(120),
+            sandbox_allow_spawn: Some(true),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let fallback = SandboxProfile::Standard
+            .resolve(&Default::default())
+            .unwrap();
+        let policy = resolve_sandbox_policy(&settings, &fallback);
+        assert_eq!(policy.max_execution_seconds, 120);
+        assert!(policy.allow_spawn);
+        assert!(matches!(policy.net_mode, NetMode::Full));
+    }
+
+    #[test]
+    fn resolve_sandbox_policy_unknown_profile_falls_back() {
+        let settings = WorkspaceSettings {
+            workspace_id: WorkspaceId::new(),
+            permission_mode: sober_core::types::PermissionMode::PolicyBased,
+            auto_snapshot: true,
+            max_snapshots: None,
+            sandbox_profile: "my_custom_profile".into(),
+            sandbox_net_mode: None,
+            sandbox_allowed_domains: None,
+            sandbox_max_execution_seconds: None,
+            sandbox_allow_spawn: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let fallback = SandboxProfile::Standard
+            .resolve(&Default::default())
+            .unwrap();
+        let policy = resolve_sandbox_policy(&settings, &fallback);
+        // Should fall back to the startup policy.
+        assert_eq!(policy.max_execution_seconds, fallback.max_execution_seconds);
     }
 }

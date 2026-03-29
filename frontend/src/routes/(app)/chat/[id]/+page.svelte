@@ -173,7 +173,13 @@
 		title = data.conversation.title || '';
 		tags = data.conversation.tags ?? [];
 		pendingConfirms = [];
-		permissionMode = data.conversation.permission_mode ?? 'policy_based';
+		// Load settings from the settings endpoint asynchronously.
+		conversationService
+			.getSettings(data.conversation.id)
+			.then((s) => {
+				permissionMode = s.permission_mode;
+			})
+			.catch(() => {});
 		memberMap = {};
 
 		// Populate message tags from inline data.
@@ -610,8 +616,8 @@
 			conversation_id: conversationId,
 			mode: newMode
 		});
-		// Persist to conversation.
-		conversationService.updatePermissionMode(conversationId, newMode);
+		// Persist to workspace settings.
+		conversationService.updateSettings(conversationId, { permission_mode: newMode });
 	};
 
 	const handleConfirmResponse = (confirmId: string, approved: boolean) => {

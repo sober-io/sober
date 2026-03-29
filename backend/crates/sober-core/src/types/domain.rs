@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{
     AgentMode, ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus,
-    MessageRole, PluginKind, PluginOrigin, PluginScope, PluginStatus, UserStatus, WorkspaceState,
-    WorktreeState,
+    MessageRole, PermissionMode, PluginKind, PluginOrigin, PluginScope, PluginStatus,
+    SandboxNetMode, UserStatus, WorkspaceState, WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
@@ -94,8 +94,6 @@ pub struct Conversation {
     pub agent_mode: AgentMode,
     /// Whether the conversation is archived.
     pub is_archived: bool,
-    /// Shell execution permission mode for this conversation.
-    pub permission_mode: crate::PermissionMode,
     /// When the conversation was created.
     pub created_at: DateTime<Utc>,
     /// When the conversation was last updated.
@@ -513,6 +511,56 @@ pub struct PluginAuditLog {
     pub audited_by: Option<UserId>,
 }
 
+/// Workspace-level settings stored in the `workspace_settings` table.
+///
+/// Single source of truth for all workspace configuration: permission mode,
+/// snapshot behavior, and sandbox policy overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceSettings {
+    /// The workspace these settings belong to (PK, FK to workspaces).
+    pub workspace_id: WorkspaceId,
+    /// Shell execution permission mode.
+    pub permission_mode: PermissionMode,
+    /// Auto-snapshot before dangerous commands.
+    pub auto_snapshot: bool,
+    /// Maximum snapshots retained (None = unlimited).
+    pub max_snapshots: Option<i32>,
+    /// Sandbox profile name (`standard`, `locked_down`, `unrestricted`, or custom).
+    pub sandbox_profile: String,
+    /// Network access mode override (None = use profile default).
+    pub sandbox_net_mode: Option<SandboxNetMode>,
+    /// Allowed domains override (None = use profile default).
+    pub sandbox_allowed_domains: Option<Vec<String>>,
+    /// Execution timeout override in seconds (None = use profile default).
+    pub sandbox_max_execution_seconds: Option<i32>,
+    /// Process spawning override (None = use profile default).
+    pub sandbox_allow_spawn: Option<bool>,
+    /// When the settings were created.
+    pub created_at: DateTime<Utc>,
+    /// When the settings were last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Agent-managed workspace state (serialized to `.sober/state.json`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorkspaceAgentState {
+    /// Learned observations about this workspace.
+    pub observations: Vec<Observation>,
+}
+
+/// A single observation the agent has recorded about a workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Observation {
+    /// What was observed (e.g. "commit_convention").
+    pub key: String,
+    /// The observed value.
+    pub value: String,
+    /// Confidence level (0.0-1.0).
+    pub confidence: f32,
+    /// ISO 8601 timestamp of when this was observed.
+    pub observed_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,6 +596,26 @@ mod tests {
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["reasoning"], "I should search the web.");
         assert_eq!(json["token_count"], 42);
+    }
+
+    #[test]
+    fn workspace_settings_defaults() {
+        let settings = WorkspaceSettings {
+            workspace_id: WorkspaceId::new(),
+            permission_mode: PermissionMode::default(),
+            auto_snapshot: true,
+            max_snapshots: None,
+            sandbox_profile: "standard".into(),
+            sandbox_net_mode: None,
+            sandbox_allowed_domains: None,
+            sandbox_max_execution_seconds: None,
+            sandbox_allow_spawn: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert_eq!(settings.permission_mode, PermissionMode::PolicyBased);
+        assert_eq!(settings.sandbox_profile, "standard");
+        assert!(settings.auto_snapshot);
     }
 
     #[test]
