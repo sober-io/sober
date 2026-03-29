@@ -33,7 +33,8 @@ use super::shell::SharedPermissionMode;
 use super::{
     ArtifactToolContext, CreateArtifactTool, CreateSnapshotTool, DeleteArtifactTool,
     DeleteSecretTool, FetchUrlTool, GeneratePluginConfig, GeneratePluginTool, ListArtifactsTool,
-    ListSecretsTool, ListSnapshotsTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
+    ListSecretsTool, ListSnapshotsTool, ProposeAutomationTool, ProposeInstructionTool,
+    ProposeSkillTool, ProposeToolTool, ReadArtifactTool, ReadSecretTool, RecallTool, RememberTool,
     RestoreSnapshotTool, SchedulerTools, SecretToolContext, ShellTool, SnapshotToolContext,
     StoreSecretTool, ToolRegistry, WebSearchTool,
 };
@@ -159,6 +160,11 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 Arc::clone(&self.memory_tools.llm),
                 self.memory_tools.config.clone(),
             )),
+            // Evolution proposal tools — static since they only need DB access.
+            Arc::new(ProposeToolTool::new(Arc::clone(&self.repos))),
+            Arc::new(ProposeSkillTool::new(Arc::clone(&self.repos))),
+            Arc::new(ProposeInstructionTool::new(Arc::clone(&self.repos))),
+            Arc::new(ProposeAutomationTool::new(Arc::clone(&self.repos))),
         ]
     }
 
