@@ -802,7 +802,9 @@
 														'h-1.5 w-1.5 rounded-full',
 														item.type === 'plugin'
 															? 'bg-purple-400'
-															: 'bg-zinc-400 dark:bg-zinc-500'
+															: item.detail.startsWith('plugin:')
+																? 'bg-sky-400'
+																: 'bg-red-400'
 													]}
 												></span>
 												<span class="text-zinc-800 dark:text-zinc-200">{item.name}</span>
