@@ -29,6 +29,18 @@ pub enum Command {
     /// Manage the scheduler (requires running sober-scheduler).
     #[command(subcommand)]
     Scheduler(SchedulerCommand),
+
+    /// Manage self-evolution events.
+    #[command(subcommand)]
+    Evolution(EvolutionCommand),
+
+    /// Manage installed plugins.
+    #[command(subcommand)]
+    Plugin(PluginCommand),
+
+    /// Manage skills.
+    #[command(subcommand)]
+    Skill(SkillCommand),
 }
 
 /// User management subcommands.
@@ -207,4 +219,110 @@ pub enum ConfigCommand {
 
     /// Generate a default configuration file to stdout.
     Generate,
+}
+
+/// Default path for the agent Unix domain socket.
+pub const DEFAULT_AGENT_SOCKET: &str = "/run/sober/agent.sock";
+
+/// Evolution management subcommands.
+#[derive(Debug, Subcommand)]
+pub enum EvolutionCommand {
+    /// List evolution events.
+    List {
+        /// Filter by evolution type (plugin, skill, instruction, automation).
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<String>,
+
+        /// Filter by status (proposed, approved, executing, active, failed, rejected, reverted).
+        #[arg(long)]
+        status: Option<String>,
+    },
+
+    /// Approve a proposed evolution event and trigger execution.
+    Approve {
+        /// Evolution event ID (UUID).
+        id: String,
+
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
+
+    /// Reject a proposed evolution event.
+    Reject {
+        /// Evolution event ID (UUID).
+        id: String,
+    },
+
+    /// Revert an active evolution event.
+    Revert {
+        /// Evolution event ID (UUID).
+        id: String,
+
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
+
+    /// Show current evolution autonomy configuration.
+    Config,
+}
+
+/// Plugin management subcommands.
+#[derive(Debug, Subcommand)]
+pub enum PluginCommand {
+    /// List installed plugins.
+    List {
+        /// Filter by plugin kind (mcp, skill, wasm).
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Filter by status (enabled, disabled, failed).
+        #[arg(long)]
+        status: Option<String>,
+    },
+
+    /// Enable a disabled plugin.
+    Enable {
+        /// Plugin ID (UUID).
+        id: String,
+
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
+
+    /// Disable an active plugin.
+    Disable {
+        /// Plugin ID (UUID).
+        id: String,
+
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
+
+    /// Remove a plugin entirely.
+    Remove {
+        /// Plugin ID (UUID).
+        id: String,
+    },
+}
+
+/// Skill management subcommands.
+#[derive(Debug, Subcommand)]
+pub enum SkillCommand {
+    /// List available skills.
+    List {
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
+
+    /// Reload the skill catalog.
+    Reload {
+        /// Path to agent socket.
+        #[arg(long, default_value = DEFAULT_AGENT_SOCKET)]
+        socket: String,
+    },
 }

@@ -6,10 +6,13 @@ mod commands;
 use anyhow::{Context, Result};
 use clap::Parser;
 use sober_core::config::AppConfig;
-use sober_db::{DatabaseConfig, PgUserRepo, create_pool};
+use sober_db::{DatabaseConfig, PgEvolutionRepo, PgPluginRepo, PgUserRepo, create_pool};
 use tracing_subscriber::EnvFilter;
 
-use cli::{Cli, Command, ConfigCommand, MigrateCommand, UserCommand};
+use cli::{
+    Cli, Command, ConfigCommand, EvolutionCommand, MigrateCommand, PluginCommand, SkillCommand,
+    UserCommand,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,6 +31,9 @@ async fn main() -> Result<()> {
         Command::User(cmd) => run_user(cmd).await,
         Command::Migrate(cmd) => run_migrate(cmd).await,
         Command::Scheduler(cmd) => commands::scheduler::handle(cmd).await,
+        Command::Evolution(cmd) => run_evolution(cmd).await,
+        Command::Plugin(cmd) => run_plugin(cmd).await,
+        Command::Skill(cmd) => run_skill(cmd).await,
     }
 }
 
@@ -67,6 +73,49 @@ async fn run_migrate(cmd: MigrateCommand) -> Result<()> {
         MigrateCommand::Run => commands::migrate::run(&pool).await,
         MigrateCommand::Status => commands::migrate::status(&pool).await,
         MigrateCommand::Revert => commands::migrate::revert(&pool).await,
+    }
+}
+
+/// Execute an evolution subcommand (requires database, some need agent gRPC).
+async fn run_evolution(cmd: EvolutionCommand) -> Result<()> {
+    let pool = connect_db().await?;
+    let repo = PgEvolutionRepo::new(pool);
+
+    match cmd {
+        EvolutionCommand::List { r#type, status } => {
+            commands::evolution::list(&repo, r#type, status).await
+        }
+        EvolutionCommand::Approve { id, socket } => {
+            commands::evolution::approve(&repo, &id, &socket).await
+        }
+        EvolutionCommand::Reject { id } => commands::evolution::reject(&repo, &id).await,
+        EvolutionCommand::Revert { id, socket } => {
+            commands::evolution::revert(&repo, &id, &socket).await
+        }
+        EvolutionCommand::Config => commands::evolution::config(&repo).await,
+    }
+}
+
+/// Execute a plugin subcommand (requires database, some need agent gRPC).
+async fn run_plugin(cmd: PluginCommand) -> Result<()> {
+    let pool = connect_db().await?;
+    let repo = PgPluginRepo::new(pool);
+
+    match cmd {
+        PluginCommand::List { kind, status } => commands::plugin::list(&repo, kind, status).await,
+        PluginCommand::Enable { id, socket } => commands::plugin::enable(&repo, &id, &socket).await,
+        PluginCommand::Disable { id, socket } => {
+            commands::plugin::disable(&repo, &id, &socket).await
+        }
+        PluginCommand::Remove { id } => commands::plugin::remove(&repo, &id).await,
+    }
+}
+
+/// Execute a skill subcommand (requires running sober-agent).
+async fn run_skill(cmd: SkillCommand) -> Result<()> {
+    match cmd {
+        SkillCommand::List { socket } => commands::skill::list(&socket).await,
+        SkillCommand::Reload { socket } => commands::skill::reload(&socket).await,
     }
 }
 
