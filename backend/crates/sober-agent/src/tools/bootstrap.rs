@@ -270,6 +270,11 @@ impl<R: AgentRepos> ToolBootstrap<R> {
         //    skills activated in earlier turns remain marked as active.
         let user_home = sober_workspace::user_home_dir();
         let workspace_path = ctx.workspace_dir.clone().unwrap_or_default();
+        let disabled_plugins = ctx
+            .workspace_settings
+            .as_ref()
+            .map(|s| s.disabled_plugins.as_slice())
+            .unwrap_or_default();
         match self
             .plugin_manager
             .tools_for_turn(
@@ -278,6 +283,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 &workspace_path,
                 ctx.workspace_id,
                 ctx.skill_activation_state.clone(),
+                disabled_plugins,
             )
             .await
         {
@@ -306,6 +312,13 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                     user_id: ctx.user_id,
                 },
             )));
+        }
+
+        // 6. Capability filtering — remove tools disabled by workspace settings.
+        if let Some(ref settings) = ctx.workspace_settings
+            && !settings.disabled_tools.is_empty()
+        {
+            tools.retain(|tool| !settings.disabled_tools.contains(&tool.metadata().name));
         }
 
         ToolRegistry::with_builtins(tools)
@@ -392,6 +405,8 @@ mod tests {
             sandbox_allowed_domains: None,
             sandbox_max_execution_seconds: None,
             sandbox_allow_spawn: None,
+            disabled_tools: vec![],
+            disabled_plugins: vec![],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -415,6 +430,8 @@ mod tests {
             sandbox_allowed_domains: None,
             sandbox_max_execution_seconds: Some(120),
             sandbox_allow_spawn: Some(true),
+            disabled_tools: vec![],
+            disabled_plugins: vec![],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -439,6 +456,8 @@ mod tests {
             sandbox_allowed_domains: None,
             sandbox_max_execution_seconds: None,
             sandbox_allow_spawn: None,
+            disabled_tools: vec![],
+            disabled_plugins: vec![],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

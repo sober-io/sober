@@ -535,6 +535,10 @@ pub struct WorkspaceSettings {
     pub sandbox_max_execution_seconds: Option<i32>,
     /// Process spawning override (None = use profile default).
     pub sandbox_allow_spawn: Option<bool>,
+    /// Tool names to exclude from the agent's available tools.
+    pub disabled_tools: Vec<String>,
+    /// Plugin IDs to exclude entirely (all their tools are removed).
+    pub disabled_plugins: Vec<PluginId>,
     /// When the settings were created.
     pub created_at: DateTime<Utc>,
     /// When the settings were last updated.
@@ -610,6 +614,8 @@ mod tests {
             sandbox_allowed_domains: None,
             sandbox_max_execution_seconds: None,
             sandbox_allow_spawn: None,
+            disabled_tools: vec![],
+            disabled_plugins: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

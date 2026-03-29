@@ -588,6 +588,108 @@ pub(crate) async fn handle_reload_skills<R: AgentRepos>(
     Ok(Response::new(proto::ReloadSkillsResponse { skills }))
 }
 
+// ---------------------------------------------------------------------------
+// List Tools RPC
+// ---------------------------------------------------------------------------
+
+/// Lists all available tools (built-in and plugin-exported) for the settings UI.
+///
+/// Returns the unfiltered catalog — the frontend compares against workspace
+/// settings to render enabled/disabled state.
+pub(crate) async fn handle_list_tools<R: AgentRepos>(
+    service: &AgentGrpcService<R>,
+    _request: Request<proto::ListToolsRequest>,
+) -> Result<Response<proto::ListToolsResponse>, Status> {
+    let agent = service.agent();
+
+    // Static built-in tools (web_search, fetch_url, scheduler, recall, remember).
+    let mut tools: Vec<proto::ToolInfoEntry> = agent
+        .static_tools()
+        .iter()
+        .map(|t| {
+            let meta = t.metadata();
+            proto::ToolInfoEntry {
+                name: meta.name,
+                description: meta.description,
+                source: "builtin".into(),
+                plugin_id: None,
+                plugin_name: None,
+            }
+        })
+        .collect();
+
+    // Per-turn built-in tools (always available when a workspace exists).
+    let per_turn_builtins = [
+        ("shell", "Execute shell commands in a sandboxed environment"),
+        ("store_secret", "Store an encrypted secret"),
+        ("read_secret", "Read a decrypted secret"),
+        ("list_secrets", "List stored secrets"),
+        ("delete_secret", "Delete a stored secret"),
+        ("create_artifact", "Create a workspace artifact"),
+        ("list_artifacts", "List workspace artifacts"),
+        ("read_artifact", "Read a workspace artifact"),
+        ("delete_artifact", "Delete a workspace artifact"),
+        ("snapshot", "Create a workspace snapshot"),
+        ("list_snapshots", "List workspace snapshots"),
+        ("restore_snapshot", "Restore a workspace snapshot"),
+        ("generate_plugin", "Generate a new plugin via LLM"),
+    ];
+    for (name, desc) in per_turn_builtins {
+        tools.push(proto::ToolInfoEntry {
+            name: name.into(),
+            description: desc.into(),
+            source: "builtin".into(),
+            plugin_id: None,
+            plugin_name: None,
+        });
+    }
+
+    // Plugin-exported tools — enumerate from the plugin registry.
+    let filter = PluginFilter {
+        status: Some(PluginStatus::Enabled),
+        ..Default::default()
+    };
+    if let Ok(plugins) = agent.repos().plugins().list(filter).await {
+        let plugin_manager = &agent.tool_bootstrap().plugin_manager;
+        for plugin in &plugins {
+            match plugin.kind {
+                PluginKind::Mcp => {
+                    if let Ok(mcp_tools) = plugin_manager.mcp_tool_names(plugin).await {
+                        for (name, description) in mcp_tools {
+                            tools.push(proto::ToolInfoEntry {
+                                name,
+                                description,
+                                source: "plugin".into(),
+                                plugin_id: Some(plugin.id.to_string()),
+                                plugin_name: Some(plugin.name.clone()),
+                            });
+                        }
+                    }
+                }
+                PluginKind::Wasm => {
+                    // WASM plugins export tool names via their metadata.
+                    if let Ok(wasm_tools) = plugin_manager.wasm_tool_names(plugin).await {
+                        for (name, description) in wasm_tools {
+                            tools.push(proto::ToolInfoEntry {
+                                name,
+                                description,
+                                source: "plugin".into(),
+                                plugin_id: Some(plugin.id.to_string()),
+                                plugin_name: Some(plugin.name.clone()),
+                            });
+                        }
+                    }
+                }
+                PluginKind::Skill => {
+                    // Skills are listed via their own endpoint.
+                }
+            }
+        }
+    }
+
+    Ok(Response::new(proto::ListToolsResponse { tools }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

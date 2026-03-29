@@ -8,10 +8,14 @@
 		AgentMode,
 		SandboxNetMode,
 		Collaborator,
-		ConversationUserRole
+		ConversationUserRole,
+		ToolInfo
 	} from '$lib/types';
+	import type { Plugin } from '$lib/types/plugin';
 	import { jobService } from '$lib/services/jobs';
 	import { conversationService } from '$lib/services/conversations';
+	import { toolService } from '$lib/services/tools';
+	import { pluginService } from '$lib/services/plugins';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
@@ -108,6 +112,13 @@
 	let autoSnapshot = $state(true);
 	let newDomain = $state('');
 
+	// Capabilities (tool/plugin filtering)
+	let availableTools = $state<ToolInfo[]>([]);
+	let availablePlugins = $state<Plugin[]>([]);
+	let disabledTools = $state<string[]>([]);
+	let disabledPlugins = $state<string[]>([]);
+	let customToolName = $state('');
+
 	// Derived
 	let createdDate = $derived(
 		new Date(conversation.created_at).toLocaleDateString(undefined, {
@@ -182,10 +193,21 @@
 			sandboxTimeout = s.sandbox_max_execution_seconds;
 			sandboxAllowSpawn = s.sandbox_allow_spawn;
 			autoSnapshot = s.auto_snapshot;
+			disabledTools = s.disabled_tools ?? [];
+			disabledPlugins = s.disabled_plugins ?? [];
 		} catch {
 			// Settings may not exist for legacy conversations
 		} finally {
 			settingsLoading = false;
+		}
+
+		// Load available tools and plugins for the capabilities section
+		try {
+			const [tools, plugins] = await Promise.all([toolService.list(), pluginService.list()]);
+			availableTools = tools;
+			availablePlugins = plugins;
+		} catch {
+			// Non-critical — capabilities section just won't show items
 		}
 	}
 
@@ -195,6 +217,32 @@
 		} catch {
 			// Could show error toast in the future
 		}
+	}
+
+	function toggleTool(name: string) {
+		if (disabledTools.includes(name)) {
+			disabledTools = disabledTools.filter((t) => t !== name);
+		} else {
+			disabledTools = [...disabledTools, name];
+		}
+		saveSetting({ disabled_tools: disabledTools });
+	}
+
+	function togglePlugin(id: string) {
+		if (disabledPlugins.includes(id)) {
+			disabledPlugins = disabledPlugins.filter((p) => p !== id);
+		} else {
+			disabledPlugins = [...disabledPlugins, id];
+		}
+		saveSetting({ disabled_plugins: disabledPlugins });
+	}
+
+	function addCustomTool() {
+		const name = customToolName.trim();
+		if (!name || disabledTools.includes(name)) return;
+		disabledTools = [...disabledTools, name];
+		customToolName = '';
+		saveSetting({ disabled_tools: disabledTools });
 	}
 
 	async function handleProfileChange(profile: string) {
@@ -596,6 +644,94 @@
 								>Auto-snapshot before dangerous commands</span
 							>
 						</label>
+					</div>
+				{/if}
+			</SettingsSection>
+
+			<!-- Capabilities -->
+			<SettingsSection
+				title="Capabilities"
+				description="Control which tools and plugins the agent can use"
+			>
+				{#if settingsLoading}
+					<p class="text-xs text-zinc-400 dark:text-zinc-500">Loading...</p>
+				{:else}
+					<div class="space-y-4">
+						<!-- Plugins -->
+						{#if availablePlugins.length > 0}
+							<div>
+								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Plugins</p>
+								<div class="space-y-1">
+									{#each availablePlugins as plugin}
+										<label class="flex items-center gap-2">
+											<input
+												type="checkbox"
+												checked={!disabledPlugins.includes(plugin.id)}
+												onchange={() => togglePlugin(plugin.id)}
+												class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
+											/>
+											<span class="text-xs text-zinc-700 dark:text-zinc-300">
+												{plugin.name}
+											</span>
+											<span class="text-xs text-zinc-400 dark:text-zinc-500">
+												{plugin.kind}
+											</span>
+										</label>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						<!-- Tools -->
+						{#if availableTools.length > 0}
+							<div>
+								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Tools</p>
+								<div class="space-y-1">
+									{#each availableTools as tool}
+										<label class="flex items-center gap-2">
+											<input
+												type="checkbox"
+												checked={!disabledTools.includes(tool.name)}
+												onchange={() => toggleTool(tool.name)}
+												class="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-600 dark:border-zinc-600"
+											/>
+											<span class="text-xs text-zinc-700 dark:text-zinc-300">
+												{tool.name}
+											</span>
+											{#if tool.plugin_name}
+												<span class="text-xs text-zinc-400 dark:text-zinc-500">
+													({tool.plugin_name})
+												</span>
+											{/if}
+										</label>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						<!-- Custom tool name (power user) -->
+						<div>
+							<p class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+								Disable by name
+							</p>
+							<div class="flex gap-1">
+								<input
+									type="text"
+									bind:value={customToolName}
+									placeholder="tool_name"
+									onkeydown={(e: KeyboardEvent) => {
+										if (e.key === 'Enter') addCustomTool();
+									}}
+									class="flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 dark:border-zinc-600 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-400"
+								/>
+								<button
+									onclick={addCustomTool}
+									class="rounded-md bg-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+								>
+									Add
+								</button>
+							</div>
+						</div>
 					</div>
 				{/if}
 			</SettingsSection>

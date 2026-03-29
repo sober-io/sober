@@ -26,6 +26,8 @@ service AgentService {
   rpc ImportPlugins(ImportPluginsRequest) returns (ImportPluginsResponse);
   rpc ReloadPlugins(ReloadPluginsRequest) returns (ReloadPluginsResponse);
   rpc ChangePluginScope(ChangePluginScopeRequest) returns (ChangePluginScopeResponse);
+  // List all available tools (built-in + plugin-exported) for the settings UI.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
 }
 
 message ConfirmAck {}
@@ -258,4 +260,21 @@ message ChangePluginScopeRequest {
 
 message ChangePluginScopeResponse {
   PluginInfo plugin = 1;
+}
+
+message ListToolsRequest {
+  string user_id = 1;
+  optional string workspace_id = 2;
+}
+
+message ToolInfoEntry {
+  string name = 1;
+  string description = 2;
+  string source = 3;           // "builtin" or "plugin"
+  optional string plugin_id = 4;
+  optional string plugin_name = 5;
+}
+
+message ListToolsResponse {
+  repeated ToolInfoEntry tools = 1;
 }

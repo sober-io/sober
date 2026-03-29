@@ -267,6 +267,13 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
     ) -> Result<Response<proto::ChangePluginScopeResponse>, Status> {
         plugins::handle_change_plugin_scope(self, &self.plugin_manager, request).await
     }
+
+    async fn list_tools(
+        &self,
+        request: Request<proto::ListToolsRequest>,
+    ) -> Result<Response<proto::ListToolsResponse>, Status> {
+        plugins::handle_list_tools(self, request).await
+    }
 }
 
 #[cfg(test)]

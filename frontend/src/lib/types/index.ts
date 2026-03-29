@@ -178,6 +178,16 @@ export interface ConversationSettings {
 	sandbox_allow_spawn?: boolean;
 	auto_snapshot: boolean;
 	max_snapshots?: number;
+	disabled_tools: string[];
+	disabled_plugins: string[];
+}
+
+export interface ToolInfo {
+	name: string;
+	description: string;
+	source: 'builtin' | 'plugin';
+	plugin_id?: string;
+	plugin_name?: string;
 }
 
 /** @deprecated Use ConversationSettings instead */
