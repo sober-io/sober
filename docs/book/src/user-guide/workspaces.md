@@ -33,7 +33,6 @@ Each workspace is a directory (the workspace root). The conversation UUID, not a
 /var/lib/sober/workspaces/
   550e8400-e29b-41d4-a716-446655440000/    # workspace root (workspace UUID)
     .sober/                                 # Sõber internals for this workspace
-      config.toml                           # workspace-level settings
       state.json                            # agent state (observations)
       proposals/                            # proposed soul/config changes
       traces/                               # execution traces
@@ -59,15 +58,19 @@ workspace_root = "/var/lib/sober/workspaces"
 workspace_root = "/var/lib/sober/workspaces"
 ```
 
+> **Note:** These paths only set the filesystem root. All workspace-level settings
+> (sandbox policy, permission mode, snapshots) are stored in the database and
+> managed via the `/conversations/{id}/settings` API endpoint.
+
 ---
 
 ## `.sober/` Directory
 
 Each workspace contains a `.sober/` directory that Sõber manages for internal state and configuration.
 
-### `config.toml`
+### Workspace Settings (DB-backed)
 
-A per-workspace configuration file created automatically when the workspace is initialised. This can override settings like the LLM model, sandbox profile, and snapshot retention limits. The format mirrors the main `config.toml` but only workspace-relevant sections are honoured.
+All workspace-level configuration — sandbox profile, network mode, allowed domains, permission mode, auto-snapshot — is stored in the `workspace_settings` database table and managed via the `GET/PATCH /conversations/{id}/settings` API. Settings are created atomically when the conversation and workspace are provisioned.
 
 ### `soul.md` (optional)
 
@@ -127,7 +130,7 @@ Generated WASM plugins are also stored as blobs, ensuring they survive workspace
 
 The snapshot manager creates and restores tar archives of conversation directories. Snapshots are automatically triggered:
 
-- Before `Dangerous`-classified shell commands (when `auto_snapshot` is enabled in the agent config).
+- Before `Dangerous`-classified shell commands (when `auto_snapshot` is enabled in workspace settings).
 - Before any `restore_snapshot` operation (a safety snapshot of the current state is always created first).
 
 Snapshots are tracked as `Snapshot`-kind artifacts in the database, making them discoverable via `list_snapshots` and restorable via `restore_snapshot`. The number of retained snapshots per workspace is configurable (default: 10).

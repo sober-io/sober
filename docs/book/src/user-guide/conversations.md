@@ -106,7 +106,7 @@ All events carry `conversation_id` and a typed `event` payload:
 
 ### Confirmation flow
 
-When the `shell` tool classifies a command as requiring confirmation and the permission mode is `PolicyBased` or `Interactive`, a `ConfirmRequest` event is sent. The frontend shows a confirmation dialog. The user's response is sent back:
+When the `shell` tool classifies a command as requiring confirmation and the workspace's permission mode is `PolicyBased` or `Interactive`, a `ConfirmRequest` event is sent. Permission mode is a workspace setting managed via `PATCH /conversations/{id}/settings`. The frontend shows a confirmation dialog. The user's response is sent back:
 
 ```json
 { "type": "confirm", "confirm_id": "<uuid>", "approved": true }
