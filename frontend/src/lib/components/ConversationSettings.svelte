@@ -662,7 +662,7 @@
 							<div>
 								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Plugins</p>
 								<div class="space-y-1">
-									{#each availablePlugins as plugin}
+									{#each availablePlugins as plugin (plugin.id)}
 										<label class="flex items-center gap-2">
 											<input
 												type="checkbox"
@@ -687,7 +687,7 @@
 							<div>
 								<p class="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">Tools</p>
 								<div class="space-y-1">
-									{#each availableTools as tool}
+									{#each availableTools as tool (tool.name)}
 										<label class="flex items-center gap-2">
 											<input
 												type="checkbox"
