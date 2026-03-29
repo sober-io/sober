@@ -225,12 +225,7 @@ impl<R: AgentRepos> Agent<R> {
         &self.repos
     }
 
-    /// Returns the pre-built static tools (identical across all conversations).
-    pub fn static_tools(&self) -> &[Arc<dyn sober_core::types::tool::Tool>] {
-        &self.static_tools
-    }
-
-    /// Returns the tool bootstrap for enumerating per-turn tools.
+    /// Returns the tool bootstrap for enumerating built-in tools.
     pub fn tool_bootstrap(&self) -> &ToolBootstrap<R> {
         &self.tool_bootstrap
     }

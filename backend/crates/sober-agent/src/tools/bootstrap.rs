@@ -162,6 +162,63 @@ impl<R: AgentRepos> ToolBootstrap<R> {
         ]
     }
 
+    /// Returns `(name, description)` pairs for all built-in tools.
+    ///
+    /// Includes both static tools (always available) and per-turn tools
+    /// (conditionally available depending on workspace/config). Used by the
+    /// `ListTools` gRPC RPC to provide the frontend with a complete catalog.
+    pub fn builtin_tool_names(&self) -> Vec<(String, String)> {
+        let mut names: Vec<(String, String)> = self
+            .build_static_tools()
+            .into_iter()
+            .map(|t| {
+                let meta = t.metadata();
+                (meta.name, meta.description)
+            })
+            .collect();
+
+        // Per-turn tools that may be available depending on workspace/config.
+        // Shell is always available; others depend on MEK, workspace, etc.
+        names.push((
+            "shell".into(),
+            "Execute shell commands in a sandboxed environment".into(),
+        ));
+
+        if self.mek.is_some() {
+            names.push(("store_secret".into(), "Store an encrypted secret".into()));
+            names.push(("read_secret".into(), "Read a decrypted secret value".into()));
+            names.push(("list_secrets".into(), "List stored secret names".into()));
+            names.push(("delete_secret".into(), "Delete a stored secret".into()));
+        }
+
+        // Artifact and snapshot tools are available when a workspace exists.
+        names.push((
+            "create_artifact".into(),
+            "Create a workspace artifact".into(),
+        ));
+        names.push(("list_artifacts".into(), "List workspace artifacts".into()));
+        names.push(("read_artifact".into(), "Read a workspace artifact".into()));
+        names.push((
+            "delete_artifact".into(),
+            "Delete a workspace artifact".into(),
+        ));
+        names.push(("snapshot".into(), "Create a workspace snapshot".into()));
+        names.push(("list_snapshots".into(), "List workspace snapshots".into()));
+        names.push((
+            "restore_snapshot".into(),
+            "Restore a workspace snapshot".into(),
+        ));
+
+        if self.plugin_generator.is_some() {
+            names.push((
+                "generate_plugin".into(),
+                "Generate a new plugin via LLM".into(),
+            ));
+        }
+
+        names
+    }
+
     /// Builds a complete [`ToolRegistry`] for one conversation turn.
     ///
     /// Reuses the pre-built `static_tools` and adds per-conversation tools:

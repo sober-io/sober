@@ -602,47 +602,19 @@ pub(crate) async fn handle_list_tools<R: AgentRepos>(
 ) -> Result<Response<proto::ListToolsResponse>, Status> {
     let agent = service.agent();
 
-    // Static built-in tools (web_search, fetch_url, scheduler, recall, remember).
+    // All built-in tools (static + per-turn) from ToolBootstrap.
     let mut tools: Vec<proto::ToolInfoEntry> = agent
-        .static_tools()
-        .iter()
-        .map(|t| {
-            let meta = t.metadata();
-            proto::ToolInfoEntry {
-                name: meta.name,
-                description: meta.description,
-                source: "builtin".into(),
-                plugin_id: None,
-                plugin_name: None,
-            }
-        })
-        .collect();
-
-    // Per-turn built-in tools (always available when a workspace exists).
-    let per_turn_builtins = [
-        ("shell", "Execute shell commands in a sandboxed environment"),
-        ("store_secret", "Store an encrypted secret"),
-        ("read_secret", "Read a decrypted secret"),
-        ("list_secrets", "List stored secrets"),
-        ("delete_secret", "Delete a stored secret"),
-        ("create_artifact", "Create a workspace artifact"),
-        ("list_artifacts", "List workspace artifacts"),
-        ("read_artifact", "Read a workspace artifact"),
-        ("delete_artifact", "Delete a workspace artifact"),
-        ("snapshot", "Create a workspace snapshot"),
-        ("list_snapshots", "List workspace snapshots"),
-        ("restore_snapshot", "Restore a workspace snapshot"),
-        ("generate_plugin", "Generate a new plugin via LLM"),
-    ];
-    for (name, desc) in per_turn_builtins {
-        tools.push(proto::ToolInfoEntry {
-            name: name.into(),
-            description: desc.into(),
+        .tool_bootstrap()
+        .builtin_tool_names()
+        .into_iter()
+        .map(|(name, description)| proto::ToolInfoEntry {
+            name,
+            description,
             source: "builtin".into(),
             plugin_id: None,
             plugin_name: None,
-        });
-    }
+        })
+        .collect();
 
     // Plugin-exported tools — enumerate from the plugin registry.
     let filter = PluginFilter {
