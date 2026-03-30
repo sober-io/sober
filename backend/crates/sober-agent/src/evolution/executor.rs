@@ -46,8 +46,6 @@ pub struct EvolutionContext<R: AgentRepos> {
 }
 
 /// Converts an [`EvolutionType`] to a static string for metric labels.
-// TODO: Replace with a generated label helper once a metrics codegen pipeline
-// is set up from metrics.toml (currently no such helper exists).
 pub(crate) fn evolution_type_str(t: EvolutionType) -> &'static str {
     match t {
         EvolutionType::Plugin => "plugin",

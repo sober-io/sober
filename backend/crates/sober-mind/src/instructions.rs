@@ -175,6 +175,14 @@ impl InstructionLoader {
         self.overlay_dir.as_deref()
     }
 
+    /// Returns `true` if the filename matches a known embedded instruction file.
+    ///
+    /// Overlays can only be created for files that exist in the base instruction
+    /// set — arbitrary filenames are rejected.
+    pub fn is_known_instruction(filename: &str) -> bool {
+        EMBEDDED_FILES.iter().any(|ef| ef.filename == filename)
+    }
+
     /// Returns a clone of the cached base + overlay + user instructions.
     pub fn cached(&self) -> Vec<InstructionFile> {
         self.cached

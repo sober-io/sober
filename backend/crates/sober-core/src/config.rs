@@ -464,7 +464,7 @@ impl Default for EvolutionConfig {
         Self {
             interval: DEFAULT_EVOLUTION_INTERVAL.to_owned(),
             detection_conv_limit: 20,
-            detection_msg_limit: 50,
+            detection_msg_limit: 200,
             detection_max_tokens: 4096,
             detection_temperature: 0.3,
         }

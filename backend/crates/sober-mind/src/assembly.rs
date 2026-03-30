@@ -314,6 +314,11 @@ impl Mind {
     /// does not exist, it is created. After writing, the instruction cache
     /// is reloaded so the change takes effect immediately.
     pub fn write_overlay(&self, filename: &str, content: &str) -> Result<(), MindError> {
+        if !InstructionLoader::is_known_instruction(filename) {
+            return Err(MindError::Io(format!(
+                "unknown instruction file '{filename}' — overlays can only target known base instructions"
+            )));
+        }
         let overlay_dir = self.instruction_loader.overlay_dir();
         if let Some(dir) = &overlay_dir {
             std::fs::create_dir_all(dir).map_err(|e| {
@@ -337,6 +342,11 @@ impl Mind {
     /// If the file does not exist, this is a no-op (returns Ok).
     /// After removal, the base instruction takes effect again.
     pub fn remove_overlay(&self, filename: &str) -> Result<(), MindError> {
+        if !InstructionLoader::is_known_instruction(filename) {
+            return Err(MindError::Io(format!(
+                "unknown instruction file '{filename}' — overlays can only target known base instructions"
+            )));
+        }
         if let Some(dir) = self.instruction_loader.overlay_dir() {
             let path = dir.join(filename);
             if path.exists() {
