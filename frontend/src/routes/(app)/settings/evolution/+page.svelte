@@ -1,12 +1,11 @@
 <script lang="ts">
-	import type { EvolutionEvent, EvolutionConfig, EvolutionType, AutonomyLevel } from '$lib/types';
+	import type { EvolutionEvent, EvolutionType, AutonomyLevel } from '$lib/types';
 	import { ApiError } from '$lib/utils/api';
 	import { evolutionService } from '$lib/services/evolution';
 	import { resolve } from '$app/paths';
 
 	// --- State ---
 	let events = $state<EvolutionEvent[]>([]);
-	let config = $state<EvolutionConfig | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let configSaving = $state(false);
@@ -48,7 +47,6 @@
 				evolutionService.getConfig()
 			]);
 			events = evts;
-			config = cfg;
 			pluginAutonomy = cfg.plugin_autonomy;
 			skillAutonomy = cfg.skill_autonomy;
 			instructionAutonomy = cfg.instruction_autonomy;
@@ -70,13 +68,12 @@
 		configSaving = true;
 		error = null;
 		try {
-			const updated = await evolutionService.updateConfig({
+			await evolutionService.updateConfig({
 				plugin_autonomy: pluginAutonomy,
 				skill_autonomy: skillAutonomy,
 				instruction_autonomy: instructionAutonomy,
 				automation_autonomy: automationAutonomy
 			});
-			config = updated;
 			configDirty = false;
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Failed to save configuration';
