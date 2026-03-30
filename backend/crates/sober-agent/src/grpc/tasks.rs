@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 use std::sync::Arc;
 
 use crate::agent::Agent;
-use crate::evolution::execute_evolution;
+use crate::evolution::{EvolutionContext, execute_evolution};
 use crate::grpc::proto;
 use crate::stream::AgentEvent;
 use crate::system_jobs::SELF_EVOLUTION_CHECK_PROMPT;
@@ -132,6 +132,12 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
 ) {
     info!(task_id = %task_id, "starting self-evolution check cycle");
+    let cycle_start = std::time::Instant::now();
+
+    let evo_ctx = EvolutionContext {
+        scheduler_client: std::sync::Arc::clone(&agent.tool_bootstrap().scheduler_client),
+        plugin_manager: std::sync::Arc::clone(&agent.tool_bootstrap().plugin_manager),
+    };
 
     // -----------------------------------------------------------------------
     // Phase 1: Execute pending approved evolution events
@@ -161,7 +167,7 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     }
 
     for event in &approved_events {
-        if let Err(e) = execute_evolution(event, agent.repos(), agent.mind()).await {
+        if let Err(e) = execute_evolution(event, agent.repos(), agent.mind(), &evo_ctx).await {
             warn!(
                 task_id = %task_id,
                 event_id = %event.id,
@@ -254,7 +260,7 @@ async fn execute_self_evolution_check<R: AgentRepos>(
             "executing newly auto-approved evolution events"
         );
         for event in new_approved {
-            if let Err(e) = execute_evolution(event, agent.repos(), agent.mind()).await {
+            if let Err(e) = execute_evolution(event, agent.repos(), agent.mind(), &evo_ctx).await {
                 warn!(
                     task_id = %task_id,
                     event_id = %event.id,
@@ -264,6 +270,9 @@ async fn execute_self_evolution_check<R: AgentRepos>(
             }
         }
     }
+
+    metrics::histogram!("sober_evolution_cycle_duration_seconds")
+        .record(cycle_start.elapsed().as_secs_f64());
 
     info!(task_id = %task_id, "self-evolution check cycle complete");
     send_done_stub(tx).await;

@@ -294,8 +294,20 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
 
-        match crate::evolution::execute_evolution(&event, self.agent().repos(), self.agent().mind())
-            .await
+        let evo_ctx = crate::evolution::EvolutionContext {
+            scheduler_client: std::sync::Arc::clone(
+                &self.agent().tool_bootstrap().scheduler_client,
+            ),
+            plugin_manager: std::sync::Arc::clone(&self.plugin_manager),
+        };
+
+        match crate::evolution::execute_evolution(
+            &event,
+            self.agent().repos(),
+            self.agent().mind(),
+            &evo_ctx,
+        )
+        .await
         {
             Ok(()) => Ok(Response::new(proto::ExecuteEvolutionResponse {
                 success: true,
@@ -327,8 +339,20 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
             .await
             .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
 
-        match crate::evolution::revert_evolution(&event, self.agent().repos(), self.agent().mind())
-            .await
+        let evo_ctx = crate::evolution::EvolutionContext {
+            scheduler_client: std::sync::Arc::clone(
+                &self.agent().tool_bootstrap().scheduler_client,
+            ),
+            plugin_manager: std::sync::Arc::clone(&self.plugin_manager),
+        };
+
+        match crate::evolution::revert_evolution(
+            &event,
+            self.agent().repos(),
+            self.agent().mind(),
+            &evo_ctx,
+        )
+        .await
         {
             Ok(()) => Ok(Response::new(proto::RevertEvolutionResponse {
                 success: true,

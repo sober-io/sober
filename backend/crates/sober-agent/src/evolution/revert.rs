@@ -1,19 +1,36 @@
 //! Evolution revert logic.
 //!
 //! Reverts an active evolution event back to its previous state:
-//! - **Instruction** — fully implemented: restores previous overlay or deletes it
-//! - **Plugin/Skill/Automation** — stub implementations pending infrastructure
+//! - **Instruction** — restores previous overlay or deletes it, reloads mind
+//! - **Plugin** — deletes plugin from registry
+//! - **Skill** — deletes plugin, removes skill file, invalidates skill cache
+//! - **Automation** — cancels scheduled job via scheduler gRPC
 
 use std::sync::Arc;
 
 use sober_core::types::AgentRepos;
 use sober_core::types::domain::EvolutionEvent;
 use sober_core::types::enums::{EvolutionStatus, EvolutionType};
-use sober_core::types::repo::EvolutionRepo;
+use sober_core::types::ids::PluginId;
+use sober_core::types::repo::{EvolutionRepo, PluginRepo};
 use sober_mind::assembly::Mind;
+use sober_plugin::PluginManager;
 use tracing::{info, warn};
 
+use super::executor::EvolutionContext;
+use crate::SharedSchedulerClient;
 use crate::error::AgentError;
+use crate::grpc::scheduler_proto;
+
+/// Converts an [`EvolutionType`] to a static string for metric labels.
+fn evolution_type_str(t: EvolutionType) -> &'static str {
+    match t {
+        EvolutionType::Plugin => "plugin",
+        EvolutionType::Skill => "skill",
+        EvolutionType::Instruction => "instruction",
+        EvolutionType::Automation => "automation",
+    }
+}
 
 /// Reverts an active evolution event.
 ///
@@ -25,6 +42,7 @@ pub async fn revert_evolution<R: AgentRepos>(
     event: &EvolutionEvent,
     repos: &R,
     mind: &Arc<Mind>,
+    ctx: &EvolutionContext<R>,
 ) -> Result<(), AgentError> {
     info!(
         event_id = %event.id,
@@ -41,10 +59,10 @@ pub async fn revert_evolution<R: AgentRepos>(
     }
 
     let result = match event.evolution_type {
-        EvolutionType::Plugin => revert_plugin(event).await,
-        EvolutionType::Skill => revert_skill(event).await,
+        EvolutionType::Plugin => revert_plugin(event, &*ctx.plugin_manager).await,
+        EvolutionType::Skill => revert_skill(event, &*ctx.plugin_manager).await,
         EvolutionType::Instruction => revert_instruction(event, mind).await,
-        EvolutionType::Automation => revert_automation(event).await,
+        EvolutionType::Automation => revert_automation(event, &ctx.scheduler_client).await,
     };
 
     match result {
@@ -54,6 +72,9 @@ pub async fn revert_evolution<R: AgentRepos>(
                 .update_status(event.id, EvolutionStatus::Reverted, None)
                 .await
                 .map_err(|e| AgentError::Internal(format!("failed to set reverted status: {e}")))?;
+
+            metrics::counter!("sober_evolution_reverts_total", "type" => evolution_type_str(event.evolution_type))
+                .increment(1);
 
             info!(event_id = %event.id, r#type = ?event.evolution_type, "evolution reverted successfully");
             Ok(())
@@ -70,25 +91,86 @@ pub async fn revert_evolution<R: AgentRepos>(
     }
 }
 
-/// Stub: plugin removal.
-async fn revert_plugin(event: &EvolutionEvent) -> Result<(), AgentError> {
-    // TODO: Wire PluginRepo::delete to remove the installed plugin.
+/// Deletes a plugin from the registry.
+///
+/// Extracts `plugin_id` from the event's execution result (stored when the
+/// plugin was created). Falls back to looking up by name from the payload.
+async fn revert_plugin<P: PluginRepo>(
+    event: &EvolutionEvent,
+    plugin_manager: &PluginManager<P>,
+) -> Result<(), AgentError> {
+    let plugin_id = resolve_plugin_id(event, plugin_manager.registry().repo()).await?;
+
     info!(
         event_id = %event.id,
-        title = %event.title,
-        "plugin evolution revert (stub — pending PluginRepo::delete integration)"
+        plugin_id = %plugin_id,
+        "deleting plugin"
     );
+
+    plugin_manager
+        .registry()
+        .repo()
+        .delete(plugin_id)
+        .await
+        .map_err(|e| AgentError::Internal(format!("failed to delete plugin: {e}")))?;
+
+    info!(event_id = %event.id, plugin_id = %plugin_id, "plugin deleted");
     Ok(())
 }
 
-/// Stub: skill removal.
-async fn revert_skill(event: &EvolutionEvent) -> Result<(), AgentError> {
-    // TODO: Wire plugin delete + skill file removal + skill catalog reload.
+/// Deletes a skill's plugin entry, removes the skill file from disk, and
+/// invalidates the skill loader cache.
+async fn revert_skill<P: PluginRepo>(
+    event: &EvolutionEvent,
+    plugin_manager: &PluginManager<P>,
+) -> Result<(), AgentError> {
+    let plugin_id = resolve_plugin_id(event, plugin_manager.registry().repo()).await?;
+
     info!(
         event_id = %event.id,
-        title = %event.title,
-        "skill evolution revert (stub — pending skill removal pipeline)"
+        plugin_id = %plugin_id,
+        "deleting skill plugin"
     );
+
+    // Delete plugin from registry.
+    plugin_manager
+        .registry()
+        .repo()
+        .delete(plugin_id)
+        .await
+        .map_err(|e| AgentError::Internal(format!("failed to delete skill plugin: {e}")))?;
+
+    // Remove skill file from disk (best-effort — the plugin deletion is the
+    // important part; the file will just be ignored by the loader if orphaned).
+    let skill_path = event
+        .result
+        .as_ref()
+        .and_then(|r| r.get("skill_path"))
+        .and_then(|v| v.as_str());
+
+    if let Some(path) = skill_path {
+        // The skill directory is the parent of SKILL.md.
+        let skill_dir = std::path::Path::new(path).parent();
+        if let Some(dir) = skill_dir {
+            match tokio::fs::remove_dir_all(dir).await {
+                Ok(()) => {
+                    info!(path = %dir.display(), "skill directory removed");
+                }
+                Err(e) => {
+                    warn!(
+                        path = %dir.display(),
+                        error = %e,
+                        "failed to remove skill directory (non-fatal)"
+                    );
+                }
+            }
+        }
+    }
+
+    // Invalidate the skill loader cache so the removed skill is no longer discovered.
+    plugin_manager.skill_loader().invalidate_cache();
+
+    info!(event_id = %event.id, "skill reverted");
     Ok(())
 }
 
@@ -144,13 +226,87 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
     Ok(())
 }
 
-/// Stub: automation job cancellation.
-async fn revert_automation(event: &EvolutionEvent) -> Result<(), AgentError> {
-    // TODO: Wire JobRepo::cancel to cancel the scheduled job.
+/// Cancels a scheduled job via the scheduler gRPC service.
+///
+/// Extracts `job_id` from the event's execution result.
+async fn revert_automation(
+    event: &EvolutionEvent,
+    scheduler_client: &SharedSchedulerClient,
+) -> Result<(), AgentError> {
+    let job_id = event
+        .result
+        .as_ref()
+        .and_then(|r| r.get("job_id"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            AgentError::Internal("automation result missing 'job_id' — cannot cancel".into())
+        })?;
+
     info!(
         event_id = %event.id,
-        title = %event.title,
-        "automation evolution revert (stub — pending JobRepo::cancel integration)"
+        job_id = %job_id,
+        "cancelling automation job"
     );
+
+    let req = scheduler_proto::CancelJobRequest {
+        job_id: job_id.to_owned(),
+    };
+
+    let mut client = {
+        let guard = scheduler_client.read().await;
+        guard
+            .as_ref()
+            .ok_or_else(|| AgentError::Internal("scheduler not connected".into()))?
+            .clone()
+    };
+
+    client
+        .cancel_job(req)
+        .await
+        .map_err(|e| AgentError::Internal(format!("scheduler CancelJob failed: {e}")))?;
+
+    info!(event_id = %event.id, job_id = %job_id, "automation job cancelled");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Resolves the `PluginId` for a plugin/skill revert.
+///
+/// First tries to extract from the event's execution result (`plugin_id`
+/// field). Falls back to looking up by name from the payload.
+async fn resolve_plugin_id<P: PluginRepo>(
+    event: &EvolutionEvent,
+    repo: &P,
+) -> Result<PluginId, AgentError> {
+    // Try result first — stored when the evolution was executed.
+    if let Some(id_str) = event
+        .result
+        .as_ref()
+        .and_then(|r| r.get("plugin_id"))
+        .and_then(|v| v.as_str())
+        && let Ok(uuid) = uuid::Uuid::parse_str(id_str)
+    {
+        return Ok(PluginId::from_uuid(uuid));
+    }
+
+    // Fallback: look up by name from the payload.
+    let name = event
+        .payload
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            AgentError::Internal(
+                "cannot resolve plugin: no plugin_id in result and no name in payload".into(),
+            )
+        })?;
+
+    let plugin = repo
+        .get_by_name(name)
+        .await
+        .map_err(|e| AgentError::Internal(format!("plugin lookup by name '{name}' failed: {e}")))?;
+
+    Ok(plugin.id)
 }
