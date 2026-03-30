@@ -198,14 +198,20 @@ impl<R: AgentRepos> ProposeAutomationTool<R> {
 
         match self.repos.evolution().create(event).await {
             Ok(created) => {
-                let status_label = match created.status {
-                    EvolutionStatus::Approved => "auto-approved",
-                    EvolutionStatus::Proposed => "proposed (awaiting approval)",
+                let autonomy_str = match created.status {
+                    EvolutionStatus::Approved => "auto_approved",
+                    EvolutionStatus::Proposed => "proposed",
                     other => {
                         return Err(ToolError::ExecutionFailed(format!(
                             "unexpected status after creation: {other:?}"
                         )));
                     }
+                };
+                metrics::counter!("sober_evolution_proposals_total", "type" => "automation", "autonomy" => autonomy_str)
+                    .increment(1);
+                let status_label = match created.status {
+                    EvolutionStatus::Approved => "auto-approved",
+                    _ => "proposed (awaiting approval)",
                 };
                 Ok(ToolOutput {
                     content: format!(
@@ -215,12 +221,16 @@ impl<R: AgentRepos> ProposeAutomationTool<R> {
                     is_error: false,
                 })
             }
-            Err(AppError::Conflict(_)) => Ok(ToolOutput {
-                content: format!(
-                    "A similar evolution for automation '{job_name}' already exists. Skipping duplicate."
-                ),
-                is_error: false,
-            }),
+            Err(AppError::Conflict(_)) => {
+                metrics::counter!("sober_evolution_proposals_total", "type" => "automation", "autonomy" => "duplicate")
+                    .increment(1);
+                Ok(ToolOutput {
+                    content: format!(
+                        "A similar evolution for automation '{job_name}' already exists. Skipping duplicate."
+                    ),
+                    is_error: false,
+                })
+            }
             Err(e) => Err(ToolError::ExecutionFailed(format!(
                 "failed to create evolution event: {e}"
             ))),

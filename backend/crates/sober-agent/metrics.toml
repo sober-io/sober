@@ -54,6 +54,46 @@ description = "Duration of individual tool call execution."
 labels = ["tool"]
 # tool: tool name
 
+[group.evolution]
+name = "Evolution"
+description = "Self-evolution loop metrics: proposals, execution, reverts."
+
+[[group.evolution.metrics]]
+name = "sober_evolution_events_total"
+type = "counter"
+description = "Evolution events by type and status."
+labels = ["type", "status"]
+# type: plugin, skill, instruction, automation
+# status: active, failed
+
+[[group.evolution.metrics]]
+name = "sober_evolution_execution_duration_seconds"
+type = "histogram"
+description = "Evolution execution latency by type."
+labels = ["type"]
+# type: plugin, skill, instruction, automation
+
+[[group.evolution.metrics]]
+name = "sober_evolution_cycle_duration_seconds"
+type = "histogram"
+description = "Full self-evolution check cycle duration."
+labels = []
+
+[[group.evolution.metrics]]
+name = "sober_evolution_proposals_total"
+type = "counter"
+description = "Proposals created by type and autonomy outcome."
+labels = ["type", "autonomy"]
+# type: plugin, skill, instruction, automation
+# autonomy: auto_approved, proposed, duplicate
+
+[[group.evolution.metrics]]
+name = "sober_evolution_reverts_total"
+type = "counter"
+description = "Evolution reverts by type."
+labels = ["type"]
+# type: plugin, skill, instruction, automation
+
 # --- Deferred metrics (not yet implemented) ---
 #
 # The following metrics are planned but depend on features not yet built:
