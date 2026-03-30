@@ -432,6 +432,20 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(())
     }
+
+    async fn list_recent(&self, limit: i64) -> Result<Vec<Conversation>, AppError> {
+        let rows = sqlx::query_as::<_, ConversationRow>(&format!(
+            "SELECT {CONV_COLUMNS} FROM conversations \
+                 WHERE kind != 'inbox' \
+                 ORDER BY updated_at DESC LIMIT $1"
+        ))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
 }
 
 /// Helper row type for the tag + conversation_id join.

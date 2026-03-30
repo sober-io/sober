@@ -5,12 +5,13 @@
 use std::sync::Arc;
 
 use sober_core::types::AgentRepos;
-use sober_core::types::ids::{ConversationId, EvolutionEventId, WorkspaceId};
-use sober_core::types::repo::{ConversationRepo, EvolutionRepo};
+use sober_core::types::ids::{ConversationId, WorkspaceId};
+use sober_core::types::repo::ConversationRepo;
 use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
 
 mod agent;
+mod evolution;
 mod plugins;
 mod tasks;
 
@@ -279,90 +280,14 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::ExecuteEvolutionRequest>,
     ) -> Result<Response<proto::ExecuteEvolutionResponse>, Status> {
-        let req = request.into_inner();
-        let event_id = req
-            .evolution_event_id
-            .parse::<uuid::Uuid>()
-            .map(EvolutionEventId::from_uuid)
-            .map_err(|_| Status::invalid_argument("invalid evolution_event_id"))?;
-
-        let event = self
-            .agent()
-            .repos()
-            .evolution()
-            .get_by_id(event_id)
-            .await
-            .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
-
-        let evo_ctx = crate::evolution::EvolutionContext {
-            scheduler_client: std::sync::Arc::clone(
-                &self.agent().tool_bootstrap().scheduler_client,
-            ),
-            plugin_manager: std::sync::Arc::clone(&self.plugin_manager),
-        };
-
-        match crate::evolution::execute_evolution(
-            &event,
-            self.agent().repos(),
-            self.agent().mind(),
-            &evo_ctx,
-        )
-        .await
-        {
-            Ok(()) => Ok(Response::new(proto::ExecuteEvolutionResponse {
-                success: true,
-                error: String::new(),
-            })),
-            Err(e) => Ok(Response::new(proto::ExecuteEvolutionResponse {
-                success: false,
-                error: e.to_string(),
-            })),
-        }
+        evolution::handle_execute(self, request).await
     }
 
     async fn revert_evolution(
         &self,
         request: Request<proto::RevertEvolutionRequest>,
     ) -> Result<Response<proto::RevertEvolutionResponse>, Status> {
-        let req = request.into_inner();
-        let event_id = req
-            .evolution_event_id
-            .parse::<uuid::Uuid>()
-            .map(EvolutionEventId::from_uuid)
-            .map_err(|_| Status::invalid_argument("invalid evolution_event_id"))?;
-
-        let event = self
-            .agent()
-            .repos()
-            .evolution()
-            .get_by_id(event_id)
-            .await
-            .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
-
-        let evo_ctx = crate::evolution::EvolutionContext {
-            scheduler_client: std::sync::Arc::clone(
-                &self.agent().tool_bootstrap().scheduler_client,
-            ),
-            plugin_manager: std::sync::Arc::clone(&self.plugin_manager),
-        };
-
-        match crate::evolution::revert_evolution(
-            &event,
-            self.agent().repos(),
-            self.agent().mind(),
-            &evo_ctx,
-        )
-        .await
-        {
-            Ok(()) => Ok(Response::new(proto::RevertEvolutionResponse {
-                success: true,
-                error: String::new(),
-            })),
-            Err(e) => Ok(Response::new(proto::RevertEvolutionResponse {
-                success: false,
-                error: e.to_string(),
-            })),
-        }
+        evolution::handle_revert(self, request).await
     }
 }
 

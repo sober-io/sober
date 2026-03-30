@@ -1,5 +1,6 @@
 //! Command implementations for the `sober` CLI.
 
+mod common;
 pub mod config;
 pub mod evolution;
 pub mod migrate;

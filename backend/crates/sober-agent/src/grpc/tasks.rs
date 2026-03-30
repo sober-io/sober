@@ -10,7 +10,9 @@ use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::enums::EvolutionStatus;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
-use sober_core::types::repo::EvolutionRepo;
+use sober_core::types::repo::{ConversationRepo, EvolutionRepo, MessageRepo};
+use sober_llm::Message as LlmMessage;
+use sober_llm::types::{CompletionRequest, FunctionDefinition, ToolDefinition};
 use tonic::Status;
 use tracing::{error, info, warn};
 
@@ -137,6 +139,7 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     let evo_ctx = EvolutionContext {
         scheduler_client: std::sync::Arc::clone(&agent.tool_bootstrap().scheduler_client),
         plugin_manager: std::sync::Arc::clone(&agent.tool_bootstrap().plugin_manager),
+        plugin_generator: agent.tool_bootstrap().plugin_generator.clone(),
     };
 
     // -----------------------------------------------------------------------
@@ -178,12 +181,11 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     }
 
     // -----------------------------------------------------------------------
-    // Phase 2: Gather recent conversation data for pattern detection (stub)
+    // Phase 2: Gather recent conversation data for pattern detection
     // -----------------------------------------------------------------------
-    info!(task_id = %task_id, "phase 2: gathering conversation data (stub)");
-    // TODO: Query MessageRepo for recent conversations, summarize into a
-    // compact format for the detection prompt. For now, use a placeholder.
-    let _conversation_summary = "placeholder: no conversation data gathered yet";
+    info!(task_id = %task_id, "phase 2: gathering conversation data");
+
+    let conversation_summary = gather_conversation_summary(agent).await;
 
     // -----------------------------------------------------------------------
     // Phase 3: Load active evolutions for context
@@ -198,7 +200,6 @@ async fn execute_self_evolution_check<R: AgentRepos>(
         }
     };
 
-    // Build a context string summarising active evolutions.
     let active_context = if active_events.is_empty() {
         "No active evolutions.".to_owned()
     } else {
@@ -215,21 +216,15 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     };
 
     // -----------------------------------------------------------------------
-    // Phase 4: Detection — build prompt and call LLM (stub)
+    // Phase 4: Detection — build prompt and call LLM
     // -----------------------------------------------------------------------
     info!(
         task_id = %task_id,
         active_evolutions = active_events.len(),
-        "phase 4: detection prompt assembly (stub — skipping LLM call)"
+        "phase 4: running LLM detection"
     );
 
-    // Log the assembled context for debugging. The actual LLM call will be
-    // wired in a future iteration once the detection prompt is finalised.
-    tracing::debug!(
-        task_id = %task_id,
-        active_context = %active_context,
-        "assembled evolution detection context"
-    );
+    run_detection_llm(agent, &conversation_summary, &active_context, task_id).await;
 
     // -----------------------------------------------------------------------
     // Post-detection: execute any newly auto-approved events
@@ -247,7 +242,6 @@ async fn execute_self_evolution_check<R: AgentRepos>(
         }
     };
 
-    // Only execute events that were not already processed in Phase 1.
     let new_approved: Vec<_> = post_approved
         .iter()
         .filter(|e| !approved_events.iter().any(|prev| prev.id == e.id))
@@ -336,6 +330,250 @@ pub(crate) async fn send_done_stub(
         artifact_ref: None,
     });
     let _ = tx.send(Ok(done)).await;
+}
+
+// ---------------------------------------------------------------------------
+// Self-evolution detection helpers
+// ---------------------------------------------------------------------------
+
+/// Maximum recent conversations to query for pattern detection.
+const DETECTION_CONV_LIMIT: i64 = 20;
+/// Maximum messages to sample per conversation.
+const DETECTION_MSG_LIMIT: i64 = 10;
+
+/// Gathers a compact summary of recent conversation activity for the LLM.
+async fn gather_conversation_summary<R: AgentRepos>(agent: &Arc<Agent<R>>) -> String {
+    let recent_convs = match agent
+        .repos()
+        .conversations()
+        .list_recent(DETECTION_CONV_LIMIT)
+        .await
+    {
+        Ok(convs) => convs,
+        Err(e) => {
+            warn!(error = %e, "failed to query recent conversations for detection");
+            return "No conversation data available.".to_owned();
+        }
+    };
+
+    if recent_convs.is_empty() {
+        return "No recent conversations.".to_owned();
+    }
+
+    let mut lines = Vec::with_capacity(recent_convs.len());
+
+    for conv in &recent_convs {
+        let messages = match agent
+            .repos()
+            .messages()
+            .list_by_conversation(conv.id, DETECTION_MSG_LIMIT)
+            .await
+        {
+            Ok(msgs) => msgs,
+            Err(_) => continue,
+        };
+
+        let msg_count = messages.len();
+        let user_msgs = messages
+            .iter()
+            .filter(|m| m.role == sober_core::types::enums::MessageRole::User)
+            .count();
+        let tool_calls: Vec<&str> = messages
+            .iter()
+            .filter_map(|m| m.metadata.as_ref())
+            .filter_map(|meta| meta.get("tool_calls"))
+            .filter_map(|v| v.as_array())
+            .flat_map(|arr| arr.iter())
+            .filter_map(|tc| tc.get("name"))
+            .filter_map(|v| v.as_str())
+            .collect();
+
+        let title = conv.title.as_deref().unwrap_or("untitled");
+        let updated = conv.updated_at.format("%Y-%m-%d %H:%M");
+
+        if tool_calls.is_empty() {
+            lines.push(format!(
+                "- {title} (user: {}, msgs: {msg_count}, user_msgs: {user_msgs}, updated: {updated})",
+                conv.user_id
+            ));
+        } else {
+            // Deduplicate tool names and count.
+            let mut tool_counts: std::collections::HashMap<&str, usize> =
+                std::collections::HashMap::new();
+            for name in &tool_calls {
+                *tool_counts.entry(name).or_default() += 1;
+            }
+            let tools_str: String = tool_counts
+                .iter()
+                .map(|(name, count)| format!("{name}×{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "- {title} (user: {}, msgs: {msg_count}, tools: [{tools_str}], updated: {updated})",
+                conv.user_id
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// The system prompt for the self-evolution detection LLM call.
+const DETECTION_SYSTEM_PROMPT: &str = "\
+You are the self-evolution engine for Sõber, an AI agent system. Your job is to \
+analyse recent conversation patterns and propose improvements.
+
+You have access to four proposal tools:
+- propose_tool: Propose a new WASM plugin tool when users repeatedly need a capability that doesn't exist.
+- propose_skill: Propose a new prompt-based skill when users frequently request a specific type of assistance.
+- propose_instruction: Propose an instruction overlay change when the agent's behavior should be adjusted.
+- propose_automation: Propose a scheduled job when users have recurring needs at predictable intervals.
+
+Rules:
+1. Only propose evolutions backed by clear patterns in the data — do not speculate.
+2. Do not duplicate existing active evolutions (listed below).
+3. Limit to at most 5 proposals per cycle.
+4. Each proposal must include a confidence score (0.0–1.0) and source_count.
+5. If no patterns warrant a proposal, respond with a brief summary and make no tool calls.
+";
+
+/// Runs the LLM detection call with conversation and evolution context.
+///
+/// Builds a prompt from gathered data, calls the LLM with propose_* tool
+/// definitions, then dispatches any returned tool calls to the propose_*
+/// tool implementations.
+async fn run_detection_llm<R: AgentRepos>(
+    agent: &Arc<Agent<R>>,
+    conversation_summary: &str,
+    active_context: &str,
+    task_id: &str,
+) {
+    // Build the user message with injected context.
+    let user_message = format!(
+        "Analyse the following recent conversation activity and active evolutions. \
+         Propose improvements if patterns warrant them.\n\n\
+         ## Recent conversation activity\n\n{conversation_summary}\n\n\
+         ## Active evolutions\n\n{active_context}"
+    );
+
+    // Collect propose_* tool definitions from the tool bootstrap.
+    let propose_tools = build_propose_tool_definitions(agent);
+
+    let model = agent
+        .llm_config()
+        .as_ref()
+        .map(|c| c.model.clone())
+        .unwrap_or_else(|| "default".to_owned());
+
+    let req = CompletionRequest {
+        model,
+        messages: vec![
+            LlmMessage::system(DETECTION_SYSTEM_PROMPT),
+            LlmMessage::user(&user_message),
+        ],
+        tools: propose_tools,
+        max_tokens: Some(4096),
+        temperature: Some(0.3),
+        stop: vec![],
+        stream: false,
+    };
+
+    let response = match agent.llm().complete(req).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "detection LLM call failed");
+            return;
+        }
+    };
+
+    // Process tool calls from the response.
+    let tool_calls = response
+        .choices
+        .first()
+        .and_then(|c| c.message.tool_calls.as_ref())
+        .cloned()
+        .unwrap_or_default();
+
+    if tool_calls.is_empty() {
+        let text = response
+            .choices
+            .first()
+            .and_then(|c| c.message.content.as_deref())
+            .unwrap_or("no response");
+        info!(
+            task_id = %task_id,
+            response = %text,
+            "detection LLM proposed no evolutions"
+        );
+        return;
+    }
+
+    info!(
+        task_id = %task_id,
+        count = tool_calls.len(),
+        "detection LLM proposed evolutions"
+    );
+
+    // Dispatch each tool call to the matching propose_* tool.
+    let tools = agent.tool_bootstrap().build_static_tools();
+    for tc in &tool_calls {
+        let tool_name = &tc.function.name;
+        let input = match serde_json::from_str::<serde_json::Value>(&tc.function.arguments) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(task_id = %task_id, tool = %tool_name, error = %e, "invalid tool call arguments");
+                continue;
+            }
+        };
+
+        let tool = tools.iter().find(|t| t.metadata().name == *tool_name);
+        if let Some(tool) = tool {
+            match tool.execute(input).await {
+                Ok(output) => {
+                    info!(
+                        task_id = %task_id,
+                        tool = %tool_name,
+                        output = %output.content,
+                        "detection proposal created"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        task_id = %task_id,
+                        tool = %tool_name,
+                        error = %e,
+                        "detection proposal tool call failed"
+                    );
+                }
+            }
+        } else {
+            warn!(
+                task_id = %task_id,
+                tool = %tool_name,
+                "detection LLM called unknown tool"
+            );
+        }
+    }
+}
+
+/// Builds LLM tool definitions for the propose_* tools.
+fn build_propose_tool_definitions<R: AgentRepos>(agent: &Arc<Agent<R>>) -> Vec<ToolDefinition> {
+    let all_tools = agent.tool_bootstrap().build_static_tools();
+    all_tools
+        .iter()
+        .filter(|t| t.metadata().name.starts_with("propose_"))
+        .map(|t| {
+            let meta = t.metadata();
+            ToolDefinition {
+                r#type: "function".to_owned(),
+                function: FunctionDefinition {
+                    name: meta.name,
+                    description: meta.description,
+                    parameters: meta.input_schema,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Converts an [`AgentEvent`] to its proto representation.

@@ -197,6 +197,16 @@ pub trait ConversationRepo: Send + Sync {
         &self,
         id: ConversationId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists the most recently updated conversations across all users.
+    ///
+    /// Used by the self-evolution detection loop to gather cross-user
+    /// conversation patterns. Returns at most `limit` conversations ordered
+    /// by `updated_at DESC`.
+    fn list_recent(
+        &self,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<Conversation>, AppError>> + Send;
 }
 
 /// Message operations.

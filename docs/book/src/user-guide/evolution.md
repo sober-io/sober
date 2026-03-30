@@ -70,15 +70,13 @@ Plugins and instructions default to requiring approval because they have broader
 
 ### Changing Autonomy Levels
 
-**Via Settings UI:** Navigate to **Settings > Evolution**. The Autonomy Configuration section at the top has a dropdown for each type. Select the level you want and click **Save**.
+Use the **Settings > Evolution** page in the web UI. The Autonomy Configuration section at the top has a dropdown for each type. Select the level you want and click **Save**.
 
-**Via CLI:**
+To view the current configuration from the command line:
 
 ```bash
 sober evolution config
 ```
-
-This displays the current configuration. To change levels, use the Settings UI or the evolution config API endpoint.
 
 ---
 

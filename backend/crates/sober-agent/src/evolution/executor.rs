@@ -1,9 +1,9 @@
 //! Evolution execution logic.
 //!
 //! Takes an approved evolution event and executes it based on type:
+//! - **Plugin** — generates WASM via [`PluginGenerator`], registers via audit pipeline
+//! - **Skill** — generates skill content via [`PluginGenerator`], writes to disk, registers
 //! - **Instruction** — writes overlay files, reloads mind
-//! - **Plugin** — registers plugin via audit pipeline (WASM generation requires LLM)
-//! - **Skill** — writes skill file to disk, registers plugin, invalidates skill cache
 //! - **Automation** — creates scheduled job via scheduler gRPC
 
 use std::path::PathBuf;
@@ -19,7 +19,9 @@ use sober_core::types::enums::{
 use sober_core::types::repo::{EvolutionRepo, PluginRepo};
 use sober_mind::assembly::Mind;
 use sober_plugin::PluginManager;
+use sober_plugin::manifest::PluginManifest;
 use sober_plugin::registry::InstallRequest;
+use sober_plugin_gen::PluginGenerator;
 use tracing::{error, info, warn};
 
 use crate::SharedSchedulerClient;
@@ -29,17 +31,20 @@ use crate::grpc::scheduler_proto;
 /// Extra dependencies needed by evolution executors beyond `repos` and `mind`.
 ///
 /// Bundles infrastructure that is only available at the agent level (scheduler
-/// gRPC client, plugin manager with audit pipeline and skill loader). Callers
-/// construct this from the `Agent` / `AgentGrpcService` fields.
+/// gRPC client, plugin manager with audit pipeline and skill loader, and the
+/// LLM-powered plugin generator). Callers construct this from the
+/// `Agent` / `AgentGrpcService` fields.
 pub struct EvolutionContext<R: AgentRepos> {
     /// Shared gRPC client for the scheduler service.
     pub scheduler_client: SharedSchedulerClient,
     /// Plugin manager for audit pipeline + skill loader access.
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
+    /// LLM-powered plugin/skill generator.
+    pub plugin_generator: Option<Arc<PluginGenerator>>,
 }
 
 /// Converts an [`EvolutionType`] to a static string for metric labels.
-fn evolution_type_str(t: EvolutionType) -> &'static str {
+pub(crate) fn evolution_type_str(t: EvolutionType) -> &'static str {
     match t {
         EvolutionType::Plugin => "plugin",
         EvolutionType::Skill => "skill",
@@ -63,9 +68,11 @@ pub async fn execute_evolution<R: AgentRepos>(
     mind: &Arc<Mind>,
     ctx: &EvolutionContext<R>,
 ) -> Result<(), AgentError> {
+    let type_str = evolution_type_str(event.evolution_type);
+
     info!(
         event_id = %event.id,
-        evolution_type = ?event.evolution_type,
+        evolution_type = type_str,
         title = %event.title,
         "executing evolution"
     );
@@ -87,13 +94,11 @@ pub async fn execute_evolution<R: AgentRepos>(
         .await
         .map_err(|e| AgentError::Internal(format!("failed to set executing status: {e}")))?;
 
-    // Dispatch to type-specific execution.
-    let type_str = evolution_type_str(event.evolution_type);
     let exec_start = std::time::Instant::now();
 
     let result = match event.evolution_type {
-        EvolutionType::Plugin => execute_plugin(event, &*ctx.plugin_manager).await,
-        EvolutionType::Skill => execute_skill(event, &*ctx.plugin_manager).await,
+        EvolutionType::Plugin => execute_plugin(event, ctx).await,
+        EvolutionType::Skill => execute_skill(event, ctx).await,
         EvolutionType::Instruction => execute_instruction(event, mind).await,
         EvolutionType::Automation => execute_automation(event, &ctx.scheduler_client).await,
     };
@@ -118,7 +123,7 @@ pub async fn execute_evolution<R: AgentRepos>(
             metrics::counter!("sober_evolution_events_total", "type" => type_str, "status" => "active")
                 .increment(1);
 
-            info!(event_id = %event.id, r#type = ?event.evolution_type, "evolution executed successfully");
+            info!(event_id = %event.id, evolution_type = type_str, "evolution executed successfully");
             Ok(())
         }
         Err(e) => {
@@ -137,64 +142,53 @@ pub async fn execute_evolution<R: AgentRepos>(
             metrics::counter!("sober_evolution_events_total", "type" => type_str, "status" => "failed")
                 .increment(1);
 
-            warn!(event_id = %event.id, evolution_type = ?event.evolution_type, error = %e, "evolution execution failed");
+            warn!(event_id = %event.id, evolution_type = type_str, error = %e, "evolution execution failed");
             Err(e)
         }
     }
 }
 
-/// Registers a plugin via the audit pipeline.
+/// Generates a WASM plugin via [`PluginGenerator`] and registers it through
+/// the audit pipeline.
 ///
-/// Extracts `name`, `description`, and `capabilities` from the event payload
-/// and installs through `PluginRegistry::install`. WASM generation (which
-/// requires an LLM client) is not performed here — the plugin is registered
-/// as a manifest-only entry that can be compiled later via `GeneratePluginTool`.
-///
-/// TODO: Wire `PluginGenerator::generate_wasm` for full WASM compilation.
-/// This requires threading an `Arc<PluginGenerator>` (which holds an LLM
-/// client) into `EvolutionContext`. Currently the generator lives on
-/// `ToolBootstrap` and is `Option<Arc<PluginGenerator>>`.
-async fn execute_plugin<P: PluginRepo>(
+/// Extracts `name`, `description`, and `capabilities` from the event payload.
+/// The generator produces compiled WASM bytes + a manifest, which are passed
+/// directly to `PluginRegistry::install`.
+async fn execute_plugin<R: AgentRepos>(
     event: &EvolutionEvent,
-    plugin_manager: &PluginManager<P>,
+    ctx: &EvolutionContext<R>,
 ) -> Result<Value, AgentError> {
-    let name = event
-        .payload
-        .get("name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AgentError::Internal("plugin payload missing 'name' field".into()))?;
+    let generator = ctx
+        .plugin_generator
+        .as_ref()
+        .ok_or_else(|| AgentError::Internal("plugin generator not available".into()))?;
 
+    let name = payload_str(event, "name")?;
     let description = event
         .payload
         .get("description")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-
-    let capabilities: Vec<String> = event
-        .payload
-        .get("capabilities")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let user_id = event.user_id;
+    let capabilities = payload_string_array(event, "capabilities");
 
     info!(
         event_id = %event.id,
         plugin_name = %name,
         capabilities = ?capabilities,
-        "executing plugin evolution"
+        "generating WASM plugin"
     );
 
-    let config = json!({
-        "capabilities": capabilities,
-        "pseudocode": event.payload.get("pseudocode").cloned().unwrap_or(Value::Null),
-    });
+    // Generate WASM via LLM with self-correcting retry loop.
+    let generated = generator
+        .generate_wasm(name, description, &capabilities)
+        .await
+        .map_err(|e| AgentError::Internal(format!("WASM generation failed: {e}")))?;
 
+    // Parse the manifest from the generated TOML.
+    let manifest = PluginManifest::from_toml(&generated.manifest)
+        .map_err(|e| AgentError::Internal(format!("invalid generated manifest: {e}")))?;
+
+    // Install through the audit pipeline with actual WASM bytes.
     let install_req = InstallRequest {
         name: name.to_owned(),
         kind: PluginKind::Wasm,
@@ -202,15 +196,19 @@ async fn execute_plugin<P: PluginRepo>(
         description: Some(description.to_owned()),
         origin: PluginOrigin::Agent,
         scope: PluginScope::User,
-        owner_id: user_id,
+        owner_id: event.user_id,
         workspace_id: None,
-        config,
-        installed_by: user_id,
-        manifest: None,
-        wasm_bytes: None,
+        config: json!({
+            "capabilities": capabilities,
+            "source": generated.source,
+        }),
+        installed_by: event.user_id,
+        manifest: Some(manifest),
+        wasm_bytes: Some(generated.wasm_bytes),
     };
 
-    let report = plugin_manager
+    let report = ctx
+        .plugin_manager
         .registry()
         .install(install_req)
         .await
@@ -223,8 +221,8 @@ async fn execute_plugin<P: PluginRepo>(
         )));
     }
 
-    // Look up the just-registered plugin to get its ID.
-    let plugin = plugin_manager
+    let plugin = ctx
+        .plugin_manager
         .registry()
         .repo()
         .get_by_name(name)
@@ -234,58 +232,49 @@ async fn execute_plugin<P: PluginRepo>(
     info!(
         event_id = %event.id,
         plugin_id = %plugin.id,
-        "plugin registered via audit pipeline"
+        "plugin generated and registered via audit pipeline"
     );
 
     Ok(json!({ "plugin_id": plugin.id.to_string() }))
 }
 
-/// Creates a skill file on disk and registers it as a plugin.
+/// Generates a skill via [`PluginGenerator`], writes it to disk, and registers
+/// it as a plugin.
 ///
-/// Writes a `SKILL.md` with YAML frontmatter to the user-level skill directory
-/// (`~/.sober/skills/<name>/SKILL.md`) so that [`SkillLoader`] discovers it on
-/// the next scan. The skill loader cache is invalidated to force immediate
-/// rediscovery.
-async fn execute_skill<P: PluginRepo>(
+/// The generator produces markdown content with YAML frontmatter. The file is
+/// written to `~/.sober/skills/<name>/SKILL.md` so that [`SkillLoader`]
+/// discovers it on the next scan. The skill loader cache is invalidated to
+/// force immediate rediscovery.
+async fn execute_skill<R: AgentRepos>(
     event: &EvolutionEvent,
-    plugin_manager: &PluginManager<P>,
+    ctx: &EvolutionContext<R>,
 ) -> Result<Value, AgentError> {
-    let name = event
-        .payload
-        .get("name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AgentError::Internal("skill payload missing 'name' field".into()))?;
+    let generator = ctx
+        .plugin_generator
+        .as_ref()
+        .ok_or_else(|| AgentError::Internal("plugin generator not available".into()))?;
 
+    let name = payload_str(event, "name")?;
     let description = event
         .payload
         .get("description")
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let prompt_template = event
-        .payload
-        .get("prompt_template")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AgentError::Internal("skill payload missing 'prompt_template' field".into())
-        })?;
-
-    let user_id = event.user_id;
-
     info!(
         event_id = %event.id,
         skill_name = %name,
-        "executing skill evolution"
+        "generating skill"
     );
 
-    // Build the SKILL.md content with YAML frontmatter.
-    let skill_content =
-        format!("---\nname: {name}\ndescription: {description}\n---\n\n{prompt_template}");
+    // Generate skill content via LLM.
+    let skill_content = generator
+        .generate_skill(name, description)
+        .await
+        .map_err(|e| AgentError::Internal(format!("skill generation failed: {e}")))?;
 
     // Write to user-level skill directory: ~/.sober/skills/<name>/SKILL.md
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| AgentError::Internal("HOME environment variable not set".into()))?;
-    let skill_dir = PathBuf::from(home).join(".sober").join("skills").join(name);
+    let skill_dir = resolve_skill_dir(name)?;
     tokio::fs::create_dir_all(&skill_dir).await.map_err(|e| {
         AgentError::Internal(format!(
             "failed to create skill directory {}: {e}",
@@ -310,10 +299,6 @@ async fn execute_skill<P: PluginRepo>(
     );
 
     // Register in the plugin system through the audit pipeline.
-    let config = json!({
-        "path": skill_path.to_string_lossy(),
-    });
-
     let install_req = InstallRequest {
         name: name.to_owned(),
         kind: PluginKind::Skill,
@@ -321,22 +306,22 @@ async fn execute_skill<P: PluginRepo>(
         description: Some(description.to_owned()),
         origin: PluginOrigin::Agent,
         scope: PluginScope::User,
-        owner_id: user_id,
+        owner_id: event.user_id,
         workspace_id: None,
-        config,
-        installed_by: user_id,
+        config: json!({ "path": skill_path.to_string_lossy() }),
+        installed_by: event.user_id,
         manifest: None,
         wasm_bytes: None,
     };
 
-    let report = plugin_manager
+    let report = ctx
+        .plugin_manager
         .registry()
         .install(install_req)
         .await
         .map_err(|e| AgentError::Internal(format!("failed to register skill plugin: {e}")))?;
 
     if !report.is_approved() {
-        // Clean up the written file on rejection.
         let _ = tokio::fs::remove_dir_all(&skill_dir).await;
         return Err(AgentError::Internal(format!(
             "skill rejected by audit: {}",
@@ -344,8 +329,8 @@ async fn execute_skill<P: PluginRepo>(
         )));
     }
 
-    // Look up the just-registered plugin to get its ID.
-    let plugin = plugin_manager
+    let plugin = ctx
+        .plugin_manager
         .registry()
         .repo()
         .get_by_name(name)
@@ -353,7 +338,7 @@ async fn execute_skill<P: PluginRepo>(
         .map_err(|e| AgentError::Internal(format!("failed to look up registered skill: {e}")))?;
 
     // Invalidate the skill loader cache so the new skill is discovered immediately.
-    plugin_manager.skill_loader().invalidate_cache();
+    ctx.plugin_manager.skill_loader().invalidate_cache();
 
     info!(
         event_id = %event.id,
@@ -368,24 +353,13 @@ async fn execute_skill<P: PluginRepo>(
     }))
 }
 
-/// Fully implemented: writes instruction overlay file and reloads the mind.
+/// Writes an instruction overlay file and reloads the mind.
 async fn execute_instruction(
     event: &EvolutionEvent,
     mind: &Arc<Mind>,
 ) -> Result<Value, AgentError> {
-    let file = event
-        .payload
-        .get("file")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AgentError::Internal("instruction payload missing 'file' field".into()))?;
-
-    let new_content = event
-        .payload
-        .get("new_content")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AgentError::Internal("instruction payload missing 'new_content' field".into())
-        })?;
+    let file = payload_str(event, "file")?;
+    let new_content = payload_str(event, "new_content")?;
 
     // Validate that this is not a guardrail file.
     if sober_mind::is_guardrail_file(file, new_content) {
@@ -394,10 +368,7 @@ async fn execute_instruction(
         )));
     }
 
-    // Resolve the overlay directory: ~/.sober/instructions/
     let overlay_dir = resolve_overlay_dir()?;
-
-    // Ensure the directory exists.
     std::fs::create_dir_all(&overlay_dir).map_err(|e| {
         AgentError::Internal(format!(
             "failed to create overlay directory {}: {e}",
@@ -405,7 +376,6 @@ async fn execute_instruction(
         ))
     })?;
 
-    // Write the overlay file.
     let overlay_path = overlay_dir.join(file);
     std::fs::write(&overlay_path, new_content).map_err(|e| {
         AgentError::Internal(format!(
@@ -416,7 +386,6 @@ async fn execute_instruction(
 
     info!(file = %file, path = %overlay_path.display(), "instruction overlay written");
 
-    // Reload instructions so the change takes effect immediately.
     mind.reload_instructions().map_err(|e| {
         AgentError::Internal(format!("failed to reload instructions after write: {e}"))
     })?;
@@ -425,44 +394,14 @@ async fn execute_instruction(
 }
 
 /// Creates a scheduled job via the scheduler gRPC service.
-///
-/// Extracts `job_name`, `schedule`, `prompt`, `target_user_id`, and optional
-/// `conversation_id` from the event payload. The job payload is
-/// [`JobPayload::Prompt`] so the scheduler dispatches it to the agent for
-/// LLM processing.
 async fn execute_automation(
     event: &EvolutionEvent,
     scheduler_client: &SharedSchedulerClient,
 ) -> Result<Value, AgentError> {
-    let job_name = event
-        .payload
-        .get("job_name")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AgentError::Internal("automation payload missing 'job_name' field".into())
-        })?;
-
-    let schedule = event
-        .payload
-        .get("schedule")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AgentError::Internal("automation payload missing 'schedule' field".into())
-        })?;
-
-    let prompt = event
-        .payload
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AgentError::Internal("automation payload missing 'prompt' field".into()))?;
-
-    let target_user_id_str = event
-        .payload
-        .get("target_user_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            AgentError::Internal("automation payload missing 'target_user_id' field".into())
-        })?;
+    let job_name = payload_str(event, "job_name")?;
+    let schedule = payload_str(event, "schedule")?;
+    let prompt = payload_str(event, "prompt")?;
+    let target_user_id_str = payload_str(event, "target_user_id")?;
 
     let target_user_id = uuid::Uuid::parse_str(target_user_id_str)
         .map_err(|e| AgentError::Internal(format!("invalid target_user_id UUID: {e}")))?;
@@ -480,7 +419,6 @@ async fn execute_automation(
         "executing automation evolution"
     );
 
-    // Build the Prompt job payload.
     let job_payload = JobPayload::Prompt {
         text: prompt.to_owned(),
         workspace_id: None,
@@ -489,7 +427,6 @@ async fn execute_automation(
     let payload_bytes = serde_json::to_vec(&job_payload)
         .map_err(|e| AgentError::Internal(format!("failed to serialize job payload: {e}")))?;
 
-    // Create the job via scheduler gRPC.
     let req = scheduler_proto::CreateJobRequest {
         name: job_name.to_owned(),
         owner_type: "user".to_owned(),
@@ -527,11 +464,45 @@ async fn execute_automation(
     Ok(json!({ "job_id": job.id }))
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Extracts a required string field from the event payload.
+fn payload_str<'a>(event: &'a EvolutionEvent, field: &str) -> Result<&'a str, AgentError> {
+    event
+        .payload
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Internal(format!("payload missing '{field}' field")))
+}
+
+/// Extracts an optional string array from the event payload.
+fn payload_string_array(event: &EvolutionEvent, field: &str) -> Vec<String> {
+    event
+        .payload
+        .get(field)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Resolves the instruction overlay directory path (`~/.sober/instructions/`).
 pub(crate) fn resolve_overlay_dir() -> Result<PathBuf, AgentError> {
     let home = std::env::var_os("HOME")
         .ok_or_else(|| AgentError::Internal("HOME environment variable not set".into()))?;
     Ok(PathBuf::from(home).join(".sober").join("instructions"))
+}
+
+/// Resolves the skill directory path (`~/.sober/skills/<name>/`).
+fn resolve_skill_dir(name: &str) -> Result<PathBuf, AgentError> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| AgentError::Internal("HOME environment variable not set".into()))?;
+    Ok(PathBuf::from(home).join(".sober").join("skills").join(name))
 }
 
 #[cfg(test)]
@@ -540,9 +511,15 @@ mod tests {
 
     #[test]
     fn resolve_overlay_dir_returns_expected_path() {
-        // This test relies on HOME being set (standard in CI and dev).
         if let Ok(dir) = resolve_overlay_dir() {
             assert!(dir.to_string_lossy().ends_with(".sober/instructions"));
+        }
+    }
+
+    #[test]
+    fn resolve_skill_dir_returns_expected_path() {
+        if let Ok(dir) = resolve_skill_dir("my-skill") {
+            assert!(dir.to_string_lossy().ends_with(".sober/skills/my-skill"));
         }
     }
 }

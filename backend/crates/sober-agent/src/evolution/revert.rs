@@ -1,9 +1,9 @@
 //! Evolution revert logic.
 //!
 //! Reverts an active evolution event back to its previous state:
-//! - **Instruction** — restores previous overlay or deletes it, reloads mind
 //! - **Plugin** — deletes plugin from registry
 //! - **Skill** — deletes plugin, removes skill file, invalidates skill cache
+//! - **Instruction** — restores previous overlay or deletes it, reloads mind
 //! - **Automation** — cancels scheduled job via scheduler gRPC
 
 use std::sync::Arc;
@@ -17,20 +17,9 @@ use sober_mind::assembly::Mind;
 use sober_plugin::PluginManager;
 use tracing::{info, warn};
 
-use super::executor::EvolutionContext;
-use crate::SharedSchedulerClient;
+use super::executor::{EvolutionContext, evolution_type_str};
 use crate::error::AgentError;
 use crate::grpc::scheduler_proto;
-
-/// Converts an [`EvolutionType`] to a static string for metric labels.
-fn evolution_type_str(t: EvolutionType) -> &'static str {
-    match t {
-        EvolutionType::Plugin => "plugin",
-        EvolutionType::Skill => "skill",
-        EvolutionType::Instruction => "instruction",
-        EvolutionType::Automation => "automation",
-    }
-}
 
 /// Reverts an active evolution event.
 ///
@@ -44,9 +33,11 @@ pub async fn revert_evolution<R: AgentRepos>(
     mind: &Arc<Mind>,
     ctx: &EvolutionContext<R>,
 ) -> Result<(), AgentError> {
+    let type_str = evolution_type_str(event.evolution_type);
+
     info!(
         event_id = %event.id,
-        evolution_type = ?event.evolution_type,
+        evolution_type = type_str,
         title = %event.title,
         "reverting evolution"
     );
@@ -73,16 +64,15 @@ pub async fn revert_evolution<R: AgentRepos>(
                 .await
                 .map_err(|e| AgentError::Internal(format!("failed to set reverted status: {e}")))?;
 
-            metrics::counter!("sober_evolution_reverts_total", "type" => evolution_type_str(event.evolution_type))
-                .increment(1);
+            metrics::counter!("sober_evolution_reverts_total", "type" => type_str).increment(1);
 
-            info!(event_id = %event.id, r#type = ?event.evolution_type, "evolution reverted successfully");
+            info!(event_id = %event.id, evolution_type = type_str, "evolution reverted successfully");
             Ok(())
         }
         Err(e) => {
             warn!(
                 event_id = %event.id,
-                evolution_type = ?event.evolution_type,
+                evolution_type = type_str,
                 error = %e,
                 "evolution revert failed — status unchanged"
             );
@@ -92,20 +82,13 @@ pub async fn revert_evolution<R: AgentRepos>(
 }
 
 /// Deletes a plugin from the registry.
-///
-/// Extracts `plugin_id` from the event's execution result (stored when the
-/// plugin was created). Falls back to looking up by name from the payload.
 async fn revert_plugin<P: PluginRepo>(
     event: &EvolutionEvent,
     plugin_manager: &PluginManager<P>,
 ) -> Result<(), AgentError> {
     let plugin_id = resolve_plugin_id(event, plugin_manager.registry().repo()).await?;
 
-    info!(
-        event_id = %event.id,
-        plugin_id = %plugin_id,
-        "deleting plugin"
-    );
+    info!(event_id = %event.id, plugin_id = %plugin_id, "deleting plugin");
 
     plugin_manager
         .registry()
@@ -113,6 +96,8 @@ async fn revert_plugin<P: PluginRepo>(
         .delete(plugin_id)
         .await
         .map_err(|e| AgentError::Internal(format!("failed to delete plugin: {e}")))?;
+
+    plugin_manager.evict_wasm_host(&plugin_id);
 
     info!(event_id = %event.id, plugin_id = %plugin_id, "plugin deleted");
     Ok(())
@@ -126,13 +111,8 @@ async fn revert_skill<P: PluginRepo>(
 ) -> Result<(), AgentError> {
     let plugin_id = resolve_plugin_id(event, plugin_manager.registry().repo()).await?;
 
-    info!(
-        event_id = %event.id,
-        plugin_id = %plugin_id,
-        "deleting skill plugin"
-    );
+    info!(event_id = %event.id, plugin_id = %plugin_id, "deleting skill plugin");
 
-    // Delete plugin from registry.
     plugin_manager
         .registry()
         .repo()
@@ -142,39 +122,28 @@ async fn revert_skill<P: PluginRepo>(
 
     // Remove skill file from disk (best-effort — the plugin deletion is the
     // important part; the file will just be ignored by the loader if orphaned).
-    let skill_path = event
+    if let Some(path) = event
         .result
         .as_ref()
         .and_then(|r| r.get("skill_path"))
-        .and_then(|v| v.as_str());
-
-    if let Some(path) = skill_path {
-        // The skill directory is the parent of SKILL.md.
-        let skill_dir = std::path::Path::new(path).parent();
-        if let Some(dir) = skill_dir {
-            match tokio::fs::remove_dir_all(dir).await {
-                Ok(()) => {
-                    info!(path = %dir.display(), "skill directory removed");
-                }
-                Err(e) => {
-                    warn!(
-                        path = %dir.display(),
-                        error = %e,
-                        "failed to remove skill directory (non-fatal)"
-                    );
-                }
+        .and_then(|v| v.as_str())
+        && let Some(dir) = std::path::Path::new(path).parent()
+    {
+        match tokio::fs::remove_dir_all(dir).await {
+            Ok(()) => info!(path = %dir.display(), "skill directory removed"),
+            Err(e) => {
+                warn!(path = %dir.display(), error = %e, "failed to remove skill directory (non-fatal)")
             }
         }
     }
 
-    // Invalidate the skill loader cache so the removed skill is no longer discovered.
     plugin_manager.skill_loader().invalidate_cache();
 
     info!(event_id = %event.id, "skill reverted");
     Ok(())
 }
 
-/// Fully implemented: restores previous instruction overlay or removes the overlay file.
+/// Restores previous instruction overlay or removes the overlay file.
 async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<(), AgentError> {
     let file = event
         .payload
@@ -185,14 +154,12 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
     let overlay_dir = super::executor::resolve_overlay_dir()?;
     let overlay_path = overlay_dir.join(file);
 
-    let previous_content = event
+    match event
         .payload
         .get("previous_content")
-        .and_then(|v| v.as_str());
-
-    match previous_content {
+        .and_then(|v| v.as_str())
+    {
         Some(content) => {
-            // Restore previous overlay content.
             std::fs::write(&overlay_path, content).map_err(|e| {
                 AgentError::Internal(format!(
                     "failed to restore overlay file {}: {e}",
@@ -202,8 +169,6 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
             info!(file = %file, "instruction overlay restored to previous content");
         }
         None => {
-            // No previous content — delete the overlay file so the base instruction
-            // takes effect again.
             if overlay_path.exists() {
                 std::fs::remove_file(&overlay_path).map_err(|e| {
                     AgentError::Internal(format!(
@@ -218,7 +183,6 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
         }
     }
 
-    // Reload instructions so the revert takes effect immediately.
     mind.reload_instructions().map_err(|e| {
         AgentError::Internal(format!("failed to reload instructions after revert: {e}"))
     })?;
@@ -227,11 +191,9 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
 }
 
 /// Cancels a scheduled job via the scheduler gRPC service.
-///
-/// Extracts `job_id` from the event's execution result.
 async fn revert_automation(
     event: &EvolutionEvent,
-    scheduler_client: &SharedSchedulerClient,
+    scheduler_client: &crate::SharedSchedulerClient,
 ) -> Result<(), AgentError> {
     let job_id = event
         .result
@@ -242,11 +204,7 @@ async fn revert_automation(
             AgentError::Internal("automation result missing 'job_id' — cannot cancel".into())
         })?;
 
-    info!(
-        event_id = %event.id,
-        job_id = %job_id,
-        "cancelling automation job"
-    );
+    info!(event_id = %event.id, job_id = %job_id, "cancelling automation job");
 
     let req = scheduler_proto::CancelJobRequest {
         job_id: job_id.to_owned(),
@@ -281,7 +239,6 @@ async fn resolve_plugin_id<P: PluginRepo>(
     event: &EvolutionEvent,
     repo: &P,
 ) -> Result<PluginId, AgentError> {
-    // Try result first — stored when the evolution was executed.
     if let Some(id_str) = event
         .result
         .as_ref()
@@ -292,7 +249,6 @@ async fn resolve_plugin_id<P: PluginRepo>(
         return Ok(PluginId::from_uuid(uuid));
     }
 
-    // Fallback: look up by name from the payload.
     let name = event
         .payload
         .get("name")
