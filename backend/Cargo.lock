@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4159,7 +4159,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -4220,7 +4220,7 @@ dependencies = [
 
 [[package]]
 name = "sober-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4244,7 +4244,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4290,7 +4290,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "chrono",
  "metrics",
@@ -4355,7 +4355,7 @@ dependencies = [
 
 [[package]]
 name = "sober-mind"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "metrics",
