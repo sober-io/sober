@@ -13,14 +13,32 @@ describe('auth store', () => {
 	});
 
 	it('setUser updates user and isAuthenticated becomes true', () => {
-		auth.setUser({ id: '1', email: 'a@b.com', username: 'alice', status: 'active' });
+		auth.setUser({
+			id: '1',
+			email: 'a@b.com',
+			username: 'alice',
+			status: 'active',
+			roles: ['user']
+		});
 
-		expect(auth.user).toEqual({ id: '1', email: 'a@b.com', username: 'alice', status: 'active' });
+		expect(auth.user).toEqual({
+			id: '1',
+			email: 'a@b.com',
+			username: 'alice',
+			status: 'active',
+			roles: ['user']
+		});
 		expect(auth.isAuthenticated).toBe(true);
 	});
 
 	it('setUser(null) resets isAuthenticated to false', () => {
-		auth.setUser({ id: '1', email: 'a@b.com', username: 'alice', status: 'active' });
+		auth.setUser({
+			id: '1',
+			email: 'a@b.com',
+			username: 'alice',
+			status: 'active',
+			roles: ['user']
+		});
 		expect(auth.isAuthenticated).toBe(true);
 
 		auth.setUser(null);

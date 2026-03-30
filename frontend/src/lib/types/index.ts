@@ -5,6 +5,7 @@ export interface User {
 	email: string;
 	username: string;
 	status: string;
+	roles: string[];
 }
 
 export type ConversationKind = 'direct' | 'group' | 'inbox';
