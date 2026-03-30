@@ -8,6 +8,8 @@ use crate::frontmatter::SkillFrontmatter;
 /// Where a skill was discovered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillSource {
+    /// System-level: `workspace_root/.sober/skills/` (configurable at startup).
+    System,
     /// User-level: `~/.sober/skills/` or `~/.agents/skills/`
     User,
     /// Workspace-level: `.sober/skills/` or `.agents/skills/`

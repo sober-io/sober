@@ -9,7 +9,9 @@
 
 use std::sync::Arc;
 
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_core::types::{
     AuditLogRepo, ConversationId, CreateAuditLog, NewSecret, SecretRepo, UserId,
 };
@@ -245,7 +247,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for StoreSecretToo
                 "required": ["name", "secret_type", "data"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -258,7 +261,7 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for StoreSecretToo
 // ReadSecretTool
 // ---------------------------------------------------------------------------
 
-/// Decrypts and returns a secret. Marked `internal: true` so results are
+/// Decrypts and returns a secret. Marked `redacted: true` so results are
 /// filtered from WebSocket delivery.
 pub struct ReadSecretTool<S: SecretRepo, A: AuditLogRepo> {
     ctx: Arc<SecretToolContext<S, A>>,
@@ -342,7 +345,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for ReadSecretTool
                 "required": ["name"]
             }),
             context_modifying: false,
-            internal: true,
+            redacted: true,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -437,7 +441,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for ListSecretsToo
                 }
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -529,7 +534,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for DeleteSecretTo
                 "required": ["name"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

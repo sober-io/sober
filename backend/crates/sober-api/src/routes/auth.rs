@@ -131,19 +131,34 @@ async fn logout(
     ))
 }
 
-/// `GET /api/v1/auth/me` — returns the current authenticated user.
+/// `GET /api/v1/auth/me` — returns the current authenticated user with roles.
 async fn me(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let user = sober_db::PgUserRepo::new(state.db.clone());
-    let user = sober_core::types::UserRepo::get_by_id(&user, auth_user.user_id).await?;
+    use sober_core::types::{RoleRepo, UserRepo};
+    let user_repo = sober_db::PgUserRepo::new(state.db.clone());
+    let role_repo = sober_db::PgRoleRepo::new(state.db.clone());
+    let user = user_repo.get_by_id(auth_user.user_id).await?;
+    let roles = role_repo
+        .get_roles_for_user(auth_user.user_id)
+        .await
+        .unwrap_or_default();
+    let role_names: Vec<&str> = roles
+        .iter()
+        .map(|r| match r {
+            sober_core::types::RoleKind::User => "user",
+            sober_core::types::RoleKind::Admin => "admin",
+            sober_core::types::RoleKind::Custom(name) => name.as_str(),
+        })
+        .collect();
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": user.id.to_string(),
         "email": user.email,
         "username": user.username,
         "status": format!("{:?}", user.status),
+        "roles": role_names,
     })))
 }
 

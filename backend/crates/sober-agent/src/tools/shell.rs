@@ -13,7 +13,9 @@ use sober_core::PermissionMode;
 use sober_core::types::ids::UserId;
 use sober_core::types::input::CreateSandboxExecutionLog;
 use sober_core::types::repo::SandboxExecutionLogRepo;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
 use sober_workspace::SnapshotManager;
@@ -269,7 +271,8 @@ impl Tool for ShellTool {
                 "required": ["command"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

@@ -427,6 +427,66 @@ pub enum ToolExecutionStatus {
     Cancelled,
 }
 
+/// The kind of self-evolution event.
+///
+/// Maps to the `evolution_type` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "evolution_type", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum EvolutionType {
+    /// WASM binary tool via sober-plugin-gen.
+    Plugin,
+    /// Prompt-based skill (PluginKind::Skill).
+    Skill,
+    /// Instruction overlay file modification.
+    Instruction,
+    /// Scheduled job creation.
+    Automation,
+}
+
+/// Lifecycle status of an evolution event.
+///
+/// Maps to the `evolution_status` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "evolution_status", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum EvolutionStatus {
+    /// Agent created the proposal, awaiting approval.
+    Proposed,
+    /// Approved (auto or manual), queued for execution.
+    Approved,
+    /// Execution engine is processing.
+    Executing,
+    /// Evolution is live and in use.
+    Active,
+    /// Execution failed. Admin can retry.
+    Failed,
+    /// Admin rejected the proposal.
+    Rejected,
+    /// Previously active evolution was rolled back.
+    Reverted,
+}
+
+/// Autonomy level for a type of evolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyLevel {
+    /// Proposals auto-approve (skip proposed state).
+    Auto,
+    /// Proposals require admin approval.
+    ApprovalRequired,
+    /// Evolution type is disabled entirely.
+    Disabled,
+}
+
 /// Authorization role kind.
 ///
 /// Known roles have dedicated variants for compile-time safety.
@@ -773,6 +833,118 @@ mod tests {
             let deserialized: RoleKind = serde_json::from_str(&json).unwrap();
             assert_eq!(variant, deserialized);
         }
+    }
+
+    #[test]
+    fn evolution_type_serde_roundtrip() {
+        for variant in [
+            EvolutionType::Plugin,
+            EvolutionType::Skill,
+            EvolutionType::Instruction,
+            EvolutionType::Automation,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: EvolutionType = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn evolution_status_serde_roundtrip() {
+        for variant in [
+            EvolutionStatus::Proposed,
+            EvolutionStatus::Approved,
+            EvolutionStatus::Executing,
+            EvolutionStatus::Active,
+            EvolutionStatus::Failed,
+            EvolutionStatus::Rejected,
+            EvolutionStatus::Reverted,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: EvolutionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn autonomy_level_serde_roundtrip() {
+        for variant in [
+            AutonomyLevel::Auto,
+            AutonomyLevel::ApprovalRequired,
+            AutonomyLevel::Disabled,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: AutonomyLevel = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn evolution_type_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&EvolutionType::Plugin).unwrap(),
+            "\"plugin\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionType::Skill).unwrap(),
+            "\"skill\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionType::Instruction).unwrap(),
+            "\"instruction\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionType::Automation).unwrap(),
+            "\"automation\""
+        );
+    }
+
+    #[test]
+    fn evolution_status_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Proposed).unwrap(),
+            "\"proposed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Approved).unwrap(),
+            "\"approved\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Executing).unwrap(),
+            "\"executing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Active).unwrap(),
+            "\"active\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Rejected).unwrap(),
+            "\"rejected\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EvolutionStatus::Reverted).unwrap(),
+            "\"reverted\""
+        );
+    }
+
+    #[test]
+    fn autonomy_level_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&AutonomyLevel::Auto).unwrap(),
+            "\"auto\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AutonomyLevel::ApprovalRequired).unwrap(),
+            "\"approval_required\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AutonomyLevel::Disabled).unwrap(),
+            "\"disabled\""
+        );
     }
 
     #[test]

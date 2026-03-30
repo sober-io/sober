@@ -160,6 +160,11 @@ define_id!(
     ToolExecutionId
 );
 
+define_id!(
+    /// Unique identifier for an evolution event.
+    EvolutionEventId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);

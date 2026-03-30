@@ -4,7 +4,9 @@
 //! conversationally. Dispatches on an `action` field to the appropriate
 //! scheduler gRPC call.
 
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use uuid::Uuid;
 
 use crate::SharedSchedulerClient;
@@ -762,7 +764,8 @@ impl Tool for SchedulerTools {
                 "required": ["action"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

@@ -12,7 +12,9 @@ use sober_core::types::enums::ArtifactKind;
 use sober_core::types::ids::{ArtifactId, ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::{ArtifactFilter, CreateArtifact, CreateAuditLog};
 use sober_core::types::repo::{ArtifactRepo, AuditLogRepo};
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_workspace::SnapshotManager;
 use uuid::Uuid;
 
@@ -158,7 +160,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for CreateSnaps
                 }
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -234,7 +237,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for ListSnapsho
                 "properties": {}
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -376,7 +380,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for RestoreSnap
                 "required": ["artifact_id"]
             }),
             context_modifying: true,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

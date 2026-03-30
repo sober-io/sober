@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use sober_core::types::tool::{Tool, ToolMetadata};
+use sober_core::types::access::TriggerKind;
+use sober_core::types::tool::{Tool, ToolMetadata, ToolVisibility};
 use sober_llm::types::{FunctionDefinition, ToolDefinition};
 
 /// Registry that holds a set of tools and provides lookup by name.
@@ -50,6 +51,30 @@ impl ToolRegistry {
         self.tools
             .iter()
             .filter(|t| !exclude.contains(&t.metadata().name.as_str()))
+            .map(|t| {
+                let meta = t.metadata();
+                ToolDefinition {
+                    r#type: "function".to_owned(),
+                    function: FunctionDefinition {
+                        name: meta.name,
+                        description: meta.description,
+                        parameters: meta.input_schema,
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// Returns tool definitions filtered by trigger visibility.
+    pub fn tool_definitions_for_trigger(&self, trigger: TriggerKind) -> Vec<ToolDefinition> {
+        self.tools
+            .iter()
+            .filter(|t| match t.metadata().visibility {
+                ToolVisibility::Public => true,
+                ToolVisibility::Internal => {
+                    matches!(trigger, TriggerKind::Scheduler | TriggerKind::Admin)
+                }
+            })
             .map(|t| {
                 let meta = t.metadata();
                 ToolDefinition {
@@ -115,7 +140,8 @@ mod tests {
                     "properties": {}
                 }),
                 context_modifying: false,
-                internal: false,
+                redacted: false,
+                visibility: ToolVisibility::Public,
             }
         }
 

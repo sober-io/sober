@@ -13,6 +13,17 @@ use serde::{Deserialize, Serialize};
 pub type BoxToolFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + 'a>>;
 
+/// Controls which trigger types can see this tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolVisibility {
+    /// Available to all triggers (Human, Scheduler, Admin, Replica).
+    #[default]
+    Public,
+    /// Only available to Scheduler and Admin triggers.
+    Internal,
+}
+
 /// Metadata describing a tool's capabilities and input schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolMetadata {
@@ -25,9 +36,11 @@ pub struct ToolMetadata {
     /// If `true`, executing this tool may invalidate loaded context
     /// (e.g. memory writes, file modifications).
     pub context_modifying: bool,
-    /// If `true`, this tool's results contain sensitive data (e.g. decrypted
-    /// secret values) and must not be forwarded to WebSocket clients.
-    pub internal: bool,
+    /// If `true`, tool output contains sensitive data and must not be
+    /// forwarded to WebSocket clients (e.g. decrypted secrets).
+    pub redacted: bool,
+    /// Controls which trigger types can see this tool.
+    pub visibility: ToolVisibility,
 }
 
 /// Output returned by a tool execution.

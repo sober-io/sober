@@ -87,11 +87,11 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 
 | Crate | Responsibility |
 |-------|---------------|
-| `sober-core` | Shared types, error handling, config, domain primitives |
-| `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`) |
+| `sober-core` | Shared types, error handling, config, domain primitives. Includes evolution types (`EvolutionEvent`, `EvolutionType`, `EvolutionStatus`, `EvolutionConfigRow`), `EvolutionRepo` trait, and `EvolutionConfig` (interval). |
+| `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`). Includes `PgEvolutionRepo` for `evolution_events` and `evolution_config` tables. |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
 | `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
-| `sober-agent` | **Binary crate (gRPC server process).** Actor-model agent: one `ConversationActor` per conversation ensures sequential message processing. Write-ahead persistence for tool executions with crash recovery. Real-time LLM streaming. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
+| `sober-agent` | **Binary crate (gRPC server process).** Actor-model agent: one `ConversationActor` per conversation ensures sequential message processing. Write-ahead persistence for tool executions with crash recovery. Real-time LLM streaming. Self-evolution loop: periodic detection job, `propose_*` tools, execution engine, and revert logic. `ExecuteEvolution` / `RevertEvolution` gRPC RPCs. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
 | `sober-plugin` | Plugin registry, WASM host functions (13 host functions via Extism), backend service traits, audit pipeline, blob-backed storage |
 | `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
 | `sober-skill` | Skill discovery, loading, and activation. Provides `SkillCatalog`, `SkillLoader`, `ActivateSkillTool`, frontmatter parsing. |
@@ -99,7 +99,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
 | `sober-cli` | Unified CLI: config, user management, migrations (offline, direct DB), scheduler control (runtime, via UDS) |
-| `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection |
+| `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection. Instruction overlay loading for evolution-generated overrides with guardrail blocklist. |
 | `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering via UDS proxy bridge, audit |
@@ -347,11 +347,92 @@ Plugins declare capabilities in a TOML manifest (`plugin.toml`) and export tool 
 
 ---
 
+## Self-Evolution
+
+The agent autonomously proposes improvements by analysing conversation patterns.
+All changes are tracked in the `evolution_events` table, configurable per type,
+and revertible.
+
+### Evolution Types
+
+| Type | Output | Infrastructure |
+|------|--------|---------------|
+| **Plugin** | WASM binary tool | `sober-plugin-gen` → `sober-plugin` registry |
+| **Skill** | Prompt-based skill file | `sober-skill` catalog reload |
+| **Instruction** | Instruction overlay file | `sober-mind` overlay loader (guardrail blocklist enforced) |
+| **Automation** | Scheduled job | `sober-scheduler` via gRPC |
+
+### Lifecycle
+
+```
+Proposed → Approved → Executing → Active
+    │          │           │
+    ▼          ▼           ▼
+ Rejected    (fail→Failed) Failed
+                            │
+                         Reverted
+```
+
+Status transitions are recorded in `status_history` (JSONB array with timestamps).
+
+### Detection & Proposal Loop
+
+The scheduler triggers a `self_evolution_check` system job on a configurable
+interval (default: 2 hours). The job runs as a conversation turn inside the
+agent with internal-visibility instructions and four `propose_*` tools:
+
+1. **Gather** — query recent conversations and active evolutions (no LLM tokens).
+2. **Detect** — LLM analyses patterns and calls `propose_tool`, `propose_skill`,
+   `propose_instruction`, or `propose_automation`.
+3. **Auto-approve** — proposals whose type has `autonomy = auto` are approved
+   immediately (subject to daily rate limit).
+4. **Execute** — approved proposals are executed in the same cycle.
+
+### Execution & Revert
+
+`ExecuteEvolution` and `RevertEvolution` are gRPC RPCs on the agent service.
+The API calls them when an admin approves or reverts via the web UI or CLI.
+
+Each type has a dedicated executor and reverter in `sober-agent::evolution`:
+
+| Type | Execute | Revert |
+|------|---------|--------|
+| Plugin | Generate WASM → register in plugin system | Delete plugin |
+| Skill | Generate skill file → register plugin + reload catalog | Delete plugin + skill file, reload |
+| Instruction | Write overlay file → reload instructions | Remove overlay (or restore previous), reload |
+| Automation | Create scheduled job | Cancel job |
+
+### Autonomy Configuration
+
+Stored in the `evolution_config` singleton table. Each type has an independent
+`AutonomyLevel`: `Auto`, `ApprovalRequired`, or `Disabled`. Defaults:
+
+- Plugins / Instructions → `ApprovalRequired` (broader impact)
+- Skills / Automations → `Auto` (lower risk, easily reverted)
+
+### Rate Limits
+
+| Limit | Value |
+|-------|-------|
+| Max proposals per cycle | 5 |
+| Max auto-approvals per day | 3 |
+| Max concurrent executing | 2 |
+
+### Safety
+
+- **Guardrail blocklist** — instruction evolutions cannot modify files with
+  `category: guardrail` frontmatter or files on a hardcoded blocklist.
+- **Deduplication** — unique DB index on `(evolution_type, title)` for active
+  events, plus tool-level and prompt-level duplicate checks.
+- **Audit trail** — every status transition is persisted with timestamp.
+
+---
+
 ## Data Storage
 
 | Store | Engine | Purpose |
 |-------|--------|---------|
-| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions, workspace settings |
+| Primary DB | PostgreSQL 17 | Users, groups, permissions, audit logs, plugin registry, conversation messages, tool executions, workspace settings, evolution events + config |
 | Vector Store | Qdrant | Embeddings, similarity search, knowledge retrieval |
 | Cache | In-memory (moka) | Route/session caching with PostgreSQL-backed sessions |
 | Code Store | Git (libgit2) | Versioned user-generated code, plugin source |

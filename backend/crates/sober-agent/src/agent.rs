@@ -225,6 +225,16 @@ impl<R: AgentRepos> Agent<R> {
         &self.repos
     }
 
+    /// Returns a reference to the LLM engine.
+    pub fn llm(&self) -> &Arc<dyn LlmEngine> {
+        &self.llm
+    }
+
+    /// Returns the LLM config (model settings).
+    pub fn llm_config(&self) -> &Option<LlmConfig> {
+        &self.llm_config
+    }
+
     /// Returns the tool bootstrap for enumerating built-in tools.
     pub fn tool_bootstrap(&self) -> &ToolBootstrap<R> {
         &self.tool_bootstrap

@@ -5,6 +5,7 @@ export interface User {
 	email: string;
 	username: string;
 	status: string;
+	roles: string[];
 }
 
 export type ConversationKind = 'direct' | 'group' | 'inbox';
@@ -221,4 +222,41 @@ export interface ApiError {
 export interface SkillInfo {
 	name: string;
 	description: string;
+}
+
+export type EvolutionType = 'plugin' | 'skill' | 'instruction' | 'automation';
+export type EvolutionStatus =
+	| 'proposed'
+	| 'approved'
+	| 'executing'
+	| 'active'
+	| 'failed'
+	| 'rejected'
+	| 'reverted';
+export type AutonomyLevel = 'auto' | 'approval_required' | 'disabled';
+
+export interface EvolutionEvent {
+	id: string;
+	evolution_type: EvolutionType;
+	user_id: string | null;
+	title: string;
+	description: string;
+	confidence: number;
+	source_count: number;
+	status: EvolutionStatus;
+	payload: Record<string, unknown>;
+	result: Record<string, unknown> | null;
+	status_history: Array<{ status: string; at: string; by?: string | null }>;
+	decided_by: string | null;
+	reverted_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface EvolutionConfig {
+	interval: string;
+	plugin_autonomy: AutonomyLevel;
+	skill_autonomy: AutonomyLevel;
+	instruction_autonomy: AutonomyLevel;
+	automation_autonomy: AutonomyLevel;
 }

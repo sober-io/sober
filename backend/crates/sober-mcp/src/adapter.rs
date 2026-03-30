@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use sober_core::types::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility};
 use tokio::sync::Mutex;
 
 use crate::client::McpClient;
@@ -56,7 +56,8 @@ impl Tool for McpToolAdapter {
             description: self.tool_info.description.clone().unwrap_or_default(),
             input_schema: self.tool_info.input_schema.clone(),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

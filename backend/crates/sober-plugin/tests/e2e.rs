@@ -298,7 +298,7 @@ async fn plugin_tool_execute_returns_echoed_content() {
     assert_eq!(metadata.name, "greet");
     assert_eq!(metadata.description, "Echoes the input back");
     assert!(!metadata.context_modifying);
-    assert!(!metadata.internal);
+    assert!(!metadata.redacted);
 
     // Execute through the Tool trait
     let input = serde_json::json!({"greeting": "hello"});

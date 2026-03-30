@@ -8,7 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    ArtifactKind, ArtifactState, PluginKind, PluginOrigin, PluginScope, PluginStatus,
+    ArtifactKind, ArtifactState, EvolutionStatus, EvolutionType, PluginKind, PluginOrigin,
+    PluginScope, PluginStatus,
 };
 use super::ids::{ArtifactId, ConversationId, PluginId, UserId, WorkspaceId};
 
@@ -317,4 +318,25 @@ pub struct PluginFilter {
     pub workspace_id: Option<WorkspaceId>,
     /// Filter by status.
     pub status: Option<PluginStatus>,
+}
+
+/// Input for creating an evolution event.
+#[derive(Debug, Clone)]
+pub struct CreateEvolutionEvent {
+    /// Type of evolution.
+    pub evolution_type: EvolutionType,
+    /// Human-readable title.
+    pub title: String,
+    /// Agent's reasoning and evidence.
+    pub description: String,
+    /// Confidence score.
+    pub confidence: f32,
+    /// Source conversation count.
+    pub source_count: i32,
+    /// Initial status (proposed or approved for auto-approve).
+    pub status: EvolutionStatus,
+    /// Type-specific payload.
+    pub payload: serde_json::Value,
+    /// Whose patterns triggered this.
+    pub user_id: Option<UserId>,
 }

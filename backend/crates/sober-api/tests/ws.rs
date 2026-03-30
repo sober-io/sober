@@ -169,6 +169,20 @@ impl proto::agent_service_server::AgentService for MockAgentService {
         }))
     }
 
+    async fn execute_evolution(
+        &self,
+        _request: tonic::Request<proto::ExecuteEvolutionRequest>,
+    ) -> Result<tonic::Response<proto::ExecuteEvolutionResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
+    async fn revert_evolution(
+        &self,
+        _request: tonic::Request<proto::RevertEvolutionRequest>,
+    ) -> Result<tonic::Response<proto::RevertEvolutionResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not used in tests"))
+    }
+
     async fn health(
         &self,
         _request: tonic::Request<proto::HealthRequest>,

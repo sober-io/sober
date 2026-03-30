@@ -25,7 +25,7 @@ pub mod soul;
 pub use access::is_visible;
 pub use assembly::Mind;
 pub use error::MindError;
-pub use evolution::{EvolutionAuditEntry, EvolutionDecision, TraitCandidate};
+pub use evolution::{EvolutionAuditEntry, EvolutionDecision, TraitCandidate, is_guardrail_file};
 pub use frontmatter::{InstructionCategory, InstructionFrontmatter, Visibility};
 pub use injection::{InjectionVerdict, classify_input};
 pub use instructions::{InstructionFile, InstructionLoader};

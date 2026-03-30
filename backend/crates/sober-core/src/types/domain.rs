@@ -8,13 +8,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    AgentMode, ArtifactKind, ArtifactState, ConversationKind, ConversationUserRole, JobStatus,
-    MessageRole, PermissionMode, PluginKind, PluginOrigin, PluginScope, PluginStatus,
-    SandboxNetMode, UserStatus, WorkspaceState, WorktreeState,
+    AgentMode, ArtifactKind, ArtifactState, AutonomyLevel, ConversationKind, ConversationUserRole,
+    EvolutionStatus, EvolutionType, JobStatus, MessageRole, PermissionMode, PluginKind,
+    PluginOrigin, PluginScope, PluginStatus, SandboxNetMode, UserStatus, WorkspaceState,
+    WorktreeState,
 };
 use super::ids::{
-    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, JobId, JobRunId, MessageId, PluginId,
-    RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, EvolutionEventId, JobId, JobRunId,
+    MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId,
+    WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -563,6 +565,56 @@ pub struct Observation {
     pub confidence: f32,
     /// ISO 8601 timestamp of when this was observed.
     pub observed_at: String,
+}
+
+/// A self-evolution event (proposed, active, or historical).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionEvent {
+    /// Unique identifier.
+    pub id: EvolutionEventId,
+    /// Type of evolution.
+    pub evolution_type: EvolutionType,
+    /// Whose patterns triggered this (attribution, not ownership).
+    pub user_id: Option<UserId>,
+    /// Human-readable title.
+    pub title: String,
+    /// Agent's reasoning and evidence.
+    pub description: String,
+    /// LLM-generated confidence score (0.0--1.0).
+    pub confidence: f32,
+    /// Number of conversations that triggered detection.
+    pub source_count: i32,
+    /// Current lifecycle status.
+    pub status: EvolutionStatus,
+    /// Type-specific data (plugin manifest, skill content, etc.).
+    pub payload: serde_json::Value,
+    /// Execution result (plugin ID, skill path, job ID, error).
+    pub result: Option<serde_json::Value>,
+    /// Ordered status transitions with timestamps.
+    pub status_history: serde_json::Value,
+    /// Who approved/rejected (NULL = auto).
+    pub decided_by: Option<UserId>,
+    /// When the evolution was reverted.
+    pub reverted_at: Option<DateTime<Utc>>,
+    /// When the event was created.
+    pub created_at: DateTime<Utc>,
+    /// When the event was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// DB-backed autonomy configuration for self-evolution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionConfigRow {
+    /// Autonomy level for plugin evolutions.
+    pub plugin_autonomy: AutonomyLevel,
+    /// Autonomy level for skill evolutions.
+    pub skill_autonomy: AutonomyLevel,
+    /// Autonomy level for instruction evolutions.
+    pub instruction_autonomy: AutonomyLevel,
+    /// Autonomy level for automation evolutions.
+    pub automation_autonomy: AutonomyLevel,
+    /// When the config was last updated.
+    pub updated_at: DateTime<Utc>,
 }
 
 #[cfg(test)]

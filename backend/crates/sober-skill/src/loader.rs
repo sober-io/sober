@@ -31,15 +31,24 @@ struct CachedCatalog {
 pub struct SkillLoader {
     cache: RwLock<HashMap<(PathBuf, PathBuf), CachedCatalog>>,
     ttl: Duration,
+    /// System-level skills directory (e.g. `workspace_root/.sober/skills/`).
+    system_dir: Option<PathBuf>,
 }
 
 impl SkillLoader {
-    /// Creates a new `SkillLoader` with the given cache TTL.
-    pub fn new(ttl: Duration) -> Self {
+    /// Creates a new `SkillLoader` with the given cache TTL and optional
+    /// system-level skills directory.
+    pub fn new(ttl: Duration, system_dir: Option<PathBuf>) -> Self {
         Self {
             cache: RwLock::new(HashMap::new()),
             ttl,
+            system_dir,
         }
+    }
+
+    /// Returns the system-level skills directory, if configured.
+    pub fn system_dir(&self) -> Option<&Path> {
+        self.system_dir.as_deref()
     }
 
     /// Invalidates all cached catalogs, forcing a rescan on the next `load()` call.
@@ -106,7 +115,15 @@ impl SkillLoader {
     ) -> Result<SkillCatalog, SkillError> {
         let mut skills = HashMap::new();
 
-        // Scan user-level directories first (lower priority)
+        // Scan system-level directory first (lowest priority)
+        if let Some(system_dir) = &self.system_dir
+            && system_dir.is_dir()
+        {
+            self.scan_directory(system_dir, SkillSource::System, &mut skills)
+                .await;
+        }
+
+        // Scan user-level directories (overwrites system)
         for subdir in SKILL_SUBDIRS {
             let dir = user_home.join(subdir);
             if dir.is_dir() {
@@ -115,7 +132,7 @@ impl SkillLoader {
             }
         }
 
-        // Scan workspace-level directories (higher priority — overwrites user)
+        // Scan workspace-level directories (highest priority — overwrites user)
         for subdir in SKILL_SUBDIRS {
             let dir = workspace_root.join(subdir);
             if dir.is_dir() {
@@ -168,20 +185,18 @@ impl SkillLoader {
             match self.load_skill(&skill_md, &path, source).await {
                 Ok(entry_val) => {
                     let skill_name = entry_val.frontmatter.name.clone();
-                    if skills.contains_key(&skill_name) && source == SkillSource::User {
+                    if let Some(existing) = skills.get(&skill_name) {
+                        if existing.source == source {
+                            debug!(skill_name, "skill already loaded from same scope");
+                            continue;
+                        }
                         debug!(
                             skill_name,
-                            "skill already loaded from higher-priority scope"
-                        );
-                        continue;
-                    }
-                    if skills.contains_key(&skill_name) {
-                        warn!(
-                            skill_name,
-                            "skill name collision — overriding with {:?}", source
+                            "overriding {:?} skill with {:?}", existing.source, source
                         );
                     }
                     let source_label = match source {
+                        SkillSource::System => "system",
                         SkillSource::User => "user",
                         SkillSource::Workspace => "workspace",
                     };
@@ -271,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn loads_valid_skills_from_directory() {
         let (_tmp, user_home) = setup_user_home();
-        let loader = SkillLoader::new(Duration::from_secs(300));
+        let loader = SkillLoader::new(Duration::from_secs(300), None);
         let catalog = loader
             .load(&user_home, &PathBuf::from("/nonexistent"))
             .await
@@ -284,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn skips_malformed_frontmatter() {
         let (_tmp, user_home) = setup_user_home();
-        let loader = SkillLoader::new(Duration::from_secs(300));
+        let loader = SkillLoader::new(Duration::from_secs(300), None);
         let catalog = loader
             .load(&user_home, &PathBuf::from("/nonexistent"))
             .await
@@ -296,7 +311,7 @@ mod tests {
     #[tokio::test]
     async fn skips_missing_description() {
         let (_tmp, user_home) = setup_user_home();
-        let loader = SkillLoader::new(Duration::from_secs(300));
+        let loader = SkillLoader::new(Duration::from_secs(300), None);
         let catalog = loader
             .load(&user_home, &PathBuf::from("/nonexistent"))
             .await
@@ -308,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn warns_on_bad_name() {
         let (_tmp, user_home) = setup_user_home();
-        let loader = SkillLoader::new(Duration::from_secs(300));
+        let loader = SkillLoader::new(Duration::from_secs(300), None);
         let catalog = loader
             .load(&user_home, &PathBuf::from("/nonexistent"))
             .await
@@ -321,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn caches_results_within_ttl() {
         let (_tmp, user_home) = setup_user_home();
-        let loader = SkillLoader::new(Duration::from_secs(300));
+        let loader = SkillLoader::new(Duration::from_secs(300), None);
         let empty = PathBuf::from("/nonexistent");
 
         let cat1 = loader.load(&user_home, &empty).await.unwrap();
@@ -352,7 +367,7 @@ mod tests {
         )
         .unwrap();
 
-        let loader = SkillLoader::new(Duration::from_secs(0));
+        let loader = SkillLoader::new(Duration::from_secs(0), None);
         let catalog = loader.load(&user_dir, &ws_dir).await.unwrap();
 
         let entry = catalog.get("my-skill").unwrap();

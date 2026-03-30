@@ -11,6 +11,7 @@ use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
 
 mod agent;
+mod evolution;
 mod plugins;
 mod tasks;
 
@@ -273,6 +274,20 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         request: Request<proto::ListToolsRequest>,
     ) -> Result<Response<proto::ListToolsResponse>, Status> {
         plugins::handle_list_tools(self, request).await
+    }
+
+    async fn execute_evolution(
+        &self,
+        request: Request<proto::ExecuteEvolutionRequest>,
+    ) -> Result<Response<proto::ExecuteEvolutionResponse>, Status> {
+        evolution::handle_execute(self, request).await
+    }
+
+    async fn revert_evolution(
+        &self,
+        request: Request<proto::RevertEvolutionRequest>,
+    ) -> Result<Response<proto::RevertEvolutionResponse>, Status> {
+        evolution::handle_revert(self, request).await
     }
 }
 

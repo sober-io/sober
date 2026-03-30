@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use metrics::{counter, histogram};
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use tokio::fs;
 
 use crate::catalog::SkillCatalog;
@@ -160,7 +162,8 @@ impl Tool for ActivateSkillTool {
                 "required": ["name"]
             }),
             context_modifying: false,
-            internal: true,
+            redacted: true,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -285,7 +288,7 @@ mod tests {
 
         assert_eq!(meta.name, "activate_skill");
         assert!(!meta.context_modifying);
-        assert!(meta.internal);
+        assert!(meta.redacted);
 
         let schema = &meta.input_schema;
         let enum_values = schema["properties"]["name"]["enum"].as_array().unwrap();

@@ -8,15 +8,20 @@
 use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::access::{CallerContext, TriggerKind};
+use sober_core::types::enums::EvolutionStatus;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
+use sober_core::types::repo::EvolutionRepo;
 use tonic::Status;
-use tracing::error;
+use tracing::{error, info, warn};
 
 use std::sync::Arc;
 
 use crate::agent::Agent;
+use crate::evolution::detection::{gather_conversation_summary, run_detection_llm};
+use crate::evolution::{EvolutionContext, execute_evolution};
 use crate::grpc::proto;
 use crate::stream::AgentEvent;
+use crate::system_jobs::SELF_EVOLUTION_CHECK_PROMPT;
 
 /// Executes a typed [`JobPayload`], dispatching to the appropriate handler.
 pub(crate) async fn execute_typed_payload<R: AgentRepos>(
@@ -29,6 +34,10 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
 ) {
     match payload {
+        JobPayload::Prompt { ref text, .. } if text == SELF_EVOLUTION_CHECK_PROMPT => {
+            // Custom handler: 4-phase self-evolution cycle.
+            execute_self_evolution_check(agent, task_id, tx).await;
+        }
         JobPayload::Prompt { text, .. } => {
             // Resolve delivery conversation for the result.
             let resolved_cid = if let Some(uid) = user_id {
@@ -46,7 +55,7 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
             } else {
                 // No conversation context — use autonomous prompt assembly.
                 // This validates the SOUL.md chain and prompt construction for
-                // system-level scheduled jobs (e.g. trait_evolution_check).
+                // system-level scheduled jobs.
                 let caller = CallerContext {
                     user_id,
                     trigger: TriggerKind::Scheduler,
@@ -104,6 +113,176 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
             let _ = tx.send(Ok(proto_event)).await;
         }
     }
+}
+
+/// Runs the 4-phase self-evolution check cycle.
+///
+/// This is the custom handler for the `self_evolution_check` system job.
+/// Instead of sending a prompt to the LLM, it:
+///
+/// 1. **Execute approved** — queries approved evolution events and executes them.
+/// 2. **Gather data** — queries recent conversations for pattern detection.
+/// 3. **Active context** — loads active evolutions for detection context.
+/// 4. **Detect** — calls the LLM with a structured prompt and propose_* tools
+///    to detect new evolution opportunities from conversation patterns.
+///
+/// After detection, executes any newly auto-approved events.
+async fn execute_self_evolution_check<R: AgentRepos>(
+    agent: &Arc<Agent<R>>,
+    task_id: &str,
+    tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
+) {
+    info!(task_id = %task_id, "starting self-evolution check cycle");
+    let cycle_start = std::time::Instant::now();
+
+    let Some(plugin_generator) = agent.tool_bootstrap().plugin_generator.clone() else {
+        warn!(task_id = %task_id, "plugin generator not configured — skipping evolution cycle");
+        send_done_stub(tx).await;
+        return;
+    };
+
+    let evo_ctx = EvolutionContext {
+        scheduler_client: std::sync::Arc::clone(&agent.tool_bootstrap().scheduler_client),
+        plugin_manager: std::sync::Arc::clone(&agent.tool_bootstrap().plugin_manager),
+        plugin_generator,
+        evolution_config: agent.tool_bootstrap().evolution_config.clone(),
+    };
+
+    // -----------------------------------------------------------------------
+    // Phase 1: Execute pending approved evolution events
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 1: executing approved evolution events");
+
+    let approved_events = match agent
+        .repos()
+        .evolution()
+        .list(None, Some(EvolutionStatus::Approved))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query approved evolution events");
+            vec![]
+        }
+    };
+
+    let approved_count = approved_events.len();
+    if approved_count > 0 {
+        info!(
+            task_id = %task_id,
+            count = approved_count,
+            "found approved evolution events to execute"
+        );
+    }
+
+    for event in &approved_events {
+        if let Err(e) = execute_evolution(event, agent.repos(), agent.mind(), &evo_ctx).await {
+            warn!(
+                task_id = %task_id,
+                event_id = %event.id,
+                error = %e,
+                "failed to execute approved evolution event"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Gather recent conversation data for pattern detection
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 2: gathering conversation data");
+
+    let conversation_summary = gather_conversation_summary(agent, &evo_ctx.evolution_config).await;
+
+    // -----------------------------------------------------------------------
+    // Phase 3: Load active evolutions for context
+    // -----------------------------------------------------------------------
+    info!(task_id = %task_id, "phase 3: loading active evolution context");
+
+    let active_events = match agent.repos().evolution().list_active().await {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query active evolution events");
+            vec![]
+        }
+    };
+
+    let active_context = if active_events.is_empty() {
+        "No active evolutions.".to_owned()
+    } else {
+        active_events
+            .iter()
+            .map(|e| {
+                format!(
+                    "- [{}] {} (type: {:?}, since: {})",
+                    e.id, e.title, e.evolution_type, e.updated_at
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // -----------------------------------------------------------------------
+    // Phase 4: Detection — build prompt and call LLM
+    // -----------------------------------------------------------------------
+    info!(
+        task_id = %task_id,
+        active_evolutions = active_events.len(),
+        "phase 4: running LLM detection"
+    );
+
+    run_detection_llm(
+        agent,
+        &evo_ctx.evolution_config,
+        &conversation_summary,
+        &active_context,
+        task_id,
+    )
+    .await;
+
+    // -----------------------------------------------------------------------
+    // Post-detection: execute any newly auto-approved events
+    // -----------------------------------------------------------------------
+    let post_approved = match agent
+        .repos()
+        .evolution()
+        .list(None, Some(EvolutionStatus::Approved))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to query post-detection approved events");
+            vec![]
+        }
+    };
+
+    let new_approved: Vec<_> = post_approved
+        .iter()
+        .filter(|e| !approved_events.iter().any(|prev| prev.id == e.id))
+        .collect();
+
+    if !new_approved.is_empty() {
+        info!(
+            task_id = %task_id,
+            count = new_approved.len(),
+            "executing newly auto-approved evolution events"
+        );
+        for event in new_approved {
+            if let Err(e) = execute_evolution(event, agent.repos(), agent.mind(), &evo_ctx).await {
+                warn!(
+                    task_id = %task_id,
+                    event_id = %event.id,
+                    error = %e,
+                    "failed to execute newly auto-approved evolution event"
+                );
+            }
+        }
+    }
+
+    metrics::histogram!("sober_evolution_cycle_duration_seconds")
+        .record(cycle_start.elapsed().as_secs_f64());
+
+    info!(task_id = %task_id, "self-evolution check cycle complete");
+    send_done_stub(tx).await;
 }
 
 /// Executes a prompt payload by delegating to `handle_message` with conversation context.

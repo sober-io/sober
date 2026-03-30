@@ -39,6 +39,10 @@ pub enum MindError {
     /// An `@path` reference in an instruction file could not be resolved.
     #[error("Failed to resolve @path reference: {0}")]
     ReferenceResolutionFailed(String),
+
+    /// Filesystem I/O error during overlay operations.
+    #[error("I/O error: {0}")]
+    Io(String),
 }
 
 impl From<MindError> for AppError {
@@ -60,6 +64,7 @@ impl From<MindError> for AppError {
             }
             MindError::FrontmatterParseFailed(msg) => AppError::Validation(msg),
             MindError::ReferenceResolutionFailed(msg) => AppError::Validation(msg),
+            MindError::Io(msg) => AppError::Internal(Box::new(std::io::Error::other(msg))),
         }
     }
 }

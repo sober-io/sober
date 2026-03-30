@@ -414,10 +414,10 @@
 
 			<div class="p-3">
 				<a
-					href={resolve('/settings/plugins')}
+					href={resolve('/settings')}
 					class="block rounded-md px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800"
 				>
-					Plugins
+					Settings
 				</a>
 			</div>
 		</div>

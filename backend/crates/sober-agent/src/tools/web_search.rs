@@ -4,7 +4,9 @@
 
 use reqwest::Client;
 use serde::Deserialize;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 
 use super::http_client;
 
@@ -87,7 +89,8 @@ impl Tool for WebSearchTool {
                 "required": ["query"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

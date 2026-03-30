@@ -6,7 +6,9 @@
 use std::time::Duration;
 
 use reqwest::Client;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 
 /// Maximum response body size in bytes (10 MB).
 const MAX_BODY_SIZE: usize = 10_485_760;
@@ -201,7 +203,8 @@ impl Tool for FetchUrlTool {
                 "required": ["url"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

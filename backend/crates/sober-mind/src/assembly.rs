@@ -259,7 +259,7 @@ impl Mind {
     /// instructions if the caller has a workspace_id.
     fn get_instructions(&self, caller: &CallerContext) -> Result<Vec<InstructionFile>, MindError> {
         match caller.workspace_id {
-            None => Ok(self.instruction_loader.cached().to_vec()),
+            None => Ok(self.instruction_loader.cached()),
             Some(id) => {
                 // Check cache (read lock)
                 {
@@ -276,7 +276,7 @@ impl Mind {
                 // Workspace loading requires a filesystem path which is not
                 // available from workspace_id alone. For now, return base only.
                 // The caller can pre-populate the cache via `cache_workspace()`.
-                Ok(self.instruction_loader.cached().to_vec())
+                Ok(self.instruction_loader.cached())
             }
         }
     }
@@ -297,6 +297,65 @@ impl Mind {
             .map_err(|_| MindError::AssemblyFailed("workspace cache lock poisoned".into()))?;
         cache.insert(workspace_id, ws_files);
         Ok(())
+    }
+
+    /// Clears cached overlay instructions, forcing re-read from disk on next
+    /// prompt assembly.
+    ///
+    /// Called by the execution engine after writing instruction overlay files
+    /// so that newly written overlays take effect without restarting the agent.
+    pub fn reload_instructions(&self) -> Result<(), MindError> {
+        self.instruction_loader.reload()
+    }
+
+    /// Writes an instruction overlay file and reloads cached instructions.
+    ///
+    /// The overlay directory is `~/.sober/instructions/`. If the directory
+    /// does not exist, it is created. After writing, the instruction cache
+    /// is reloaded so the change takes effect immediately.
+    pub fn write_overlay(&self, filename: &str, content: &str) -> Result<(), MindError> {
+        if !InstructionLoader::is_known_instruction(filename) {
+            return Err(MindError::Io(format!(
+                "unknown instruction file '{filename}' — overlays can only target known base instructions"
+            )));
+        }
+        let overlay_dir = self.instruction_loader.overlay_dir();
+        if let Some(dir) = &overlay_dir {
+            std::fs::create_dir_all(dir).map_err(|e| {
+                MindError::Io(format!(
+                    "failed to create overlay dir {}: {e}",
+                    dir.display()
+                ))
+            })?;
+            let path = dir.join(filename);
+            std::fs::write(&path, content).map_err(|e| {
+                MindError::Io(format!("failed to write overlay {}: {e}", path.display()))
+            })?;
+        } else {
+            return Err(MindError::Io("overlay directory not configured".into()));
+        }
+        self.instruction_loader.reload()
+    }
+
+    /// Removes an instruction overlay file and reloads cached instructions.
+    ///
+    /// If the file does not exist, this is a no-op (returns Ok).
+    /// After removal, the base instruction takes effect again.
+    pub fn remove_overlay(&self, filename: &str) -> Result<(), MindError> {
+        if !InstructionLoader::is_known_instruction(filename) {
+            return Err(MindError::Io(format!(
+                "unknown instruction file '{filename}' — overlays can only target known base instructions"
+            )));
+        }
+        if let Some(dir) = self.instruction_loader.overlay_dir() {
+            let path = dir.join(filename);
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| {
+                    MindError::Io(format!("failed to remove overlay {}: {e}", path.display()))
+                })?;
+            }
+        }
+        self.instruction_loader.reload()
     }
 }
 
@@ -331,6 +390,7 @@ mod tests {
     use super::*;
     use sober_core::types::access::TriggerKind;
     use sober_core::types::ids::UserId;
+    use sober_core::types::tool::ToolVisibility;
 
     fn make_caller(trigger: TriggerKind) -> CallerContext {
         CallerContext {
@@ -381,7 +441,8 @@ mod tests {
             description: "Search the web.".into(),
             input_schema: serde_json::json!({}),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }];
 
         let caller = make_caller(TriggerKind::Scheduler);

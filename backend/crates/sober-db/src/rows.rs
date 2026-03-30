@@ -6,16 +6,17 @@
 use chrono::{DateTime, Utc};
 use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
-    ConversationKind, ConversationUserRole, EncryptionKeyId, JobId, JobRunId, JobStatus, MessageId,
-    MessageRole, PermissionMode, PluginId, PluginKind, PluginOrigin, PluginScope, PluginStatus,
-    RoleId, SandboxNetMode, ScopeId, SecretId, SessionId, TagId, ToolExecutionId,
-    ToolExecutionSource, ToolExecutionStatus, UserId, UserStatus, WorkspaceId, WorkspaceRepoId,
-    WorkspaceState, WorktreeId, WorktreeState,
+    ConversationKind, ConversationUserRole, EncryptionKeyId, EvolutionEventId, EvolutionStatus,
+    EvolutionType, JobId, JobRunId, JobStatus, MessageId, MessageRole, PermissionMode, PluginId,
+    PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleId, SandboxNetMode, ScopeId, SecretId,
+    SessionId, TagId, ToolExecutionId, ToolExecutionSource, ToolExecutionStatus, UserId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
-    Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername, Job,
-    JobRun, Message, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
-    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
+    Artifact, AuditLogEntry, AutonomyLevel, Conversation, ConversationUser,
+    ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message, Plugin,
+    PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, ToolExecution, User,
+    UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
 };
 use uuid::Uuid;
 
@@ -769,6 +770,79 @@ impl From<WorkspaceSettingsRow> for WorkspaceSettings {
                 .map(PluginId::from_uuid)
                 .collect(),
             created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct EvolutionEventRow {
+    pub id: Uuid,
+    pub evolution_type: EvolutionType,
+    pub user_id: Option<Uuid>,
+    pub title: String,
+    pub description: String,
+    pub confidence: f32,
+    pub source_count: i32,
+    pub status: EvolutionStatus,
+    pub payload: serde_json::Value,
+    pub result: Option<serde_json::Value>,
+    pub status_history: serde_json::Value,
+    pub decided_by: Option<Uuid>,
+    pub reverted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<EvolutionEventRow> for EvolutionEvent {
+    fn from(row: EvolutionEventRow) -> Self {
+        EvolutionEvent {
+            id: EvolutionEventId::from_uuid(row.id),
+            evolution_type: row.evolution_type,
+            user_id: row.user_id.map(UserId::from_uuid),
+            title: row.title,
+            description: row.description,
+            confidence: row.confidence,
+            source_count: row.source_count,
+            status: row.status,
+            payload: row.payload,
+            result: row.result,
+            status_history: row.status_history,
+            decided_by: row.decided_by.map(UserId::from_uuid),
+            reverted_at: row.reverted_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct EvolutionConfigDbRow {
+    #[allow(dead_code)] // Singleton key — not mapped to domain type
+    pub id: bool,
+    pub plugin_autonomy: String,
+    pub skill_autonomy: String,
+    pub instruction_autonomy: String,
+    pub automation_autonomy: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Parses an autonomy level string from the database.
+///
+/// Expected values: `"auto"`, `"approval_required"`, `"disabled"`.
+fn parse_autonomy(s: &str) -> AutonomyLevel {
+    // Use serde for consistent parsing with the enum's rename_all = "snake_case".
+    serde_json::from_value(serde_json::Value::String(s.to_owned()))
+        .unwrap_or(AutonomyLevel::ApprovalRequired)
+}
+
+impl From<EvolutionConfigDbRow> for EvolutionConfigRow {
+    fn from(row: EvolutionConfigDbRow) -> Self {
+        EvolutionConfigRow {
+            plugin_autonomy: parse_autonomy(&row.plugin_autonomy),
+            skill_autonomy: parse_autonomy(&row.skill_autonomy),
+            instruction_autonomy: parse_autonomy(&row.instruction_autonomy),
+            automation_autonomy: parse_autonomy(&row.automation_autonomy),
             updated_at: row.updated_at,
         }
     }
