@@ -248,6 +248,16 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                     policy.fs_write.push(ws_dir.clone());
                 }
             }
+            // Apply workspace-level permission mode to the shared lock so the
+            // shell tool (and any runtime readers) use the correct mode.
+            {
+                let mut guard = self
+                    .shell
+                    .permission_mode
+                    .write()
+                    .expect("permission mode lock poisoned");
+                *guard = ws_settings.permission_mode;
+            }
             ShellToolConfig {
                 command_policy: self.shell.command_policy.clone(),
                 permission_mode: Arc::clone(&self.shell.permission_mode),
