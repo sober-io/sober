@@ -969,7 +969,7 @@ mod tests {
 
     fn make_manager(repo: MockPluginRepo) -> Arc<PluginManager<MockPluginRepo>> {
         let pool = McpPool::new(McpConfig::default());
-        let loader = Arc::new(SkillLoader::new(Duration::from_secs(300)));
+        let loader = Arc::new(SkillLoader::new(Duration::from_secs(300), None));
         Arc::new(PluginManager::new(repo, pool, loader, None))
     }
 

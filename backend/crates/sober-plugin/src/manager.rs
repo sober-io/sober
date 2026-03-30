@@ -371,7 +371,7 @@ impl<R: PluginRepo> PluginManager<R> {
             let entry = catalog.get(name).expect("name from catalog");
             let lookup_ws = match entry.source {
                 sober_skill::SkillSource::Workspace => workspace_id,
-                sober_skill::SkillSource::User => None,
+                sober_skill::SkillSource::System | sober_skill::SkillSource::User => None,
             };
 
             if let Some(db_plugin) = existing_by_key.get(&(name, lookup_ws)) {
@@ -381,6 +381,7 @@ impl<R: PluginRepo> PluginManager<R> {
             } else {
                 // New skill — install through the audit pipeline.
                 let (scope, ws_id) = match entry.source {
+                    sober_skill::SkillSource::System => (PluginScope::System, None),
                     sober_skill::SkillSource::User => (PluginScope::User, None),
                     sober_skill::SkillSource::Workspace => (PluginScope::Workspace, workspace_id),
                 };
@@ -909,7 +910,7 @@ mod tests {
     fn make_manager(plugins: Vec<Plugin>) -> PluginManager<MockPluginRepo> {
         let repo = MockPluginRepo::new(plugins);
         let pool = McpPool::new(McpConfig::default());
-        let loader = Arc::new(SkillLoader::new(Duration::from_secs(300)));
+        let loader = Arc::new(SkillLoader::new(Duration::from_secs(300), None));
         PluginManager::new(repo, pool, loader, None)
     }
 

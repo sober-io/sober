@@ -193,7 +193,7 @@ async fn execute_plugin<R: AgentRepos>(
         version: Some("0.1.0".to_owned()),
         description: Some(description.to_owned()),
         origin: PluginOrigin::Agent,
-        scope: PluginScope::User,
+        scope: PluginScope::System,
         owner_id: event.user_id,
         workspace_id: None,
         config: json!({
@@ -268,9 +268,13 @@ async fn execute_skill<R: AgentRepos>(
         .await
         .map_err(|e| AgentError::Internal(format!("skill generation failed: {e}")))?;
 
-    // Write to user-level skill directory: ~/.sober/skills/<name>/SKILL.md
-    let skill_dir = sober_skill::SkillLoader::resolve_skill_dir(name)
-        .map_err(|e| AgentError::Internal(format!("failed to resolve skill directory: {e}")))?;
+    // Write to system-level skill directory: workspace_root/.sober/skills/<name>/SKILL.md
+    let skill_dir = ctx
+        .plugin_manager
+        .skill_loader()
+        .system_dir()
+        .ok_or_else(|| AgentError::Internal("system skills directory not configured".into()))?
+        .join(name);
     tokio::fs::create_dir_all(&skill_dir).await.map_err(|e| {
         AgentError::Internal(format!(
             "failed to create skill directory {}: {e}",
@@ -301,7 +305,7 @@ async fn execute_skill<R: AgentRepos>(
         version: Some("0.1.0".to_owned()),
         description: Some(description.to_owned()),
         origin: PluginOrigin::Agent,
-        scope: PluginScope::User,
+        scope: PluginScope::System,
         owner_id: event.user_id,
         workspace_id: None,
         config: json!({ "path": skill_path.to_string_lossy() }),
@@ -473,10 +477,18 @@ fn payload_string_array(event: &EvolutionEvent, field: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     #[test]
-    fn skill_dir_resolves_correctly() {
-        if let Ok(dir) = sober_skill::SkillLoader::resolve_skill_dir("test") {
-            assert!(dir.to_string_lossy().ends_with(".sober/skills/test"));
-        }
+    fn system_skill_dir_from_loader() {
+        let loader = sober_skill::SkillLoader::new(
+            std::time::Duration::from_secs(300),
+            Some(Path::new("/var/lib/sober/workspaces/.sober/skills").to_path_buf()),
+        );
+        let dir = loader.system_dir().unwrap().join("my-skill");
+        assert_eq!(
+            dir.to_string_lossy(),
+            "/var/lib/sober/workspaces/.sober/skills/my-skill"
+        );
     }
 }

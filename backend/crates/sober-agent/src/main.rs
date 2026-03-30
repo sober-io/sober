@@ -149,9 +149,13 @@ async fn main() -> Result<()> {
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));
 
     // 14. Create SkillLoader, PluginManager, and ToolBootstrap
-    let skill_loader = Arc::new(SkillLoader::new(std::time::Duration::from_secs(
-        SKILL_CACHE_TTL_SECS,
-    )));
+    let system_skills_dir = workspace_root
+        .join(sober_workspace::SOBER_DIR)
+        .join("skills");
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::time::Duration::from_secs(SKILL_CACHE_TTL_SECS),
+        Some(system_skills_dir),
+    ));
 
     let mcp_pool = McpPool::new(McpConfig::default());
     let plugin_repo = PgPluginRepo::new(pool.clone());
