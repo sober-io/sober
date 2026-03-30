@@ -173,6 +173,82 @@ Prints run IDs, statuses, start and finish times, and any error messages.
 
 ---
 
+## Evolution
+
+Manage self-evolution events and configuration.
+
+### List evolution events
+
+```
+sober evolution list
+sober evolution list --type plugin --status proposed
+```
+
+Filters by evolution type and/or status. Shows ID, type, title, status, and timestamps.
+
+### Approve or reject proposals
+
+```
+sober evolution approve <event-id>
+sober evolution reject <event-id>
+```
+
+Approving triggers execution via the agent. Rejecting transitions the event to `rejected`.
+
+### Revert an active evolution
+
+```
+sober evolution revert <event-id>
+```
+
+Reverts a live evolution: deletes the plugin/skill, restores the previous instruction, or cancels the scheduled job.
+
+### View autonomy configuration
+
+```
+sober evolution config
+```
+
+Displays the current autonomy level for each evolution type (auto, approval_required, or disabled). Autonomy levels are changed via the Settings > Evolution page in the web UI.
+
+---
+
+## Plugins
+
+Manage installed plugins (WASM and MCP).
+
+### List plugins
+
+```
+sober plugin list
+sober plugin list --kind wasm --scope user
+```
+
+Shows plugin ID, name, kind, scope, enabled status, and tool names.
+
+### Enable or disable a plugin
+
+```
+sober plugin enable <plugin-id>
+sober plugin disable <plugin-id>
+```
+
+Disabled plugins are excluded from the agent's available tools.
+
+---
+
+## Skills
+
+List discovered skills.
+
+```
+sober skill list
+```
+
+Shows all skills discovered by the skill loader from user-level (`~/.sober/skills/`) and workspace-level (`.sober/skills/`) directories.
+
+---
+
 ## Configuration
 
 The CLI loads configuration via `AppConfig::load()`, which reads from (in priority order):
