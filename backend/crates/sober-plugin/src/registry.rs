@@ -42,6 +42,10 @@ pub struct InstallRequest {
     pub manifest: Option<PluginManifest>,
     /// Raw WASM bytes.
     pub wasm_bytes: Option<Vec<u8>>,
+    /// Built-in tool names that plugins must not shadow.
+    /// Passed from the agent which owns the tool definitions.
+    #[doc(hidden)]
+    pub reserved_tool_names: Vec<String>,
 }
 
 /// The plugin registry.
@@ -101,6 +105,7 @@ impl<P: PluginRepo> PluginRegistry<P> {
             config: request.config.clone(),
             manifest: request.manifest,
             wasm_bytes: request.wasm_bytes,
+            reserved_tool_names: request.reserved_tool_names,
         };
         let report = AuditPipeline::audit(&audit_request);
 

@@ -13,6 +13,40 @@ use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 
 use crate::host::PluginHost;
 
+/// State of the underlying WASM host for a plugin tool.
+///
+/// Tools are always registered in the tool registry (from the manifest),
+/// but the WASM host may not have loaded successfully. In the `Failed`
+/// state, [`PluginTool::execute`] returns a clear error to the LLM
+/// instead of the tool being silently invisible.
+#[derive(Clone)]
+pub enum WasmHostState {
+    /// Host loaded and ready for execution.
+    Loaded(Arc<Mutex<PluginHost>>),
+    /// Host failed to load — stores the error message.
+    Failed(String),
+}
+
+/// Context for constructing a [`PluginTool`].
+pub struct PluginToolContext {
+    /// WASM host state — `Loaded` or `Failed`.
+    pub host_state: WasmHostState,
+    /// Plugin name from the manifest.
+    pub plugin_name: String,
+    /// Tool name from the manifest `[[tools]]` entry.
+    pub tool_name: String,
+    /// Human-readable tool description.
+    pub description: String,
+    /// Plugin ID from the database.
+    pub plugin_id: PluginId,
+    /// Owner user ID (for scoped operations).
+    pub user_id: Option<UserId>,
+    /// Workspace ID (for scoped operations).
+    pub workspace_id: Option<WorkspaceId>,
+    /// Database pool for persisting execution logs.
+    pub db_pool: Option<sqlx::PgPool>,
+}
+
 /// A WASM plugin tool that implements the [`Tool`] trait.
 ///
 /// Wraps a shared [`PluginHost`] and exposes a single tool from the
@@ -22,7 +56,8 @@ use crate::host::PluginHost;
 /// Multiple `PluginTool` instances can share the same host (one per
 /// manifest tool entry), coordinated through the inner [`Mutex`].
 pub struct PluginTool {
-    host: Arc<Mutex<PluginHost>>,
+    host_state: WasmHostState,
+    plugin_name: String,
     tool_name: String,
     metadata: ToolMetadata,
     plugin_id: PluginId,
@@ -32,26 +67,11 @@ pub struct PluginTool {
 }
 
 impl PluginTool {
-    /// Creates a new `PluginTool` for the given tool entry.
-    ///
-    /// The `host` is shared across all tools from the same plugin.
-    /// `tool_name` must match a `[[tools]]` entry in the manifest.
-    /// `description` comes from the manifest's tool entry.
-    ///
-    /// When `db_pool` is `Some`, execution logs are persisted to the
-    /// `plugin_execution_logs` table after each invocation.
-    pub fn new(
-        host: Arc<Mutex<PluginHost>>,
-        tool_name: String,
-        description: String,
-        plugin_id: PluginId,
-        user_id: Option<UserId>,
-        workspace_id: Option<WorkspaceId>,
-        db_pool: Option<sqlx::PgPool>,
-    ) -> Self {
+    /// Creates a new `PluginTool` from the given context.
+    pub fn new(ctx: PluginToolContext) -> Self {
         let metadata = ToolMetadata {
-            name: tool_name.clone(),
-            description,
+            name: ctx.tool_name.clone(),
+            description: ctx.description,
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -62,13 +82,14 @@ impl PluginTool {
         };
 
         Self {
-            host,
-            tool_name,
+            host_state: ctx.host_state,
+            plugin_name: ctx.plugin_name,
+            tool_name: ctx.tool_name,
             metadata,
-            plugin_id,
-            user_id,
-            workspace_id,
-            db_pool,
+            plugin_id: ctx.plugin_id,
+            user_id: ctx.user_id,
+            workspace_id: ctx.workspace_id,
+            db_pool: ctx.db_pool,
         }
     }
 }
@@ -79,17 +100,18 @@ impl Tool for PluginTool {
     }
 
     fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> {
-        let host = Arc::clone(&self.host);
+        let host = match &self.host_state {
+            WasmHostState::Loaded(h) => Arc::clone(h),
+            WasmHostState::Failed(err) => {
+                let msg = format!("WASM plugin '{}' failed to load: {err}", self.plugin_name);
+                return Box::pin(async move {
+                    Err(sober_core::types::tool::ToolError::ExecutionFailed(msg))
+                });
+            }
+        };
         let tool_name = self.tool_name.clone();
         let meta_tool_name = self.tool_name.clone();
-
-        // Capture the plugin name from the host's manifest for logging.
-        let plugin_name = self
-            .host
-            .lock()
-            .ok()
-            .map(|h| h.manifest().plugin.name.clone())
-            .unwrap_or_else(|| "<unknown>".to_owned());
+        let plugin_name = self.plugin_name.clone();
 
         let db_pool = self.db_pool.clone();
         let plugin_id = self.plugin_id;

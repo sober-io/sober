@@ -295,20 +295,34 @@
 		capabilitySearch = '';
 	}
 
+	let pluginToolNames = $derived(
+		availableTools.reduce<Record<string, string[]>>((acc, t) => {
+			if (t.plugin_id) {
+				(acc[t.plugin_id] ??= []).push(t.name);
+			}
+			return acc;
+		}, {})
+	);
+
 	let filteredCapabilities = $derived.by(() => {
 		if (!capabilityFocused) return [];
 		const q = capabilitySearch.toLowerCase();
 		const items: Array<{ type: 'tool' | 'plugin'; id: string; name: string; detail: string }> = [];
 		for (const plugin of availablePlugins) {
+			const tools = pluginToolNames[plugin.id] ?? [];
 			if (
 				!disabledPlugins.includes(plugin.id) &&
-				(!q || plugin.name.toLowerCase().includes(q) || plugin.kind.toLowerCase().includes(q))
+				(!q ||
+					plugin.name.toLowerCase().includes(q) ||
+					plugin.kind.toLowerCase().includes(q) ||
+					tools.some((t) => t.toLowerCase().includes(q)))
 			) {
+				const toolsSuffix = tools.length > 0 ? ` · ${tools.join(', ')}` : '';
 				items.push({
 					type: 'plugin',
 					id: plugin.id,
 					name: plugin.name,
-					detail: `${plugin.kind} plugin`
+					detail: `${plugin.kind}${toolsSuffix}`
 				});
 			}
 		}
@@ -754,6 +768,7 @@
 							<div class="flex flex-wrap gap-1">
 								{#each disabledPluginNames as plugin (plugin.id)}
 									{@const c = CAP.plugin}
+									{@const tools = pluginToolNames[plugin.id] ?? []}
 									<button
 										onclick={() => enablePlugin(plugin.id)}
 										class={[
@@ -762,7 +777,9 @@
 										]}
 									>
 										{plugin.name}
-										<span class={['text-xs', c.badge]}>plugin</span>
+										{#if tools.length > 0}
+											<span class="opacity-60">({tools.join(', ')})</span>
+										{/if}
 										<span class={c.close}>&times;</span>
 									</button>
 								{/each}

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Plugin, PluginKind, PluginAuditLog, McpPluginConfig } from '$lib/types/plugin';
+	import type { ToolInfo } from '$lib/types';
 	import { ApiError } from '$lib/utils/api';
 	import { pluginService } from '$lib/services/plugins';
+	import { toolService } from '$lib/services/tools';
 
 	type KindFilter = 'all' | PluginKind;
 
@@ -29,6 +31,17 @@
 	let auditPluginId = $state<string | null>(null);
 	let auditLogs = $state<PluginAuditLog[]>([]);
 	let auditLoading = $state(false);
+
+	// Tool names per plugin
+	let allTools = $state<ToolInfo[]>([]);
+	let pluginToolNames = $derived(
+		allTools.reduce<Record<string, ToolInfo[]>>((acc, t) => {
+			if (t.plugin_id) {
+				(acc[t.plugin_id] ??= []).push(t);
+			}
+			return acc;
+		}, {})
+	);
 
 	// Expanded plugin details
 	let expandedId = $state<string | null>(null);
@@ -68,7 +81,7 @@
 		loading = true;
 		error = null;
 		try {
-			plugins = await pluginService.list();
+			[plugins, allTools] = await Promise.all([pluginService.list(), toolService.list()]);
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Failed to load plugins';
 		} finally {
@@ -420,6 +433,7 @@
 	{:else}
 		<div class="space-y-2">
 			{#each filteredPlugins as plugin (plugin.id)}
+				{@const tools = pluginToolNames[plugin.id] ?? []}
 				<div class="rounded-lg border border-zinc-200 dark:border-zinc-700">
 					<!-- Main row -->
 					<div class="flex items-center justify-between px-4 py-3">
@@ -466,6 +480,17 @@
 								<p class="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
 									{plugin.description}
 								</p>
+							{/if}
+							{#if tools.length > 0}
+								<div class="mt-1 flex flex-wrap gap-1">
+									{#each tools as tool (tool.name)}
+										<span
+											class="inline-flex rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+										>
+											{tool.name}
+										</span>
+									{/each}
+								</div>
 							{/if}
 						</div>
 						<div class="ml-4 flex items-center gap-1">

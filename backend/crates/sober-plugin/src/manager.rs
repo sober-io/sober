@@ -33,9 +33,9 @@ use crate::backends::{
 use crate::error::PluginError;
 use crate::host::PluginHost;
 use crate::host_fns::HostContext;
-use crate::manifest::PluginManifest;
+use crate::manifest::{PluginManifest, ToolEntry};
 use crate::registry::{InstallRequest, PluginRegistry};
-use crate::tool::PluginTool;
+use crate::tool::{PluginTool, PluginToolContext, WasmHostState};
 
 /// Service handles for WASM host function execution.
 ///
@@ -82,9 +82,23 @@ pub struct PluginManager<R: PluginRepo> {
     blob_store: Option<Arc<BlobStore>>,
     /// Service handles injected into WASM host contexts.
     wasm_services: WasmServices,
-    /// WASM hosts cached by plugin ID.  Uses `std::sync::RwLock` because
-    /// accesses are brief and never held across `.await` points.
-    wasm_hosts: RwLock<HashMap<PluginId, Arc<Mutex<PluginHost>>>>,
+    /// Per-plugin cache of manifest tools and WASM host state.
+    /// Uses `std::sync::RwLock` because accesses are brief and never
+    /// held across `.await` points.
+    wasm_cache: RwLock<HashMap<PluginId, WasmPluginCache>>,
+}
+
+/// Cached state for a single WASM plugin.
+///
+/// Holds both the parsed tool entries (from manifest) and the WASM host
+/// state. Tool discovery reads from `tools`; execution reads from `host`.
+struct WasmPluginCache {
+    /// Tool entries parsed from the manifest TOML.
+    tools: Vec<ToolEntry>,
+    /// Plugin name from the manifest.
+    plugin_name: String,
+    /// WASM host — loaded on first access, or failed.
+    host: WasmHostState,
 }
 
 impl<R: PluginRepo> PluginManager<R> {
@@ -110,7 +124,7 @@ impl<R: PluginRepo> PluginManager<R> {
             skill_loader,
             blob_store,
             wasm_services: WasmServices::default(),
-            wasm_hosts: RwLock::new(HashMap::new()),
+            wasm_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -239,6 +253,44 @@ impl<R: PluginRepo> PluginManager<R> {
             .collect())
     }
 
+    /// Returns `(name, description)` pairs from a WASM plugin's manifest.
+    ///
+    /// Reads from the cache when available, otherwise parses from the
+    /// `manifest_toml` field in the plugin's DB config. Does not load the
+    /// WASM binary — use this for listing/catalog purposes.
+    pub fn manifest_tool_names(
+        &self,
+        plugin: &Plugin,
+    ) -> Result<Vec<(String, String)>, PluginError> {
+        // Try cache first.
+        if let Ok(cache) = self.wasm_cache.read()
+            && let Some(entry) = cache.get(&plugin.id)
+        {
+            return Ok(entry
+                .tools
+                .iter()
+                .map(|t| (t.name.clone(), t.description.clone()))
+                .collect());
+        }
+
+        // Cache miss — parse from config.
+        let manifest_toml = plugin
+            .config
+            .get("manifest_toml")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                PluginError::Config("WASM plugin missing 'manifest_toml' in config".into())
+            })?;
+
+        let manifest = PluginManifest::from_toml(manifest_toml)?;
+
+        Ok(manifest
+            .tools
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.description.clone()))
+            .collect())
+    }
+
     /// Returns tool adapters from the MCP pool for a given plugin.
     ///
     /// The MCP server must already be connected in the pool (connections are
@@ -348,6 +400,7 @@ impl<R: PluginRepo> PluginManager<R> {
                     installed_by: None,
                     manifest: None,
                     wasm_bytes: None,
+                    reserved_tool_names: vec![],
                 };
                 match self.registry.install(install_req).await {
                     Ok(report) => {
@@ -441,159 +494,197 @@ impl<R: PluginRepo> PluginManager<R> {
         ))])
     }
 
-    /// Loads tools from a WASM plugin.
+    /// Returns tools from a WASM plugin, using a two-phase cache.
     ///
-    /// Checks the host cache first.  On a cache miss, resolves WASM bytes by
-    /// checking the plugin config for `wasm_blob_key` (content-addressed BlobStore)
-    /// and falling back to `wasm_path` (filesystem) when no blob key is
-    /// present.  Creates a new [`PluginHost`] and caches it by plugin ID.
-    /// Returns a [`PluginTool`] for each tool declared in the manifest.
+    /// **Phase 1 — Discovery:** Parses tool entries from the manifest TOML
+    /// stored in the plugin's DB config. Always succeeds if the config is valid.
+    ///
+    /// **Phase 2 — Loading:** Attempts to load the WASM binary and create a
+    /// [`PluginHost`]. If loading fails, tools are still returned with a
+    /// `Failed` host state — the LLM sees the tool but gets a clear error
+    /// on execute.
+    ///
+    /// Both phases are cached by plugin ID. The cache is evicted on
+    /// regeneration via [`evict_wasm_host`](Self::evict_wasm_host).
     async fn wasm_tools(&self, plugin: &Plugin) -> Result<Vec<Arc<dyn Tool>>, PluginError> {
-        // Check cache.
-        let cached_host = {
-            let cache = self.wasm_hosts.read().map_err(|_| {
-                PluginError::ExecutionFailed("WASM host cache lock poisoned".into())
-            })?;
-            cache.get(&plugin.id).cloned()
+        // Check cache — return cached tools + host state if present.
+        let cached = {
+            let cache = self
+                .wasm_cache
+                .read()
+                .map_err(|_| PluginError::ExecutionFailed("WASM cache lock poisoned".into()))?;
+            cache.get(&plugin.id).map(|entry| {
+                (
+                    entry.tools.clone(),
+                    entry.plugin_name.clone(),
+                    entry.host.clone(),
+                )
+            })
         };
 
-        let host = match cached_host {
-            Some(h) => h,
-            None => {
-                // Manifest is stored as a TOML string in the plugin's DB config,
-                // separate from the WASM blob. The blob contains only compiled bytes.
-                let manifest_toml = plugin
-                    .config
-                    .get("manifest_toml")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        PluginError::Config("WASM plugin missing 'manifest_toml' in config".into())
-                    })?;
+        if let Some((tool_entries, plugin_name, host_state)) = cached {
+            return Ok(self.build_plugin_tools(&tool_entries, &plugin_name, &host_state, plugin));
+        }
 
-                // Prefer wasm_blob_key (content-addressed) over wasm_path (filesystem).
-                let bytes = if let Some(wasm_blob_key) =
-                    plugin.config.get("wasm_blob_key").and_then(|v| v.as_str())
-                {
-                    let store = self.blob_store.as_ref().ok_or_else(|| {
-                        PluginError::Config(format!(
-                            "WASM plugin '{}' has wasm_blob_key but no blob store is configured",
-                            plugin.name
-                        ))
-                    })?;
-                    store.retrieve(wasm_blob_key).await.map_err(|e| {
-                        PluginError::ExecutionFailed(format!(
-                            "failed to retrieve WASM blob '{wasm_blob_key}' for plugin '{}': {e}",
-                            plugin.name
-                        ))
-                    })?
-                } else {
-                    // Fallback: read from filesystem path.
-                    let wasm_path = plugin
-                        .config
-                        .get("wasm_path")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| {
-                            PluginError::Config(
-                                "WASM plugin missing both 'wasm_blob_key' and 'wasm_path' in config"
-                                    .into(),
-                            )
-                        })?;
+        // Cache miss — Phase 1: parse manifest from config.
+        let manifest_toml = plugin
+            .config
+            .get("manifest_toml")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                PluginError::Config("WASM plugin missing 'manifest_toml' in config".into())
+            })?;
 
-                    tokio::fs::read(wasm_path).await.map_err(|e| {
-                        PluginError::ExecutionFailed(format!(
-                            "failed to read WASM file at {wasm_path}: {e}"
-                        ))
-                    })?
-                };
+        let manifest = PluginManifest::from_toml(manifest_toml)?;
+        let tool_entries = manifest.tools.clone();
+        let plugin_name = manifest.plugin.name.clone();
 
-                let manifest = PluginManifest::from_toml(manifest_toml)?;
-
-                // Build a HostContext with all available service backends.
-                let capabilities = manifest.capabilities.to_capabilities();
-                let mut ctx = HostContext::new(plugin.id, capabilities);
-                ctx = ctx.with_runtime_handle(tokio::runtime::Handle::current());
-
-                if let Some(ref kv) = self.wasm_services.kv_backend {
-                    ctx = ctx.with_kv_backend(Arc::clone(kv));
-                }
-                if let Some(ref llm) = self.wasm_services.llm_engine {
-                    ctx = ctx.with_llm_engine(Arc::clone(llm));
-                }
-                if let Some(ref sec) = self.wasm_services.secret_backend {
-                    ctx = ctx.with_secret_backend(Arc::clone(sec));
-                }
-                if let Some(ref mem) = self.wasm_services.memory_backend {
-                    ctx = ctx.with_memory_backend(Arc::clone(mem));
-                }
-                if let Some(ref conv) = self.wasm_services.conversation_backend {
-                    ctx = ctx.with_conversation_backend(Arc::clone(conv));
-                }
-                if let Some(ref sched) = self.wasm_services.schedule_backend {
-                    ctx = ctx.with_schedule_backend(Arc::clone(sched));
-                }
-                if let Some(ref tool) = self.wasm_services.tool_executor {
-                    ctx = ctx.with_tool_executor(Arc::clone(tool));
-                }
-
-                // Set user_id from the plugin's owner for scoped operations.
-                if let Some(owner_id) = plugin.owner_id {
-                    ctx = ctx.with_user_id(owner_id);
-                }
-                if let Some(ref sp) = self.wasm_services.system_prompt {
-                    ctx = ctx.with_system_prompt(sp.clone());
-                }
-
-                let new_host = PluginHost::load_with_context(&bytes, &manifest, ctx)?;
-                let host = Arc::new(Mutex::new(new_host));
-
-                let mut cache = self.wasm_hosts.write().map_err(|_| {
-                    PluginError::ExecutionFailed("WASM host cache lock poisoned".into())
-                })?;
-                cache.insert(plugin.id, Arc::clone(&host));
-
-                host
+        // Phase 2: attempt to load WASM host.
+        let host_state = match self.load_wasm_host(plugin, &manifest).await {
+            Ok(host) => {
+                debug!(
+                    plugin_id = %plugin.id,
+                    tool_count = tool_entries.len(),
+                    "loaded WASM host"
+                );
+                WasmHostState::Loaded(host)
+            }
+            Err(e) => {
+                warn!(
+                    plugin_id = %plugin.id,
+                    plugin_name = %plugin.name,
+                    error = %e,
+                    "WASM host failed to load — tools will return errors on execute"
+                );
+                WasmHostState::Failed(e.to_string())
             }
         };
 
-        // Build a PluginTool for each tool declared in the manifest.
-        let manifest = {
-            let h = host
-                .lock()
-                .map_err(|_| PluginError::ExecutionFailed("WASM host lock poisoned".into()))?;
-            h.manifest().clone()
-        };
+        // Cache both phases.
+        if let Ok(mut cache) = self.wasm_cache.write() {
+            cache.insert(
+                plugin.id,
+                WasmPluginCache {
+                    tools: tool_entries.clone(),
+                    plugin_name: plugin_name.clone(),
+                    host: host_state.clone(),
+                },
+            );
+        }
 
-        let tools: Vec<Arc<dyn Tool>> = manifest
-            .tools
-            .iter()
-            .map(|entry| {
-                Arc::new(PluginTool::new(
-                    Arc::clone(&host),
-                    entry.name.clone(),
-                    entry.description.clone(),
-                    plugin.id,
-                    plugin.owner_id,
-                    plugin.workspace_id,
-                    self.wasm_services.db_pool.clone(),
-                )) as Arc<dyn Tool>
-            })
-            .collect();
-
-        debug!(
-            plugin_id = %plugin.id,
-            tool_count = tools.len(),
-            "loaded WASM tools"
-        );
-
-        Ok(tools)
+        Ok(self.build_plugin_tools(&tool_entries, &plugin_name, &host_state, plugin))
     }
 
-    /// Evicts a WASM plugin from the host cache.
+    /// Loads a WASM binary and creates a [`PluginHost`] with service backends.
+    async fn load_wasm_host(
+        &self,
+        plugin: &Plugin,
+        manifest: &PluginManifest,
+    ) -> Result<Arc<Mutex<PluginHost>>, PluginError> {
+        // Prefer wasm_blob_key (content-addressed) over wasm_path (filesystem).
+        let bytes = if let Some(wasm_blob_key) =
+            plugin.config.get("wasm_blob_key").and_then(|v| v.as_str())
+        {
+            let store = self.blob_store.as_ref().ok_or_else(|| {
+                PluginError::Config(format!(
+                    "WASM plugin '{}' has wasm_blob_key but no blob store is configured",
+                    plugin.name
+                ))
+            })?;
+            store.retrieve(wasm_blob_key).await.map_err(|e| {
+                PluginError::ExecutionFailed(format!(
+                    "failed to retrieve WASM blob '{wasm_blob_key}' for plugin '{}': {e}",
+                    plugin.name
+                ))
+            })?
+        } else {
+            let wasm_path = plugin
+                .config
+                .get("wasm_path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    PluginError::Config(
+                        "WASM plugin missing both 'wasm_blob_key' and 'wasm_path' in config".into(),
+                    )
+                })?;
+
+            tokio::fs::read(wasm_path).await.map_err(|e| {
+                PluginError::ExecutionFailed(format!(
+                    "failed to read WASM file at {wasm_path}: {e}"
+                ))
+            })?
+        };
+
+        // Build a HostContext with all available service backends.
+        let capabilities = manifest.capabilities.to_capabilities();
+        let mut ctx = HostContext::new(plugin.id, capabilities);
+        ctx = ctx.with_runtime_handle(tokio::runtime::Handle::current());
+
+        if let Some(ref kv) = self.wasm_services.kv_backend {
+            ctx = ctx.with_kv_backend(Arc::clone(kv));
+        }
+        if let Some(ref llm) = self.wasm_services.llm_engine {
+            ctx = ctx.with_llm_engine(Arc::clone(llm));
+        }
+        if let Some(ref sec) = self.wasm_services.secret_backend {
+            ctx = ctx.with_secret_backend(Arc::clone(sec));
+        }
+        if let Some(ref mem) = self.wasm_services.memory_backend {
+            ctx = ctx.with_memory_backend(Arc::clone(mem));
+        }
+        if let Some(ref conv) = self.wasm_services.conversation_backend {
+            ctx = ctx.with_conversation_backend(Arc::clone(conv));
+        }
+        if let Some(ref sched) = self.wasm_services.schedule_backend {
+            ctx = ctx.with_schedule_backend(Arc::clone(sched));
+        }
+        if let Some(ref tool) = self.wasm_services.tool_executor {
+            ctx = ctx.with_tool_executor(Arc::clone(tool));
+        }
+
+        if let Some(owner_id) = plugin.owner_id {
+            ctx = ctx.with_user_id(owner_id);
+        }
+        if let Some(ref sp) = self.wasm_services.system_prompt {
+            ctx = ctx.with_system_prompt(sp.clone());
+        }
+
+        let new_host = PluginHost::load_with_context(&bytes, manifest, ctx)?;
+        Ok(Arc::new(Mutex::new(new_host)))
+    }
+
+    /// Builds [`PluginTool`] instances from cached manifest entries and host state.
+    fn build_plugin_tools(
+        &self,
+        tool_entries: &[ToolEntry],
+        plugin_name: &str,
+        host_state: &WasmHostState,
+        plugin: &Plugin,
+    ) -> Vec<Arc<dyn Tool>> {
+        tool_entries
+            .iter()
+            .map(|entry| {
+                Arc::new(PluginTool::new(PluginToolContext {
+                    host_state: host_state.clone(),
+                    plugin_name: plugin_name.to_owned(),
+                    tool_name: entry.name.clone(),
+                    description: entry.description.clone(),
+                    plugin_id: plugin.id,
+                    user_id: plugin.owner_id,
+                    workspace_id: plugin.workspace_id,
+                    db_pool: self.wasm_services.db_pool.clone(),
+                })) as Arc<dyn Tool>
+            })
+            .collect()
+    }
+
+    /// Evicts a WASM plugin from the cache.
     ///
-    /// The next call to [`tools_for_turn`](Self::tools_for_turn) for this
-    /// plugin will reload the WASM bytes and create a fresh [`PluginHost`].
+    /// Clears both the cached manifest tools and the WASM host. The next
+    /// call to [`tools_for_turn`](Self::tools_for_turn) will re-read the
+    /// manifest and attempt to reload the WASM binary.
     pub fn evict_wasm_host(&self, plugin_id: &PluginId) {
-        if let Ok(mut cache) = self.wasm_hosts.write() {
+        if let Ok(mut cache) = self.wasm_cache.write() {
             cache.remove(plugin_id);
         }
     }
@@ -931,7 +1022,7 @@ mod tests {
         // Eviction on a missing key is a no-op.
         manager.evict_wasm_host(&id);
 
-        let cache = manager.wasm_hosts.read().expect("lock");
+        let cache = manager.wasm_cache.read().expect("lock");
         assert!(cache.is_empty());
     }
 

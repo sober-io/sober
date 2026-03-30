@@ -43,6 +43,7 @@ fn audit_approves_hello_world() {
         config: serde_json::json!({}),
         manifest: Some(manifest),
         wasm_bytes: Some(wasm_bytes),
+        reserved_tool_names: vec![],
     });
 
     assert_eq!(report.verdict, AuditVerdict::Approved);
