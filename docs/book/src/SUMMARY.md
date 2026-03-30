@@ -21,6 +21,7 @@
 - [Built-in Tools](user-guide/tools.md)
 - [Scheduling](user-guide/scheduling.md)
 - [Frontend](user-guide/frontend.md)
+- [Self-Evolution](user-guide/evolution.md)
 
 # Plugins
 
