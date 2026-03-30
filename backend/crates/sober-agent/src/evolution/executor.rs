@@ -205,6 +205,7 @@ async fn execute_plugin<R: AgentRepos>(
         installed_by: event.user_id,
         manifest: Some(manifest),
         wasm_bytes: Some(generated.wasm_bytes),
+        reserved_tool_names: vec![],
     };
 
     let report = ctx
@@ -312,6 +313,7 @@ async fn execute_skill<R: AgentRepos>(
         installed_by: event.user_id,
         manifest: None,
         wasm_bytes: None,
+        reserved_tool_names: vec![],
     };
 
     let report = ctx

@@ -42,6 +42,10 @@ use crate::tools::ToolRegistry;
 /// Maximum consecutive tool errors before forcing a text response.
 const MAX_CONSECUTIVE_TOOL_ERRORS: u32 = 3;
 
+/// Maximum consecutive iterations where the only tool called is the same one.
+/// Prevents infinite loops when a tool succeeds but the LLM keeps re-calling it.
+const MAX_CONSECUTIVE_SAME_TOOL: u32 = 3;
+
 /// All parameters needed to execute a single agentic turn (multi-iteration loop).
 ///
 /// Holds a reference to [`AgentContext`] for shared dependencies plus per-turn
@@ -88,6 +92,8 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
     let mut needs_context_rebuild = true;
     let mut system_prompt_len: usize = 0;
     let mut consecutive_tool_errors: u32 = 0;
+    let mut consecutive_same_tool: u32 = 0;
+    let mut last_tool_signature: Option<String> = None;
     let mut assistant_text = String::new();
     // Accumulate reasoning across all iterations so multi-turn tool loops
     // don't lose earlier reasoning content.
@@ -361,6 +367,31 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 }
             } else {
                 consecutive_tool_errors = 0;
+            }
+
+            // Repetitive tool call circuit breaker: detect when the LLM keeps
+            // calling the same tool(s) with the same arguments each iteration.
+            // Unlike the error breaker (which nudges), this hard-stops the loop.
+            let signature = {
+                let mut parts: Vec<String> = tool_calls
+                    .iter()
+                    .map(|tc| format!("{}:{}", tc.function.name, tc.function.arguments))
+                    .collect();
+                parts.sort();
+                parts.join("|")
+            };
+            if last_tool_signature.as_deref() == Some(&signature) {
+                consecutive_same_tool += 1;
+                if consecutive_same_tool >= MAX_CONSECUTIVE_SAME_TOOL {
+                    warn!(
+                        consecutive_same = consecutive_same_tool,
+                        signature, "repetitive tool call circuit breaker tripped, stopping turn"
+                    );
+                    break;
+                }
+            } else {
+                consecutive_same_tool = 1;
+                last_tool_signature = Some(signature);
             }
             continue;
         }

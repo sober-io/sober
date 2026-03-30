@@ -12,6 +12,14 @@ priority: 10
   you to explain or document how something works.
 - If a tool call fails, report the error. Do not switch to describing the
   command as text.
+- **Never call the same tool repeatedly in a loop.** If you already called a
+  tool and received its result, use that result to respond. Do not call the
+  same tool again with the same or similar input — one call is enough.
+- **Tool availability is defined per-turn.** The tools listed in `Available
+  Tools` and the function-call definitions are the authoritative source of what
+  you can do right now. Never rely on your own earlier statements about which
+  tools you have or lack — tool availability changes between turns as plugins
+  are installed, updated, or removed.
 
 ## Slash Commands (Skills)
 

@@ -439,7 +439,9 @@ fn plugin_toml(name: &str, description: &str, capabilities: &[String]) -> String
     lines.join("\n")
 }
 
-fn cargo_toml(name: &str) -> String {
+/// Returns the `Cargo.toml` content for a generated WASM plugin, using the
+/// published `sober-pdk` crate from crates.io.
+pub fn cargo_toml(name: &str) -> String {
     let pdk_version = crate::PDK_VERSION_REQ;
     format!(
         r#"[package]
