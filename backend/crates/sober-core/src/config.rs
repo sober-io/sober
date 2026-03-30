@@ -449,12 +449,24 @@ impl Default for WebConfig {
 pub struct EvolutionConfig {
     /// How often the evolution check job runs (e.g. `"2h"`, `"30m"`).
     pub interval: String,
+    /// Max recent conversations to scan per detection cycle.
+    pub detection_conv_limit: i64,
+    /// Max messages to sample per conversation during detection.
+    pub detection_msg_limit: i64,
+    /// Max tokens for the detection LLM call.
+    pub detection_max_tokens: u32,
+    /// Temperature for the detection LLM call.
+    pub detection_temperature: f32,
 }
 
 impl Default for EvolutionConfig {
     fn default() -> Self {
         Self {
             interval: DEFAULT_EVOLUTION_INTERVAL.to_owned(),
+            detection_conv_limit: 20,
+            detection_msg_limit: 50,
+            detection_max_tokens: 4096,
+            detection_temperature: 0.3,
         }
     }
 }

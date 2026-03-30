@@ -25,6 +25,7 @@ fn build_context<R: AgentRepos>(
         scheduler_client: Arc::clone(&service.agent().tool_bootstrap().scheduler_client),
         plugin_manager: Arc::clone(&service.plugin_manager),
         plugin_generator,
+        evolution_config: service.agent().tool_bootstrap().evolution_config.clone(),
     })
 }
 

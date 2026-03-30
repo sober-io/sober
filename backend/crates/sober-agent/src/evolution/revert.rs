@@ -151,41 +151,22 @@ async fn revert_instruction(event: &EvolutionEvent, mind: &Arc<Mind>) -> Result<
         .and_then(|v| v.as_str())
         .ok_or_else(|| AgentError::Internal("instruction payload missing 'file' field".into()))?;
 
-    let overlay_dir = super::executor::resolve_overlay_dir()?;
-    let overlay_path = overlay_dir.join(file);
-
     match event
         .payload
         .get("previous_content")
         .and_then(|v| v.as_str())
     {
         Some(content) => {
-            std::fs::write(&overlay_path, content).map_err(|e| {
-                AgentError::Internal(format!(
-                    "failed to restore overlay file {}: {e}",
-                    overlay_path.display()
-                ))
-            })?;
+            mind.write_overlay(file, content)
+                .map_err(|e| AgentError::Internal(format!("failed to restore overlay: {e}")))?;
             info!(file = %file, "instruction overlay restored to previous content");
         }
         None => {
-            if overlay_path.exists() {
-                std::fs::remove_file(&overlay_path).map_err(|e| {
-                    AgentError::Internal(format!(
-                        "failed to remove overlay file {}: {e}",
-                        overlay_path.display()
-                    ))
-                })?;
-                info!(file = %file, "instruction overlay removed (reverting to base)");
-            } else {
-                warn!(file = %file, "overlay file already absent during revert");
-            }
+            mind.remove_overlay(file)
+                .map_err(|e| AgentError::Internal(format!("failed to remove overlay: {e}")))?;
+            info!(file = %file, "instruction overlay removed (reverting to base)");
         }
     }
-
-    mind.reload_instructions().map_err(|e| {
-        AgentError::Internal(format!("failed to reload instructions after revert: {e}"))
-    })?;
 
     Ok(())
 }

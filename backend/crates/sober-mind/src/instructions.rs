@@ -165,9 +165,14 @@ impl InstructionLoader {
 
         Ok(Self {
             cached: RwLock::new(instructions),
-            overlay_dir: overlay_dir.filter(|d| d.is_dir()),
+            overlay_dir,
             user_dir: user_dir.map(Path::to_path_buf),
         })
+    }
+
+    /// Returns the overlay directory path, if configured.
+    pub fn overlay_dir(&self) -> Option<&Path> {
+        self.overlay_dir.as_deref()
     }
 
     /// Returns a clone of the cached base + overlay + user instructions.

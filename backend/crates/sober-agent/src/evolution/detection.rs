@@ -11,12 +11,9 @@ use sober_llm::Message as LlmMessage;
 use sober_llm::types::{CompletionRequest, FunctionDefinition, ToolDefinition};
 use tracing::{info, warn};
 
-use crate::agent::Agent;
+use sober_core::config::EvolutionConfig;
 
-/// Maximum recent conversations to query for pattern detection.
-const CONV_LIMIT: i64 = 20;
-/// Maximum messages to sample per conversation.
-const MSG_LIMIT: i64 = 10;
+use crate::agent::Agent;
 
 /// The system prompt for the self-evolution detection LLM call.
 const DETECTION_SYSTEM_PROMPT: &str = "\
@@ -38,8 +35,16 @@ Rules:
 ";
 
 /// Gathers a compact summary of recent conversation activity for the LLM.
-pub(crate) async fn gather_conversation_summary<R: AgentRepos>(agent: &Arc<Agent<R>>) -> String {
-    let recent_convs = match agent.repos().conversations().list_recent(CONV_LIMIT).await {
+pub(crate) async fn gather_conversation_summary<R: AgentRepos>(
+    agent: &Arc<Agent<R>>,
+    config: &EvolutionConfig,
+) -> String {
+    let recent_convs = match agent
+        .repos()
+        .conversations()
+        .list_recent(config.detection_conv_limit)
+        .await
+    {
         Ok(convs) => convs,
         Err(e) => {
             warn!(error = %e, "failed to query recent conversations for detection");
@@ -57,7 +62,7 @@ pub(crate) async fn gather_conversation_summary<R: AgentRepos>(agent: &Arc<Agent
         let messages = match agent
             .repos()
             .messages()
-            .list_by_conversation(conv.id, MSG_LIMIT)
+            .list_by_conversation(conv.id, config.detection_msg_limit)
             .await
         {
             Ok(msgs) => msgs,
@@ -115,6 +120,7 @@ pub(crate) async fn gather_conversation_summary<R: AgentRepos>(agent: &Arc<Agent
 /// tool implementations.
 pub(crate) async fn run_detection_llm<R: AgentRepos>(
     agent: &Arc<Agent<R>>,
+    config: &EvolutionConfig,
     conversation_summary: &str,
     active_context: &str,
     task_id: &str,
@@ -141,8 +147,8 @@ pub(crate) async fn run_detection_llm<R: AgentRepos>(
             LlmMessage::user(&user_message),
         ],
         tools: propose_tools,
-        max_tokens: Some(4096),
-        temperature: Some(0.3),
+        max_tokens: Some(config.detection_max_tokens),
+        temperature: Some(config.detection_temperature),
         stop: vec![],
         stream: false,
     };

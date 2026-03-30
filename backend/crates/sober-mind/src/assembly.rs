@@ -307,6 +307,46 @@ impl Mind {
     pub fn reload_instructions(&self) -> Result<(), MindError> {
         self.instruction_loader.reload()
     }
+
+    /// Writes an instruction overlay file and reloads cached instructions.
+    ///
+    /// The overlay directory is `~/.sober/instructions/`. If the directory
+    /// does not exist, it is created. After writing, the instruction cache
+    /// is reloaded so the change takes effect immediately.
+    pub fn write_overlay(&self, filename: &str, content: &str) -> Result<(), MindError> {
+        let overlay_dir = self.instruction_loader.overlay_dir();
+        if let Some(dir) = &overlay_dir {
+            std::fs::create_dir_all(dir).map_err(|e| {
+                MindError::Io(format!(
+                    "failed to create overlay dir {}: {e}",
+                    dir.display()
+                ))
+            })?;
+            let path = dir.join(filename);
+            std::fs::write(&path, content).map_err(|e| {
+                MindError::Io(format!("failed to write overlay {}: {e}", path.display()))
+            })?;
+        } else {
+            return Err(MindError::Io("overlay directory not configured".into()));
+        }
+        self.instruction_loader.reload()
+    }
+
+    /// Removes an instruction overlay file and reloads cached instructions.
+    ///
+    /// If the file does not exist, this is a no-op (returns Ok).
+    /// After removal, the base instruction takes effect again.
+    pub fn remove_overlay(&self, filename: &str) -> Result<(), MindError> {
+        if let Some(dir) = self.instruction_loader.overlay_dir() {
+            let path = dir.join(filename);
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| {
+                    MindError::Io(format!("failed to remove overlay {}: {e}", path.display()))
+                })?;
+            }
+        }
+        self.instruction_loader.reload()
+    }
 }
 
 /// Maps a trigger kind to a static label string for metrics.

@@ -6,10 +6,10 @@
 //! - **Instruction** — writes overlay files, reloads mind
 //! - **Automation** — creates scheduled job via scheduler gRPC
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use sober_core::config::EvolutionConfig;
 use sober_core::types::AgentRepos;
 use sober_core::types::JobPayload;
 use sober_core::types::domain::EvolutionEvent;
@@ -41,9 +41,13 @@ pub struct EvolutionContext<R: AgentRepos> {
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
     /// LLM-powered plugin/skill generator.
     pub plugin_generator: Arc<PluginGenerator>,
+    /// Evolution configuration (detection limits, LLM params).
+    pub evolution_config: EvolutionConfig,
 }
 
 /// Converts an [`EvolutionType`] to a static string for metric labels.
+// TODO: Replace with a generated label helper once a metrics codegen pipeline
+// is set up from metrics.toml (currently no such helper exists).
 pub(crate) fn evolution_type_str(t: EvolutionType) -> &'static str {
     match t {
         EvolutionType::Plugin => "plugin",
@@ -363,27 +367,10 @@ async fn execute_instruction(
         )));
     }
 
-    let overlay_dir = resolve_overlay_dir()?;
-    std::fs::create_dir_all(&overlay_dir).map_err(|e| {
-        AgentError::Internal(format!(
-            "failed to create overlay directory {}: {e}",
-            overlay_dir.display()
-        ))
-    })?;
+    mind.write_overlay(file, new_content)
+        .map_err(|e| AgentError::Internal(format!("failed to write overlay: {e}")))?;
 
-    let overlay_path = overlay_dir.join(file);
-    std::fs::write(&overlay_path, new_content).map_err(|e| {
-        AgentError::Internal(format!(
-            "failed to write overlay file {}: {e}",
-            overlay_path.display()
-        ))
-    })?;
-
-    info!(file = %file, path = %overlay_path.display(), "instruction overlay written");
-
-    mind.reload_instructions().map_err(|e| {
-        AgentError::Internal(format!("failed to reload instructions after write: {e}"))
-    })?;
+    info!(file = %file, "instruction overlay written");
 
     Ok(json!({}))
 }
@@ -486,21 +473,12 @@ fn payload_string_array(event: &EvolutionEvent, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolves the instruction overlay directory path (`~/.sober/instructions/`).
-pub(crate) fn resolve_overlay_dir() -> Result<PathBuf, AgentError> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| AgentError::Internal("HOME environment variable not set".into()))?;
-    Ok(PathBuf::from(home).join(".sober").join("instructions"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn resolve_overlay_dir_returns_expected_path() {
-        if let Ok(dir) = resolve_overlay_dir() {
-            assert!(dir.to_string_lossy().ends_with(".sober/instructions"));
+    fn skill_dir_resolves_correctly() {
+        if let Ok(dir) = sober_skill::SkillLoader::resolve_skill_dir("test") {
+            assert!(dir.to_string_lossy().ends_with(".sober/skills/test"));
         }
     }
 }

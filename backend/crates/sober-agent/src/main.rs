@@ -237,6 +237,7 @@ async fn main() -> Result<()> {
             Arc::clone(&llm),
             config.llm.model.clone(),
         ))),
+        evolution_config: config.evolution.clone(),
     });
 
     // 15. Create broadcast channel for conversation update events

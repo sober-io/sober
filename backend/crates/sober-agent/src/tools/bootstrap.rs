@@ -138,6 +138,8 @@ pub struct ToolBootstrap<R: AgentRepos> {
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
     /// LLM-powered plugin generator (None = generation disabled).
     pub plugin_generator: Option<Arc<PluginGenerator>>,
+    /// Evolution configuration (detection limits, LLM params).
+    pub evolution_config: sober_core::config::EvolutionConfig,
 }
 
 impl<R: AgentRepos> ToolBootstrap<R> {

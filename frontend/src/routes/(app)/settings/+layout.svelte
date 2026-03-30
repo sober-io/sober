@@ -17,7 +17,7 @@
 			: 'border-b-2 border-transparent px-4 py-2 text-sm font-medium text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200';
 </script>
 
-<div class="mx-auto max-w-3xl p-6">
+<div class="mx-auto w-[90%] max-w-5xl p-6">
 	<h1 class="mb-6 text-xl font-semibold text-zinc-900 dark:text-zinc-100">Settings</h1>
 
 	<div class="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-800">

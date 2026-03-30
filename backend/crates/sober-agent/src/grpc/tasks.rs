@@ -145,6 +145,7 @@ async fn execute_self_evolution_check<R: AgentRepos>(
         scheduler_client: std::sync::Arc::clone(&agent.tool_bootstrap().scheduler_client),
         plugin_manager: std::sync::Arc::clone(&agent.tool_bootstrap().plugin_manager),
         plugin_generator,
+        evolution_config: agent.tool_bootstrap().evolution_config.clone(),
     };
 
     // -----------------------------------------------------------------------
@@ -190,7 +191,7 @@ async fn execute_self_evolution_check<R: AgentRepos>(
     // -----------------------------------------------------------------------
     info!(task_id = %task_id, "phase 2: gathering conversation data");
 
-    let conversation_summary = gather_conversation_summary(agent).await;
+    let conversation_summary = gather_conversation_summary(agent, &evo_ctx.evolution_config).await;
 
     // -----------------------------------------------------------------------
     // Phase 3: Load active evolutions for context
@@ -229,7 +230,14 @@ async fn execute_self_evolution_check<R: AgentRepos>(
         "phase 4: running LLM detection"
     );
 
-    run_detection_llm(agent, &conversation_summary, &active_context, task_id).await;
+    run_detection_llm(
+        agent,
+        &evo_ctx.evolution_config,
+        &conversation_summary,
+        &active_context,
+        task_id,
+    )
+    .await;
 
     // -----------------------------------------------------------------------
     // Post-detection: execute any newly auto-approved events
