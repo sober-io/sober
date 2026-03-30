@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # Rust toolchain for WASM plugin compilation (generate-plugin tool).
 # RUSTUP_HOME + toolchain are system-wide and read-only.
-# CARGO_HOME is set per-user so the sober user can download crates.
+# CARGO_HOME points to /var/lib/sober/.cargo so the sober user can download crates.
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -24,8 +24,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 RUN useradd --system --create-home --shell /usr/sbin/nologin sober
 COPY --from=builder /usr/local/bin/sober-agent /usr/local/bin/sober-agent
-RUN mkdir -p /run/sober /var/lib/sober/workspaces/default /home/sober/.cargo \
+RUN mkdir -p /run/sober /var/lib/sober/workspaces/default /var/lib/sober/.cargo \
     && chown -R sober:sober /run/sober /var/lib/sober /home/sober
 USER sober
-ENV CARGO_HOME=/home/sober/.cargo
+ENV CARGO_HOME=/var/lib/sober/.cargo
 ENTRYPOINT ["sober-agent"]

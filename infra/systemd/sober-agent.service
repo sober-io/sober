@@ -8,6 +8,8 @@ Type=simple
 User=sober
 Group=sober
 ExecStart=/opt/sober/bin/sober-agent
+Environment=RUSTUP_HOME=/usr/local/rustup
+Environment=CARGO_HOME=/var/lib/sober/.cargo
 EnvironmentFile=-/etc/sober/.env
 Environment=SOBER_CONFIG=/etc/sober/config.toml
 StateDirectory=sober

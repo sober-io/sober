@@ -149,25 +149,16 @@ sudo chmod -R a+rX /usr/local/rustup /usr/local/cargo
 sudo ln -sf /usr/local/cargo/bin/{cargo,rustc,rustup} /usr/local/bin/
 ```
 
-**Step 2 — Create a writable CARGO_HOME for the sober user:**
-
-The system-wide `CARGO_HOME` (`/usr/local/cargo`) is read-only. The agent needs a
-writable location to download crates during plugin compilation:
-
-```bash
-sudo mkdir -p /home/sober/.cargo
-sudo chown sober:sober /home/sober/.cargo
-```
-
-**Step 3 — Set environment variables in `/etc/sober/.env`:**
+**Step 2 — Set environment variables in `/etc/sober/.env`:**
 
 The systemd units load this file automatically. `RUSTUP_HOME` points to the shared
-toolchain; `CARGO_HOME` points to the sober user's writable directory:
+toolchain; `CARGO_HOME` uses the agent's state directory (`/var/lib/sober/.cargo`)
+which is writable under systemd's `StateDirectory=sober`:
 
 ```bash
 cat <<'EOF' | sudo tee -a /etc/sober/.env
 RUSTUP_HOME=/usr/local/rustup
-CARGO_HOME=/home/sober/.cargo
+CARGO_HOME=/var/lib/sober/.cargo
 EOF
 ```
 
@@ -176,6 +167,9 @@ Then restart services:
 ```bash
 sudo systemctl restart sober.target
 ```
+
+> **Note:** Do not use `/home/sober/.cargo` — the systemd unit sets `ProtectHome=yes`,
+> which makes `/home` inaccessible to the agent process.
 
 > **Without `bubblewrap`**, the shell tool will refuse to execute commands.
 > **Without Rust + `wasm32-wasip1`**, the agent cannot generate or compile plugins.
