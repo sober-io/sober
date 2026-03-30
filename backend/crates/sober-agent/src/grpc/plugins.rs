@@ -655,31 +655,27 @@ pub(crate) async fn handle_list_tools<R: AgentRepos>(
                         );
                     }
                 },
-                PluginKind::Wasm => {
-                    // Read tool names from the stored manifest TOML — avoids
-                    // loading the full WASM binary just for a catalog listing.
-                    match plugin_manager.manifest_tool_names(plugin) {
-                        Ok(wasm_tools) => {
-                            for (name, description) in wasm_tools {
-                                tools.push(proto::ToolInfoEntry {
-                                    name,
-                                    description,
-                                    source: "plugin".into(),
-                                    plugin_id: Some(plugin.id.to_string()),
-                                    plugin_name: Some(plugin.name.clone()),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                plugin_id = %plugin.id,
-                                plugin_name = %plugin.name,
-                                error = %e,
-                                "failed to list WASM tools for catalog"
-                            );
+                PluginKind::Wasm => match plugin_manager.manifest_tool_names(plugin) {
+                    Ok(wasm_tools) => {
+                        for (name, description) in wasm_tools {
+                            tools.push(proto::ToolInfoEntry {
+                                name,
+                                description,
+                                source: "plugin".into(),
+                                plugin_id: Some(plugin.id.to_string()),
+                                plugin_name: Some(plugin.name.clone()),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!(
+                            plugin_id = %plugin.id,
+                            plugin_name = %plugin.name,
+                            error = %e,
+                            "failed to list WASM tools for catalog"
+                        );
+                    }
+                },
                 PluginKind::Skill => {
                     // Skills are listed via their own endpoint.
                 }

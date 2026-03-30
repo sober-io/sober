@@ -11,7 +11,7 @@ use sober_core::types::tool::Tool;
 use sober_plugin::audit::{AuditPipeline, AuditRequest, AuditVerdict};
 use sober_plugin::host::PluginHost;
 use sober_plugin::manifest::{PluginManifest, PluginMeta, ToolEntry};
-use sober_plugin::tool::{PluginTool, WasmHostState};
+use sober_plugin::tool::{PluginTool, PluginToolContext, WasmHostState};
 
 // ---------------------------------------------------------------------------
 // WAT plugin source — an echo plugin that copies input to output
@@ -282,16 +282,16 @@ async fn plugin_tool_execute_returns_echoed_content() {
     let host = PluginHost::load(&wasm_bytes, &manifest).expect("should load valid WASM plugin");
     let host = Arc::new(Mutex::new(host));
 
-    let tool = PluginTool::new(
-        WasmHostState::Loaded(Arc::clone(&host)),
-        "echo-plugin".into(),
-        "greet".into(),
-        "Echoes the input back".into(),
-        sober_core::types::ids::PluginId::new(),
-        None,
-        None,
-        None,
-    );
+    let tool = PluginTool::new(PluginToolContext {
+        host_state: WasmHostState::Loaded(Arc::clone(&host)),
+        plugin_name: "echo-plugin".into(),
+        tool_name: "greet".into(),
+        description: "Echoes the input back".into(),
+        plugin_id: sober_core::types::ids::PluginId::new(),
+        user_id: None,
+        workspace_id: None,
+        db_pool: None,
+    });
 
     // Verify metadata
     let metadata = tool.metadata();
@@ -323,16 +323,16 @@ async fn plugin_tool_multiple_calls_on_shared_host() {
     let host = PluginHost::load(&wasm_bytes, &manifest).expect("should load valid WASM plugin");
     let host = Arc::new(Mutex::new(host));
 
-    let greet_tool = PluginTool::new(
-        WasmHostState::Loaded(Arc::clone(&host)),
-        "echo-plugin".into(),
-        "greet".into(),
-        "Echoes the input back".into(),
-        sober_core::types::ids::PluginId::new(),
-        None,
-        None,
-        None,
-    );
+    let greet_tool = PluginTool::new(PluginToolContext {
+        host_state: WasmHostState::Loaded(Arc::clone(&host)),
+        plugin_name: "echo-plugin".into(),
+        tool_name: "greet".into(),
+        description: "Echoes the input back".into(),
+        plugin_id: sober_core::types::ids::PluginId::new(),
+        user_id: None,
+        workspace_id: None,
+        db_pool: None,
+    });
 
     // Call greet multiple times to verify the host can be reused
     for i in 0..3 {

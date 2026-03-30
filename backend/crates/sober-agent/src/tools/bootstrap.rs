@@ -355,13 +355,15 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             .await
         {
             Ok(plugin_tools) => {
+                // Safety net: plugins installed via the gRPC InstallPlugin
+                // handler bypass the audit pipeline, so reserved-name
+                // rejection doesn't cover them. Drop collisions at runtime.
                 for tool in plugin_tools {
                     let name = tool.metadata().name;
-                    if let Some(existing) = tools.iter().find(|t| t.metadata().name == name) {
-                        let _ = existing; // used only for the collision check
+                    if tools.iter().any(|t| t.metadata().name == name) {
                         tracing::warn!(
                             tool_name = %name,
-                            "plugin tool name collides with existing tool, skipping"
+                            "plugin tool collides with built-in, skipping"
                         );
                     } else {
                         tools.push(tool);

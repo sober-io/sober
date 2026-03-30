@@ -35,7 +35,7 @@ use crate::host::PluginHost;
 use crate::host_fns::HostContext;
 use crate::manifest::{PluginManifest, ToolEntry};
 use crate::registry::{InstallRequest, PluginRegistry};
-use crate::tool::{PluginTool, WasmHostState};
+use crate::tool::{PluginTool, PluginToolContext, WasmHostState};
 
 /// Service handles for WASM host function execution.
 ///
@@ -664,16 +664,16 @@ impl<R: PluginRepo> PluginManager<R> {
         tool_entries
             .iter()
             .map(|entry| {
-                Arc::new(PluginTool::new(
-                    host_state.clone(),
-                    plugin_name.to_owned(),
-                    entry.name.clone(),
-                    entry.description.clone(),
-                    plugin.id,
-                    plugin.owner_id,
-                    plugin.workspace_id,
-                    self.wasm_services.db_pool.clone(),
-                )) as Arc<dyn Tool>
+                Arc::new(PluginTool::new(PluginToolContext {
+                    host_state: host_state.clone(),
+                    plugin_name: plugin_name.to_owned(),
+                    tool_name: entry.name.clone(),
+                    description: entry.description.clone(),
+                    plugin_id: plugin.id,
+                    user_id: plugin.owner_id,
+                    workspace_id: plugin.workspace_id,
+                    db_pool: self.wasm_services.db_pool.clone(),
+                })) as Arc<dyn Tool>
             })
             .collect()
     }

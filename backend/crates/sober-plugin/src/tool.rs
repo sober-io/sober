@@ -27,6 +27,26 @@ pub enum WasmHostState {
     Failed(String),
 }
 
+/// Context for constructing a [`PluginTool`].
+pub struct PluginToolContext {
+    /// WASM host state — `Loaded` or `Failed`.
+    pub host_state: WasmHostState,
+    /// Plugin name from the manifest.
+    pub plugin_name: String,
+    /// Tool name from the manifest `[[tools]]` entry.
+    pub tool_name: String,
+    /// Human-readable tool description.
+    pub description: String,
+    /// Plugin ID from the database.
+    pub plugin_id: PluginId,
+    /// Owner user ID (for scoped operations).
+    pub user_id: Option<UserId>,
+    /// Workspace ID (for scoped operations).
+    pub workspace_id: Option<WorkspaceId>,
+    /// Database pool for persisting execution logs.
+    pub db_pool: Option<sqlx::PgPool>,
+}
+
 /// A WASM plugin tool that implements the [`Tool`] trait.
 ///
 /// Wraps a shared [`PluginHost`] and exposes a single tool from the
@@ -47,33 +67,11 @@ pub struct PluginTool {
 }
 
 impl PluginTool {
-    /// Creates a new `PluginTool` for the given tool entry.
-    ///
-    /// The `host` is shared across all tools from the same plugin.
-    /// `tool_name` must match a `[[tools]]` entry in the manifest.
-    /// `description` comes from the manifest's tool entry.
-    ///
-    /// When `db_pool` is `Some`, execution logs are persisted to the
-    /// `plugin_execution_logs` table after each invocation.
-    /// Creates a new `PluginTool` for the given tool entry.
-    ///
-    /// `host_state` is either `Loaded` (ready for execution) or `Failed`
-    /// (will return an error on execute). The host is shared across all
-    /// tools from the same plugin.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        host_state: WasmHostState,
-        plugin_name: String,
-        tool_name: String,
-        description: String,
-        plugin_id: PluginId,
-        user_id: Option<UserId>,
-        workspace_id: Option<WorkspaceId>,
-        db_pool: Option<sqlx::PgPool>,
-    ) -> Self {
+    /// Creates a new `PluginTool` from the given context.
+    pub fn new(ctx: PluginToolContext) -> Self {
         let metadata = ToolMetadata {
-            name: tool_name.clone(),
-            description,
+            name: ctx.tool_name.clone(),
+            description: ctx.description,
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {},
@@ -84,14 +82,14 @@ impl PluginTool {
         };
 
         Self {
-            host_state,
-            plugin_name,
-            tool_name,
+            host_state: ctx.host_state,
+            plugin_name: ctx.plugin_name,
+            tool_name: ctx.tool_name,
             metadata,
-            plugin_id,
-            user_id,
-            workspace_id,
-            db_pool,
+            plugin_id: ctx.plugin_id,
+            user_id: ctx.user_id,
+            workspace_id: ctx.workspace_id,
+            db_pool: ctx.db_pool,
         }
     }
 }
