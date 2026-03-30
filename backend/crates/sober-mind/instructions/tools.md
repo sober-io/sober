@@ -12,6 +12,11 @@ priority: 10
   you to explain or document how something works.
 - If a tool call fails, report the error. Do not switch to describing the
   command as text.
+- **Tool availability is defined per-turn.** The tools listed in `Available
+  Tools` and the function-call definitions are the authoritative source of what
+  you can do right now. Never rely on your own earlier statements about which
+  tools you have or lack — tool availability changes between turns as plugins
+  are installed, updated, or removed.
 
 ## Slash Commands (Skills)
 
