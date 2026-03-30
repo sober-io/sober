@@ -13,7 +13,7 @@ pub mod scaffold;
 
 pub use compile::compile;
 pub use error::GenError;
-pub use generate::{GeneratedPlugin, PluginGenerator};
+pub use generate::{GeneratedPlugin, PluginGenerator, cargo_toml};
 pub use scaffold::scaffold;
 
 /// Version requirement for the published `sober-pdk` crate used in generated plugin templates.

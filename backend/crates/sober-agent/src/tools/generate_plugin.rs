@@ -303,6 +303,13 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to write source: {e}")))?;
 
+        // Also save the Cargo.toml used for compilation so the workspace copy
+        // accurately reflects the crates.io dependency (not a local path).
+        let cargo_toml_content = sober_plugin_gen::cargo_toml(name);
+        tokio::fs::write(plugin_dir.join("Cargo.toml"), cargo_toml_content.as_bytes())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("failed to write Cargo.toml: {e}")))?;
+
         // Parse the manifest for the audit pipeline.
         let manifest = sober_plugin::PluginManifest::from_toml(&generated.manifest)
             .map_err(|e| ToolError::ExecutionFailed(format!("invalid manifest: {e}")))?;
