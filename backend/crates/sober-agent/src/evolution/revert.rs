@@ -11,7 +11,7 @@ use sober_core::types::domain::EvolutionEvent;
 use sober_core::types::enums::{EvolutionStatus, EvolutionType};
 use sober_core::types::repo::EvolutionRepo;
 use sober_mind::assembly::Mind;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::error::AgentError;
 
@@ -26,6 +26,13 @@ pub async fn revert_evolution<R: AgentRepos>(
     repos: &R,
     mind: &Arc<Mind>,
 ) -> Result<(), AgentError> {
+    info!(
+        event_id = %event.id,
+        evolution_type = ?event.evolution_type,
+        title = %event.title,
+        "reverting evolution"
+    );
+
     if event.status != EvolutionStatus::Active {
         return Err(AgentError::Internal(format!(
             "cannot revert evolution event {} — status is {:?}, expected Active",
@@ -52,8 +59,9 @@ pub async fn revert_evolution<R: AgentRepos>(
             Ok(())
         }
         Err(e) => {
-            error!(
+            warn!(
                 event_id = %event.id,
+                evolution_type = ?event.evolution_type,
                 error = %e,
                 "evolution revert failed — status unchanged"
             );

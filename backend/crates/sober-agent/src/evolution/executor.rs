@@ -31,6 +31,13 @@ pub async fn execute_evolution<R: AgentRepos>(
     repos: &R,
     mind: &Arc<Mind>,
 ) -> Result<(), AgentError> {
+    info!(
+        event_id = %event.id,
+        evolution_type = ?event.evolution_type,
+        title = %event.title,
+        "executing evolution"
+    );
+
     // Atomic status guard: only proceed if currently approved.
     if event.status != EvolutionStatus::Approved {
         info!(
@@ -86,7 +93,7 @@ pub async fn execute_evolution<R: AgentRepos>(
                 error!(event_id = %event.id, error = %status_err, "failed to set failed status");
             }
 
-            warn!(event_id = %event.id, error = %e, "evolution execution failed");
+            warn!(event_id = %event.id, evolution_type = ?event.evolution_type, error = %e, "evolution execution failed");
             Err(e)
         }
     }
