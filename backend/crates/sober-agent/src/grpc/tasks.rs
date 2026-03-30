@@ -121,10 +121,10 @@ pub(crate) async fn execute_typed_payload<R: AgentRepos>(
 /// Instead of sending a prompt to the LLM, it:
 ///
 /// 1. **Execute approved** — queries approved evolution events and executes them.
-/// 2. **Gather data** — queries recent conversations for pattern detection (stub).
+/// 2. **Gather data** — queries recent conversations for pattern detection.
 /// 3. **Active context** — loads active evolutions for detection context.
-/// 4. **Detect** — builds a structured prompt for the LLM to detect new
-///    evolution opportunities (stub — logs context, skips LLM call).
+/// 4. **Detect** — calls the LLM with a structured prompt and propose_* tools
+///    to detect new evolution opportunities from conversation patterns.
 ///
 /// After detection, executes any newly auto-approved events.
 async fn execute_self_evolution_check<R: AgentRepos>(
