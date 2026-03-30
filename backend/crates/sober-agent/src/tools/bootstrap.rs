@@ -354,7 +354,20 @@ impl<R: AgentRepos> ToolBootstrap<R> {
             )
             .await
         {
-            Ok(plugin_tools) => tools.extend(plugin_tools),
+            Ok(plugin_tools) => {
+                for tool in plugin_tools {
+                    let name = tool.metadata().name;
+                    if let Some(existing) = tools.iter().find(|t| t.metadata().name == name) {
+                        let _ = existing; // used only for the collision check
+                        tracing::warn!(
+                            tool_name = %name,
+                            "plugin tool name collides with existing tool, skipping"
+                        );
+                    } else {
+                        tools.push(tool);
+                    }
+                }
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "failed to load plugin tools, continuing without them");
             }
@@ -377,6 +390,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                     workspace_id: ctx.workspace_id,
                     conversation_id: Some(ctx.conversation_id),
                     user_id: ctx.user_id,
+                    reserved_tool_names: tools.iter().map(|t| t.metadata().name).collect(),
                 },
             )));
         }

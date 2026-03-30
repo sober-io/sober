@@ -32,6 +32,8 @@ pub struct GeneratePluginConfig<A: ArtifactRepo> {
     pub workspace_id: Option<WorkspaceId>,
     pub conversation_id: Option<ConversationId>,
     pub user_id: UserId,
+    /// Built-in tool names that generated plugins must not shadow.
+    pub reserved_tool_names: Vec<String>,
 }
 
 /// Built-in tool that generates plugins (WASM or skill) via LLM.
@@ -55,6 +57,7 @@ pub struct GeneratePluginTool<R: PluginRepo, A: ArtifactRepo> {
     workspace_id: Option<WorkspaceId>,
     conversation_id: Option<ConversationId>,
     user_id: UserId,
+    reserved_tool_names: Vec<String>,
 }
 
 impl<R: PluginRepo, A: ArtifactRepo> GeneratePluginTool<R, A> {
@@ -78,6 +81,7 @@ impl<R: PluginRepo, A: ArtifactRepo> GeneratePluginTool<R, A> {
             workspace_id: config.workspace_id,
             conversation_id: config.conversation_id,
             user_id: config.user_id,
+            reserved_tool_names: config.reserved_tool_names,
         }
     }
 }
@@ -203,6 +207,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
             installed_by: Some(self.user_id),
             manifest,
             wasm_bytes,
+            reserved_tool_names: self.reserved_tool_names.clone(),
         };
 
         let report = self
@@ -349,6 +354,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A
                 config: new_config.clone(),
                 manifest: Some(manifest.clone()),
                 wasm_bytes: Some(generated.wasm_bytes.clone()),
+                reserved_tool_names: self.reserved_tool_names.clone(),
             };
             let report = AuditPipeline::audit(&audit_request);
             if !report.is_approved() {
@@ -986,6 +992,7 @@ mod tests {
                 workspace_id: None,
                 conversation_id: None,
                 user_id: UserId::new(),
+                reserved_tool_names: vec![],
             },
         );
         (tool, blob_dir)
@@ -1017,6 +1024,7 @@ mod tests {
                 workspace_id,
                 conversation_id: None,
                 user_id: UserId::new(),
+                reserved_tool_names: vec![],
             },
         );
         (tool, manager, blob_dir)

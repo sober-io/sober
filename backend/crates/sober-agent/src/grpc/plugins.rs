@@ -634,8 +634,8 @@ pub(crate) async fn handle_list_tools<R: AgentRepos>(
         let plugin_manager = &agent.tool_bootstrap().plugin_manager;
         for plugin in &plugins {
             match plugin.kind {
-                PluginKind::Mcp => {
-                    if let Ok(mcp_tools) = plugin_manager.mcp_tool_names(plugin).await {
+                PluginKind::Mcp => match plugin_manager.mcp_tool_names(plugin).await {
+                    Ok(mcp_tools) => {
                         for (name, description) in mcp_tools {
                             tools.push(proto::ToolInfoEntry {
                                 name,
@@ -646,18 +646,37 @@ pub(crate) async fn handle_list_tools<R: AgentRepos>(
                             });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!(
+                            plugin_id = %plugin.id,
+                            plugin_name = %plugin.name,
+                            error = %e,
+                            "failed to list MCP tools for catalog"
+                        );
+                    }
+                },
                 PluginKind::Wasm => {
-                    // WASM plugins export tool names via their metadata.
-                    if let Ok(wasm_tools) = plugin_manager.wasm_tool_names(plugin).await {
-                        for (name, description) in wasm_tools {
-                            tools.push(proto::ToolInfoEntry {
-                                name,
-                                description,
-                                source: "plugin".into(),
-                                plugin_id: Some(plugin.id.to_string()),
-                                plugin_name: Some(plugin.name.clone()),
-                            });
+                    // Read tool names from the stored manifest TOML — avoids
+                    // loading the full WASM binary just for a catalog listing.
+                    match plugin_manager.manifest_tool_names(plugin) {
+                        Ok(wasm_tools) => {
+                            for (name, description) in wasm_tools {
+                                tools.push(proto::ToolInfoEntry {
+                                    name,
+                                    description,
+                                    source: "plugin".into(),
+                                    plugin_id: Some(plugin.id.to_string()),
+                                    plugin_name: Some(plugin.name.clone()),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                plugin_id = %plugin.id,
+                                plugin_name = %plugin.name,
+                                error = %e,
+                                "failed to list WASM tools for catalog"
+                            );
                         }
                     }
                 }

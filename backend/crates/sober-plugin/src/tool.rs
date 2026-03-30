@@ -13,6 +13,20 @@ use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
 
 use crate::host::PluginHost;
 
+/// State of the underlying WASM host for a plugin tool.
+///
+/// Tools are always registered in the tool registry (from the manifest),
+/// but the WASM host may not have loaded successfully. In the `Failed`
+/// state, [`PluginTool::execute`] returns a clear error to the LLM
+/// instead of the tool being silently invisible.
+#[derive(Clone)]
+pub enum WasmHostState {
+    /// Host loaded and ready for execution.
+    Loaded(Arc<Mutex<PluginHost>>),
+    /// Host failed to load — stores the error message.
+    Failed(String),
+}
+
 /// A WASM plugin tool that implements the [`Tool`] trait.
 ///
 /// Wraps a shared [`PluginHost`] and exposes a single tool from the
@@ -22,7 +36,8 @@ use crate::host::PluginHost;
 /// Multiple `PluginTool` instances can share the same host (one per
 /// manifest tool entry), coordinated through the inner [`Mutex`].
 pub struct PluginTool {
-    host: Arc<Mutex<PluginHost>>,
+    host_state: WasmHostState,
+    plugin_name: String,
     tool_name: String,
     metadata: ToolMetadata,
     plugin_id: PluginId,
@@ -40,8 +55,15 @@ impl PluginTool {
     ///
     /// When `db_pool` is `Some`, execution logs are persisted to the
     /// `plugin_execution_logs` table after each invocation.
+    /// Creates a new `PluginTool` for the given tool entry.
+    ///
+    /// `host_state` is either `Loaded` (ready for execution) or `Failed`
+    /// (will return an error on execute). The host is shared across all
+    /// tools from the same plugin.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        host: Arc<Mutex<PluginHost>>,
+        host_state: WasmHostState,
+        plugin_name: String,
         tool_name: String,
         description: String,
         plugin_id: PluginId,
@@ -62,7 +84,8 @@ impl PluginTool {
         };
 
         Self {
-            host,
+            host_state,
+            plugin_name,
             tool_name,
             metadata,
             plugin_id,
@@ -79,17 +102,18 @@ impl Tool for PluginTool {
     }
 
     fn execute(&self, input: serde_json::Value) -> BoxToolFuture<'_> {
-        let host = Arc::clone(&self.host);
+        let host = match &self.host_state {
+            WasmHostState::Loaded(h) => Arc::clone(h),
+            WasmHostState::Failed(err) => {
+                let msg = format!("WASM plugin '{}' failed to load: {err}", self.plugin_name);
+                return Box::pin(async move {
+                    Err(sober_core::types::tool::ToolError::ExecutionFailed(msg))
+                });
+            }
+        };
         let tool_name = self.tool_name.clone();
         let meta_tool_name = self.tool_name.clone();
-
-        // Capture the plugin name from the host's manifest for logging.
-        let plugin_name = self
-            .host
-            .lock()
-            .ok()
-            .map(|h| h.manifest().plugin.name.clone())
-            .unwrap_or_else(|| "<unknown>".to_owned());
+        let plugin_name = self.plugin_name.clone();
 
         let db_pool = self.db_pool.clone();
         let plugin_id = self.plugin_id;

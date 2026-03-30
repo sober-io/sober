@@ -11,7 +11,7 @@ use sober_core::types::tool::Tool;
 use sober_plugin::audit::{AuditPipeline, AuditRequest, AuditVerdict};
 use sober_plugin::host::PluginHost;
 use sober_plugin::manifest::{PluginManifest, PluginMeta, ToolEntry};
-use sober_plugin::tool::PluginTool;
+use sober_plugin::tool::{PluginTool, WasmHostState};
 
 // ---------------------------------------------------------------------------
 // WAT plugin source — an echo plugin that copies input to output
@@ -283,7 +283,8 @@ async fn plugin_tool_execute_returns_echoed_content() {
     let host = Arc::new(Mutex::new(host));
 
     let tool = PluginTool::new(
-        Arc::clone(&host),
+        WasmHostState::Loaded(Arc::clone(&host)),
+        "echo-plugin".into(),
         "greet".into(),
         "Echoes the input back".into(),
         sober_core::types::ids::PluginId::new(),
@@ -323,7 +324,8 @@ async fn plugin_tool_multiple_calls_on_shared_host() {
     let host = Arc::new(Mutex::new(host));
 
     let greet_tool = PluginTool::new(
-        Arc::clone(&host),
+        WasmHostState::Loaded(Arc::clone(&host)),
+        "echo-plugin".into(),
         "greet".into(),
         "Echoes the input back".into(),
         sober_core::types::ids::PluginId::new(),
@@ -361,6 +363,7 @@ fn audit_pipeline_approves_valid_wasm_module() {
         config: serde_json::json!({}),
         manifest: Some(manifest),
         wasm_bytes: Some(wasm_bytes),
+        reserved_tool_names: vec![],
     };
 
     let report = AuditPipeline::audit(&request);
@@ -410,6 +413,7 @@ fn audit_pipeline_runs_sober_test_export() {
         config: serde_json::json!({}),
         manifest: Some(manifest),
         wasm_bytes: Some(wasm_bytes),
+        reserved_tool_names: vec![],
     };
 
     let report = AuditPipeline::audit(&request);
@@ -446,6 +450,7 @@ fn audit_pipeline_rejects_garbage_wasm() {
         config: serde_json::json!({}),
         manifest: Some(manifest),
         wasm_bytes: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+        reserved_tool_names: vec![],
     };
 
     let report = AuditPipeline::audit(&request);
@@ -491,6 +496,7 @@ description = "Echoes the input back"
         config: serde_json::json!({}),
         manifest: Some(manifest),
         wasm_bytes: Some(wasm_bytes),
+        reserved_tool_names: vec![],
     };
 
     let report = AuditPipeline::audit(&request);
