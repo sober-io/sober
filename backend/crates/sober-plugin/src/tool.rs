@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use metrics::{counter, histogram};
 use sober_core::types::ids::{PluginId, UserId, WorkspaceId};
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{BoxToolFuture, Tool, ToolMetadata, ToolOutput, ToolVisibility};
 
 use crate::host::PluginHost;
 
@@ -58,7 +58,8 @@ impl PluginTool {
                 "additionalProperties": true,
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         };
 
         Self {
@@ -199,13 +200,14 @@ mod tests {
             description: "Does stuff".into(),
             input_schema: serde_json::json!({"type": "object"}),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         };
 
         assert_eq!(metadata.name, "my_tool");
         assert_eq!(metadata.description, "Does stuff");
         assert!(!metadata.context_modifying);
-        assert!(!metadata.internal);
+        assert!(!metadata.redacted);
     }
 
     #[test]
@@ -224,14 +226,15 @@ mod tests {
             description: "Greets someone".into(),
             input_schema: expected_schema.clone(),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         };
 
         assert_eq!(metadata.name, "greet");
         assert_eq!(metadata.description, "Greets someone");
         assert_eq!(metadata.input_schema, expected_schema);
         assert!(!metadata.context_modifying);
-        assert!(!metadata.internal);
+        assert!(!metadata.redacted);
     }
 
     // Compile-time assertion that PluginTool is Send + Sync.

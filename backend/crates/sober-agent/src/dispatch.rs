@@ -135,10 +135,10 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                 .or_insert(serde_json::Value::Bool(false));
         }
 
-        let _tool_internal = req
+        let _tool_redacted = req
             .tool_registry
             .get_tool(tool_name)
-            .is_some_and(|t| t.metadata().internal);
+            .is_some_and(|t| t.metadata().redacted);
 
         // -----------------------------------------------------------
         // Step 1: Write-ahead — create pending tool execution row

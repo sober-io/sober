@@ -340,6 +340,7 @@ mod tests {
     use super::*;
     use sober_core::types::access::TriggerKind;
     use sober_core::types::ids::UserId;
+    use sober_core::types::tool::ToolVisibility;
 
     fn make_caller(trigger: TriggerKind) -> CallerContext {
         CallerContext {
@@ -390,7 +391,8 @@ mod tests {
             description: "Search the web.".into(),
             input_schema: serde_json::json!({}),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }];
 
         let caller = make_caller(TriggerKind::Scheduler);

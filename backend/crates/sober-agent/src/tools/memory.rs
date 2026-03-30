@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use sober_core::config::MemoryConfig;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_core::{ScopeId, UserId};
 use sober_llm::LlmEngine;
 use sober_memory::bcf::ChunkType;
@@ -237,7 +239,8 @@ impl Tool for RecallTool {
                 "required": ["query"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -381,7 +384,8 @@ impl Tool for RememberTool {
                 "required": ["content", "chunk_type"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

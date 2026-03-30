@@ -13,7 +13,9 @@ use sober_core::types::enums::{
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::input::{ArtifactFilter, CreateArtifact, PluginFilter};
 use sober_core::types::repo::{ArtifactRepo, PluginRepo};
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_plugin::audit::AuditRequest;
 use sober_plugin::registry::InstallRequest;
 use sober_plugin::{AuditPipeline, PluginManager};
@@ -115,7 +117,8 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> Tool for GeneratePlugin
                 "required": ["name", "description"]
             }),
             context_modifying: true,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -1032,7 +1035,7 @@ mod tests {
         let meta = tool.metadata();
         assert_eq!(meta.name, "generate_plugin");
         assert!(meta.context_modifying);
-        assert!(!meta.internal);
+        assert!(!meta.redacted);
         assert!(meta.description.contains("plugin"));
 
         // Schema has required name and description fields.

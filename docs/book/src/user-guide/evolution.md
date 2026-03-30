@@ -12,7 +12,7 @@ The agent runs a **self-evolution check** on a configurable interval (default: e
 
 1. **Execute pending approvals** -- any evolutions you approved since the last cycle are executed first.
 2. **Gather data** -- the agent queries recent conversations and reviews what evolutions are already active. This phase uses no LLM tokens.
-3. **Detect patterns** -- the agent analyzes the gathered data and proposes new evolutions by calling internal `propose_*` tools. Depending on your autonomy configuration, proposals are either auto-approved or queued for your review.
+3. **Detect patterns** -- the agent analyzes the gathered data and proposes new evolutions by calling `propose_*` tools (internal-only, visible to Scheduler and Admin triggers only). Depending on your autonomy configuration, proposals are either auto-approved or queued for your review.
 4. **Execute auto-approved** -- any proposals that were auto-approved in phase 3 are executed immediately.
 
 The only evolutions that wait between cycles are proposals that require your approval.

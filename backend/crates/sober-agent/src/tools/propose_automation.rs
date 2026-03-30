@@ -11,7 +11,9 @@ use sober_core::types::enums::{AutonomyLevel, EvolutionStatus, EvolutionType};
 use sober_core::types::ids::UserId;
 use sober_core::types::input::CreateEvolutionEvent;
 use sober_core::types::repo::EvolutionRepo;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use uuid::Uuid;
 
 /// Maximum number of auto-approved evolutions per day.
@@ -79,7 +81,8 @@ impl<R: AgentRepos> Tool for ProposeAutomationTool<R> {
                 "required": ["job_name", "schedule", "prompt", "target_user_id", "confidence", "evidence", "source_count"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Internal,
         }
     }
 

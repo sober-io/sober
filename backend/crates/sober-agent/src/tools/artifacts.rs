@@ -13,7 +13,9 @@ use std::sync::Arc;
 use sober_core::types::enums::{ArtifactKind, ArtifactState};
 use sober_core::types::input::{ArtifactFilter, CreateArtifact};
 use sober_core::types::repo::{ArtifactRepo, AuditLogRepo};
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 use sober_core::{ArtifactId, ConversationId, UserId, WorkspaceId};
 use sober_workspace::BlobStore;
 use uuid::Uuid;
@@ -212,7 +214,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for CreateArtif
                 "required": ["title", "kind", "content"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -311,7 +314,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for ListArtifac
                 }
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -415,7 +419,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for ReadArtifac
                 "required": ["artifact_id"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 
@@ -482,7 +487,8 @@ impl<A: ArtifactRepo + 'static, Au: AuditLogRepo + 'static> Tool for DeleteArtif
                 "required": ["artifact_id"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Public,
         }
     }
 

@@ -45,5 +45,5 @@ pub use repo::{
     SecretRepo, SessionRepo, TagRepo, ToolExecutionRepo, UserRepo, WorkspaceRepo,
     WorkspaceRepoRepo, WorkspaceSettingsRepo, WorktreeRepo,
 };
-pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility};
 pub use tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};

@@ -136,11 +136,13 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         // -----------------------------------------------------------------
         // Phase 2: Streaming LLM call
         // -----------------------------------------------------------------
-        let tool_definitions = if params.trigger == TriggerKind::Scheduler {
-            params.tool_registry.tool_definitions_except(&["scheduler"])
-        } else {
-            params.tool_registry.tool_definitions()
-        };
+        let mut tool_definitions = params
+            .tool_registry
+            .tool_definitions_for_trigger(params.trigger);
+        // Scheduler can't see its own scheduling tool (prevents recursion).
+        if params.trigger == TriggerKind::Scheduler {
+            tool_definitions.retain(|t| t.function.name != "scheduler");
+        }
 
         let req = CompletionRequest {
             model: params.ctx.config.model.clone(),
@@ -279,19 +281,19 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 tool_call_id: None,
             });
 
-            // Skip DB persistence when all tool calls target internal tools
+            // Skip DB persistence when all tool calls target redacted tools
             // (e.g. activate_skill) — they stay in-memory only.
-            let all_internal = tool_calls.iter().all(|tc| {
+            let all_redacted = tool_calls.iter().all(|tc| {
                 params
                     .tool_registry
                     .get_tool(&tc.function.name)
-                    .is_some_and(|t| t.metadata().internal)
+                    .is_some_and(|t| t.metadata().redacted)
             });
 
             // Write-ahead: create the assistant message on first tool-call
             // iteration, reuse on subsequent iterations. This ensures all tool
             // executions and the final text live on one message row.
-            let assistant_msg_id = if !all_internal {
+            let assistant_msg_id = if !all_redacted {
                 if let Some(existing_id) = turn_assistant_msg_id {
                     existing_id
                 } else {

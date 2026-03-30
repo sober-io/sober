@@ -10,7 +10,9 @@ use sober_core::types::AgentRepos;
 use sober_core::types::enums::{AutonomyLevel, EvolutionStatus, EvolutionType};
 use sober_core::types::input::CreateEvolutionEvent;
 use sober_core::types::repo::EvolutionRepo;
-use sober_core::types::tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput};
+use sober_core::types::tool::{
+    BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
+};
 
 /// Maximum number of auto-approved evolutions per day.
 const AUTO_APPROVE_DAILY_LIMIT: i64 = 3;
@@ -76,7 +78,8 @@ impl<R: AgentRepos> Tool for ProposeToolTool<R> {
                 "required": ["name", "description", "pseudocode", "confidence", "evidence", "source_count"]
             }),
             context_modifying: false,
-            internal: false,
+            redacted: false,
+            visibility: ToolVisibility::Internal,
         }
     }
 
