@@ -42,6 +42,20 @@ impl SkillLoader {
         }
     }
 
+    /// Returns the user-level skill directory for a given skill name.
+    ///
+    /// Resolves to `~/.sober/skills/<name>/` using the `HOME` environment
+    /// variable. Used by the evolution executor to write generated skill files.
+    pub fn resolve_skill_dir(name: &str) -> Result<PathBuf, SkillError> {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            SkillError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "HOME environment variable not set",
+            ))
+        })?;
+        Ok(PathBuf::from(home).join(".sober/skills").join(name))
+    }
+
     /// Invalidates all cached catalogs, forcing a rescan on the next `load()` call.
     pub fn invalidate_cache(&self) {
         if let Ok(mut cache) = self.cache.write() {

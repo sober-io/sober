@@ -4,6 +4,7 @@
 //! Each evolution type (Plugin, Skill, Instruction, Automation) has its own
 //! execution and revert logic.
 
+pub mod detection;
 pub mod executor;
 pub mod revert;
 

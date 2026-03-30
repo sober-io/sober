@@ -13,12 +13,19 @@ use super::proto;
 /// Builds an [`EvolutionContext`] from the gRPC service's dependencies.
 fn build_context<R: AgentRepos>(
     service: &AgentGrpcService<R>,
-) -> crate::evolution::EvolutionContext<R> {
-    crate::evolution::EvolutionContext {
+) -> Result<crate::evolution::EvolutionContext<R>, Status> {
+    let plugin_generator = service
+        .agent()
+        .tool_bootstrap()
+        .plugin_generator
+        .clone()
+        .ok_or_else(|| Status::unavailable("plugin generator not configured"))?;
+
+    Ok(crate::evolution::EvolutionContext {
         scheduler_client: Arc::clone(&service.agent().tool_bootstrap().scheduler_client),
         plugin_manager: Arc::clone(&service.plugin_manager),
-        plugin_generator: service.agent().tool_bootstrap().plugin_generator.clone(),
-    }
+        plugin_generator,
+    })
 }
 
 /// Parses an evolution event ID from the request string.
@@ -43,7 +50,7 @@ pub(crate) async fn handle_execute<R: AgentRepos>(
         .await
         .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
 
-    let ctx = build_context(service);
+    let ctx = build_context(service)?;
 
     match crate::evolution::execute_evolution(
         &event,
@@ -79,7 +86,7 @@ pub(crate) async fn handle_revert<R: AgentRepos>(
         .await
         .map_err(|e| Status::not_found(format!("evolution event not found: {e}")))?;
 
-    let ctx = build_context(service);
+    let ctx = build_context(service)?;
 
     match crate::evolution::revert_evolution(
         &event,

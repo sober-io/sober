@@ -40,7 +40,7 @@ pub struct EvolutionContext<R: AgentRepos> {
     /// Plugin manager for audit pipeline + skill loader access.
     pub plugin_manager: Arc<PluginManager<R::Plg>>,
     /// LLM-powered plugin/skill generator.
-    pub plugin_generator: Option<Arc<PluginGenerator>>,
+    pub plugin_generator: Arc<PluginGenerator>,
 }
 
 /// Converts an [`EvolutionType`] to a static string for metric labels.
@@ -158,11 +158,6 @@ async fn execute_plugin<R: AgentRepos>(
     event: &EvolutionEvent,
     ctx: &EvolutionContext<R>,
 ) -> Result<Value, AgentError> {
-    let generator = ctx
-        .plugin_generator
-        .as_ref()
-        .ok_or_else(|| AgentError::Internal("plugin generator not available".into()))?;
-
     let name = payload_str(event, "name")?;
     let description = event
         .payload
@@ -179,7 +174,8 @@ async fn execute_plugin<R: AgentRepos>(
     );
 
     // Generate WASM via LLM with self-correcting retry loop.
-    let generated = generator
+    let generated = ctx
+        .plugin_generator
         .generate_wasm(name, description, &capabilities)
         .await
         .map_err(|e| AgentError::Internal(format!("WASM generation failed: {e}")))?;
@@ -250,11 +246,6 @@ async fn execute_skill<R: AgentRepos>(
     event: &EvolutionEvent,
     ctx: &EvolutionContext<R>,
 ) -> Result<Value, AgentError> {
-    let generator = ctx
-        .plugin_generator
-        .as_ref()
-        .ok_or_else(|| AgentError::Internal("plugin generator not available".into()))?;
-
     let name = payload_str(event, "name")?;
     let description = event
         .payload
@@ -269,13 +260,15 @@ async fn execute_skill<R: AgentRepos>(
     );
 
     // Generate skill content via LLM.
-    let skill_content = generator
+    let skill_content = ctx
+        .plugin_generator
         .generate_skill(name, description)
         .await
         .map_err(|e| AgentError::Internal(format!("skill generation failed: {e}")))?;
 
     // Write to user-level skill directory: ~/.sober/skills/<name>/SKILL.md
-    let skill_dir = resolve_skill_dir(name)?;
+    let skill_dir = sober_skill::SkillLoader::resolve_skill_dir(name)
+        .map_err(|e| AgentError::Internal(format!("failed to resolve skill directory: {e}")))?;
     tokio::fs::create_dir_all(&skill_dir).await.map_err(|e| {
         AgentError::Internal(format!(
             "failed to create skill directory {}: {e}",
@@ -500,13 +493,6 @@ pub(crate) fn resolve_overlay_dir() -> Result<PathBuf, AgentError> {
     Ok(PathBuf::from(home).join(".sober").join("instructions"))
 }
 
-/// Resolves the skill directory path (`~/.sober/skills/<name>/`).
-fn resolve_skill_dir(name: &str) -> Result<PathBuf, AgentError> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| AgentError::Internal("HOME environment variable not set".into()))?;
-    Ok(PathBuf::from(home).join(".sober").join("skills").join(name))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,13 +501,6 @@ mod tests {
     fn resolve_overlay_dir_returns_expected_path() {
         if let Ok(dir) = resolve_overlay_dir() {
             assert!(dir.to_string_lossy().ends_with(".sober/instructions"));
-        }
-    }
-
-    #[test]
-    fn resolve_skill_dir_returns_expected_path() {
-        if let Ok(dir) = resolve_skill_dir("my-skill") {
-            assert!(dir.to_string_lossy().ends_with(".sober/skills/my-skill"));
         }
     }
 }
