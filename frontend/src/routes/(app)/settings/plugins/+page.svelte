@@ -1,3 +1,8 @@
+<!-- TODO: Role-based visibility for plugins page.
+     - Non-admin users should only see plugins they own or that are in their scope.
+     - Enable/disable/scope-change actions should be restricted by ownership and role.
+     - System-scoped plugins should be read-only for non-admin users.
+     - Consider filtering plugin list server-side based on caller's roles/scopes. -->
 <script lang="ts">
 	import type { Plugin, PluginKind, PluginAuditLog, McpPluginConfig } from '$lib/types/plugin';
 	import type { ToolInfo } from '$lib/types';

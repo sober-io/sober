@@ -1,3 +1,7 @@
+<!-- TODO: Role-based settings tab visibility.
+     - Evolution tab: admin only (done).
+     - Future tabs (e.g. Users, System) should also be gated by role.
+     - Consider a guard on the evolution route itself that redirects non-admins. -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/stores';
