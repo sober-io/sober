@@ -9,7 +9,7 @@ The backend is a Cargo workspace of focused library and binary crates. Dependenc
 | `sober-core` | Shared types, error handling, config, domain primitives |
 | `sober-db` | PostgreSQL access layer: pool creation, row types, `Pg*Repo` implementations |
 | `sober-auth` | Authentication (password/Argon2id), RBAC/ABAC |
-| `sober-memory` | Vector storage, Binary Context Format (BCF), pruning, scoped retrieval |
+| `sober-memory` | Vector storage, memory pruning, scoped retrieval |
 | `sober-agent` | **Binary.** Agent orchestration (gRPC server), replica lifecycle, task delegation, self-evolution |
 | `sober-plugin` | Plugin registry, WASM host functions (11 capabilities via Extism), audit pipeline, blob-backed storage |
 | `sober-plugin-gen` | WASM plugin code generation for predictable plugin logic |

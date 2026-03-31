@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Sõber is a self-evolving AI agent system built around three design pillars: security-first boundaries (zero trust, encrypted inter-process communication), strict context isolation (scoped BCF memory containers, no cross-user leakage), and plugin extensibility (audited WASM plugin pipeline for autonomous capability growth).
+Sõber is a self-evolving AI agent system built around three design pillars: security-first boundaries (zero trust, encrypted inter-process communication), strict context isolation (scoped Qdrant vector collections, no cross-user leakage), and plugin extensibility (audited WASM plugin pipeline for autonomous capability growth).
 
 ## Core Principles
 

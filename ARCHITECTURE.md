@@ -68,7 +68,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 │ sober-memory │  │  sober-crypto  │  │   sober-llm    │
 │              │  │                │  │                │
 │ • Vector DB  │  │ • Keypair Gen  │  │ • Anthropic    │
-│ • Binary Ctx │  │ • Envelope Enc │  │ • OpenAI       │
+│ • Chunk Types│  │ • Envelope Enc │  │ • OpenAI       │
 │ • Pruning    │  │ • Signing      │  │ • Local/Ollama │
 │ • Scoping    │  │                │  │ • Router       │
 │              │  │                │  │                │
@@ -90,7 +90,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-core` | Shared types, error handling, config, domain primitives. Includes evolution types (`EvolutionEvent`, `EvolutionType`, `EvolutionStatus`, `EvolutionConfigRow`), `EvolutionRepo` trait, and `EvolutionConfig` (interval). |
 | `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`). Includes `PgEvolutionRepo` for `evolution_events` and `evolution_config` tables. |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
-| `sober-memory` | Vector storage, binary context format, pruning, scoped retrieval |
+| `sober-memory` | Vector storage, memory pruning, scoped retrieval |
 | `sober-agent` | **Binary crate (gRPC server process).** Actor-model agent: one `ConversationActor` per conversation ensures sequential message processing. Write-ahead persistence for tool executions with crash recovery. Real-time LLM streaming. Self-evolution loop: periodic detection job, `propose_*` tools, execution engine, and revert logic. `ExecuteEvolution` / `RevertEvolution` gRPC RPCs. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
 | `sober-plugin` | Plugin registry, WASM host functions (13 host functions via Extism), backend service traits, audit pipeline, blob-backed storage |
 | `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
@@ -109,14 +109,6 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ---
 
 ## Memory & Context System
-
-### Binary Context Format (BCF)
-
-Compact binary format: 28-byte header (magic `SÕBE`, version, flags, scope UUID,
-chunk count) → chunk table → zstd-compressed + optionally AES-256-GCM encrypted
-chunks → embedded HNSW vector index footer.
-
-Chunk types: `Fact`, `Preference`, `Decision`, `Soul`.
 
 ### Scoped Memory
 
@@ -303,7 +295,7 @@ sober-mind/instructions/soul.md  (base — compiled into binary)
 One engine composes the system prompt from:
 
 1. **Resolved soul.md** (base + user + workspace layering via `SoulResolver`)
-2. **Soul layers** (per-user/group BCF adaptations, appended after soul.md)
+2. **Soul layers** (per-user/group Qdrant-stored adaptations, appended after soul.md)
 3. **Instruction files** (filtered by visibility, sorted by category/priority)
 4. **Task context** (what triggered this interaction)
 5. **Tool definitions** (available tools for the current turn)

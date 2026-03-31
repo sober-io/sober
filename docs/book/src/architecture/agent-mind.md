@@ -64,7 +64,7 @@ The resolved soul.md content is added to the system prompt during prompt assembl
 One engine in `sober-mind` composes the complete system prompt for each agent turn. The assembly sequence is:
 
 1. **Resolved soul.md** — The merged output of the `SoulResolver` (base + user + workspace layers).
-2. **Soul layers** — Per-user and per-group BCF `Soul` chunks, appended after the resolved soul.md. These represent autonomously evolved personality adaptations.
+2. **Soul layers** — Per-user and per-group `Soul` chunks stored in Qdrant, appended after the resolved soul.md. These represent autonomously evolved personality adaptations.
 3. **Instruction files** — All instruction `.md` files filtered by visibility for the current trigger, sorted by category then priority.
 4. **Task context** — What triggered this interaction (user message, scheduler job description, admin command context).
 5. **Tool definitions** — The set of tools available for this turn, formatted for the model.
@@ -86,7 +86,7 @@ This ensures users never see operational instructions intended for autonomous or
 
 Personality evolves at two levels:
 
-**Per-user/group soul layers** evolve freely and autonomously. The agent can add and modify `Soul` chunks in BCF containers based on observed patterns in conversations. These are stored in Qdrant and loaded as part of context. All changes are audit-logged.
+**Per-user/group soul layers** evolve freely and autonomously. The agent can add and modify `Soul` chunks in Qdrant based on observed patterns in conversations. These are loaded as part of context. All changes are audit-logged.
 
 **Base soul.md** requires either:
 - High confidence: a consistent pattern observed across many contexts over time, OR

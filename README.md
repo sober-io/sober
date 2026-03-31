@@ -18,7 +18,6 @@ Sõber ("friend" in Estonian) is a self-evolving personal AI agent. It assists u
 - **Extensible agent system** — tool use, scoped memory, plugin installation, and autonomous scheduling
 - **WASM plugin system** (Extism) — sandboxed execution via wasmtime, capability-gated host functions (KV, HTTP, secrets, LLM, memory, scheduling, filesystem, metrics, and more)
 - **Process-level sandboxing** (bwrap) with policy profiles and network filtering
-- **Binary Context Format (BCF)** — compact, optionally encrypted memory snapshots (zstd + AES-256-GCM)
 - **Scoped memory** with Qdrant vector search — hybrid dense + sparse (BM25) retrieval, context isolation across user/group/session boundaries
 - **17 built-in agent tools** — web search, sandboxed shell, memory recall/remember, artifacts, secrets, snapshots, scheduling, plugin generation, and more
 - **Multi-provider LLM support** — OpenRouter, Ollama, OpenAI, and local agents via ACP (Agent Client Protocol)

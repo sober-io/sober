@@ -44,8 +44,7 @@ tool invocations.
 
 ### Memory Scopes
 
-Sõber organises knowledge into **scoped memory containers** using a compact Binary Context
-Format (BCF). Each scope is an independently encrypted container:
+Sõber organises knowledge into **scoped vector collections** in Qdrant. Each scope is independently isolated:
 
 | Scope | Contents |
 |-------|----------|
@@ -79,8 +78,8 @@ across many interactions, or explicit admin approval.
 on a zero-trust model: no component trusts another without verification. Prompt injection
 attempts are classified and blocked. Detected attacks trigger actor lockout and alerting.
 
-**Context Isolation.** User, group, and system contexts are stored in separate scoped BCF
-containers and never concatenated raw. A memory leak between user scopes is treated as a
+**Context Isolation.** User, group, and system contexts are stored in separate scoped Qdrant
+collections and never concatenated raw. A memory leak between user scopes is treated as a
 security event, not a bug.
 
 **Minimal Context Loading.** Sõber loads only the context required for each operation. Long-term
