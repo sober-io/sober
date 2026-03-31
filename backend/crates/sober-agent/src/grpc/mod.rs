@@ -231,7 +231,7 @@ impl<R: AgentRepos> proto::agent_service_server::AgentService for AgentGrpcServi
         &self,
         request: Request<proto::UninstallPluginRequest>,
     ) -> Result<Response<proto::UninstallPluginResponse>, Status> {
-        plugins::handle_uninstall_plugin(self, request).await
+        plugins::handle_uninstall_plugin(self, &self.plugin_manager, request).await
     }
 
     async fn enable_plugin(

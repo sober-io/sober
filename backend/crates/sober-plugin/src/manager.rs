@@ -690,6 +690,15 @@ impl<R: PluginRepo> PluginManager<R> {
         }
     }
 
+    /// Uninstalls a plugin: evicts the WASM host cache, then deletes the DB row.
+    ///
+    /// Always use this instead of calling `registry().uninstall()` directly —
+    /// direct deletion leaves stale WASM hosts in the cache.
+    pub async fn uninstall(&self, id: PluginId) -> Result<(), PluginError> {
+        self.evict_wasm_host(&id);
+        self.registry.uninstall(id).await
+    }
+
     /// Provides mutable access to the MCP pool for connection management.
     ///
     /// The caller (typically the agent startup code) uses this to connect
