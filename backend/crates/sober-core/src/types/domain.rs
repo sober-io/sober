@@ -7,16 +7,17 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::content::ContentBlock;
 use super::enums::{
-    AgentMode, ArtifactKind, ArtifactState, AutonomyLevel, ConversationKind, ConversationUserRole,
-    EvolutionStatus, EvolutionType, JobStatus, MessageRole, PermissionMode, PluginKind,
-    PluginOrigin, PluginScope, PluginStatus, SandboxNetMode, UserStatus, WorkspaceState,
-    WorktreeState,
+    AgentMode, ArtifactKind, ArtifactState, AttachmentKind, AutonomyLevel, ConversationKind,
+    ConversationUserRole, EvolutionStatus, EvolutionType, JobStatus, MessageRole, PermissionMode,
+    PluginKind, PluginOrigin, PluginScope, PluginStatus, SandboxNetMode, UserStatus,
+    WorkspaceState, WorktreeState,
 };
 use super::ids::{
-    ArtifactId, AuditLogId, ConversationId, EncryptionKeyId, EvolutionEventId, JobId, JobRunId,
-    MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId, TagId, UserId, WorkspaceId,
-    WorkspaceRepoId, WorktreeId,
+    ArtifactId, AuditLogId, ConversationAttachmentId, ConversationId, EncryptionKeyId,
+    EvolutionEventId, JobId, JobRunId, MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId,
+    TagId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -111,8 +112,8 @@ pub struct Message {
     pub conversation_id: ConversationId,
     /// Author type (user, assistant, system, event).
     pub role: MessageRole,
-    /// Message content.
-    pub content: String,
+    /// Message content blocks.
+    pub content: Vec<ContentBlock>,
     /// LLM reasoning/thinking content (extended thinking output).
     pub reasoning: Option<String>,
     /// Approximate token count for context budgeting.
@@ -123,6 +124,21 @@ pub struct Message {
     pub metadata: Option<serde_json::Value>,
     /// When the message was created.
     pub created_at: DateTime<Utc>,
+}
+
+impl Message {
+    /// Extracts joined text from all text content blocks.
+    #[must_use]
+    pub fn text_content(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// A single result from a full-text search over conversation messages.
@@ -136,11 +152,36 @@ pub struct MessageSearchHit {
     pub conversation_title: Option<String>,
     /// Author type of the matched message.
     pub role: MessageRole,
-    /// The message content.
-    pub content: String,
+    /// The message content blocks.
+    pub content: Vec<ContentBlock>,
     /// Relevance score from the search engine.
     pub score: f32,
     /// When the matched message was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A file attached to a conversation (image, document, audio, video).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationAttachment {
+    /// Unique identifier.
+    pub id: ConversationAttachmentId,
+    /// Content-addressed blob storage key.
+    pub blob_key: String,
+    /// Derived attachment kind.
+    pub kind: AttachmentKind,
+    /// MIME content type (e.g. "image/jpeg").
+    pub content_type: String,
+    /// Original filename.
+    pub filename: String,
+    /// File size in bytes.
+    pub size: i64,
+    /// Type-specific metadata (dimensions, extracted text, etc.).
+    pub metadata: serde_json::Value,
+    /// The conversation this attachment belongs to.
+    pub conversation_id: ConversationId,
+    /// The user who uploaded this attachment.
+    pub user_id: UserId,
+    /// When the attachment was created.
     pub created_at: DateTime<Utc>,
 }
 
@@ -661,13 +702,14 @@ mod tests {
             id: MessageId::new(),
             conversation_id: ConversationId::new(),
             role: MessageRole::Assistant,
-            content: "Let me search for that.".into(),
+            content: vec![ContentBlock::text("Let me search for that.")],
             reasoning: Some("I should search the web.".into()),
             token_count: Some(42),
             user_id: None,
             metadata: None,
             created_at: Utc::now(),
         };
+        assert_eq!(msg.text_content(), "Let me search for that.");
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["reasoning"], "I should search the web.");
         assert_eq!(json["token_count"], 42);

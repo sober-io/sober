@@ -438,6 +438,27 @@ pub enum ToolExecutionStatus {
     Cancelled,
 }
 
+/// Kind of conversation attachment, derived from validated content type.
+///
+/// Maps to the `attachment_kind` PostgreSQL enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "attachment_kind", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentKind {
+    /// An image file (JPEG, PNG, WebP, GIF).
+    Image,
+    /// An audio file (MP3, WAV, WebM, OGG).
+    Audio,
+    /// A video file (MP4, WebM).
+    Video,
+    /// A document (PDF, text, CSV, markdown, JSON, XML).
+    Document,
+}
+
 /// The kind of self-evolution event.
 ///
 /// Maps to the `evolution_type` PostgreSQL enum.
@@ -976,5 +997,19 @@ mod tests {
         assert_eq!(RoleKind::User.to_string(), "user");
         assert_eq!(RoleKind::Admin.to_string(), "admin");
         assert_eq!(RoleKind::Custom("custom".into()).to_string(), "custom");
+    }
+
+    #[test]
+    fn attachment_kind_serde_roundtrip() {
+        for variant in [
+            AttachmentKind::Image,
+            AttachmentKind::Audio,
+            AttachmentKind::Video,
+            AttachmentKind::Document,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let deserialized: AttachmentKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(variant, deserialized);
+        }
     }
 }

@@ -138,7 +138,10 @@ impl Mind {
                     .map(String::as_str)
                     .unwrap_or("User");
                 let mut prefixed = msg.clone();
-                prefixed.content = format!("[{username}]: {}", msg.content);
+                prefixed.content = vec![sober_core::types::ContentBlock::text(format!(
+                    "[{username}]: {}",
+                    msg.text_content()
+                ))];
                 messages.push(prefixed);
             } else {
                 messages.push(msg.clone());
@@ -183,7 +186,7 @@ impl Mind {
                 id: MessageId::new(),
                 conversation_id: sober_core::ConversationId::new(),
                 role: MessageRole::User,
-                content: task.to_string(),
+                content: vec![sober_core::types::ContentBlock::text(task.to_string())],
                 reasoning: None,
                 token_count: None,
                 user_id: None,
@@ -376,7 +379,7 @@ fn make_system_message(content: &str) -> Message {
         id: MessageId::new(),
         conversation_id: sober_core::ConversationId::new(),
         role: MessageRole::System,
-        content: content.to_string(),
+        content: vec![sober_core::types::ContentBlock::text(content)],
         reasoning: None,
         token_count: None,
         user_id: None,
@@ -423,13 +426,13 @@ mod tests {
         assert_eq!(messages.len(), 2); // system + task context
         assert_eq!(messages[0].role, MessageRole::System);
         // Should contain soul.md content
-        assert!(messages[0].content.contains("Sõber"));
-        assert!(messages[0].content.contains("Core Values"));
+        assert!(messages[0].text_content().contains("Sõber"));
+        assert!(messages[0].text_content().contains("Core Values"));
         // Should contain safety content
-        assert!(messages[0].content.contains("Ethical Boundaries"));
+        assert!(messages[0].text_content().contains("Ethical Boundaries"));
         // Should contain extraction instructions
-        assert!(messages[0].content.contains("Memory Extraction"));
-        assert!(messages[1].content.contains("Rust code"));
+        assert!(messages[0].text_content().contains("Memory Extraction"));
+        assert!(messages[1].text_content().contains("Rust code"));
     }
 
     #[tokio::test]
@@ -458,8 +461,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(messages.len(), 1); // system only (no task context)
-        assert!(messages[0].content.contains("web_search"));
-        assert!(messages[0].content.contains("Search the web."));
+        assert!(messages[0].text_content().contains("web_search"));
+        assert!(messages[0].text_content().contains("Search the web."));
     }
 
     #[tokio::test]
@@ -479,16 +482,16 @@ mod tests {
             .assemble(&human_caller, &context, &[], "", "")
             .await
             .unwrap();
-        assert!(!human_msgs[0].content.contains("Self-Reasoning"));
-        assert!(!human_msgs[0].content.contains("Evolution State"));
+        assert!(!human_msgs[0].text_content().contains("Self-Reasoning"));
+        assert!(!human_msgs[0].text_content().contains("Evolution State"));
         assert!(
             !human_msgs[0]
-                .content
+                .text_content()
                 .contains("Internal Tool Documentation")
         );
         // But should see public content.
-        assert!(human_msgs[0].content.contains("Sõber"));
-        assert!(human_msgs[0].content.contains("Ethical Boundaries"));
+        assert!(human_msgs[0].text_content().contains("Sõber"));
+        assert!(human_msgs[0].text_content().contains("Ethical Boundaries"));
 
         // Scheduler should see everything.
         let sched_caller = make_caller(TriggerKind::Scheduler);
@@ -496,11 +499,15 @@ mod tests {
             .assemble(&sched_caller, &context, &[], "", "")
             .await
             .unwrap();
-        assert!(sched_msgs[0].content.contains("Self-Reasoning"));
-        assert!(sched_msgs[0].content.contains("Self-Evolution Guidelines"));
+        assert!(sched_msgs[0].text_content().contains("Self-Reasoning"));
         assert!(
             sched_msgs[0]
-                .content
+                .text_content()
+                .contains("Self-Evolution Guidelines")
+        );
+        assert!(
+            sched_msgs[0]
+                .text_content()
                 .contains("Internal Tool Documentation")
         );
     }
@@ -522,8 +529,8 @@ mod tests {
             .assemble(&caller, &context, &[], layer_text, "")
             .await
             .unwrap();
-        assert!(messages[0].content.contains("tone"));
-        assert!(messages[0].content.contains("formal"));
+        assert!(messages[0].text_content().contains("tone"));
+        assert!(messages[0].text_content().contains("formal"));
     }
 
     #[tokio::test]
@@ -538,9 +545,9 @@ mod tests {
 
         assert_eq!(messages.len(), 2); // system + user
         assert_eq!(messages[0].role, MessageRole::System);
-        assert!(messages[0].content.contains("Sõber"));
+        assert!(messages[0].text_content().contains("Sõber"));
         assert_eq!(messages[1].role, MessageRole::User);
-        assert_eq!(messages[1].content, "Run maintenance");
+        assert_eq!(messages[1].text_content(), "Run maintenance");
     }
 
     #[tokio::test]
@@ -553,7 +560,7 @@ mod tests {
             .assemble_autonomous_prompt("check traits", &sched_caller)
             .await
             .unwrap();
-        assert!(sched_msgs[0].content.contains("Self-Reasoning"));
+        assert!(sched_msgs[0].text_content().contains("Self-Reasoning"));
 
         // Human should not see internal content.
         let human_caller = make_caller(TriggerKind::Human);
@@ -561,7 +568,7 @@ mod tests {
             .assemble_autonomous_prompt("check traits", &human_caller)
             .await
             .unwrap();
-        assert!(!human_msgs[0].content.contains("Self-Reasoning"));
+        assert!(!human_msgs[0].text_content().contains("Self-Reasoning"));
     }
 
     #[test]
@@ -578,7 +585,7 @@ mod tests {
             id: MessageId::new(),
             conversation_id: sober_core::ConversationId::new(),
             role,
-            content: content.to_string(),
+            content: vec![sober_core::types::ContentBlock::text(content)],
             reasoning: None,
             token_count: None,
             user_id,
@@ -634,10 +641,10 @@ mod tests {
         let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         // system + group context + 3 messages
         assert_eq!(messages.len(), 5);
-        assert!(messages[1].content.contains("group conversation"));
-        assert!(messages[2].content.starts_with("[Alice]: "));
-        assert!(messages[3].content.starts_with("[Bob]: "));
-        assert_eq!(messages[4].content, "hello!");
+        assert!(messages[1].text_content().contains("group conversation"));
+        assert!(messages[2].text_content().starts_with("[Alice]: "));
+        assert!(messages[3].text_content().starts_with("[Bob]: "));
+        assert_eq!(messages[4].text_content(), "hello!");
     }
 
     #[tokio::test]
@@ -655,7 +662,7 @@ mod tests {
 
         let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[1].content, "hello");
+        assert_eq!(messages[1].text_content(), "hello");
     }
 
     #[tokio::test]
@@ -670,7 +677,7 @@ mod tests {
         };
 
         let messages = mind.assemble(&caller, &context, &[], "", "").await.unwrap();
-        let prompt = &messages[0].content;
+        let prompt = messages[0].text_content();
 
         // Personality (soul.md) should come before guardrails (safety.md)
         let soul_pos = prompt.find("Sõber").unwrap();

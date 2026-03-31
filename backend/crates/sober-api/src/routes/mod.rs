@@ -47,7 +47,7 @@ pub(crate) async fn insert_event_message(
         .create(CreateMessage {
             conversation_id,
             role: MessageRole::Event,
-            content: content.to_string(),
+            content: vec![sober_core::types::ContentBlock::text(content)],
             reasoning: None,
             token_count: None,
             metadata: Some(metadata),

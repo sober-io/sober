@@ -42,8 +42,8 @@ pub struct CreateMessage {
     pub conversation_id: ConversationId,
     /// Author type.
     pub role: super::enums::MessageRole,
-    /// Message content.
-    pub content: String,
+    /// Message content blocks.
+    pub content: Vec<super::content::ContentBlock>,
     /// LLM reasoning/thinking content.
     pub reasoning: Option<String>,
     /// Approximate token count.
@@ -52,6 +52,27 @@ pub struct CreateMessage {
     pub metadata: Option<serde_json::Value>,
     /// The user who sent this message (for user role messages).
     pub user_id: Option<super::ids::UserId>,
+}
+
+/// Input for creating a conversation attachment.
+#[derive(Debug, Clone)]
+pub struct CreateConversationAttachment {
+    /// Content-addressed blob storage key.
+    pub blob_key: String,
+    /// Derived attachment kind.
+    pub kind: super::enums::AttachmentKind,
+    /// MIME content type.
+    pub content_type: String,
+    /// Original filename.
+    pub filename: String,
+    /// File size in bytes.
+    pub size: i64,
+    /// Type-specific metadata.
+    pub metadata: serde_json::Value,
+    /// The conversation this attachment belongs to.
+    pub conversation_id: super::ids::ConversationId,
+    /// The user who uploaded this attachment.
+    pub user_id: super::ids::UserId,
 }
 
 /// Input for creating a new scheduled job.

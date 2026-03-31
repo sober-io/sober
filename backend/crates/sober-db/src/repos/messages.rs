@@ -2,7 +2,7 @@
 
 use sober_core::error::AppError;
 use sober_core::types::{
-    ConversationId, CreateMessage, Message, MessageId, MessageSearchHit, UserId,
+    ContentBlock, ConversationId, CreateMessage, Message, MessageId, MessageSearchHit, UserId,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -39,7 +39,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .bind(id)
         .bind(input.conversation_id.as_uuid())
         .bind(input.role)
-        .bind(&input.content)
+        .bind(sqlx::types::Json(&input.content))
         .bind(&input.reasoning)
         .bind(input.token_count)
         .bind(&input.metadata)
@@ -140,12 +140,12 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
     async fn update_content(
         &self,
         id: MessageId,
-        content: &str,
+        content: &[ContentBlock],
         reasoning: Option<&str>,
     ) -> Result<(), AppError> {
         sqlx::query("UPDATE conversation_messages SET content = $2, reasoning = $3 WHERE id = $1")
             .bind(id.as_uuid())
-            .bind(content)
+            .bind(sqlx::types::Json(content))
             .bind(reasoning)
             .execute(&self.pool)
             .await
@@ -163,14 +163,14 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         let rows = sqlx::query_as::<_, MessageSearchHitRow>(
             "SELECT m.id, m.conversation_id, c.title, m.role, m.content, m.created_at, \
              GREATEST( \
-                 ts_rank_cd(m.search_vector_english, websearch_to_tsquery('english', $1)), \
-                 ts_rank_cd(m.search_vector_simple, websearch_to_tsquery('simple', $1)) \
+                 ts_rank_cd(to_tsvector('english', extract_message_text(m.content)), websearch_to_tsquery('english', $1)), \
+                 ts_rank_cd(to_tsvector('simple', extract_message_text(m.content)), websearch_to_tsquery('simple', $1)) \
              ) AS rank \
              FROM conversation_messages m \
              JOIN conversations c ON c.id = m.conversation_id \
              WHERE c.user_id = $2 \
-               AND (m.search_vector_english @@ websearch_to_tsquery('english', $1) \
-                    OR m.search_vector_simple @@ websearch_to_tsquery('simple', $1)) \
+               AND (to_tsvector('english', extract_message_text(m.content)) @@ websearch_to_tsquery('english', $1) \
+                    OR to_tsvector('simple', extract_message_text(m.content)) @@ websearch_to_tsquery('simple', $1)) \
                AND ($3::uuid IS NULL OR m.conversation_id = $3) \
              ORDER BY rank DESC \
              LIMIT $4",

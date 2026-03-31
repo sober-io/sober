@@ -301,7 +301,7 @@ async fn message_create_and_list(pool: PgPool) {
         .create(CreateMessage {
             conversation_id: conv.id,
             role: MessageRole::User,
-            content: "Hello".into(),
+            content: vec![sober_core::types::ContentBlock::text("Hello")],
             reasoning: None,
             token_count: Some(5),
             metadata: None,
@@ -309,14 +309,14 @@ async fn message_create_and_list(pool: PgPool) {
         })
         .await
         .unwrap();
-    assert_eq!(msg.content, "Hello");
+    assert_eq!(msg.text_content(), "Hello");
     assert_eq!(msg.role, MessageRole::User);
 
     msg_repo
         .create(CreateMessage {
             conversation_id: conv.id,
             role: MessageRole::Assistant,
-            content: "Hi there".into(),
+            content: vec![sober_core::types::ContentBlock::text("Hi there")],
             reasoning: None,
             token_count: Some(8),
             metadata: None,
@@ -327,8 +327,8 @@ async fn message_create_and_list(pool: PgPool) {
 
     let messages = msg_repo.list_by_conversation(conv.id, 10).await.unwrap();
     assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0].content, "Hello"); // oldest first
-    assert_eq!(messages[1].content, "Hi there");
+    assert_eq!(messages[0].text_content(), "Hello"); // oldest first
+    assert_eq!(messages[1].text_content(), "Hi there");
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────
@@ -664,7 +664,7 @@ async fn insert_message(
         .create(CreateMessage {
             conversation_id,
             role: MessageRole::User,
-            content: content.into(),
+            content: vec![sober_core::types::ContentBlock::text(content)],
             reasoning: None,
             token_count: None,
             metadata: None,
@@ -694,7 +694,7 @@ async fn search_by_user_returns_matching_messages(
 
     assert!(!results.is_empty(), "expected at least one search hit");
     assert!(
-        results.iter().any(|h| h.content.contains("Rust borrow")),
+        results.iter().any(|h| h.content.iter().any(|b| matches!(b, sober_core::types::ContentBlock::Text { text } if text.contains("Rust borrow")))),
         "expected a hit containing 'Rust borrow', got: {results:?}"
     );
     // Verify the hit carries correct conversation metadata.

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use sober_core::config::LlmConfig;
 use sober_core::types::AgentRepos;
+use sober_core::types::ContentBlock;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::enums::{ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, MessageId, UserId, WorkspaceId};
@@ -305,7 +306,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                         .create(CreateMessage {
                             conversation_id: params.conversation_id,
                             role: MessageRole::Assistant,
-                            content: content_buffer.clone(),
+                            content: vec![ContentBlock::text(content_buffer.clone())],
                             reasoning: if reasoning_buffer.is_empty() {
                                 None
                             } else {
@@ -408,7 +409,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .messages()
                 .update_content(
                     existing_id,
-                    &text,
+                    &[ContentBlock::text(text.clone())],
                     if reasoning_buffer.is_empty() {
                         None
                     } else {
@@ -426,7 +427,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .create(CreateMessage {
                     conversation_id: params.conversation_id,
                     role: MessageRole::Assistant,
-                    content: text.clone(),
+                    content: vec![ContentBlock::text(text.clone())],
                     reasoning: if reasoning_buffer.is_empty() {
                         None
                     } else {
@@ -635,7 +636,7 @@ async fn build_context<R: AgentRepos>(
     let system_prompt = assembled
         .iter()
         .find(|m| m.role == MessageRole::System)
-        .map(|m| m.content.clone())
+        .map(|m| m.text_content())
         .unwrap_or_default();
 
     // e. Load messages with tool executions from DB for the conversation history.

@@ -165,6 +165,11 @@ define_id!(
     EvolutionEventId
 );
 
+define_id!(
+    /// Unique identifier for a conversation attachment.
+    ConversationAttachmentId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);

@@ -8,9 +8,11 @@ pub mod blob;
 pub mod config;
 pub mod error;
 pub mod fs;
+pub mod image_processing;
 pub mod layout;
 pub mod remote;
 pub mod snapshot;
+pub mod text_extraction;
 pub mod worktree;
 
 /// Name of the hidden directory inside each workspace root (`.sober/`).

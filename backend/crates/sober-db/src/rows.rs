@@ -13,7 +13,7 @@ use sober_core::types::{
     UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
-    Artifact, AuditLogEntry, AutonomyLevel, Conversation, ConversationUser,
+    Artifact, AuditLogEntry, AutonomyLevel, ContentBlock, Conversation, ConversationUser,
     ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message,
     MessageSearchHit, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
     Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
@@ -140,7 +140,7 @@ pub(crate) struct MessageRow {
     pub id: Uuid,
     pub conversation_id: Uuid,
     pub role: MessageRole,
-    pub content: String,
+    pub content: sqlx::types::Json<Vec<ContentBlock>>,
     pub reasoning: Option<String>,
     pub token_count: Option<i32>,
     pub user_id: Option<Uuid>,
@@ -154,7 +154,7 @@ impl From<MessageRow> for Message {
             id: MessageId::from_uuid(row.id),
             conversation_id: ConversationId::from_uuid(row.conversation_id),
             role: row.role,
-            content: row.content,
+            content: row.content.0,
             reasoning: row.reasoning,
             token_count: row.token_count,
             user_id: row.user_id.map(UserId::from_uuid),
@@ -170,7 +170,7 @@ pub(crate) struct MessageSearchHitRow {
     pub conversation_id: Uuid,
     pub title: Option<String>,
     pub role: MessageRole,
-    pub content: String,
+    pub content: sqlx::types::Json<Vec<ContentBlock>>,
     pub rank: f32,
     pub created_at: DateTime<Utc>,
 }
@@ -182,7 +182,7 @@ impl From<MessageSearchHitRow> for MessageSearchHit {
             conversation_id: ConversationId::from_uuid(row.conversation_id),
             conversation_title: row.title,
             role: row.role,
-            content: row.content,
+            content: row.content.0,
             score: row.rank,
             created_at: row.created_at,
         }

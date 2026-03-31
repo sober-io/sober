@@ -33,22 +33,23 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
             MessageRole::Event => continue,
 
             MessageRole::User => {
-                result.push(LlmMessage::user(&msg.content));
+                result.push(LlmMessage::user(msg.text_content()));
             }
 
             MessageRole::System => {
-                result.push(LlmMessage::system(&msg.content));
+                result.push(LlmMessage::system(msg.text_content()));
             }
 
             MessageRole::Assistant => {
+                let text = msg.text_content();
                 if mwe.tool_executions.is_empty() {
                     // Skip empty assistant messages (no content, no tool calls).
-                    if msg.content.is_empty() {
+                    if text.is_empty() {
                         continue;
                     }
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: Some(msg.content.clone()),
+                        content: Some(text),
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
                         reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
@@ -66,11 +67,7 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                     // Emit assistant message with tool_calls.
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: if msg.content.is_empty() {
-                            None
-                        } else {
-                            Some(msg.content.clone())
-                        },
+                        content: if text.is_empty() { None } else { Some(text) },
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
                         reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
@@ -123,6 +120,7 @@ mod tests {
     use super::*;
 
     use chrono::Utc;
+    use sober_core::types::ContentBlock;
     use sober_core::types::domain::Message;
     use sober_core::types::enums::ToolExecutionSource;
     use sober_core::types::ids::{ConversationId, MessageId, ToolExecutionId};
@@ -133,7 +131,11 @@ mod tests {
             id: MessageId::new(),
             conversation_id: ConversationId::new(),
             role,
-            content: content.to_owned(),
+            content: if content.is_empty() {
+                vec![]
+            } else {
+                vec![ContentBlock::text(content)]
+            },
             reasoning: None,
             token_count: None,
             user_id: None,

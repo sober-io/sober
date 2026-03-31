@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sober_core::types::AgentRepos;
+use sober_core::types::ContentBlock;
 use sober_core::types::Conversation;
 use sober_core::types::access::TriggerKind;
 use sober_core::types::domain::WorkspaceSettings;
@@ -263,7 +264,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 .create(CreateMessage {
                     conversation_id: self.conversation_id,
                     role: MessageRole::User,
-                    content: content.to_owned(),
+                    content: vec![ContentBlock::text(content.to_owned())],
                     reasoning: None,
                     token_count: None,
                     metadata: None,

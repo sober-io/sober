@@ -273,6 +273,13 @@ impl<M: MessageRepo> RecallTool<M> {
                 hit.role,
                 hit.score,
                 hit.content
+                    .iter()
+                    .filter_map(|b| match b {
+                        sober_core::types::ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             ));
         }
         Ok(ToolOutput {
@@ -562,7 +569,7 @@ mod tests {
         fn update_content(
             &self,
             _id: MessageId,
-            _content: &str,
+            _content: &[sober_core::types::ContentBlock],
             _reasoning: Option<&str>,
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { unimplemented!("stub") }
