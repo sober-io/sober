@@ -447,6 +447,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 &params.ctx.llm,
                 &params.ctx.memory,
                 params.user_id,
+                params.conversation_id,
                 extraction_result.extractions,
                 params.ctx.memory_config.decay_half_life_days,
             );

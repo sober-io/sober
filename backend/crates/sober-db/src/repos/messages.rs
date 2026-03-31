@@ -1,17 +1,20 @@
 //! PostgreSQL implementation of [`MessageRepo`].
 
 use sober_core::error::AppError;
-use sober_core::types::{ConversationId, CreateMessage, Message, MessageId};
+use sober_core::types::{
+    ConversationId, CreateMessage, Message, MessageId, MessageSearchHit, UserId,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::rows::MessageRow;
+use crate::rows::{MessageRow, MessageSearchHitRow};
 
 /// Column list for message queries.
 const MSG_COLUMNS: &str = "id, conversation_id, role, content, reasoning, \
                             token_count, user_id, metadata, created_at";
 
 /// PostgreSQL-backed message repository.
+#[derive(Clone)]
 pub struct PgMessageRepo {
     pool: PgPool,
 }
@@ -148,5 +151,38 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
         Ok(())
+    }
+
+    async fn search_by_user(
+        &self,
+        user_id: UserId,
+        query: &str,
+        conversation_id: Option<ConversationId>,
+        limit: i64,
+    ) -> Result<Vec<MessageSearchHit>, AppError> {
+        let rows = sqlx::query_as::<_, MessageSearchHitRow>(
+            "SELECT m.id, m.conversation_id, c.title, m.role, m.content, m.created_at, \
+             GREATEST( \
+                 ts_rank_cd(m.search_vector_english, websearch_to_tsquery('english', $1)), \
+                 ts_rank_cd(m.search_vector_simple, websearch_to_tsquery('simple', $1)) \
+             ) AS rank \
+             FROM conversation_messages m \
+             JOIN conversations c ON c.id = m.conversation_id \
+             WHERE c.user_id = $2 \
+               AND (m.search_vector_english @@ websearch_to_tsquery('english', $1) \
+                    OR m.search_vector_simple @@ websearch_to_tsquery('simple', $1)) \
+               AND ($3::uuid IS NULL OR m.conversation_id = $3) \
+             ORDER BY rank DESC \
+             LIMIT $4",
+        )
+        .bind(query)
+        .bind(user_id.as_uuid())
+        .bind(conversation_id.map(|id| *id.as_uuid()))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(MessageSearchHit::from).collect())
     }
 }

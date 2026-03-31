@@ -20,29 +20,20 @@ pub const CHUNK_TABLE_ENTRY_SIZE: usize = 13;
 pub enum ChunkType {
     /// Extracted knowledge fact.
     Fact = 0,
-    /// Conversation summary or key exchange.
-    Conversation = 1,
-    /// Raw f32 embedding vector.
-    Embedding = 2,
     /// User preference or personal setting.
-    Preference = 3,
-    /// Learned skill or capability.
-    Skill = 4,
-    /// Code snippet or technical reference.
-    Code = 5,
-    /// Soul layer data (used by sober-mind).
-    Soul = 6,
+    Preference = 1,
+    /// Decision or choice made, with rationale.
+    Decision = 2,
+    /// Soul layer data (internal, used by sober-mind).
+    Soul = 3,
 }
 
 impl std::fmt::Display for ChunkType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Fact => "fact",
-            Self::Conversation => "conversation",
-            Self::Embedding => "embedding",
             Self::Preference => "preference",
-            Self::Skill => "skill",
-            Self::Code => "code",
+            Self::Decision => "decision",
             Self::Soul => "soul",
         };
         f.write_str(s)
@@ -55,12 +46,9 @@ impl TryFrom<u8> for ChunkType {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Fact),
-            1 => Ok(Self::Conversation),
-            2 => Ok(Self::Embedding),
-            3 => Ok(Self::Preference),
-            4 => Ok(Self::Skill),
-            5 => Ok(Self::Code),
-            6 => Ok(Self::Soul),
+            1 => Ok(Self::Preference),
+            2 => Ok(Self::Decision),
+            3 => Ok(Self::Soul),
             other => Err(MemoryError::InvalidChunkType(other)),
         }
     }
@@ -103,17 +91,14 @@ mod tests {
     #[test]
     fn chunk_type_known_values() {
         assert_eq!(ChunkType::try_from(0).unwrap(), ChunkType::Fact);
-        assert_eq!(ChunkType::try_from(1).unwrap(), ChunkType::Conversation);
-        assert_eq!(ChunkType::try_from(2).unwrap(), ChunkType::Embedding);
-        assert_eq!(ChunkType::try_from(3).unwrap(), ChunkType::Preference);
-        assert_eq!(ChunkType::try_from(4).unwrap(), ChunkType::Skill);
-        assert_eq!(ChunkType::try_from(5).unwrap(), ChunkType::Code);
-        assert_eq!(ChunkType::try_from(6).unwrap(), ChunkType::Soul);
+        assert_eq!(ChunkType::try_from(1).unwrap(), ChunkType::Preference);
+        assert_eq!(ChunkType::try_from(2).unwrap(), ChunkType::Decision);
+        assert_eq!(ChunkType::try_from(3).unwrap(), ChunkType::Soul);
     }
 
     #[test]
     fn chunk_type_unknown_value_errors() {
-        assert!(ChunkType::try_from(7).is_err());
+        assert!(ChunkType::try_from(4).is_err());
         assert!(ChunkType::try_from(255).is_err());
     }
 
@@ -121,11 +106,8 @@ mod tests {
     fn chunk_type_roundtrip() {
         for ct in [
             ChunkType::Fact,
-            ChunkType::Conversation,
-            ChunkType::Embedding,
             ChunkType::Preference,
-            ChunkType::Skill,
-            ChunkType::Code,
+            ChunkType::Decision,
             ChunkType::Soul,
         ] {
             let byte: u8 = ct.into();

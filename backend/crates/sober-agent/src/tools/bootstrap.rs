@@ -156,6 +156,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 Arc::clone(&self.memory_tools.memory),
                 Arc::clone(&self.memory_tools.llm),
                 self.memory_tools.config.clone(),
+                Arc::new(self.repos.messages().clone()),
             )),
             Arc::new(RememberTool::new(
                 Arc::clone(&self.memory_tools.memory),

@@ -79,6 +79,17 @@ pub enum MessageRole {
     Event,
 }
 
+impl std::fmt::Display for MessageRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::User => f.write_str("user"),
+            Self::Assistant => f.write_str("assistant"),
+            Self::System => f.write_str("system"),
+            Self::Event => f.write_str("event"),
+        }
+    }
+}
+
 /// The kind/type of a conversation.
 ///
 /// Maps to the `conversation_kind` PostgreSQL enum.

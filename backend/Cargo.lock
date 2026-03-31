@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4244,7 +4244,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4290,7 +4290,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "metrics",

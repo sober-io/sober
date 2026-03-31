@@ -14,9 +14,9 @@ use sober_core::types::{
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, AutonomyLevel, Conversation, ConversationUser,
-    ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message, Plugin,
-    PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, ToolExecution, User,
-    UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
+    ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message,
+    MessageSearchHit, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
+    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
 };
 use uuid::Uuid;
 
@@ -159,6 +159,31 @@ impl From<MessageRow> for Message {
             token_count: row.token_count,
             user_id: row.user_id.map(UserId::from_uuid),
             metadata: row.metadata,
+            created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub(crate) struct MessageSearchHitRow {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub title: Option<String>,
+    pub role: MessageRole,
+    pub content: String,
+    pub rank: f32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<MessageSearchHitRow> for MessageSearchHit {
+    fn from(row: MessageSearchHitRow) -> Self {
+        Self {
+            message_id: MessageId::from_uuid(row.id),
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            conversation_title: row.title,
+            role: row.role,
+            content: row.content,
+            score: row.rank,
             created_at: row.created_at,
         }
     }

@@ -251,6 +251,15 @@ pub trait MessageRepo: Send + Sync {
         content: &str,
         reasoning: Option<&str>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Full-text search over conversation messages owned by a user.
+    fn search_by_user(
+        &self,
+        user_id: UserId,
+        query: &str,
+        conversation_id: Option<ConversationId>,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<MessageSearchHit>, AppError>> + Send;
 }
 
 /// Conversation membership and unread tracking operations.

@@ -488,6 +488,13 @@ impl<R: AgentRepos> Agent<R> {
 pub fn format_memory_context(context: &LoadedContext) -> String {
     let mut parts = Vec::new();
 
+    for hit in &context.conversation_memories {
+        parts.push(format!(
+            "- [conversation memory, score={:.2}] {}",
+            hit.score, hit.content
+        ));
+    }
+
     for hit in &context.user_memories {
         parts.push(format!(
             "- [user memory, score={:.2}] {}",
@@ -525,6 +532,7 @@ mod tests {
     fn format_memory_context_empty() {
         let context = LoadedContext {
             recent_messages: vec![],
+            conversation_memories: vec![],
             user_memories: vec![],
             system_memories: vec![],
             estimated_tokens: 0,
@@ -538,6 +546,7 @@ mod tests {
 
         let context = LoadedContext {
             recent_messages: vec![],
+            conversation_memories: vec![],
             user_memories: vec![MemoryHit {
                 point_id: uuid::Uuid::nil(),
                 content: "User prefers Rust.".to_owned(),

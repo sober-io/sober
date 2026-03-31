@@ -116,19 +116,27 @@ Compact binary format: 28-byte header (magic `SÕBE`, version, flags, scope UUID
 chunk count) → chunk table → zstd-compressed + optionally AES-256-GCM encrypted
 chunks → embedded HNSW vector index footer.
 
-Chunk types: `Fact`, `Conversation`, `Skill`, `Preference`, `Embedding`, `Code`, `Soul`.
+Chunk types: `Fact`, `Preference`, `Decision`, `Soul`.
 
 ### Scoped Memory
 
 ```
-Global (system prompts, core personality)
-  └── User Scope (per-user facts, preferences, history)
-       └── Group Scope (shared context for teams/channels)
-            └── Session Scope (ephemeral, current conversation)
+System (agent identity, global knowledge)
+  └── User Scope (per-user facts, preferences, decisions)
+       └── Conversation Scope (session-specific context, auto-loaded per conversation)
 ```
 
-Each scope is a separate BCF container. Context loading follows principle of
-least privilege — only the minimal required scopes are loaded for any operation.
+Three active scopes backed by Qdrant payload filtering (no separate collections):
+
+| Scope | Stored as | Auto-loaded | Searchable via recall |
+|-------|-----------|-------------|---------------------|
+| **System** | `ScopeId::GLOBAL` | Preferences only | Yes (scope: "system") |
+| **User** | `ScopeId::from(user_id)` | Preferences only | Yes (scope: "user", default) |
+| **Conversation** | `ScopeId::from(conversation_id)` | All types, current conversation only | Yes (scope: "conversation" + conversation_id) |
+
+The LLM decides scope during memory extraction. Conversation-scoped memories
+are invisible to other conversations unless explicitly searched via the `recall`
+tool with a conversation_id. Context loading follows principle of least privilege.
 
 ### Vector Storage (Qdrant)
 
