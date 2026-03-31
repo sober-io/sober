@@ -4765,7 +4765,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4808,7 +4808,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -4894,7 +4894,7 @@ dependencies = [
 
 [[package]]
 name = "sober-core"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "axum 0.8.8",
  "axum-core 0.5.6",
@@ -4940,7 +4940,7 @@ dependencies = [
 
 [[package]]
 name = "sober-db"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "chrono",
  "metrics",
@@ -4955,7 +4955,7 @@ dependencies = [
 
 [[package]]
 name = "sober-llm"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "agent-client-protocol-schema",
  "async-trait",
@@ -4989,7 +4989,7 @@ dependencies = [
 
 [[package]]
 name = "sober-memory"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "metrics",
@@ -5005,7 +5005,7 @@ dependencies = [
 
 [[package]]
 name = "sober-mind"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "metrics",
@@ -5026,7 +5026,7 @@ dependencies = [
 
 [[package]]
 name = "sober-plugin"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5057,7 +5057,7 @@ dependencies = [
 
 [[package]]
 name = "sober-plugin-gen"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -5095,7 +5095,7 @@ dependencies = [
 
 [[package]]
 name = "sober-scheduler"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5164,7 +5164,7 @@ dependencies = [
 
 [[package]]
 name = "sober-workspace"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "git2",
