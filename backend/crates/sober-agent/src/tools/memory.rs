@@ -290,8 +290,8 @@ impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
                 already auto-loaded into your context each turn — use this tool for targeted \
                 searches when you need something specific beyond what was loaded.\n\n\
                 source: \"memory\" (default) — Search stored knowledge: personal facts, \
-                preferences, learned skills, code snippets, decisions. Use when looking for \
-                something specific you stored about this user.\n\n\
+                preferences, decisions. Use when looking for something specific you stored \
+                about this user.\n\n\
                 source: \"conversations\" — Full-text search over past conversation messages. \
                 Use for anything discussed previously: decisions, questions, technical context, \
                 anything that was said but may not have been extracted into memory.\n\n\
@@ -312,7 +312,7 @@ impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
                     "source": {
                         "type": "string",
                         "enum": ["memory", "conversations"],
-                        "description": "Where to search. 'memory' (default) for stored knowledge — facts, preferences, skills, code. 'conversations' for past conversation messages — decisions, discussions, anything that was said."
+                        "description": "Where to search. 'memory' (default) for stored knowledge — facts, preferences, decisions. 'conversations' for past conversation messages — discussions, anything that was said."
                     },
                     "chunk_type": {
                         "type": "string",
