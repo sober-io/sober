@@ -176,8 +176,10 @@ services:
       SOBER_AUTH_SESSION_TTL_SECONDS: "2592000"
       SOBER_SEARXNG_URL: http://searxng:8080
       OTEL_SERVICE_NAME: sober-api
+      SOBER_SCHEDULER_WORKSPACE_ROOT: /var/lib/sober/workspaces
     volumes:
       - sober_sockets:/run/sober
+      - sober_workspaces:/var/lib/sober/workspaces
     depends_on:
       sober-agent:
         condition: service_healthy
