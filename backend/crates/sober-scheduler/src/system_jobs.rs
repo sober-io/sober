@@ -53,6 +53,14 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
+            name: "system::blob_gc",
+            schedule: "0 0 3 * * * *",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": "blob_gc",
+            }),
+        },
+        SystemJobDef {
             name: "system::trait_evolution_check",
             schedule: "0 0 3 * * * *",
             payload: serde_json::json!({
