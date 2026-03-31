@@ -20,8 +20,8 @@ use sober_core::{ScopeId, UserId};
 
 use super::bm25;
 use super::collections::{system_collection_name, user_collection_name};
+use super::types::ChunkType;
 use super::types::{MemoryHit, StoreChunk, StoreQuery};
-use crate::bcf::ChunkType;
 use crate::error::MemoryError;
 use crate::scoring;
 

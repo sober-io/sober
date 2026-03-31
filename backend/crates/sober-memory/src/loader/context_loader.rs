@@ -6,8 +6,8 @@ use sober_core::config::MemoryConfig;
 use sober_core::{Message, MessageRepo, ScopeId, UserId};
 
 use super::types::{LoadRequest, LoadedContext};
-use crate::bcf::ChunkType;
 use crate::error::MemoryError;
+use crate::store::ChunkType;
 use crate::store::{MemoryHit, MemoryStore, StoreQuery};
 
 /// Estimates token count from text content using a simple heuristic.

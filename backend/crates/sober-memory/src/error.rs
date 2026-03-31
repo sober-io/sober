@@ -9,14 +9,6 @@ pub enum MemoryError {
     #[error("qdrant error: {0}")]
     Qdrant(String),
 
-    /// BCF format validation failure.
-    #[error("bcf format error: {0}")]
-    BcfFormat(String),
-
-    /// Unknown chunk type discriminant.
-    #[error("invalid chunk type: {0}")]
-    InvalidChunkType(u8),
-
     /// Repository (database) error.
     #[error("repository error: {0}")]
     Repo(String),

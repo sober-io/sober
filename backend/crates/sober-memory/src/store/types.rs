@@ -1,9 +1,58 @@
 //! Types for the Qdrant memory store.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sober_core::{MessageId, ScopeId};
 
-use crate::bcf::ChunkType;
+/// Memory chunk type discriminant.
+///
+/// Categorises knowledge extracted from conversations before storage
+/// in the vector database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum ChunkType {
+    /// Extracted knowledge fact.
+    Fact = 0,
+    /// User preference or personal setting.
+    Preference = 1,
+    /// Decision or choice made, with rationale.
+    Decision = 2,
+    /// Soul layer data (internal, used by sober-mind).
+    Soul = 3,
+}
+
+impl std::fmt::Display for ChunkType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Fact => "fact",
+            Self::Preference => "preference",
+            Self::Decision => "decision",
+            Self::Soul => "soul",
+        };
+        f.write_str(s)
+    }
+}
+
+impl From<ChunkType> for u8 {
+    fn from(ct: ChunkType) -> Self {
+        ct as u8
+    }
+}
+
+impl TryFrom<u8> for ChunkType {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Fact),
+            1 => Ok(Self::Preference),
+            2 => Ok(Self::Decision),
+            3 => Ok(Self::Soul),
+            other => Err(other),
+        }
+    }
+}
 
 /// A memory chunk to be stored in Qdrant.
 #[derive(Debug)]

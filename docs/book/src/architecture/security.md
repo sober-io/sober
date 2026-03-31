@@ -129,7 +129,7 @@ Permission scopes: `knowledge`, `tools`, `agent`, `admin`.
 
 ## Context Isolation
 
-Memory scopes are enforced at the container level. Each scope is a separate BCF file with its own scope UUID embedded in the header. The context loading pipeline never mixes chunks from different user scopes. A bug that incorrectly loads the wrong scope would produce a UUID mismatch error rather than silently leaking data.
+Memory scopes are enforced at the query level. Each memory chunk carries a scope UUID in its Qdrant payload. The context loading pipeline applies scope filters on every query, ensuring chunks from different user scopes are never mixed.
 
 See [Memory System](./memory-system.md) for the full scoping model.
 

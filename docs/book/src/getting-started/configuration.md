@@ -255,7 +255,7 @@ See [Search Setup](search-setup.md) for installation and configuration details.
 
 | Variable | TOML Key | Default | Description |
 |----------|----------|---------|-------------|
-| `SOBER_CRYPTO_MASTER_ENCRYPTION_KEY` | `crypto.master_encryption_key` | — | 64-char hex (256-bit) master key for BCF encryption |
+| `SOBER_CRYPTO_MASTER_ENCRYPTION_KEY` | `crypto.master_encryption_key` | — | 64-char hex (256-bit) master key for envelope encryption |
 
 ### ACP (Agent Client Protocol)
 
@@ -288,7 +288,7 @@ Code, Goose) instead of — or in addition to — direct LLM API calls.
   ```bash
   openssl rand -hex 32
   ```
-- If `crypto.master_encryption_key` is not set, BCF containers are not encrypted at rest.
+- If `crypto.master_encryption_key` is not set, secrets are not encrypted at rest.
   This is acceptable in development but should not be used in production.
 
 ---

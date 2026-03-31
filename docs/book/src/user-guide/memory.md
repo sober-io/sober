@@ -1,6 +1,6 @@
 # Memory
 
-Sõber maintains persistent memory across conversations. Rather than relying on a fixed context window, it stores knowledge in a structured binary format and retrieves relevant memories on demand using vector search.
+Sõber maintains persistent memory across conversations. Rather than relying on a fixed context window, it stores knowledge in Qdrant and retrieves relevant memories on demand using vector search.
 
 ---
 
@@ -12,9 +12,7 @@ The agent accumulates several kinds of memories over time:
 |------|---------|
 | `fact` | "Alice works at Acme Corp", "the project uses PostgreSQL 17" |
 | `preference` | "User prefers dark mode", "always use British English" |
-| `skill` | "How to set up a Rust workspace", "steps to deploy via Docker Compose" |
-| `code` | Frequently referenced code snippets, custom functions |
-| `conversation` | Summaries of past conversations |
+| `decision` | "We chose PostgreSQL over MongoDB for ACID guarantees" |
 | `soul` | Per-user personality layer adaptations |
 
 Memories are stored when:
@@ -49,48 +47,6 @@ The four-level scope hierarchy is defined in the type system (`ScopeKind` enum).
 
 ---
 
-## Binary Context Format (BCF)
-
-Memories at rest are stored in BCF, a compact binary format optimised for fast loading and streaming to the LLM context. Each BCF container holds all memories for one scope.
-
-### Header (28 bytes)
-
-| Offset | Size | Field | Description |
-|--------|------|-------|-------------|
-| 0 | 4 | magic | `SÕBE` — bytes `0x53 0xD5 0x42 0x45` |
-| 4 | 2 | version | Format version (`1` for current). |
-| 6 | 2 | flags | Feature flags: bit 0 = encrypted, bit 1 = compressed (reserved for future use). |
-| 8 | 16 | scope_id | UUID of the scope this container belongs to. |
-| 24 | 4 | chunk_count | Number of chunks in this container. |
-
-### Chunk Table
-
-Immediately follows the header. Each entry is 13 bytes:
-
-| Offset | Size | Field | Description |
-|--------|------|-------|-------------|
-| 0 | 8 | offset | Byte offset of the chunk data from the start of the data section. |
-| 8 | 4 | length | Byte length of the chunk data. |
-| 12 | 1 | chunk_type | Chunk type discriminant (see below). |
-
-### Chunk Types
-
-| Discriminant | Name | Description |
-|-------------|------|-------------|
-| 0 | `Fact` | Extracted knowledge fact. |
-| 1 | `Conversation` | Conversation summary or key exchange. |
-| 2 | `Embedding` | Raw f32 embedding vector (not directly returned in recall results). |
-| 3 | `Preference` | User preference or personal setting. |
-| 4 | `Skill` | Learned skill or capability description. |
-| 5 | `Code` | Code snippet or technical reference. |
-| 6 | `Soul` | Soul layer data — per-user personality adaptations. |
-
-### Data Section
-
-Chunk payloads follow the chunk table. Chunks may be individually compressed (zstd) or encrypted (AES-256-GCM) in future versions — the `flags` field in the header indicates which features are active. Currently the flags field is reserved and always zero.
-
----
-
 ## Vector Retrieval via Qdrant
 
 Every chunk stored via `remember` is embedded into a dense vector using the configured embedding model and upserted into Qdrant. This enables semantic similarity search: the agent can find relevant memories even when the exact words do not match.
@@ -103,8 +59,6 @@ Recall queries combine two signals:
 - **Sparse BM25 keyword search** — traditional term-frequency matching for exact keyword recall.
 
 The combined score ranks results for the agent.
-
-> **Roadmap:** Plan 031 will introduce PostgreSQL `tsvector`-based full-text search as a fallback and complement to Qdrant vector search — useful for exact-match keyword queries and when the vector store is unavailable.
 
 ### Scoped Collections
 
