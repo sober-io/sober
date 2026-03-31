@@ -7,6 +7,8 @@
 mod agent_repos;
 mod artifacts;
 mod audit_log;
+mod blob_gc;
+mod conversation_attachments;
 mod conversation_users;
 mod conversations;
 mod evolution;
@@ -29,6 +31,8 @@ mod worktrees;
 pub use agent_repos::PgAgentRepos;
 pub use artifacts::PgArtifactRepo;
 pub use audit_log::PgAuditLogRepo;
+pub use blob_gc::PgBlobGcRepo;
+pub use conversation_attachments::PgConversationAttachmentRepo;
 pub use conversation_users::PgConversationUserRepo;
 pub use conversations::PgConversationRepo;
 pub use evolution::PgEvolutionRepo;

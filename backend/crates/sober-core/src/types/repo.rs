@@ -6,8 +6,6 @@
 //!
 //! Uses Rust 2024 RPITIT — no `async_trait` crate needed.
 
-use std::collections::HashSet;
-
 use chrono::{DateTime, Utc};
 
 use super::content::ContentBlock;
@@ -671,9 +669,16 @@ pub trait ArtifactRepo: Send + Sync {
         target: ArtifactId,
         relation: ArtifactRelation,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
 
-    /// Returns all blob keys referenced by non-archived artifacts.
-    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
+/// Blob garbage collection — finds unreferenced blob keys.
+pub trait BlobGcRepo: Send + Sync {
+    /// Given a batch of blob keys, returns those not referenced by any
+    /// conversation attachment, plugin config, or active artifact.
+    fn find_unreferenced(
+        &self,
+        keys: &[String],
+    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
 }
 
 /// Role assignment query operations.
@@ -875,9 +880,6 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
         scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
-
-    /// Returns all blob keys currently referenced by plugin configs.
-    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
 }
 
 /// Evolution event operations.

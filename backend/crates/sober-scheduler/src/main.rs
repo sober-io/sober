@@ -12,12 +12,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
-use sober_db::{PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool};
+use sober_db::{PgConversationAttachmentRepo, PgJobRepo, PgJobRunRepo, PgSessionRepo, create_pool};
 use sober_memory::MemoryStore;
 use sober_sandbox::SandboxProfile;
 use sober_scheduler::engine::TickEngine;
 use sober_scheduler::executor::JobExecutorRegistry;
 use sober_scheduler::executors::artifact::ArtifactExecutor;
+use sober_scheduler::executors::attachment_cleanup::AttachmentCleanupExecutor;
 use sober_scheduler::executors::blob_gc::BlobGcExecutor;
 use sober_scheduler::executors::memory_pruning::MemoryPruningExecutor;
 use sober_scheduler::executors::plugin_cleanup::PluginCleanupExecutor;
@@ -180,15 +181,10 @@ fn build_executor_registry(
         .context("failed to resolve sandbox policy")?;
 
     // Blob GC executor — reuses the same blob_store Arc
-    let gc_plugin_repo = sober_db::PgPluginRepo::new(pool.clone());
-    let gc_artifact_repo = sober_db::PgArtifactRepo::new(pool.clone());
+    let blob_gc_repo = sober_db::PgBlobGcRepo::new(pool.clone());
     registry.register(
         sober_scheduler::executors::blob_gc::OP,
-        Arc::new(BlobGcExecutor::new(
-            Arc::clone(&blob_store),
-            gc_plugin_repo,
-            gc_artifact_repo,
-        )),
+        Arc::new(BlobGcExecutor::new(Arc::clone(&blob_store), blob_gc_repo)),
     );
 
     // Plugin cleanup executor
@@ -196,6 +192,13 @@ fn build_executor_registry(
     registry.register(
         "plugin_cleanup",
         Arc::new(PluginCleanupExecutor::new(cleanup_plugin_repo)),
+    );
+
+    // Attachment cleanup executor
+    let attachment_repo = PgConversationAttachmentRepo::new(pool.clone());
+    registry.register(
+        sober_scheduler::executors::attachment_cleanup::OP,
+        Arc::new(AttachmentCleanupExecutor::new(attachment_repo)),
     );
 
     let sandbox_log_repo = Arc::new(sober_db::PgSandboxExecutionLogRepo::new(pool));

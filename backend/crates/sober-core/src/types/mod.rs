@@ -43,10 +43,11 @@ pub use input::{
 };
 pub use job_payload::{ArtifactType, InternalOp, JobPayload};
 pub use repo::{
-    ArtifactRepo, AuditLogRepo, ConversationAttachmentRepo, ConversationRepo, ConversationUserRepo,
-    EvolutionRepo, JobRepo, JobRunRepo, MessageRepo, PluginExecutionLogRepo, PluginRepo, RoleRepo,
-    SandboxExecutionLogRepo, SecretRepo, SessionRepo, TagRepo, ToolExecutionRepo, UserRepo,
-    WorkspaceRepo, WorkspaceRepoRepo, WorkspaceSettingsRepo, WorktreeRepo,
+    ArtifactRepo, AuditLogRepo, BlobGcRepo, ConversationAttachmentRepo, ConversationRepo,
+    ConversationUserRepo, EvolutionRepo, JobRepo, JobRunRepo, MessageRepo, PluginExecutionLogRepo,
+    PluginRepo, RoleRepo, SandboxExecutionLogRepo, SecretRepo, SessionRepo, TagRepo,
+    ToolExecutionRepo, UserRepo, WorkspaceRepo, WorkspaceRepoRepo, WorkspaceSettingsRepo,
+    WorktreeRepo,
 };
 pub use tool::{BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility};
 pub use tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};

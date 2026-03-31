@@ -5,7 +5,7 @@
 //! accumulating too many entries.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use metrics::{counter, histogram};
 use sha2::{Digest, Sha256};
@@ -202,6 +202,27 @@ impl BlobStore {
         })
         .await
         .expect("spawn_blocking join")
+    }
+
+    /// Lists blob keys in batches, filtering out files newer than `grace_period`.
+    ///
+    /// Returns a vector of batches (each batch is a `Vec<String>` of blob keys).
+    pub async fn list_keys_batched(
+        &self,
+        batch_size: usize,
+        grace_period: Duration,
+    ) -> Result<Vec<Vec<String>>, WorkspaceError> {
+        let cutoff = SystemTime::now() - grace_period;
+        let all = self.list_keys().await?;
+        let eligible: Vec<String> = all
+            .into_iter()
+            .filter(|(_, modified)| *modified <= cutoff)
+            .map(|(key, _)| key)
+            .collect();
+        Ok(eligible
+            .chunks(batch_size)
+            .map(|chunk| chunk.to_vec())
+            .collect())
     }
 
     /// Returns the filesystem path for a given content-addressed key.

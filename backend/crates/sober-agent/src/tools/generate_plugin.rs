@@ -826,13 +826,6 @@ mod tests {
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { Ok(()) }
         }
-
-        fn blob_keys_in_use(
-            &self,
-        ) -> impl std::future::Future<Output = Result<std::collections::HashSet<String>, AppError>> + Send
-        {
-            async { Ok(std::collections::HashSet::new()) }
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -911,13 +904,6 @@ mod tests {
             _relation: ArtifactRelation,
         ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
             async { Ok(()) }
-        }
-
-        fn blob_keys_in_use(
-            &self,
-        ) -> impl std::future::Future<Output = Result<std::collections::HashSet<String>, AppError>> + Send
-        {
-            async { Ok(std::collections::HashSet::new()) }
         }
     }
 

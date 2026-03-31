@@ -5,18 +5,20 @@
 
 use chrono::{DateTime, Utc};
 use sober_core::types::{
-    AgentMode, ArtifactId, ArtifactKind, ArtifactState, AuditLogId, ConversationId,
-    ConversationKind, ConversationUserRole, EncryptionKeyId, EvolutionEventId, EvolutionStatus,
-    EvolutionType, JobId, JobRunId, JobStatus, MessageId, MessageRole, PermissionMode, PluginId,
-    PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleId, SandboxNetMode, ScopeId, SecretId,
-    SessionId, TagId, ToolExecutionId, ToolExecutionSource, ToolExecutionStatus, UserId,
-    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
+    AgentMode, ArtifactId, ArtifactKind, ArtifactState, AttachmentKind, AuditLogId,
+    ConversationAttachmentId, ConversationId, ConversationKind, ConversationUserRole,
+    EncryptionKeyId, EvolutionEventId, EvolutionStatus, EvolutionType, JobId, JobRunId, JobStatus,
+    MessageId, MessageRole, PermissionMode, PluginId, PluginKind, PluginOrigin, PluginScope,
+    PluginStatus, RoleId, SandboxNetMode, ScopeId, SecretId, SessionId, TagId, ToolExecutionId,
+    ToolExecutionSource, ToolExecutionStatus, UserId, UserStatus, WorkspaceId, WorkspaceRepoId,
+    WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
-    Artifact, AuditLogEntry, AutonomyLevel, ContentBlock, Conversation, ConversationUser,
-    ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message,
-    MessageSearchHit, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek,
-    Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
+    Artifact, AuditLogEntry, AutonomyLevel, ContentBlock, Conversation, ConversationAttachment,
+    ConversationUser, ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job,
+    JobRun, Message, MessageSearchHit, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
+    Session, StoredDek, Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry,
+    WorkspaceSettings, Worktree,
 };
 use uuid::Uuid;
 
@@ -710,6 +712,37 @@ impl From<PluginAuditLogRow> for PluginAuditLog {
             rejection_reason: row.rejection_reason,
             audited_at: row.audited_at,
             audited_by: row.audited_by.map(UserId::from_uuid),
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct ConversationAttachmentRow {
+    pub id: Uuid,
+    pub blob_key: String,
+    pub kind: AttachmentKind,
+    pub content_type: String,
+    pub filename: String,
+    pub size: i64,
+    pub metadata: serde_json::Value,
+    pub conversation_id: Uuid,
+    pub user_id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<ConversationAttachmentRow> for ConversationAttachment {
+    fn from(row: ConversationAttachmentRow) -> Self {
+        ConversationAttachment {
+            id: ConversationAttachmentId::from_uuid(row.id),
+            blob_key: row.blob_key,
+            kind: row.kind,
+            content_type: row.content_type,
+            filename: row.filename,
+            size: row.size,
+            metadata: row.metadata,
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            user_id: UserId::from_uuid(row.user_id),
+            created_at: row.created_at,
         }
     }
 }
