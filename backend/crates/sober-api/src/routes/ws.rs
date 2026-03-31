@@ -433,7 +433,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 let mut request = tonic::Request::new(proto::HandleMessageRequest {
                     user_id: user_id.to_string(),
                     conversation_id: conversation_id.clone(),
-                    content,
+                    content: vec![proto::ContentBlock {
+                        block: Some(proto::content_block::Block::Text(proto::TextBlock {
+                            text: content,
+                        })),
+                    }],
                 });
 
                 let conv_id = conversation_id.clone();

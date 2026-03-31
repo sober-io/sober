@@ -192,11 +192,23 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 serde_json::Value::String(nm.source),
             )
             .unwrap_or(sober_core::types::access::TriggerKind::Human);
+
+            // Extract text content from proto ContentBlock list.
+            let text_content: String = nm
+                .content
+                .iter()
+                .filter_map(|b| match b.block.as_ref()? {
+                    proto::content_block::Block::Text(t) => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
             Some(ServerWsMessage::ChatNewMessage {
                 conversation_id: cid,
                 message_id: nm.message_id,
                 role: nm.role,
-                content: nm.content,
+                content: text_content,
                 source,
                 user_id: nm.user_id.filter(|s| !s.is_empty()),
                 username: None,
@@ -240,7 +252,11 @@ mod tests {
                 proto::NewMessage {
                     message_id: "msg-1".to_owned(),
                     role: "Assistant".to_owned(),
-                    content: "hi".to_owned(),
+                    content: vec![proto::ContentBlock {
+                        block: Some(proto::content_block::Block::Text(proto::TextBlock {
+                            text: "hi".to_owned(),
+                        })),
+                    }],
                     source: "scheduler".to_owned(),
                     user_id: None,
                 },

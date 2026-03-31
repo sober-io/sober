@@ -44,8 +44,8 @@ pub enum InboxMessage {
     UserMessage {
         /// The authenticated user sending the message.
         user_id: UserId,
-        /// The message content.
-        content: String,
+        /// The message content blocks.
+        content: Vec<ContentBlock>,
         /// What triggered this interaction (Human, Scheduler, Admin, Replica).
         trigger: TriggerKind,
         /// Channel for streaming [`AgentEvent`]s back to the caller.
@@ -172,7 +172,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     async fn handle_message(
         &self,
         user_id: UserId,
-        content: String,
+        content: Vec<ContentBlock>,
         trigger: TriggerKind,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) {
@@ -223,12 +223,15 @@ impl<R: AgentRepos> ConversationActor<R> {
     async fn handle_message_inner(
         &self,
         user_id: UserId,
-        content: &str,
+        content: &[ContentBlock],
         trigger: TriggerKind,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) -> Result<(), AgentError> {
+        // Extract text for injection checking and other text-based operations.
+        let text_content = crate::util::text_from_content_blocks(content);
+
         // 1. Injection check
-        let verdict = Mind::check_injection(content);
+        let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {
                 return Err(AgentError::InjectionDetected(reason));
@@ -264,7 +267,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 .create(CreateMessage {
                     conversation_id: self.conversation_id,
                     role: MessageRole::User,
-                    content: vec![ContentBlock::text(content.to_owned())],
+                    content: content.to_vec(),
                     reasoning: None,
                     token_count: None,
                     metadata: None,
@@ -281,7 +284,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         let should_respond = match conversation.agent_mode {
             AgentMode::Always => true,
             AgentMode::Silent => false,
-            AgentMode::Mention => content.to_lowercase().contains(MENTION_TRIGGER),
+            AgentMode::Mention => text_content.to_lowercase().contains(MENTION_TRIGGER),
         };
 
         if !should_respond {
@@ -347,7 +350,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             tool_registry: &tool_registry,
             user_id,
             conversation_id: self.conversation_id,
-            content,
+            content: &text_content,
             user_msg_id,
             event_tx,
             trigger,

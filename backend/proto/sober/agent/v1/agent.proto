@@ -36,10 +36,26 @@ service AgentService {
 
 message ConfirmAck {}
 
+message ContentBlock {
+  oneof block {
+    TextBlock text = 1;
+    ImageBlock image = 2;
+    FileBlock file = 3;
+    AudioBlock audio = 4;
+    VideoBlock video = 5;
+  }
+}
+
+message TextBlock { string text = 1; }
+message ImageBlock { string conversation_attachment_id = 1; optional string alt = 2; }
+message FileBlock { string conversation_attachment_id = 1; }
+message AudioBlock { string conversation_attachment_id = 1; }
+message VideoBlock { string conversation_attachment_id = 1; }
+
 message HandleMessageRequest {
   string user_id = 1;
   string conversation_id = 2;
-  string content = 3;
+  repeated ContentBlock content = 3;
 }
 
 // Returned immediately by HandleMessage after storing the user message.
@@ -135,7 +151,7 @@ message SubscribeRequest {}
 message NewMessage {
   string message_id = 1;
   string role = 2;
-  string content = 3;
+  repeated ContentBlock content = 3;
   // What produced this message: "human", "scheduler", "replica", "admin", "system".
   string source = 4;
   // The user who triggered the message (empty for system/scheduler).

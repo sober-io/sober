@@ -36,4 +36,7 @@ pub use client::OpenAiCompatibleEngine;
 pub use engine::LlmEngine;
 pub use error::LlmError;
 pub use resolver::{LlmKeyResolver, ResolvedLlmKey};
-pub use types::{CompletionRequest, CompletionResponse, EngineCapabilities, Message};
+pub use types::{
+    CompletionRequest, CompletionResponse, EngineCapabilities, ImageUrl, LlmContentBlock, Message,
+    MessageContent, ModelCapabilities,
+};

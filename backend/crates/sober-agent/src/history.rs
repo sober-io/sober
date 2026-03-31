@@ -8,6 +8,7 @@
 use sober_core::types::enums::{MessageRole, ToolExecutionStatus};
 use sober_core::types::tool_execution::{MessageWithExecutions, ToolExecution};
 use sober_llm::Message as LlmMessage;
+use sober_llm::MessageContent;
 use sober_llm::types::{FunctionCall, ToolCall as LlmToolCall};
 
 /// Converts domain messages (with associated tool executions) into the LLM
@@ -49,7 +50,7 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                     }
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: Some(text),
+                        content: Some(MessageContent::Text(text)),
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
                         reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
@@ -67,7 +68,11 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                     // Emit assistant message with tool_calls.
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: if text.is_empty() { None } else { Some(text) },
+                        content: if text.is_empty() {
+                            None
+                        } else {
+                            Some(MessageContent::Text(text))
+                        },
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
                         reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
@@ -192,7 +197,7 @@ mod tests {
         let result = to_llm_messages(&messages);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
-        assert_eq!(result[0].content.as_deref(), Some("Hello!"));
+        assert_eq!(result[0].text_content(), Some("Hello!"));
     }
 
     #[test]
@@ -201,7 +206,7 @@ mod tests {
         let result = to_llm_messages(&messages);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "system");
-        assert_eq!(result[0].content.as_deref(), Some("You are helpful."));
+        assert_eq!(result[0].text_content(), Some("You are helpful."));
     }
 
     #[test]
@@ -234,7 +239,7 @@ mod tests {
         let result = to_llm_messages(&messages);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
-        assert_eq!(result[0].content.as_deref(), Some("Here is the answer."));
+        assert_eq!(result[0].text_content(), Some("Here is the answer."));
         assert!(result[0].tool_calls.is_none());
     }
 
@@ -278,7 +283,7 @@ mod tests {
 
         // Assistant message with tool_calls
         assert_eq!(result[0].role, "assistant");
-        assert_eq!(result[0].content.as_deref(), Some("Let me search."));
+        assert_eq!(result[0].text_content(), Some("Let me search."));
         let tool_calls = result[0]
             .tool_calls
             .as_ref()
@@ -291,7 +296,7 @@ mod tests {
         // Tool result message
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].tool_call_id.as_deref(), Some("call_abc"));
-        assert_eq!(result[1].content.as_deref(), Some("Search results here"));
+        assert_eq!(result[1].text_content(), Some("Search results here"));
     }
 
     #[test]
@@ -324,10 +329,7 @@ mod tests {
 
         // Tool result with error
         assert_eq!(result[1].role, "tool");
-        assert_eq!(
-            result[1].content.as_deref(),
-            Some("Error: connection timeout")
-        );
+        assert_eq!(result[1].text_content(), Some("Error: connection timeout"));
     }
 
     #[test]
@@ -352,7 +354,7 @@ mod tests {
         }];
 
         let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some("Error: Unknown error"));
+        assert_eq!(result[1].text_content(), Some("Error: Unknown error"));
     }
 
     #[test]
@@ -378,7 +380,7 @@ mod tests {
 
         let result = to_llm_messages(&messages);
         assert_eq!(
-            result[1].content.as_deref(),
+            result[1].text_content(),
             Some("Error: Agent restarted during execution")
         );
     }
@@ -406,7 +408,7 @@ mod tests {
 
         let result = to_llm_messages(&messages);
         assert_eq!(
-            result[1].content.as_deref(),
+            result[1].text_content(),
             Some("Error: Agent restarted during execution")
         );
     }
@@ -433,7 +435,7 @@ mod tests {
         }];
 
         let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some("Cancelled by user"));
+        assert_eq!(result[1].text_content(), Some("Cancelled by user"));
     }
 
     #[test]
@@ -481,11 +483,11 @@ mod tests {
 
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].tool_call_id.as_deref(), Some("call_1"));
-        assert_eq!(result[1].content.as_deref(), Some("result 1"));
+        assert_eq!(result[1].text_content(), Some("result 1"));
 
         assert_eq!(result[2].role, "tool");
         assert_eq!(result[2].tool_call_id.as_deref(), Some("call_2"));
-        assert_eq!(result[2].content.as_deref(), Some("result 2"));
+        assert_eq!(result[2].text_content(), Some("result 2"));
     }
 
     #[test]
@@ -530,9 +532,9 @@ mod tests {
         let result = to_llm_messages(&messages);
         assert_eq!(result.len(), 4); // 1 assistant + 3 tool results
 
-        assert_eq!(result[1].content.as_deref(), Some("success"));
-        assert_eq!(result[2].content.as_deref(), Some("Error: boom"));
-        assert_eq!(result[3].content.as_deref(), Some("Cancelled by user"));
+        assert_eq!(result[1].text_content(), Some("success"));
+        assert_eq!(result[2].text_content(), Some("Error: boom"));
+        assert_eq!(result[3].text_content(), Some("Cancelled by user"));
     }
 
     #[test]
@@ -630,6 +632,6 @@ mod tests {
         }];
 
         let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some(""));
+        assert_eq!(result[1].text_content(), Some(""));
     }
 }

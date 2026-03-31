@@ -381,11 +381,12 @@ impl<R: AgentRepos> Agent<R> {
         self: &Arc<Self>,
         user_id: UserId,
         conversation_id: ConversationId,
-        content: &str,
+        content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
     ) -> Result<AgentResponseStream, AgentError> {
         // 1. Pre-flight injection check (before routing to actor).
-        let verdict = Mind::check_injection(content);
+        let text_content = crate::util::text_from_content_blocks(content);
+        let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {
                 return Err(AgentError::InjectionDetected(reason));
@@ -447,7 +448,7 @@ impl<R: AgentRepos> Agent<R> {
         // 4. Send the message to the actor's inbox.
         let msg = InboxMessage::UserMessage {
             user_id,
-            content: content.to_owned(),
+            content: content.to_vec(),
             trigger,
             event_tx,
         };

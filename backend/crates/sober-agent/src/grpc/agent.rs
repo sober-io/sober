@@ -16,6 +16,7 @@ use tonic::{Request, Response, Status};
 use tracing::error;
 
 use super::{AgentGrpcService, proto};
+use crate::grpc::content_blocks;
 use crate::grpc::tasks;
 
 // ---------------------------------------------------------------------------
@@ -68,13 +69,13 @@ pub(crate) async fn handle_message<R: AgentRepos>(
     span.record("message.length", req.content.len());
 
     let agent = Arc::clone(service.agent());
-    let content = req.content;
+    let content_blocks = content_blocks::proto_to_domain(&req.content);
 
     match agent
         .handle_message(
             user_id,
             conversation_id,
-            &content,
+            &content_blocks,
             sober_core::types::access::TriggerKind::Human,
         )
         .await

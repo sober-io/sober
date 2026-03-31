@@ -295,11 +295,12 @@ pub(crate) async fn execute_prompt_conversational<R: AgentRepos>(
     tx: &tokio::sync::mpsc::Sender<Result<proto::AgentEvent, Status>>,
 ) {
     let result = if let (Some(uid), Some(cid)) = (user_id, conversation_id) {
+        let content = vec![sober_core::types::ContentBlock::text(prompt)];
         agent
             .handle_message(
                 uid,
                 cid,
-                prompt,
+                &content,
                 sober_core::types::access::TriggerKind::Scheduler,
             )
             .await

@@ -272,7 +272,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 content: if content_buffer.is_empty() {
                     None
                 } else {
-                    Some(content_buffer.clone())
+                    Some(sober_llm::MessageContent::Text(content_buffer.clone()))
                 },
                 reasoning_content: if reasoning_buffer.is_empty() {
                     None
@@ -461,7 +461,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 proto::NewMessage {
                     message_id: assistant_msg_id.to_string(),
                     role: "Assistant".to_owned(),
-                    content: text.clone(),
+                    content: crate::grpc::content_blocks::domain_to_proto(&[ContentBlock::text(
+                        text.clone(),
+                    )]),
                     source: match params.trigger {
                         TriggerKind::Human => "human",
                         TriggerKind::Scheduler => "scheduler",
@@ -751,7 +753,7 @@ async fn auto_generate_title<R: AgentRepos>(
             // Primary: use content field if non-empty
             let title = c
                 .message
-                .content
+                .text_content()
                 .filter(|s| !s.trim().is_empty())
                 .map(|t| t.trim().trim_matches('"').to_owned());
 
