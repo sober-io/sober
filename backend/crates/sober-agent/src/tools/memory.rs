@@ -296,20 +296,21 @@ impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata {
             name: "recall".to_owned(),
-            description: "Search your memory or past conversations.\n\n\
-                source: \"memory\" (default) — Search stored knowledge about the user: personal \
-                facts, preferences, learned skills, code snippets. Use when looking for something \
-                you learned and stored about this user.\n\n\
-                source: \"conversations\" — Search past conversation messages. Use for anything \
-                discussed previously: decisions made, questions asked, technical discussions, \
-                context from past interactions.\n\n\
-                Rule of thumb: if it's a user-specific trait or fact you extracted, use memory. \
-                If it's something that was said in a conversation, use conversations.\n\n\
-                You MUST use this tool proactively:\n\
-                - At the START of every new conversation to load relevant context\n\
-                - Whenever the user references something from the past\n\
-                - Before answering questions that might depend on stored knowledge\n\
-                - Before saying \"I don't know\" — always check memory first"
+            description: "Search your memory or past conversations. Relevant memories are \
+                already auto-loaded into your context each turn — use this tool for targeted \
+                searches when you need something specific beyond what was loaded.\n\n\
+                source: \"memory\" (default) — Search stored knowledge: personal facts, \
+                preferences, learned skills, code snippets, decisions. Use when looking for \
+                something specific you stored about this user.\n\n\
+                source: \"conversations\" — Full-text search over past conversation messages. \
+                Use for anything discussed previously: decisions, questions, technical context, \
+                anything that was said but may not have been extracted into memory.\n\n\
+                When to use:\n\
+                - The user references a past conversation or decision\n\
+                - You need specific context not present in auto-loaded memories\n\
+                - Before saying \"I don't know\" — search both sources first\n\
+                - When the user asks \"do you remember\" or \"we discussed\"\n\n\
+                Do NOT call this at the start of every conversation — context is auto-loaded."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -455,15 +456,14 @@ impl Tool for RememberTool {
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata {
             name: "remember".to_owned(),
-            description: "Store a fact, preference, skill, code snippet, or other knowledge \
-                in memory for future recall. Use this when the user shares personal facts or \
-                preferences, when you learn something useful for future conversations, when \
-                the user explicitly asks you to remember something, or after extracting key \
-                decisions/outcomes from a conversation.\n\
-                When storing knowledge about yourself (the agent) — your capabilities, \
-                configuration, identity, learned behaviors — always use scope 'system'. \
-                When storing personal details about the user — their preferences, facts, \
-                habits — always use scope 'user'."
+            description: "Store important information in long-term memory. Most extraction \
+                happens automatically via extraction blocks, but use this tool directly when:\n\
+                - The user explicitly asks you to remember something\n\
+                - You need to store something complex that benefits from precise wording\n\
+                - You want to store with a specific importance score or chunk type\n\
+                - You realize mid-conversation that an earlier fact should be stored\n\n\
+                Scope: 'user' (default) for personal details about the user. 'system' for \
+                knowledge about yourself — capabilities, configuration, learned behaviors."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
