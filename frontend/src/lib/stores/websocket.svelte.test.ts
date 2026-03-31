@@ -66,7 +66,11 @@ describe('websocket store', () => {
 	});
 
 	it('queues messages when disconnected and flushes on connect', () => {
-		const msg = { type: 'chat.message' as const, conversation_id: 'c1', content: 'hello' };
+		const msg = {
+			type: 'chat.message' as const,
+			conversation_id: 'c1',
+			content: [{ type: 'text' as const, text: 'hello' }]
+		};
 		websocket.send(msg);
 
 		// Not connected — message should be queued, not sent

@@ -11,10 +11,11 @@ use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
-    ApiResponse, ConversationId, CreateTag, MessageId, MessageRepo, MessageRole, Tag, TagId,
-    TagRepo, ToolExecutionRepo,
+    ApiResponse, ContentBlock, ConversationAttachmentId, ConversationAttachmentRepo,
+    ConversationId, CreateTag, MessageId, MessageRepo, MessageRole, Tag, TagId, TagRepo,
+    ToolExecutionRepo,
 };
-use sober_db::{PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
+use sober_db::{PgConversationAttachmentRepo, PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
 
 use crate::state::AppState;
 
@@ -87,7 +88,50 @@ async fn list_messages(
         }
     }
 
-    // Attach tags and tool executions to each message.
+    // Collect all attachment IDs from content blocks across messages.
+    let mut all_attachment_ids: Vec<ConversationAttachmentId> = Vec::new();
+    for msg in &messages {
+        for block in &msg.content {
+            let attachment_id = match block {
+                ContentBlock::Image {
+                    conversation_attachment_id,
+                    ..
+                }
+                | ContentBlock::File {
+                    conversation_attachment_id,
+                }
+                | ContentBlock::Audio {
+                    conversation_attachment_id,
+                }
+                | ContentBlock::Video {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Text { .. } => None,
+            };
+            if let Some(id) = attachment_id {
+                all_attachment_ids.push(id);
+            }
+        }
+    }
+
+    // Batch-fetch attachment metadata and build a lookup map.
+    let mut attachment_map: HashMap<String, serde_json::Value> = HashMap::new();
+    if !all_attachment_ids.is_empty() {
+        all_attachment_ids.dedup();
+        let attachment_repo = PgConversationAttachmentRepo::new(state.db.clone());
+        let attachments = attachment_repo
+            .get_by_ids(&all_attachment_ids)
+            .await
+            .unwrap_or_default();
+        for att in attachments {
+            attachment_map.insert(
+                att.id.to_string(),
+                serde_json::to_value(&att).unwrap_or_default(),
+            );
+        }
+    }
+
+    // Attach tags, tool executions, and attachment metadata to each message.
     let response: Vec<serde_json::Value> = messages
         .iter()
         .map(|m| {
@@ -102,6 +146,35 @@ async fn list_messages(
                         serde_json::Value::Array(execs),
                     );
                 }
+                // Add per-message attachments map for referenced attachments.
+                let mut msg_attachments = serde_json::Map::new();
+                for block in &m.content {
+                    let att_id = match block {
+                        ContentBlock::Image {
+                            conversation_attachment_id,
+                            ..
+                        }
+                        | ContentBlock::File {
+                            conversation_attachment_id,
+                        }
+                        | ContentBlock::Audio {
+                            conversation_attachment_id,
+                        }
+                        | ContentBlock::Video {
+                            conversation_attachment_id,
+                        } => Some(conversation_attachment_id.to_string()),
+                        ContentBlock::Text { .. } => None,
+                    };
+                    if let Some(id_str) = att_id
+                        && let Some(att_val) = attachment_map.get(&id_str)
+                    {
+                        msg_attachments.insert(id_str, att_val.clone());
+                    }
+                }
+                obj.insert(
+                    "attachments".to_string(),
+                    serde_json::Value::Object(msg_attachments),
+                );
             }
             val
         })

@@ -13,7 +13,7 @@ describe('ChatInput', () => {
 		expect(button).toBeDisabled();
 	});
 
-	it('Enter key submits trimmed value and clears input', async () => {
+	it('Enter key submits content blocks and clears input', async () => {
 		const user = userEvent.setup();
 		const onsend = vi.fn();
 		render(ChatInput, { props: { onsend } });
@@ -22,7 +22,7 @@ describe('ChatInput', () => {
 		await user.type(textarea, 'hello world');
 		await user.keyboard('{Enter}');
 
-		expect(onsend).toHaveBeenCalledWith('hello world');
+		expect(onsend).toHaveBeenCalledWith([{ type: 'text', text: 'hello world' }]);
 	});
 
 	it('Shift+Enter does not submit', async () => {
@@ -77,7 +77,7 @@ describe('ChatInput', () => {
 		expect(onSlashCommand).toHaveBeenCalledWith('/help');
 	});
 
-	it('non-builtin slash commands go through onsend', async () => {
+	it('non-builtin slash commands go through onsend as content blocks', async () => {
 		const user = userEvent.setup();
 		const onsend = vi.fn();
 		render(ChatInput, {
@@ -89,7 +89,7 @@ describe('ChatInput', () => {
 		await user.type(textarea, '/my-skill do something');
 		await user.keyboard('{Enter}');
 
-		expect(onsend).toHaveBeenCalledWith('/my-skill do something');
+		expect(onsend).toHaveBeenCalledWith([{ type: 'text', text: '/my-skill do something' }]);
 	});
 
 	it('shows "Queue" when busy', () => {
@@ -98,5 +98,13 @@ describe('ChatInput', () => {
 		});
 
 		expect(screen.getByText('Queue')).toBeInTheDocument();
+	});
+
+	it('renders attach button', () => {
+		render(ChatInput, {
+			props: { onsend: vi.fn() }
+		});
+
+		expect(screen.getByTitle('Attach file')).toBeInTheDocument();
 	});
 });

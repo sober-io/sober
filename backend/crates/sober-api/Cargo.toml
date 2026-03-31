@@ -15,8 +15,9 @@ path = "src/main.rs"
 sober-core = { path = "../sober-core", features = ["grpc-telemetry"] }
 sober-auth = { path = "../sober-auth" }
 sober-db = { path = "../sober-db" }
+sober-workspace = { path = "../sober-workspace" }
 anyhow = { workspace = true }
-axum = { workspace = true, features = ["ws", "json", "macros"] }
+axum = { workspace = true, features = ["ws", "json", "macros", "multipart"] }
 axum-core = { workspace = true }
 chrono = { workspace = true }
 dotenvy = { workspace = true }

@@ -1,7 +1,8 @@
 <script lang="ts">
-	import type { Tag, ToolExecution } from '$lib/types';
+	import type { ContentBlock, ConversationAttachment, Tag, ToolExecution } from '$lib/types';
 	import { renderMarkdown, highlighterReady } from '$lib/utils/markdown.svelte';
 	import StreamingText from './StreamingText.svelte';
+	import ContentBlockRenderer from './ContentBlockRenderer.svelte';
 	import ToolCallDisplay from './ToolCallDisplay.svelte';
 	import ThinkingIndicator from './ThinkingIndicator.svelte';
 	import MessageActionBar from './MessageActionBar.svelte';
@@ -10,6 +11,8 @@
 	interface Props {
 		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
+		contentBlocks?: ContentBlock[];
+		attachments?: Record<string, ConversationAttachment>;
 		thinkingContent?: string;
 		toolExecutions?: ToolExecution[];
 		streaming?: boolean;
@@ -29,6 +32,8 @@
 	let {
 		role,
 		content,
+		contentBlocks,
+		attachments,
 		thinkingContent = '',
 		toolExecutions,
 		streaming = false,
@@ -47,6 +52,9 @@
 	const isUser = $derived(role === 'user');
 	const hasToolExecutions = $derived(toolExecutions && toolExecutions.length > 0);
 	const hasThinkingContent = $derived(thinkingContent.length > 0);
+	const hasNonTextBlocks = $derived(
+		contentBlocks ? contentBlocks.some((b) => b.type !== 'text') : false
+	);
 	const renderedContent = $derived(
 		// Read highlighterReady.version to re-derive when shiki finishes loading
 		content ? (highlighterReady.version, renderMarkdown(content)) : ''
@@ -113,6 +121,8 @@
 					<ThinkingIndicator {thinkingContent} />
 				{:else if streaming}
 					<StreamingText {content} {streaming} />
+				{:else if hasNonTextBlocks && contentBlocks}
+					<ContentBlockRenderer blocks={contentBlocks} {attachments} />
 				{:else}
 					<!-- eslint-disable-next-line svelte/no-at-html-tags -- DOMPurify-sanitized in renderMarkdown -->
 					<div class="chat-prose prose prose-sm max-w-none">{@html renderedContent}</div>

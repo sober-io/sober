@@ -17,7 +17,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
-use sober_core::types::ConversationId;
+use sober_core::types::{ContentBlock, ConversationId};
 use sober_db::PgConversationUserRepo;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -58,7 +58,7 @@ enum ClientWsMessage {
     #[serde(rename = "chat.message")]
     ChatMessage {
         conversation_id: String,
-        content: String,
+        content: Vec<ContentBlock>,
     },
     #[serde(rename = "chat.cancel")]
     ChatCancel { conversation_id: String },
@@ -404,13 +404,23 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .await;
                 }
 
+                // Extract text summary for the broadcast message.
+                let text_summary: String = content
+                    .iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
                 // Broadcast the user's message to all other subscribers
                 // so group members see it in real-time.
                 let user_msg = ServerWsMessage::ChatNewMessage {
                     conversation_id: conversation_id.clone(),
                     message_id: uuid::Uuid::now_v7().to_string(),
                     role: "user".into(),
-                    content: content.clone(),
+                    content: text_summary,
                     source: sober_core::types::access::TriggerKind::Human,
                     user_id: Some(user_id.to_string()),
                     username: Some(username.clone()),
@@ -428,16 +438,54 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                     )
                     .await;
 
+                // Convert content blocks to proto format.
+                let proto_blocks: Vec<proto::ContentBlock> = content
+                    .into_iter()
+                    .map(|block| match block {
+                        ContentBlock::Text { text } => proto::ContentBlock {
+                            block: Some(proto::content_block::Block::Text(proto::TextBlock {
+                                text,
+                            })),
+                        },
+                        ContentBlock::Image {
+                            conversation_attachment_id,
+                            alt,
+                        } => proto::ContentBlock {
+                            block: Some(proto::content_block::Block::Image(proto::ImageBlock {
+                                conversation_attachment_id: conversation_attachment_id.to_string(),
+                                alt,
+                            })),
+                        },
+                        ContentBlock::File {
+                            conversation_attachment_id,
+                        } => proto::ContentBlock {
+                            block: Some(proto::content_block::Block::File(proto::FileBlock {
+                                conversation_attachment_id: conversation_attachment_id.to_string(),
+                            })),
+                        },
+                        ContentBlock::Audio {
+                            conversation_attachment_id,
+                        } => proto::ContentBlock {
+                            block: Some(proto::content_block::Block::Audio(proto::AudioBlock {
+                                conversation_attachment_id: conversation_attachment_id.to_string(),
+                            })),
+                        },
+                        ContentBlock::Video {
+                            conversation_attachment_id,
+                        } => proto::ContentBlock {
+                            block: Some(proto::content_block::Block::Video(proto::VideoBlock {
+                                conversation_attachment_id: conversation_attachment_id.to_string(),
+                            })),
+                        },
+                    })
+                    .collect();
+
                 // Call unary HandleMessage RPC — fire and forget.
                 let mut agent_client = state.agent_client.clone();
                 let mut request = tonic::Request::new(proto::HandleMessageRequest {
                     user_id: user_id.to_string(),
                     conversation_id: conversation_id.clone(),
-                    content: vec![proto::ContentBlock {
-                        block: Some(proto::content_block::Block::Text(proto::TextBlock {
-                            text: content,
-                        })),
-                    }],
+                    content: proto_blocks,
                 });
 
                 let conv_id = conversation_id.clone();

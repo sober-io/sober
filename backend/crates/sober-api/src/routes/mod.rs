@@ -1,5 +1,6 @@
 //! Route handlers and router assembly.
 
+pub mod attachments;
 pub mod auth;
 pub mod collaborators;
 pub mod conversations;
@@ -65,6 +66,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .merge(health::routes())
         .merge(system::routes())
+        .merge(attachments::routes())
         .merge(auth::routes())
         .merge(conversations::routes())
         .merge(collaborators::routes())
