@@ -41,6 +41,10 @@ pub enum Command {
     /// Manage skills.
     #[command(subcommand)]
     Skill(SkillCommand),
+
+    /// Garbage collection commands.
+    #[command(subcommand)]
+    Gc(GcCommand),
 }
 
 /// User management subcommands.
@@ -306,6 +310,17 @@ pub enum PluginCommand {
     Remove {
         /// Plugin ID (UUID).
         id: String,
+    },
+}
+
+/// Garbage collection subcommands.
+#[derive(Debug, Subcommand)]
+pub enum GcCommand {
+    /// Run blob garbage collection (requires running sober-scheduler).
+    Blobs {
+        /// Path to scheduler socket.
+        #[arg(long, default_value = DEFAULT_SCHEDULER_SOCKET)]
+        socket: String,
     },
 }
 

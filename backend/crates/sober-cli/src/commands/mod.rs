@@ -3,6 +3,7 @@
 mod common;
 pub mod config;
 pub mod evolution;
+pub mod gc;
 pub mod migrate;
 pub mod plugin;
 pub mod scheduler;
