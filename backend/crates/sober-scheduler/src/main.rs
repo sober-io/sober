@@ -18,6 +18,7 @@ use sober_sandbox::SandboxProfile;
 use sober_scheduler::engine::TickEngine;
 use sober_scheduler::executor::JobExecutorRegistry;
 use sober_scheduler::executors::artifact::ArtifactExecutor;
+use sober_scheduler::executors::blob_gc::BlobGcExecutor;
 use sober_scheduler::executors::memory_pruning::MemoryPruningExecutor;
 use sober_scheduler::executors::plugin_cleanup::PluginCleanupExecutor;
 use sober_scheduler::executors::session_cleanup::SessionCleanupExecutor;
@@ -177,6 +178,18 @@ fn build_executor_registry(
     let sandbox_policy = sandbox_profile
         .resolve(&std::collections::HashMap::new())
         .context("failed to resolve sandbox policy")?;
+
+    // Blob GC executor — reuses the same blob_store Arc
+    let gc_plugin_repo = sober_db::PgPluginRepo::new(pool.clone());
+    let gc_artifact_repo = sober_db::PgArtifactRepo::new(pool.clone());
+    registry.register(
+        sober_scheduler::executors::blob_gc::OP,
+        Arc::new(BlobGcExecutor::new(
+            Arc::clone(&blob_store),
+            gc_plugin_repo,
+            gc_artifact_repo,
+        )),
+    );
 
     // Plugin cleanup executor
     let cleanup_plugin_repo = sober_db::PgPluginRepo::new(pool.clone());

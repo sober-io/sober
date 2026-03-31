@@ -185,6 +185,7 @@ pub(crate) async fn handle_install_plugin<R: AgentRepos>(
 
 pub(crate) async fn handle_uninstall_plugin<R: AgentRepos>(
     service: &AgentGrpcService<R>,
+    plugin_manager: &Arc<PluginManager<R::Plg>>,
     request: Request<proto::UninstallPluginRequest>,
 ) -> Result<Response<proto::UninstallPluginResponse>, Status> {
     let req = request.into_inner();
@@ -195,13 +196,12 @@ pub(crate) async fn handle_uninstall_plugin<R: AgentRepos>(
         .map(PluginId::from_uuid)
         .map_err(|_| Status::invalid_argument("invalid plugin_id"))?;
 
-    service
-        .agent()
-        .repos()
-        .plugins()
-        .delete(plugin_id)
+    plugin_manager
+        .uninstall(plugin_id)
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
+
+    let _ = service; // service not needed after switching to plugin_manager
 
     info!(%plugin_id, "plugin uninstalled");
 

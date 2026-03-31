@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
         Command::Evolution(cmd) => run_evolution(cmd).await,
         Command::Plugin(cmd) => run_plugin(cmd).await,
         Command::Skill(cmd) => run_skill(cmd).await,
+        Command::Gc(cmd) => commands::gc::handle(cmd).await,
     }
 }
 

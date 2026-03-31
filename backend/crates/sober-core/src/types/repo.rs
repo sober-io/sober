@@ -6,6 +6,8 @@
 //!
 //! Uses Rust 2024 RPITIT — no `async_trait` crate needed.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 
 use super::domain::*;
@@ -621,6 +623,9 @@ pub trait ArtifactRepo: Send + Sync {
         target: ArtifactId,
         relation: ArtifactRelation,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Returns all blob keys referenced by non-archived artifacts.
+    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
 }
 
 /// Role assignment query operations.
@@ -822,6 +827,9 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
         scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Returns all blob keys currently referenced by plugin configs.
+    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
 }
 
 /// Evolution event operations.

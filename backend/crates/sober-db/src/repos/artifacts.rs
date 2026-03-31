@@ -1,5 +1,7 @@
 //! PostgreSQL implementation of [`ArtifactRepo`].
 
+use std::collections::HashSet;
+
 use sober_core::error::AppError;
 use sober_core::types::{
     Artifact, ArtifactFilter, ArtifactId, ArtifactRelation, ArtifactState, CreateArtifact,
@@ -159,5 +161,17 @@ impl sober_core::types::ArtifactRepo for PgArtifactRepo {
         .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(())
+    }
+
+    async fn blob_keys_in_use(&self) -> Result<HashSet<String>, AppError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT blob_key FROM artifacts \
+             WHERE blob_key IS NOT NULL AND state != 'archived'",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(|(k,)| k).collect())
     }
 }

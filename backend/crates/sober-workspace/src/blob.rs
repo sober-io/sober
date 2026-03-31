@@ -127,6 +127,83 @@ impl BlobStore {
         Ok(())
     }
 
+    /// Lists all blob keys and their modification times.
+    ///
+    /// Walks the blob directory tree (`{root}/{prefix}/{key}`) and returns
+    /// `(key, modified_time)` pairs for every blob file found.
+    pub async fn list_keys(&self) -> Result<Vec<(String, std::time::SystemTime)>, WorkspaceError> {
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut entries = Vec::new();
+            let read_dir = match std::fs::read_dir(&root) {
+                Ok(d) => d,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+                Err(e) => return Err(WorkspaceError::Filesystem(e)),
+            };
+            for prefix_entry in read_dir {
+                let prefix_entry = prefix_entry.map_err(WorkspaceError::Filesystem)?;
+                if !prefix_entry.path().is_dir() {
+                    continue;
+                }
+                let sub_dir =
+                    std::fs::read_dir(prefix_entry.path()).map_err(WorkspaceError::Filesystem)?;
+                for blob_entry in sub_dir {
+                    let blob_entry = blob_entry.map_err(WorkspaceError::Filesystem)?;
+                    let path = blob_entry.path();
+                    if path.is_file() {
+                        let key = path
+                            .file_name()
+                            .expect("blob file always has a name")
+                            .to_string_lossy()
+                            .into_owned();
+                        let modified = blob_entry
+                            .metadata()
+                            .map_err(WorkspaceError::Filesystem)?
+                            .modified()
+                            .map_err(WorkspaceError::Filesystem)?;
+                        entries.push((key, modified));
+                    }
+                }
+            }
+            Ok(entries)
+        })
+        .await
+        .expect("spawn_blocking join")
+    }
+
+    /// Returns the total size in bytes of all stored blobs.
+    pub async fn total_size(&self) -> Result<u64, WorkspaceError> {
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut total: u64 = 0;
+            let read_dir = match std::fs::read_dir(&root) {
+                Ok(d) => d,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+                Err(e) => return Err(WorkspaceError::Filesystem(e)),
+            };
+            for prefix_entry in read_dir {
+                let prefix_entry = prefix_entry.map_err(WorkspaceError::Filesystem)?;
+                if !prefix_entry.path().is_dir() {
+                    continue;
+                }
+                let sub_dir =
+                    std::fs::read_dir(prefix_entry.path()).map_err(WorkspaceError::Filesystem)?;
+                for blob_entry in sub_dir {
+                    let blob_entry = blob_entry.map_err(WorkspaceError::Filesystem)?;
+                    if blob_entry.path().is_file() {
+                        total += blob_entry
+                            .metadata()
+                            .map_err(WorkspaceError::Filesystem)?
+                            .len();
+                    }
+                }
+            }
+            Ok(total)
+        })
+        .await
+        .expect("spawn_blocking join")
+    }
+
     /// Returns the filesystem path for a given content-addressed key.
     pub fn blob_path(&self, key: &str) -> PathBuf {
         let prefix = &key[..2];
@@ -196,5 +273,53 @@ mod tests {
         // SHA-256 produces 64 hex characters
         assert_eq!(key.len(), 64);
         assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn list_keys_returns_stored_blobs() {
+        let tmp = TempDir::new().unwrap();
+        let store = BlobStore::new(tmp.path().to_path_buf());
+
+        let key1 = store.store(b"blob one").await.unwrap();
+        let key2 = store.store(b"blob two").await.unwrap();
+
+        let keys = store.list_keys().await.unwrap();
+        let key_strs: Vec<&str> = keys.iter().map(|(k, _)| k.as_str()).collect();
+
+        assert_eq!(keys.len(), 2);
+        assert!(key_strs.contains(&key1.as_str()));
+        assert!(key_strs.contains(&key2.as_str()));
+    }
+
+    #[tokio::test]
+    async fn list_keys_empty_store() {
+        let tmp = TempDir::new().unwrap();
+        let store = BlobStore::new(tmp.path().to_path_buf());
+
+        let keys = store.list_keys().await.unwrap();
+        assert!(keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn total_size_sums_all_blobs() {
+        let tmp = TempDir::new().unwrap();
+        let store = BlobStore::new(tmp.path().to_path_buf());
+
+        let data1 = b"hello";
+        let data2 = b"world!!!";
+        store.store(data1).await.unwrap();
+        store.store(data2).await.unwrap();
+
+        let size = store.total_size().await.unwrap();
+        assert_eq!(size, (data1.len() + data2.len()) as u64);
+    }
+
+    #[tokio::test]
+    async fn total_size_empty_store() {
+        let tmp = TempDir::new().unwrap();
+        let store = BlobStore::new(tmp.path().to_path_buf());
+
+        let size = store.total_size().await.unwrap();
+        assert_eq!(size, 0);
     }
 }

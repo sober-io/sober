@@ -100,7 +100,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
 | `sober-cli` | Unified CLI: config, user management, migrations (offline, direct DB), scheduler control (runtime, via UDS) |
 | `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection. Instruction overlay loading for evolution-generated overrides with guardrail blocklist. |
-| `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
+| `sober-scheduler` | Autonomous tick engine, interval + cron scheduling, job persistence, local execution of deterministic jobs (artifact/internal/blob GC) via executor registry. Depends on `sober-memory`, `sober-sandbox`, `sober-workspace` for local executors. |
 | `sober-mcp` | MCP server/client implementation for tool interop. MCP servers run sandboxed via `sober-sandbox`. Depends on `sober-crypto` for credential decryption. |
 | `sober-sandbox` | Process-level execution sandboxing (bwrap), policy profiles, network filtering via UDS proxy bridge, audit |
 | `sober-llm` | Multi-provider LLM abstraction. Two transports: OpenAI-compatible HTTP (OpenRouter, Ollama, OpenAI, etc.) and ACP (Agent Client Protocol) for sending prompts through local coding agents (Claude Code, Kimi Code, Goose). |
