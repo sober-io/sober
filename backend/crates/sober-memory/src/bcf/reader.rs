@@ -162,7 +162,7 @@ mod tests {
         let scope_id = uuid::Uuid::now_v7();
         let mut writer = BcfWriter::new(scope_id);
         writer.add_chunk(ChunkType::Fact, b"fact data here".to_vec());
-        writer.add_chunk(ChunkType::Conversation, b"conv data".to_vec());
+        writer.add_chunk(ChunkType::Decision, b"decision data".to_vec());
         writer.add_chunk(ChunkType::Soul, b"soul layer".to_vec());
 
         let bytes = writer.finish().unwrap();
@@ -175,8 +175,8 @@ mod tests {
         let chunks: Vec<_> = reader.chunks().collect::<Result<_, _>>().unwrap();
         assert_eq!(chunks[0].chunk_type, ChunkType::Fact);
         assert_eq!(chunks[0].data, b"fact data here");
-        assert_eq!(chunks[1].chunk_type, ChunkType::Conversation);
-        assert_eq!(chunks[1].data, b"conv data");
+        assert_eq!(chunks[1].chunk_type, ChunkType::Decision);
+        assert_eq!(chunks[1].data, b"decision data");
         assert_eq!(chunks[2].chunk_type, ChunkType::Soul);
         assert_eq!(chunks[2].data, b"soul layer");
     }
@@ -222,13 +222,13 @@ mod tests {
         // Store raw f32 vector as bytes
         let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 0.5];
         let vector_bytes: Vec<u8> = vector.iter().flat_map(|f| f.to_le_bytes()).collect();
-        writer.add_chunk(ChunkType::Embedding, vector_bytes.clone());
+        writer.add_chunk(ChunkType::Fact, vector_bytes.clone());
 
         let bytes = writer.finish().unwrap();
         let reader = BcfReader::parse(&bytes).unwrap();
         let chunks: Vec<_> = reader.chunks().collect::<Result<_, _>>().unwrap();
 
-        assert_eq!(chunks[0].chunk_type, ChunkType::Embedding);
+        assert_eq!(chunks[0].chunk_type, ChunkType::Fact);
         assert_eq!(chunks[0].data, vector_bytes.as_slice());
 
         // Verify we can reconstruct the f32 vector

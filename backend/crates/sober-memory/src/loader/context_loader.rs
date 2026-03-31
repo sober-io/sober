@@ -44,8 +44,9 @@ impl<M: MessageRepo> ContextLoader<M> {
     ///
     /// Priority order:
     /// 1. Recent messages (highest priority — always included first)
-    /// 2. User-scope memories (personal facts)
-    /// 3. System-scope memories (global knowledge)
+    /// 2. Conversation-scope memories (context for this session)
+    /// 3. User-scope memories (personal facts)
+    /// 4. System-scope memories (global knowledge)
     ///
     /// Each category is truncated to fit within the total token budget.
     pub async fn load(
@@ -59,12 +60,25 @@ impl<M: MessageRepo> ContextLoader<M> {
             self.store.ensure_system_collection(),
         )?;
 
-        // Fetch recent messages and user memories concurrently
+        // Fetch recent messages, conversation memories, and user memories concurrently
         let user_scope = ScopeId::from_uuid(*request.user_id.as_uuid());
+        let conv_scope = ScopeId::from_uuid(*request.conversation_id.as_uuid());
 
         let messages_fut = self
             .message_repo
             .list_by_conversation(request.conversation_id, request.recent_message_count);
+
+        // Conversation scope: load ALL chunk types — conversation context
+        // includes facts, decisions, and other ephemeral knowledge.
+        let conv_query = StoreQuery {
+            dense_vector: request.query_vector.clone(),
+            query_text: request.query_text.clone(),
+            scope_id: conv_scope,
+            limit: request.hits_per_scope,
+            score_threshold: None,
+            chunk_type_filter: None,
+        };
+        let conv_search_fut = self.store.search(request.user_id, conv_query);
 
         // Passive loading fetches only Preference chunks — identity-building
         // memories that shape how the agent responds. Facts, skills, code, and
@@ -79,9 +93,11 @@ impl<M: MessageRepo> ContextLoader<M> {
         };
         let user_search_fut = self.store.search(request.user_id, user_query);
 
-        let (messages_result, user_search_result) = tokio::join!(messages_fut, user_search_fut);
+        let (messages_result, conv_search_result, user_search_result) =
+            tokio::join!(messages_fut, conv_search_fut, user_search_fut);
 
         let all_messages = messages_result.map_err(|e| MemoryError::Repo(e.to_string()))?;
+        let all_conv_memories = conv_search_result?;
         let all_user_memories = user_search_result?;
 
         // System scope search (sequential — budget may be near-exhausted)
@@ -120,7 +136,19 @@ impl<M: MessageRepo> ContextLoader<M> {
         // Restore chronological order (oldest first) for the LLM.
         recent_messages.reverse();
 
-        // 2. User memories (sorted by score, descending — already sorted by Qdrant)
+        // 2. Conversation memories (context for this session)
+        let mut conversation_memories = Vec::new();
+        for hit in &all_conv_memories {
+            let tokens = estimate_tokens(&hit.content);
+            if tokens <= remaining {
+                conversation_memories.push(hit.clone());
+                remaining -= tokens;
+            } else {
+                break;
+            }
+        }
+
+        // 3. User memories (sorted by score, descending — already sorted by Qdrant)
         let mut user_memories = Vec::new();
         for hit in &all_user_memories {
             let tokens = estimate_tokens(&hit.content);
@@ -132,7 +160,7 @@ impl<M: MessageRepo> ContextLoader<M> {
             }
         }
 
-        // 3. System memories
+        // 4. System memories
         let mut system_memories = Vec::new();
         for hit in &all_system_memories {
             let tokens = estimate_tokens(&hit.content);
@@ -147,10 +175,17 @@ impl<M: MessageRepo> ContextLoader<M> {
         let estimated_tokens = request.token_budget - remaining;
 
         // Fire-and-forget retrieval boosts for included memories
-        self.spawn_retrieval_boosts(request.user_id, &user_memories, &system_memories, config);
+        self.spawn_retrieval_boosts(
+            request.user_id,
+            &conversation_memories,
+            &user_memories,
+            &system_memories,
+            config,
+        );
 
         Ok(LoadedContext {
             recent_messages,
+            conversation_memories,
             user_memories,
             system_memories,
             estimated_tokens,
@@ -161,6 +196,7 @@ impl<M: MessageRepo> ContextLoader<M> {
     fn spawn_retrieval_boosts(
         &self,
         user_id: UserId,
+        conversation_memories: &[MemoryHit],
         user_memories: &[MemoryHit],
         system_memories: &[MemoryHit],
         config: &MemoryConfig,
@@ -168,8 +204,9 @@ impl<M: MessageRepo> ContextLoader<M> {
         let store = Arc::clone(&self.store);
         let boost_val = config.retrieval_boost;
 
-        let hits: Vec<(uuid::Uuid, ScopeId)> = user_memories
+        let hits: Vec<(uuid::Uuid, ScopeId)> = conversation_memories
             .iter()
+            .chain(user_memories.iter())
             .chain(system_memories.iter())
             .map(|h| (h.point_id, h.scope_id))
             .collect();

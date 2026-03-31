@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use sober_core::types::ids::UserId;
+use sober_core::types::ids::{ConversationId, UserId};
 use sober_llm::LlmEngine;
 use sober_memory::{MemoryStore, StoreChunk};
 use tracing::{debug, warn};
@@ -13,17 +13,19 @@ use crate::extraction::MemoryExtraction;
 ///
 /// This function takes a batch of extractions, embeds them using the LLM engine,
 /// and stores them in memory with appropriate decay scheduling. The operation
-/// runs asynchronously in a spawned tokio task.
+/// runs asynchronously in a spawned tokio task. Each extraction's `scope` field
+/// determines the target scope: `"system"` → global, `"conversation"` → conversation
+/// scope, default → user scope.
 pub fn spawn_extraction_ingestion(
     llm: &Arc<dyn LlmEngine>,
     memory: &Arc<MemoryStore>,
     user_id: UserId,
+    conversation_id: ConversationId,
     extractions: Vec<MemoryExtraction>,
     half_life_days: u32,
 ) {
     let llm = Arc::clone(llm);
     let memory = Arc::clone(memory);
-    let scope_id = sober_core::ScopeId::from_uuid(*user_id.as_uuid());
 
     tokio::spawn(async move {
         let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
@@ -55,6 +57,12 @@ pub fn spawn_extraction_ingestion(
                     "extraction ingestion: unknown chunk type, skipping"
                 );
                 continue;
+            };
+
+            let scope_id = match extraction.scope.as_deref() {
+                Some("system") => sober_core::ScopeId::GLOBAL,
+                Some("conversation") => sober_core::ScopeId::from_uuid(*conversation_id.as_uuid()),
+                _ => sober_core::ScopeId::from_uuid(*user_id.as_uuid()),
             };
 
             let importance = crate::extraction::extraction_importance(chunk_type);

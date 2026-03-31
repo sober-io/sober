@@ -27,6 +27,8 @@ pub struct LoadRequest {
 pub struct LoadedContext {
     /// Recent messages from PostgreSQL, oldest-first.
     pub recent_messages: Vec<Message>,
+    /// Vector search hits from conversation scope (current conversation only).
+    pub conversation_memories: Vec<MemoryHit>,
     /// Vector search hits from user scope.
     pub user_memories: Vec<MemoryHit>,
     /// Vector search hits from system scope.

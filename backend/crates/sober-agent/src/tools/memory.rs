@@ -29,13 +29,11 @@ const MAX_RECALL_LIMIT: u64 = 20;
 fn parse_chunk_type(s: &str) -> Result<ChunkType, ToolError> {
     match s {
         "fact" => Ok(ChunkType::Fact),
-        "conversation" => Ok(ChunkType::Conversation),
         "preference" => Ok(ChunkType::Preference),
-        "skill" => Ok(ChunkType::Skill),
-        "code" => Ok(ChunkType::Code),
+        "decision" => Ok(ChunkType::Decision),
         "soul" => Ok(ChunkType::Soul),
         other => Err(ToolError::InvalidInput(format!(
-            "unknown chunk_type '{other}'. Use: fact, conversation, preference, skill, code, soul"
+            "unknown chunk_type '{other}'. Use: fact, preference, decision, soul"
         ))),
     }
 }
@@ -44,11 +42,8 @@ fn parse_chunk_type(s: &str) -> Result<ChunkType, ToolError> {
 fn chunk_type_label(ct: ChunkType) -> &'static str {
     match ct {
         ChunkType::Fact => "fact",
-        ChunkType::Conversation => "conversation",
-        ChunkType::Embedding => "embedding",
         ChunkType::Preference => "preference",
-        ChunkType::Skill => "skill",
-        ChunkType::Code => "code",
+        ChunkType::Decision => "decision",
         ChunkType::Soul => "soul",
     }
 }
@@ -57,11 +52,9 @@ fn chunk_type_label(ct: ChunkType) -> &'static str {
 fn default_importance(ct: ChunkType) -> f64 {
     match ct {
         ChunkType::Soul => 0.9,
+        ChunkType::Decision => 0.85,
         ChunkType::Preference => 0.8,
-        ChunkType::Fact | ChunkType::Skill => 0.7,
-        ChunkType::Code => 0.6,
-        ChunkType::Conversation => 0.5,
-        ChunkType::Embedding => 0.5,
+        ChunkType::Fact => 0.7,
     }
 }
 
@@ -80,6 +73,12 @@ fn resolve_user_id(input: &serde_json::Value) -> Result<UserId, ToolError> {
 fn resolve_scope(input: &serde_json::Value, user_id: UserId) -> ScopeId {
     match input.get("scope").and_then(|v| v.as_str()) {
         Some("system") => ScopeId::GLOBAL,
+        Some("conversation") => input
+            .get("conversation_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<uuid::Uuid>().ok())
+            .map(ScopeId::from_uuid)
+            .unwrap_or_else(|| ScopeId::from_uuid(*user_id.as_uuid())),
         _ => ScopeId::from_uuid(*user_id.as_uuid()),
     }
 }
@@ -326,17 +325,17 @@ impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
                     },
                     "chunk_type": {
                         "type": "string",
-                        "enum": ["fact", "conversation", "preference", "skill", "code", "soul"],
+                        "enum": ["fact", "preference", "decision", "soul"],
                         "description": "Filter results to a specific memory type. Only applies when source is 'memory'."
                     },
                     "scope": {
                         "type": "string",
-                        "enum": ["user", "system"],
-                        "description": "Search scope: 'user' for personal memories (default), 'system' for global knowledge. Only applies when source is 'memory'."
+                        "enum": ["user", "system", "conversation"],
+                        "description": "Search scope: 'user' (default) for personal memories, 'system' for global knowledge, 'conversation' to search a specific conversation's extracted memories (requires conversation_id)."
                     },
                     "conversation_id": {
                         "type": "string",
-                        "description": "Narrow search to a specific conversation. Only applies when source is 'conversations'."
+                        "description": "Narrow search to a specific conversation. Applies to source 'conversations' or scope 'conversation'."
                     },
                     "limit": {
                         "type": "integer",
@@ -474,17 +473,17 @@ impl Tool for RememberTool {
                     },
                     "chunk_type": {
                         "type": "string",
-                        "enum": ["fact", "preference", "skill", "code"],
-                        "description": "Type of memory: 'fact' for knowledge, 'preference' for user likes/dislikes, 'skill' for capabilities, 'code' for snippets."
+                        "enum": ["fact", "preference", "decision"],
+                        "description": "Type of memory: 'fact' for knowledge, 'preference' for user likes/dislikes/style (auto-loaded), 'decision' for choices made with rationale."
                     },
                     "importance": {
                         "type": "number",
-                        "description": "Importance score 0.0-1.0 (optional). Defaults vary by type: soul=0.9, preference=0.8, fact/skill=0.7, code=0.6, conversation=0.5."
+                        "description": "Importance score 0.0-1.0 (optional). Defaults: decision=0.85, preference=0.8, fact=0.7."
                     },
                     "scope": {
                         "type": "string",
-                        "enum": ["user", "system"],
-                        "description": "Storage scope: 'user' for personal memories (default), 'system' for knowledge about the agent itself (identity, capabilities, learned behaviors)."
+                        "enum": ["user", "system", "conversation"],
+                        "description": "Storage scope: 'user' (default) for personal memories, 'system' for knowledge about the agent itself, 'conversation' for session-specific context (requires conversation_id injected by agent)."
                     }
                 },
                 "required": ["content", "chunk_type"]
@@ -714,15 +713,10 @@ mod tests {
     fn parse_chunk_type_valid() {
         assert_eq!(parse_chunk_type("fact").unwrap(), ChunkType::Fact);
         assert_eq!(
-            parse_chunk_type("conversation").unwrap(),
-            ChunkType::Conversation
-        );
-        assert_eq!(
             parse_chunk_type("preference").unwrap(),
             ChunkType::Preference
         );
-        assert_eq!(parse_chunk_type("skill").unwrap(), ChunkType::Skill);
-        assert_eq!(parse_chunk_type("code").unwrap(), ChunkType::Code);
+        assert_eq!(parse_chunk_type("decision").unwrap(), ChunkType::Decision);
         assert_eq!(parse_chunk_type("soul").unwrap(), ChunkType::Soul);
     }
 
@@ -735,11 +729,9 @@ mod tests {
     #[test]
     fn default_importance_values() {
         assert!((default_importance(ChunkType::Soul) - 0.9).abs() < f64::EPSILON);
+        assert!((default_importance(ChunkType::Decision) - 0.85).abs() < f64::EPSILON);
         assert!((default_importance(ChunkType::Preference) - 0.8).abs() < f64::EPSILON);
         assert!((default_importance(ChunkType::Fact) - 0.7).abs() < f64::EPSILON);
-        assert!((default_importance(ChunkType::Skill) - 0.7).abs() < f64::EPSILON);
-        assert!((default_importance(ChunkType::Code) - 0.6).abs() < f64::EPSILON);
-        assert!((default_importance(ChunkType::Conversation) - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
