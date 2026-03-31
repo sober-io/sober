@@ -6,7 +6,7 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 /// Generated protobuf types for the scheduler gRPC service.
-mod proto {
+pub(super) mod proto {
     tonic::include_proto!("sober.scheduler.v1");
 }
 
@@ -19,7 +19,9 @@ use proto::{
 use crate::cli::SchedulerCommand;
 
 /// Connect to the scheduler gRPC service over a Unix domain socket.
-async fn connect(socket_path: &str) -> Result<SchedulerServiceClient<tonic::transport::Channel>> {
+pub(super) async fn connect(
+    socket_path: &str,
+) -> Result<SchedulerServiceClient<tonic::transport::Channel>> {
     let path = std::path::PathBuf::from(socket_path);
     if !path.exists() {
         anyhow::bail!(
