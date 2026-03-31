@@ -15,7 +15,7 @@ use sober_core::types::tool::{
 };
 use sober_core::{ScopeId, UserId};
 use sober_llm::LlmEngine;
-use sober_memory::bcf::ChunkType;
+use sober_memory::ChunkType;
 use sober_memory::store::{MemoryStore, StoreChunk, StoreQuery};
 use uuid::Uuid;
 

@@ -4,7 +4,7 @@
 //! its response. This module extracts those, stores them in memory, and returns
 //! the cleaned response text.
 
-use sober_memory::bcf::ChunkType;
+use sober_memory::ChunkType;
 
 /// A single memory extraction parsed from the LLM response.
 #[derive(Debug, Clone, serde::Deserialize)]

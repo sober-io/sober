@@ -7,4 +7,4 @@ mod types;
 
 pub use collections::{system_collection_name, user_collection_name};
 pub use memory_store::MemoryStore;
-pub use types::{MemoryHit, StoreChunk, StoreQuery};
+pub use types::{ChunkType, MemoryHit, StoreChunk, StoreQuery};
