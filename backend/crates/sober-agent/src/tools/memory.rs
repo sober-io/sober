@@ -87,9 +87,6 @@ fn resolve_scope(input: &serde_json::Value, user_id: UserId) -> ScopeId {
 // RecallTool
 // ---------------------------------------------------------------------------
 
-/// Maximum length for recall queries.
-const MAX_QUERY_LENGTH: usize = 256;
-
 /// Active memory search tool. The LLM formulates a targeted query to find
 /// relevant memories or search past conversation messages, bridging the
 /// semantic gap that passive retrieval misses.
@@ -127,12 +124,6 @@ impl<M: MessageRepo> RecallTool<M> {
 
         if query_text.is_empty() {
             return Err(ToolError::InvalidInput("query must not be empty".into()));
-        }
-
-        if query_text.len() > MAX_QUERY_LENGTH {
-            return Err(ToolError::InvalidInput(
-                "query too long (max 256 characters)".into(),
-            ));
         }
 
         let limit = input
@@ -335,7 +326,7 @@ impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
                     },
                     "conversation_id": {
                         "type": "string",
-                        "description": "Narrow search to a specific conversation. Applies to source 'conversations' or scope 'conversation'."
+                        "description": "Optional. Narrow search to a specific conversation. Without this, all conversations are searched. Applies to source 'conversations' and scope 'conversation'."
                     },
                     "limit": {
                         "type": "integer",
@@ -666,23 +657,6 @@ mod tests {
             msg.contains("must not be empty"),
             "expected 'must not be empty', got: {msg}"
         );
-    }
-
-    #[tokio::test]
-    async fn oversized_query_rejected() {
-        let tool = make_recall_tool();
-        let long_query = "x".repeat(257);
-        let input = serde_json::json!({
-            "query": long_query,
-            "owner_id": "00000000-0000-0000-0000-000000000001"
-        });
-
-        let err = tool
-            .execute_inner(input)
-            .await
-            .expect_err("should reject oversized query");
-        let msg = err.to_string();
-        assert!(msg.contains("too long"), "expected 'too long', got: {msg}");
     }
 
     #[tokio::test]
