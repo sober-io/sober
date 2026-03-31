@@ -13,7 +13,7 @@ use super::{
 /// `Clone` bounds on `Secret`, `Audit`, and `Artifact` allow the agent to
 /// create per-conversation tool contexts that hold their own repo handles.
 pub trait AgentRepos: Send + Sync + 'static {
-    type Msg: MessageRepo;
+    type Msg: MessageRepo + Clone;
     type Conv: ConversationRepo;
     type User: UserRepo;
     type Secret: SecretRepo + Clone;

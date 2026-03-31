@@ -636,3 +636,178 @@ async fn audit_log_create_and_list(pool: PgPool) {
     assert_eq!(by_actor.len(), 1);
     assert_eq!(by_actor[0].action, "user.login");
 }
+
+// ── Message Search ──────────────────────────────────────────────────────────
+
+/// Helper: create a user, returning the `User`.
+async fn create_test_user(
+    user_repo: &PgUserRepo,
+    email: &str,
+    username: &str,
+) -> Result<sober_core::types::User, sober_core::error::AppError> {
+    user_repo
+        .create(CreateUser {
+            email: email.into(),
+            username: username.into(),
+            password_hash: "argon2id$testhash".into(),
+        })
+        .await
+}
+
+/// Helper: insert a message into a conversation.
+async fn insert_message(
+    msg_repo: &PgMessageRepo,
+    conversation_id: ConversationId,
+    content: &str,
+) -> Result<sober_core::types::Message, sober_core::error::AppError> {
+    msg_repo
+        .create(CreateMessage {
+            conversation_id,
+            role: MessageRole::User,
+            content: content.into(),
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_by_user_returns_matching_messages(
+    pool: PgPool,
+) -> Result<(), sober_core::error::AppError> {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "search@example.com", "searchuser").await?;
+    let conv = conv_repo.create(user.id, Some("Dev Chat"), None).await?;
+
+    insert_message(&msg_repo, conv.id, "Rust borrow checker discussion").await?;
+    insert_message(&msg_repo, conv.id, "Python type hints").await?;
+    insert_message(&msg_repo, conv.id, "Kubernetes deployment strategy").await?;
+
+    let results = msg_repo
+        .search_by_user(user.id, "Rust borrow", None, 10)
+        .await?;
+
+    assert!(!results.is_empty(), "expected at least one search hit");
+    assert!(
+        results.iter().any(|h| h.content.contains("Rust borrow")),
+        "expected a hit containing 'Rust borrow', got: {results:?}"
+    );
+    // Verify the hit carries correct conversation metadata.
+    assert_eq!(results[0].conversation_id, conv.id);
+    assert_eq!(results[0].conversation_title.as_deref(), Some("Dev Chat"));
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_by_user_scoped_to_conversation(
+    pool: PgPool,
+) -> Result<(), sober_core::error::AppError> {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "scope@example.com", "scopeuser").await?;
+    let conv_a = conv_repo.create(user.id, Some("Chat A"), None).await?;
+    let conv_b = conv_repo.create(user.id, Some("Chat B"), None).await?;
+
+    insert_message(&msg_repo, conv_a.id, "database indexing strategies").await?;
+    insert_message(&msg_repo, conv_b.id, "database migration patterns").await?;
+
+    // Search scoped to conv_a — should only return the indexing message.
+    let results = msg_repo
+        .search_by_user(user.id, "database", Some(conv_a.id), 10)
+        .await?;
+
+    assert!(!results.is_empty(), "expected at least one hit in conv_a");
+    for hit in &results {
+        assert_eq!(
+            hit.conversation_id, conv_a.id,
+            "all hits must belong to conv_a"
+        );
+    }
+
+    // Search scoped to conv_b — should only return the migration message.
+    let results_b = msg_repo
+        .search_by_user(user.id, "database", Some(conv_b.id), 10)
+        .await?;
+
+    assert!(!results_b.is_empty(), "expected at least one hit in conv_b");
+    for hit in &results_b {
+        assert_eq!(
+            hit.conversation_id, conv_b.id,
+            "all hits must belong to conv_b"
+        );
+    }
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_by_user_no_cross_user_leakage(
+    pool: PgPool,
+) -> Result<(), sober_core::error::AppError> {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let alice = create_test_user(&user_repo, "alice@example.com", "alice").await?;
+    let bob = create_test_user(&user_repo, "bob@example.com", "bob").await?;
+
+    let alice_conv = conv_repo.create(alice.id, Some("Alice Chat"), None).await?;
+    let bob_conv = conv_repo.create(bob.id, Some("Bob Chat"), None).await?;
+
+    insert_message(&msg_repo, alice_conv.id, "quantum computing breakthroughs").await?;
+    insert_message(&msg_repo, bob_conv.id, "quantum physics homework").await?;
+
+    // Alice searches — should only see her own message.
+    let alice_results = msg_repo
+        .search_by_user(alice.id, "quantum", None, 10)
+        .await?;
+
+    assert!(!alice_results.is_empty(), "alice should find her message");
+    for hit in &alice_results {
+        assert_eq!(
+            hit.conversation_id, alice_conv.id,
+            "alice must not see bob's messages"
+        );
+    }
+
+    // Bob searches — should only see his own message.
+    let bob_results = msg_repo.search_by_user(bob.id, "quantum", None, 10).await?;
+
+    assert!(!bob_results.is_empty(), "bob should find his message");
+    for hit in &bob_results {
+        assert_eq!(
+            hit.conversation_id, bob_conv.id,
+            "bob must not see alice's messages"
+        );
+    }
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_by_user_empty_results(pool: PgPool) -> Result<(), sober_core::error::AppError> {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "empty@example.com", "emptyuser").await?;
+    let conv = conv_repo.create(user.id, None, None).await?;
+
+    insert_message(&msg_repo, conv.id, "Rust borrow checker discussion").await?;
+
+    let results = msg_repo
+        .search_by_user(user.id, "xylophone", None, 10)
+        .await?;
+
+    assert!(results.is_empty(), "expected no hits for unrelated term");
+
+    Ok(())
+}

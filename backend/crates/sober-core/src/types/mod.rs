@@ -17,9 +17,10 @@ pub use agent_repos::AgentRepos;
 pub use api::ApiResponse;
 pub use domain::{
     Artifact, AuditLogEntry, Conversation, ConversationUser, ConversationUserWithUsername,
-    ConversationWithDetails, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message, Observation,
-    Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow, Session, StoredDek, Tag, User,
-    UserRole, Workspace, WorkspaceAgentState, WorkspaceRepoEntry, WorkspaceSettings, Worktree,
+    ConversationWithDetails, EvolutionConfigRow, EvolutionEvent, Job, JobRun, Message,
+    MessageSearchHit, Observation, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
+    Session, StoredDek, Tag, User, UserRole, Workspace, WorkspaceAgentState, WorkspaceRepoEntry,
+    WorkspaceSettings, Worktree,
 };
 pub use enums::{
     AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, AutonomyLevel, ConversationKind,

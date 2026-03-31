@@ -125,6 +125,25 @@ pub struct Message {
     pub created_at: DateTime<Utc>,
 }
 
+/// A single result from a full-text search over conversation messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageSearchHit {
+    /// The matched message's unique identifier.
+    pub message_id: MessageId,
+    /// The conversation containing the matched message.
+    pub conversation_id: ConversationId,
+    /// Title of the conversation (if set).
+    pub conversation_title: Option<String>,
+    /// Author type of the matched message.
+    pub role: MessageRole,
+    /// The message content.
+    pub content: String,
+    /// Relevance score from the search engine.
+    pub score: f32,
+    /// When the matched message was created.
+    pub created_at: DateTime<Utc>,
+}
+
 /// A user's membership in a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationUser {

@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use sober_core::config::MemoryConfig;
+use sober_core::types::ids::ConversationId;
+use sober_core::types::repo::MessageRepo;
 use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
@@ -86,31 +88,37 @@ fn resolve_scope(input: &serde_json::Value, user_id: UserId) -> ScopeId {
 // RecallTool
 // ---------------------------------------------------------------------------
 
+/// Maximum length for recall queries.
+const MAX_QUERY_LENGTH: usize = 256;
+
 /// Active memory search tool. The LLM formulates a targeted query to find
-/// relevant memories, bridging the semantic gap that passive retrieval misses.
-pub struct RecallTool {
+/// relevant memories or search past conversation messages, bridging the
+/// semantic gap that passive retrieval misses.
+pub struct RecallTool<M: MessageRepo> {
     memory: Arc<MemoryStore>,
     llm: Arc<dyn LlmEngine>,
     memory_config: MemoryConfig,
+    messages: Arc<M>,
 }
 
-impl RecallTool {
+impl<M: MessageRepo> RecallTool<M> {
     /// Creates a new recall tool.
     pub fn new(
         memory: Arc<MemoryStore>,
         llm: Arc<dyn LlmEngine>,
         memory_config: MemoryConfig,
+        messages: Arc<M>,
     ) -> Self {
         Self {
             memory,
             llm,
             memory_config,
+            messages,
         }
     }
 
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
-        let scope_id = resolve_scope(&input, user_id);
 
         let query_text = input
             .get("query")
@@ -118,11 +126,15 @@ impl RecallTool {
             .ok_or_else(|| ToolError::InvalidInput("missing required field 'query'".into()))?
             .to_owned();
 
-        let chunk_type_filter = input
-            .get("chunk_type")
-            .and_then(|v| v.as_str())
-            .map(parse_chunk_type)
-            .transpose()?;
+        if query_text.is_empty() {
+            return Err(ToolError::InvalidInput("query must not be empty".into()));
+        }
+
+        if query_text.len() > MAX_QUERY_LENGTH {
+            return Err(ToolError::InvalidInput(
+                "query too long (max 256 characters)".into(),
+            ));
+        }
 
         let limit = input
             .get("limit")
@@ -130,10 +142,46 @@ impl RecallTool {
             .unwrap_or(DEFAULT_RECALL_LIMIT)
             .min(MAX_RECALL_LIMIT);
 
+        let source = input
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("memory");
+
+        match source {
+            "memory" => {
+                self.search_memory(user_id, &query_text, &input, limit)
+                    .await
+            }
+            "conversations" => {
+                self.search_conversations(user_id, &query_text, &input, limit as i64)
+                    .await
+            }
+            _ => Err(ToolError::InvalidInput(
+                "unknown source: use 'memory' or 'conversations'".into(),
+            )),
+        }
+    }
+
+    /// Searches vector memory (Qdrant) for stored knowledge chunks.
+    async fn search_memory(
+        &self,
+        user_id: UserId,
+        query_text: &str,
+        input: &serde_json::Value,
+        limit: u64,
+    ) -> Result<ToolOutput, ToolError> {
+        let scope_id = resolve_scope(input, user_id);
+
+        let chunk_type_filter = input
+            .get("chunk_type")
+            .and_then(|v| v.as_str())
+            .map(parse_chunk_type)
+            .transpose()?;
+
         // Embed the crafted query
         let embeddings = self
             .llm
-            .embed(&[&query_text])
+            .embed(&[query_text])
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("embedding failed: {e}")))?;
 
@@ -144,7 +192,7 @@ impl RecallTool {
 
         let query = StoreQuery {
             dense_vector,
-            query_text: query_text.clone(),
+            query_text: query_text.to_owned(),
             scope_id,
             limit,
             score_threshold: None,
@@ -196,23 +244,72 @@ impl RecallTool {
             is_error: false,
         })
     }
+
+    /// Searches past conversation messages via full-text search.
+    async fn search_conversations(
+        &self,
+        user_id: UserId,
+        query: &str,
+        input: &serde_json::Value,
+        limit: i64,
+    ) -> Result<ToolOutput, ToolError> {
+        let conversation_id = input
+            .get("conversation_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.parse::<uuid::Uuid>())
+            .transpose()
+            .map_err(|_| ToolError::InvalidInput("invalid conversation_id".into()))?
+            .map(ConversationId::from_uuid);
+
+        let hits = self
+            .messages
+            .search_by_user(user_id, query, conversation_id, limit)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("conversation search failed: {e}")))?;
+
+        if hits.is_empty() {
+            return Ok(ToolOutput {
+                content: "No matching conversation messages found.".into(),
+                is_error: false,
+            });
+        }
+
+        let mut output = format!("Found {} matching message(s):\n\n", hits.len());
+        for hit in &hits {
+            output.push_str(&format!(
+                "**[{}] {} — {}** (score: {:.2})\n{}\n\n",
+                hit.created_at.format("%Y-%m-%d %H:%M"),
+                hit.conversation_title.as_deref().unwrap_or("Untitled"),
+                hit.role,
+                hit.score,
+                hit.content
+            ));
+        }
+        Ok(ToolOutput {
+            content: output,
+            is_error: false,
+        })
+    }
 }
 
-impl Tool for RecallTool {
+impl<M: MessageRepo + Send + Sync + 'static> Tool for RecallTool<M> {
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata {
             name: "recall".to_owned(),
-            description: "Search your long-term memory for stored facts, preferences, code, \
-                skills, and conversation history across ALL conversations. You MUST use this tool proactively:\n\
-                - At the START of every new conversation to load relevant context about the user\n\
+            description: "Search your memory or past conversations.\n\n\
+                source: \"memory\" (default) — Search stored knowledge about the user: personal \
+                facts, preferences, learned skills, code snippets. Use when looking for something \
+                you learned and stored about this user.\n\n\
+                source: \"conversations\" — Search past conversation messages. Use for anything \
+                discussed previously: decisions made, questions asked, technical discussions, \
+                context from past interactions.\n\n\
+                Rule of thumb: if it's a user-specific trait or fact you extracted, use memory. \
+                If it's something that was said in a conversation, use conversations.\n\n\
+                You MUST use this tool proactively:\n\
+                - At the START of every new conversation to load relevant context\n\
                 - Whenever the user references something from the past\n\
-                - Before answering any question that might depend on stored knowledge\n\
-                - Before saying \"I don't know\" — always check memory first\n\
-                Your passive context only includes user preferences. All facts, skills, \
-                code snippets, and conversation history require explicit recall.\n\
-                When recalling knowledge about yourself (the agent) — your identity, \
-                capabilities, configuration, learned behaviors — use scope 'system'. \
-                When recalling personal details about the user — use scope 'user'."
+                - Before answering questions that might depend on stored knowledge\n\
+                - Before saying \"I don't know\" — always check memory first"
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -221,15 +318,24 @@ impl Tool for RecallTool {
                         "type": "string",
                         "description": "Search query, crafted for semantic relevance to what you're looking for."
                     },
+                    "source": {
+                        "type": "string",
+                        "enum": ["memory", "conversations"],
+                        "description": "Where to search. 'memory' (default) for stored knowledge — facts, preferences, skills, code. 'conversations' for past conversation messages — decisions, discussions, anything that was said."
+                    },
                     "chunk_type": {
                         "type": "string",
                         "enum": ["fact", "conversation", "preference", "skill", "code", "soul"],
-                        "description": "Filter results to a specific memory type (optional)."
+                        "description": "Filter results to a specific memory type. Only applies when source is 'memory'."
                     },
                     "scope": {
                         "type": "string",
                         "enum": ["user", "system"],
-                        "description": "Search scope: 'user' for personal memories (default), 'system' for global knowledge."
+                        "description": "Search scope: 'user' for personal memories (default), 'system' for global knowledge. Only applies when source is 'memory'."
+                    },
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "Narrow search to a specific conversation. Only applies when source is 'conversations'."
                     },
                     "limit": {
                         "type": "integer",
@@ -397,6 +503,212 @@ impl Tool for RememberTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::pin::Pin;
+
+    use async_trait::async_trait;
+    use futures::Stream;
+    use sober_core::config::QdrantConfig;
+    use sober_core::error::AppError;
+    use sober_core::types::domain::{Message, MessageSearchHit};
+    use sober_core::types::ids::{ConversationId, MessageId};
+    use sober_core::types::input::CreateMessage;
+    use sober_llm::error::LlmError;
+    use sober_llm::types::EngineCapabilities;
+    use sober_llm::types::{CompletionRequest, CompletionResponse, StreamChunk};
+
+    // -----------------------------------------------------------------------
+    // Stub MessageRepo — methods are never called during validation tests
+    // -----------------------------------------------------------------------
+
+    struct StubMessageRepo;
+
+    impl MessageRepo for StubMessageRepo {
+        fn create(
+            &self,
+            _input: CreateMessage,
+        ) -> impl std::future::Future<Output = Result<Message, AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn list_by_conversation(
+            &self,
+            _conversation_id: ConversationId,
+            _limit: i64,
+        ) -> impl std::future::Future<Output = Result<Vec<Message>, AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn list_paginated(
+            &self,
+            _conversation_id: ConversationId,
+            _before: Option<MessageId>,
+            _limit: i64,
+        ) -> impl std::future::Future<Output = Result<Vec<Message>, AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn delete(
+            &self,
+            _id: MessageId,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn clear_conversation(
+            &self,
+            _conversation_id: ConversationId,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn get_by_id(
+            &self,
+            _id: MessageId,
+        ) -> impl std::future::Future<Output = Result<Message, AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn update_content(
+            &self,
+            _id: MessageId,
+            _content: &str,
+            _reasoning: Option<&str>,
+        ) -> impl std::future::Future<Output = Result<(), AppError>> + Send {
+            async { unimplemented!("stub") }
+        }
+
+        fn search_by_user(
+            &self,
+            _user_id: UserId,
+            _query: &str,
+            _conversation_id: Option<ConversationId>,
+            _limit: i64,
+        ) -> impl std::future::Future<Output = Result<Vec<MessageSearchHit>, AppError>> + Send
+        {
+            async { unimplemented!("stub") }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stub LlmEngine — methods are never called during validation tests
+    // -----------------------------------------------------------------------
+
+    struct StubLlm;
+
+    #[async_trait]
+    impl LlmEngine for StubLlm {
+        async fn complete(&self, _req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+            unimplemented!("stub")
+        }
+
+        async fn stream(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, LlmError>> + Send>>, LlmError>
+        {
+            unimplemented!("stub")
+        }
+
+        async fn embed(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
+            unimplemented!("stub")
+        }
+
+        fn capabilities(&self) -> EngineCapabilities {
+            EngineCapabilities {
+                supports_tools: false,
+                supports_streaming: false,
+                supports_embeddings: false,
+                max_context_tokens: 0,
+            }
+        }
+
+        fn model_id(&self) -> &str {
+            "stub/model"
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper to build a RecallTool that satisfies the type system
+    // -----------------------------------------------------------------------
+
+    fn make_recall_tool() -> RecallTool<StubMessageRepo> {
+        let config = QdrantConfig {
+            url: "http://localhost:6334".to_owned(),
+            api_key: None,
+        };
+        let store = MemoryStore::new(&config, 384).expect("qdrant client should build");
+        RecallTool::new(
+            Arc::new(store),
+            Arc::new(StubLlm),
+            MemoryConfig::default(),
+            Arc::new(StubMessageRepo),
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Validation tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn empty_query_rejected() {
+        let tool = make_recall_tool();
+        let input = serde_json::json!({
+            "query": "",
+            "owner_id": "00000000-0000-0000-0000-000000000001"
+        });
+
+        let err = tool
+            .execute_inner(input)
+            .await
+            .expect_err("should reject empty query");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("must not be empty"),
+            "expected 'must not be empty', got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_query_rejected() {
+        let tool = make_recall_tool();
+        let long_query = "x".repeat(257);
+        let input = serde_json::json!({
+            "query": long_query,
+            "owner_id": "00000000-0000-0000-0000-000000000001"
+        });
+
+        let err = tool
+            .execute_inner(input)
+            .await
+            .expect_err("should reject oversized query");
+        let msg = err.to_string();
+        assert!(msg.contains("too long"), "expected 'too long', got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn unknown_source_rejected() {
+        let tool = make_recall_tool();
+        let input = serde_json::json!({
+            "query": "test",
+            "source": "invalid",
+            "owner_id": "00000000-0000-0000-0000-000000000001"
+        });
+
+        let err = tool
+            .execute_inner(input)
+            .await
+            .expect_err("should reject unknown source");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown source"),
+            "expected 'unknown source', got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Existing tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn parse_chunk_type_valid() {

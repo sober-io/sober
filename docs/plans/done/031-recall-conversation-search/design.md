@@ -149,15 +149,15 @@ You MUST use this tool proactively:
 ### New migration
 
 ```sql
-ALTER TABLE messages
+ALTER TABLE conversation_messages
   ADD COLUMN search_vector_simple tsvector
     GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
   ADD COLUMN search_vector_english tsvector
     GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
 
-CREATE INDEX idx_messages_search_simple ON messages
+CREATE INDEX idx_conv_messages_search_simple ON conversation_messages
   USING GIN (search_vector_simple);
-CREATE INDEX idx_messages_search_english ON messages
+CREATE INDEX idx_conv_messages_search_english ON conversation_messages
   USING GIN (search_vector_english);
 ```
 
@@ -185,7 +185,7 @@ SELECT m.id, m.conversation_id, c.title, m.role, m.content, m.created_at,
            ts_rank_cd(m.search_vector_english, websearch_to_tsquery('english', $1)),
            ts_rank_cd(m.search_vector_simple, websearch_to_tsquery('simple', $1))
        ) AS rank
-FROM messages m
+FROM conversation_messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE c.user_id = $2
   AND (m.search_vector_english @@ websearch_to_tsquery('english', $1)
@@ -199,7 +199,7 @@ LIMIT $4
 
 | Layer | Change |
 |-------|--------|
-| Migration | Add two `tsvector` generated columns + GIN indexes to `messages` |
+| Migration | Add two `tsvector` generated columns + GIN indexes to `conversation_messages` |
 | sober-core | Add `MessageSearchHit` type, add `search_by_user` to `MessageRepo` |
 | sober-db | Implement `search_by_user` on `PgMessageRepo` |
 | sober-agent | Make `RecallTool` generic over `M: MessageRepo`, add `source`/`conversation_id` params, route to repo |

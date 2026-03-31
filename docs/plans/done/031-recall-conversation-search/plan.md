@@ -15,14 +15,14 @@ The `recall` tool searches Qdrant for stored memories (facts, preferences, skill
 **File:** `backend/migrations/<timestamp>_add_message_search_vectors.sql` (new)
 
 ```sql
-ALTER TABLE messages
+ALTER TABLE conversation_messages
   ADD COLUMN search_vector_simple tsvector
     GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
   ADD COLUMN search_vector_english tsvector
     GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
 
-CREATE INDEX idx_messages_search_simple ON messages USING GIN (search_vector_simple);
-CREATE INDEX idx_messages_search_english ON messages USING GIN (search_vector_english);
+CREATE INDEX idx_conv_messages_search_simple ON conversation_messages USING GIN (search_vector_simple);
+CREATE INDEX idx_conv_messages_search_english ON conversation_messages USING GIN (search_vector_english);
 ```
 
 Generated columns — PG maintains automatically. Existing rows populated on migration.
@@ -54,7 +54,6 @@ Generated columns — PG maintains automatically. Existing rows populated on mig
               Self::User => f.write_str("user"),
               Self::Assistant => f.write_str("assistant"),
               Self::System => f.write_str("system"),
-              Self::Tool => f.write_str("tool"),
               Self::Event => f.write_str("event"),
           }
       }
