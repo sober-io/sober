@@ -156,16 +156,29 @@
 		]}
 	>
 		<!-- Header -->
-		<div
-			class="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800"
-		>
-			<span class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Sõber</span>
-			<button
-				onclick={handleLogout}
-				class="rounded-md px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-			>
-				Sign out
-			</button>
+		<div class="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+			<div class="flex items-center gap-2.5">
+				<img src="/favicon.png" alt="Sõber" class="h-7 w-7 rounded-md" />
+				<span class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Sõber</span>
+			</div>
+			{#if auth.user}
+				<div class="mt-2 flex items-center justify-between">
+					<div class="min-w-0">
+						<p class="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
+							{auth.user.username}
+						</p>
+						<p class="truncate text-xs text-zinc-400 dark:text-zinc-500">
+							{auth.user.email}
+						</p>
+					</div>
+					<button
+						onclick={handleLogout}
+						class="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+					>
+						Sign out
+					</button>
+				</div>
+			{/if}
 		</div>
 
 		<!-- Scrollable list area -->
