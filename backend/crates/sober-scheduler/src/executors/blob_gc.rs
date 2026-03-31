@@ -15,6 +15,12 @@ use tracing::{info, warn};
 
 use crate::executor::{ExecutionResult, JobExecutor};
 
+/// System job name registered in [`crate::system_jobs`].
+pub const JOB_NAME: &str = "system::blob_gc";
+
+/// Executor operation key in [`crate::executor::JobExecutorRegistry`].
+pub const OP: &str = "blob_gc";
+
 /// Default grace period: blobs younger than this are never deleted,
 /// even if unreferenced (protects mid-installation blobs).
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3600);

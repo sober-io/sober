@@ -5,6 +5,10 @@ use anyhow::{Context, Result};
 use super::scheduler::{connect, proto};
 use crate::cli::GcCommand;
 
+/// System job name for blob GC. Must match
+/// `sober_scheduler::executors::blob_gc::JOB_NAME`.
+const BLOB_GC_JOB_NAME: &str = "system::blob_gc";
+
 /// Execute a GC subcommand.
 pub async fn handle(cmd: GcCommand) -> Result<()> {
     match cmd {
@@ -34,7 +38,7 @@ async fn run_blob_gc(socket: &str) -> Result<()> {
     let jobs = resp.into_inner().jobs;
     let job = jobs
         .iter()
-        .find(|j| j.name == "system::blob_gc")
+        .find(|j| j.name == BLOB_GC_JOB_NAME)
         .ok_or_else(|| anyhow::anyhow!("system::blob_gc job not found — is blob GC registered?"))?;
 
     let resp = client

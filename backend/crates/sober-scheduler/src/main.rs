@@ -183,7 +183,7 @@ fn build_executor_registry(
     let gc_plugin_repo = sober_db::PgPluginRepo::new(pool.clone());
     let gc_artifact_repo = sober_db::PgArtifactRepo::new(pool.clone());
     registry.register(
-        "blob_gc",
+        sober_scheduler::executors::blob_gc::OP,
         Arc::new(BlobGcExecutor::new(
             Arc::clone(&blob_store),
             gc_plugin_repo,

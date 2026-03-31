@@ -53,11 +53,11 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
-            name: "system::blob_gc",
+            name: crate::executors::blob_gc::JOB_NAME,
             schedule: "0 0 0 * * * *",
             payload: serde_json::json!({
                 "type": "internal",
-                "op": "blob_gc",
+                "op": crate::executors::blob_gc::OP,
             }),
         },
         SystemJobDef {
