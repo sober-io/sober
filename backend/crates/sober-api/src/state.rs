@@ -53,7 +53,6 @@ impl AppState {
         config: AppConfig,
     ) -> Arc<Self> {
         let blob_root = config
-            .scheduler
             .workspace_root
             .join(sober_workspace::SOBER_DIR)
             .join("blobs");
@@ -92,7 +91,6 @@ impl AppState {
         ));
 
         let blob_root = config
-            .scheduler
             .workspace_root
             .join(sober_workspace::SOBER_DIR)
             .join("blobs");

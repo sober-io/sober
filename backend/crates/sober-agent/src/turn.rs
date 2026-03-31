@@ -653,9 +653,90 @@ async fn build_context<R: AgentRepos>(
         .await
         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-    let history_messages = history::to_llm_messages(&messages_with_execs);
+    // f. Pre-load attachment data for multimodal content blocks (images, files).
+    let attachment_data = load_attachment_data(params, &messages_with_execs).await;
+
+    let history_messages = history::to_llm_messages(&messages_with_execs, &attachment_data);
 
     Ok((system_prompt, history_messages))
+}
+
+/// Collects all attachment IDs from message content blocks and batch-loads
+/// their metadata and blob data for multimodal LLM input.
+///
+/// Returns a best-effort map — attachments that fail to load are silently
+/// skipped (the LLM will see a fallback placeholder instead).
+async fn load_attachment_data<R: AgentRepos>(
+    params: &TurnParams<'_, R>,
+    messages: &[sober_core::types::tool_execution::MessageWithExecutions],
+) -> history::AttachmentDataMap {
+    use sober_core::types::ids::ConversationAttachmentId;
+    use sober_core::types::repo::ConversationAttachmentRepo;
+
+    // 1. Collect all attachment IDs from user message content blocks.
+    let mut ids: Vec<ConversationAttachmentId> = Vec::new();
+    for mwe in messages {
+        if mwe.message.role != MessageRole::User {
+            continue;
+        }
+        for block in &mwe.message.content {
+            let id = match block {
+                ContentBlock::Image {
+                    conversation_attachment_id,
+                    ..
+                } => Some(*conversation_attachment_id),
+                ContentBlock::File {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Audio {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Video {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Text { .. } => None,
+            };
+            if let Some(id) = id {
+                ids.push(id);
+            }
+        }
+    }
+
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+
+    ids.dedup();
+
+    // 2. Batch-load attachment metadata.
+    let attachments = match params.ctx.repos.attachments().get_by_ids(&ids).await {
+        Ok(a) => a,
+        Err(e) => {
+            warn!(error = %e, "failed to load attachment metadata for LLM context");
+            return HashMap::new();
+        }
+    };
+
+    // 3. Load blob data for each attachment.
+    let blob_store = &params.ctx.tool_bootstrap.blob_store;
+    let mut map = HashMap::with_capacity(attachments.len());
+    for attachment in attachments {
+        match blob_store.retrieve(&attachment.blob_key).await {
+            Ok(data) => {
+                map.insert(attachment.id, (attachment, data));
+            }
+            Err(e) => {
+                warn!(
+                    attachment_id = %attachment.id,
+                    blob_key = %attachment.blob_key,
+                    error = %e,
+                    "failed to load blob data for attachment"
+                );
+            }
+        }
+    }
+
+    map
 }
 
 /// Attempts to resolve a dynamic LLM engine from user-stored keys.

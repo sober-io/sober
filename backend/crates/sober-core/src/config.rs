@@ -80,9 +80,12 @@ pub const DEFAULT_EVOLUTION_INTERVAL: &str = "2h";
 ///
 /// Loaded from environment variables at startup via [`load_from_env`](AppConfig::load_from_env).
 /// Unused sections are harmless — each section applies its own defaults.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    /// Root directory for workspaces (shared across all services).
+    #[serde(default = "default_workspace_root")]
+    pub workspace_root: PathBuf,
     /// PostgreSQL connection settings.
     pub database: DatabaseConfig,
     /// Qdrant vector database settings.
@@ -115,6 +118,34 @@ pub struct AppConfig {
     pub web: WebConfig,
     /// Self-evolution loop settings.
     pub evolution: EvolutionConfig,
+}
+
+fn default_workspace_root() -> PathBuf {
+    PathBuf::from(DEFAULT_WORKSPACE_ROOT)
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            workspace_root: default_workspace_root(),
+            database: DatabaseConfig::default(),
+            qdrant: QdrantConfig::default(),
+            llm: LlmConfig::default(),
+            server: ServerConfig::default(),
+            auth: AuthConfig::default(),
+            searxng: SearxngConfig::default(),
+            admin: AdminConfig::default(),
+            scheduler: SchedulerConfig::default(),
+            mcp: McpConfig::default(),
+            memory: MemoryConfig::default(),
+            acp: None,
+            crypto: CryptoConfig::default(),
+            environment: Environment::default(),
+            agent: AgentProcessConfig::default(),
+            web: WebConfig::default(),
+            evolution: EvolutionConfig::default(),
+        }
+    }
 }
 
 /// Runtime environment.
@@ -561,6 +592,11 @@ impl AppConfig {
     /// TOML or default values. Each set env var wins over the file/default value.
     pub(crate) fn apply_env_overrides(&mut self, get_var: impl Fn(&str) -> Option<String>) {
         let env = EnvSource(&get_var);
+
+        // workspace root (shared across services)
+        if let Some(v) = get_var("SOBER_WORKSPACE_ROOT") {
+            self.workspace_root = PathBuf::from(v);
+        }
 
         // environment
         if let Some(val) = get_var("SOBER_ENV") {

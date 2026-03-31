@@ -1,8 +1,9 @@
 //! Trait bundle for all repository types needed by the agent.
 
 use super::{
-    ArtifactRepo, AuditLogRepo, ConversationRepo, EvolutionRepo, MessageRepo, PluginRepo,
-    SecretRepo, ToolExecutionRepo, UserRepo, WorkspaceRepo, WorkspaceSettingsRepo,
+    ArtifactRepo, AuditLogRepo, ConversationAttachmentRepo, ConversationRepo, EvolutionRepo,
+    MessageRepo, PluginRepo, SecretRepo, ToolExecutionRepo, UserRepo, WorkspaceRepo,
+    WorkspaceSettingsRepo,
 };
 
 /// Bundles all repository traits needed by the agent.
@@ -24,6 +25,7 @@ pub trait AgentRepos: Send + Sync + 'static {
     type ToolExec: ToolExecutionRepo;
     type WsSettings: WorkspaceSettingsRepo;
     type Evo: EvolutionRepo;
+    type Attach: ConversationAttachmentRepo;
 
     fn messages(&self) -> &Self::Msg;
     fn conversations(&self) -> &Self::Conv;
@@ -36,4 +38,5 @@ pub trait AgentRepos: Send + Sync + 'static {
     fn tool_executions(&self) -> &Self::ToolExec;
     fn workspace_settings(&self) -> &Self::WsSettings;
     fn evolution(&self) -> &Self::Evo;
+    fn attachments(&self) -> &Self::Attach;
 }
