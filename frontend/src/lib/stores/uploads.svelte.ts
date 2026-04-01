@@ -15,10 +15,11 @@ export interface AttachmentState {
 
 export const uploads = (() => {
 	const attachments = new SvelteMap<string, AttachmentState>();
+	let nextId = 0;
 
 	async function addFiles(conversationId: string, files: FileList | File[]) {
 		for (const file of files) {
-			const tempId = crypto.randomUUID();
+			const tempId = String(nextId++);
 			const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
 
 			attachments.set(tempId, {
