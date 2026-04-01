@@ -49,6 +49,25 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
+        // Increment unread for all conversation members whose read position
+        // is before this message (or NULL), excluding the message author.
+        // This is the single centralized path for unread tracking — every
+        // stored message goes through here.
+        let exclude_author = input.user_id.map(|u| *u.as_uuid()).unwrap_or(Uuid::nil());
+        sqlx::query(
+            "UPDATE conversation_users \
+             SET unread_count = unread_count + 1 \
+             WHERE conversation_id = $1 \
+               AND user_id != $3 \
+               AND (last_read_message_id IS NULL OR last_read_message_id < $2)",
+        )
+        .bind(input.conversation_id.as_uuid())
+        .bind(id)
+        .bind(exclude_author)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
         for block in &input.content {
             let block_type = match block {
                 ContentBlock::Text { .. } => "text",
