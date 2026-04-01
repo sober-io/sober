@@ -14,6 +14,7 @@ use std::time::Duration;
 use dashmap::DashMap;
 use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
+use sober_core::types::ContentBlock;
 use sober_core::types::access::TriggerKind;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, WorkspaceRepo};
@@ -385,7 +386,7 @@ impl<R: AgentRepos> Agent<R> {
         trigger: TriggerKind,
     ) -> Result<AgentResponseStream, AgentError> {
         // 1. Pre-flight injection check (before routing to actor).
-        let text_content = crate::util::text_from_content_blocks(content);
+        let text_content = ContentBlock::extract_text(content);
         let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {

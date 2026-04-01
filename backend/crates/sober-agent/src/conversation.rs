@@ -228,7 +228,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) -> Result<(), AgentError> {
         // Extract text for injection checking and other text-based operations.
-        let text_content = crate::util::text_from_content_blocks(content);
+        let text_content = ContentBlock::extract_text(content);
 
         // 1. Injection check
         let verdict = Mind::check_injection(&text_content);

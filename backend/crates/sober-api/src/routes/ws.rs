@@ -405,14 +405,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 }
 
                 // Extract text summary for the broadcast message.
-                let text_summary: String = content
-                    .iter()
-                    .filter_map(|b| match b {
-                        ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let text_summary = ContentBlock::extract_text(&content);
 
                 // Broadcast the user's message to all other subscribers
                 // so group members see it in real-time.

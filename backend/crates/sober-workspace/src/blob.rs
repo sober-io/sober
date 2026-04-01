@@ -206,23 +206,67 @@ impl BlobStore {
 
     /// Lists blob keys in batches, filtering out files newer than `grace_period`.
     ///
-    /// Returns a vector of batches (each batch is a `Vec<String>` of blob keys).
+    /// Walks the directory incrementally without loading all keys into memory
+    /// first. Returns a vector of batches (each batch is a `Vec<String>` of
+    /// blob keys).
     pub async fn list_keys_batched(
         &self,
         batch_size: usize,
         grace_period: Duration,
     ) -> Result<Vec<Vec<String>>, WorkspaceError> {
+        let root = self.root.clone();
         let cutoff = SystemTime::now() - grace_period;
-        let all = self.list_keys().await?;
-        let eligible: Vec<String> = all
-            .into_iter()
-            .filter(|(_, modified)| *modified <= cutoff)
-            .map(|(key, _)| key)
-            .collect();
-        Ok(eligible
-            .chunks(batch_size)
-            .map(|chunk| chunk.to_vec())
-            .collect())
+
+        tokio::task::spawn_blocking(move || {
+            let mut batches = Vec::new();
+            let mut current_batch = Vec::with_capacity(batch_size);
+
+            let read_dir = match std::fs::read_dir(&root) {
+                Ok(d) => d,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(batches),
+                Err(e) => return Err(WorkspaceError::Filesystem(e)),
+            };
+
+            for prefix_entry in read_dir {
+                let prefix_entry = prefix_entry.map_err(WorkspaceError::Filesystem)?;
+                if !prefix_entry.path().is_dir() {
+                    continue;
+                }
+                let sub_dir =
+                    std::fs::read_dir(prefix_entry.path()).map_err(WorkspaceError::Filesystem)?;
+                for blob_entry in sub_dir {
+                    let blob_entry = blob_entry.map_err(WorkspaceError::Filesystem)?;
+                    let path = blob_entry.path();
+                    if !path.is_file() {
+                        continue;
+                    }
+                    let modified = blob_entry
+                        .metadata()
+                        .map_err(WorkspaceError::Filesystem)?
+                        .modified()
+                        .map_err(WorkspaceError::Filesystem)?;
+                    if modified > cutoff {
+                        continue;
+                    }
+                    let key = path
+                        .file_name()
+                        .expect("blob file always has a name")
+                        .to_string_lossy()
+                        .into_owned();
+                    current_batch.push(key);
+                    if current_batch.len() >= batch_size {
+                        batches.push(current_batch);
+                        current_batch = Vec::with_capacity(batch_size);
+                    }
+                }
+            }
+            if !current_batch.is_empty() {
+                batches.push(current_batch);
+            }
+            Ok(batches)
+        })
+        .await
+        .expect("spawn_blocking join")
     }
 
     /// Returns the filesystem path for a given content-addressed key.

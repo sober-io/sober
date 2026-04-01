@@ -47,6 +47,21 @@ impl ContentBlock {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
+
+    /// Extracts joined text from a slice of content blocks.
+    ///
+    /// Non-text blocks are skipped. Text blocks are joined with newlines.
+    #[must_use]
+    pub fn extract_text(blocks: &[Self]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                Self::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +114,25 @@ mod tests {
         };
         let json = serde_json::to_string(&block).unwrap();
         assert!(!json.contains("alt"));
+    }
+
+    #[test]
+    fn extract_text_joins_text_blocks() {
+        let blocks = vec![
+            ContentBlock::text("hello"),
+            ContentBlock::Image {
+                conversation_attachment_id: ConversationAttachmentId::new(),
+                alt: None,
+            },
+            ContentBlock::text("world"),
+        ];
+        assert_eq!(ContentBlock::extract_text(&blocks), "hello\nworld");
+    }
+
+    #[test]
+    fn extract_text_empty_blocks() {
+        let blocks: Vec<ContentBlock> = vec![];
+        assert_eq!(ContentBlock::extract_text(&blocks), "");
     }
 
     #[test]

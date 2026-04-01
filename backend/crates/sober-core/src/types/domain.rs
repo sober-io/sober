@@ -130,14 +130,7 @@ impl Message {
     /// Extracts joined text from all text content blocks.
     #[must_use]
     pub fn text_content(&self) -> String {
-        self.content
-            .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        ContentBlock::extract_text(&self.content)
     }
 }
 

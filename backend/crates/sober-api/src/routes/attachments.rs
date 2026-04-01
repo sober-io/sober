@@ -142,15 +142,10 @@ async fn upload_attachment(
 /// Returns the raw file bytes with appropriate content type and caching headers.
 async fn serve_attachment(
     State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
     Path(id): Path<ConversationAttachmentId>,
 ) -> Result<Response, AppError> {
     let repo = PgConversationAttachmentRepo::new(state.db.clone());
     let attachment = repo.get_by_id(id).await?;
-
-    // Verify membership for the attachment's conversation.
-    let _membership =
-        super::verify_membership(&state.db, attachment.conversation_id, auth_user.user_id).await?;
 
     // Read blob data.
     let data = state
