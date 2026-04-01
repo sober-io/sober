@@ -11,8 +11,8 @@ use sober_core::error::AppError;
 use sober_core::types::{
     AgentMode, ApiResponse, ConversationId, ConversationKind, ConversationRepo,
     ConversationUserRepo, ConversationUserRole, ConversationWithDetails, JobRepo,
-    ListConversationsFilter, MessageRepo, PermissionMode, PluginId, SandboxNetMode, TagRepo,
-    WorkspaceRepo, WorkspaceSettingsRepo,
+    ListConversationsFilter, MessageId, MessageRepo, PermissionMode, PluginId, SandboxNetMode,
+    TagRepo, WorkspaceRepo, WorkspaceSettingsRepo,
 };
 use sober_db::{
     PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
@@ -129,6 +129,7 @@ async fn create_conversation(
         "agent_mode": conversation.agent_mode,
         "is_archived": conversation.is_archived,
         "unread_count": 0,
+        "last_read_message_id": null,
         "tags": [],
         "created_at": conversation.created_at.to_rfc3339(),
         "updated_at": conversation.updated_at.to_rfc3339(),
@@ -171,6 +172,7 @@ async fn get_conversation(
     let details = ConversationWithDetails {
         conversation,
         unread_count: cu.unread_count,
+        last_read_message_id: cu.last_read_message_id,
         tags,
         users,
         workspace_name,
@@ -432,20 +434,48 @@ async fn get_inbox(
     })))
 }
 
+/// Request body for `mark_read`.
+#[derive(Deserialize)]
+struct MarkReadRequest {
+    /// The ID of the last message the user has seen. If omitted, uses the
+    /// latest message in the conversation.
+    message_id: Option<uuid::Uuid>,
+}
+
 /// `POST /api/v1/conversations/:id/read` — mark conversation as read.
 async fn mark_read(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
+    body: Option<axum::Json<MarkReadRequest>>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
     let conversation_id = ConversationId::from_uuid(id);
 
     let _membership =
         super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
+    // Resolve the message ID to mark as read.
+    let message_id = if let Some(axum::Json(req)) = body {
+        req.message_id
+    } else {
+        None
+    };
+    let message_id = match message_id {
+        Some(mid) => MessageId::from_uuid(mid),
+        None => {
+            // Fall back to the latest message in the conversation.
+            let msg_repo = PgMessageRepo::new(state.db.clone());
+            let messages = msg_repo.list_paginated(conversation_id, None, 1).await?;
+            match messages.first() {
+                Some(msg) => msg.id,
+                None => return Ok(ApiResponse::new(serde_json::json!({"ok": true}))),
+            }
+        }
+    };
+
     let cu_repo = PgConversationUserRepo::new(state.db.clone());
     cu_repo
-        .mark_read(conversation_id, auth_user.user_id)
+        .mark_read(conversation_id, auth_user.user_id, message_id)
         .await?;
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))

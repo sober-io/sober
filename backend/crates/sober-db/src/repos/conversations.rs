@@ -181,6 +181,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
             "SELECT c.id, c.user_id, c.title, c.workspace_id, c.kind, c.agent_mode, c.is_archived, \
              c.created_at, c.updated_at, \
              COALESCE(cu.unread_count, 0) AS unread_count, \
+             cu.last_read_message_id, \
              w.name AS workspace_name, w.root_path AS workspace_path \
              FROM conversations c \
              LEFT JOIN workspaces w ON w.id = c.workspace_id \
@@ -283,6 +284,9 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
                         updated_at: r.updated_at,
                     },
                     unread_count: r.unread_count,
+                    last_read_message_id: r
+                        .last_read_message_id
+                        .map(sober_core::types::MessageId::from_uuid),
                     tags: tags_by_conv.remove(&conv_id).unwrap_or_default(),
                     users: Vec::new(),
                     workspace_name: r.workspace_name,
