@@ -5,7 +5,7 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
-use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, UserId};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -60,17 +60,14 @@ async fn subscription_loop(
                         Ok(update) => {
                             let conversation_id = update.conversation_id.clone();
 
-                            // Handle unread notifications for NewMessage events.
-                            if let Some(proto::conversation_update::Event::NewMessage(ref nm)) =
+                            // Push live unread notifications for NewMessage events.
+                            // The unread count was already incremented by MessageRepo::create;
+                            // we just need to notify connected users.
+                            if let Some(proto::conversation_update::Event::NewMessage(_)) =
                                 update.event
                             {
-                                handle_new_message_unread(
-                                    &conversation_id,
-                                    nm,
-                                    &db,
-                                    &user_connections,
-                                )
-                                .await;
+                                push_unread_notifications(&conversation_id, &db, &user_connections)
+                                    .await;
                             }
 
                             if let Some(ws_msg) = conversation_update_to_ws(update) {
@@ -97,11 +94,12 @@ async fn subscription_loop(
     }
 }
 
-/// Increments unread counts for all users in a conversation except the sender,
-/// and sends `chat.unread` notifications via the user connection registry.
-async fn handle_new_message_unread(
+/// Pushes current unread counts to connected users for a conversation.
+///
+/// Called after a `NewMessage` event — the message repo already incremented
+/// counts, so we just read and push.
+async fn push_unread_notifications(
     conversation_id: &str,
-    nm: &proto::NewMessage,
     db: &PgPool,
     user_connections: &UserConnectionRegistry,
 ) {
@@ -110,25 +108,19 @@ async fn handle_new_message_unread(
     };
     let conv_id = ConversationId::from_uuid(conv_uuid);
 
-    // Determine the sender user to exclude from unread increment.
-    // If no user_id is present (system/scheduler messages), use a nil UUID
-    // so all users get their unread count incremented.
-    let exclude_user_id = nm
-        .user_id
-        .as_deref()
-        .and_then(|id| id.parse::<uuid::Uuid>().ok())
-        .map(UserId::from_uuid)
-        .unwrap_or_default();
-
     let cu_repo = PgConversationUserRepo::new(db.clone());
-    if let Ok(affected) = cu_repo.increment_unread(conv_id, exclude_user_id).await {
-        for (user_id, new_count) in affected {
+    let Ok(members) = cu_repo.list_by_conversation(conv_id).await else {
+        return;
+    };
+
+    for member in members {
+        if member.unread_count > 0 {
             user_connections
                 .send(
-                    &user_id.to_string(),
+                    &member.user_id.to_string(),
                     ServerWsMessage::ChatUnread {
                         conversation_id: conversation_id.to_string(),
-                        unread_count: new_count,
+                        unread_count: member.unread_count,
                     },
                 )
                 .await;

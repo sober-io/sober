@@ -435,7 +435,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     },
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
-                    user_id: Some(params.user_id),
+                    user_id: None,
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;

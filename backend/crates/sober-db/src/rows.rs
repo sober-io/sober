@@ -553,6 +553,7 @@ pub(crate) struct ConversationUserRow {
     pub user_id: Uuid,
     pub unread_count: i32,
     pub last_read_at: Option<DateTime<Utc>>,
+    pub last_read_message_id: Option<Uuid>,
     pub role: ConversationUserRole,
     pub joined_at: DateTime<Utc>,
 }
@@ -564,6 +565,7 @@ impl From<ConversationUserRow> for ConversationUser {
             user_id: UserId::from_uuid(row.user_id),
             unread_count: row.unread_count,
             last_read_at: row.last_read_at,
+            last_read_message_id: row.last_read_message_id.map(MessageId::from_uuid),
             role: row.role,
             joined_at: row.joined_at,
         }
@@ -578,6 +580,7 @@ pub(crate) struct ConversationUserWithUsernameRow {
     pub username: String,
     pub unread_count: i32,
     pub last_read_at: Option<DateTime<Utc>>,
+    pub last_read_message_id: Option<Uuid>,
     pub role: ConversationUserRole,
     pub joined_at: DateTime<Utc>,
 }
@@ -590,6 +593,7 @@ impl From<ConversationUserWithUsernameRow> for ConversationUserWithUsername {
             username: row.username,
             unread_count: row.unread_count,
             last_read_at: row.last_read_at,
+            last_read_message_id: row.last_read_message_id.map(MessageId::from_uuid),
             role: row.role,
             joined_at: row.joined_at,
         }
@@ -642,6 +646,7 @@ pub(crate) struct ConversationWithUnreadRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub unread_count: i32,
+    pub last_read_message_id: Option<Uuid>,
     pub workspace_name: Option<String>,
     pub workspace_path: Option<String>,
 }

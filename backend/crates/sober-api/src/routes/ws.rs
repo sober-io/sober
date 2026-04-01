@@ -17,8 +17,8 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
-use sober_core::types::{ContentBlock, ConversationId};
-use sober_db::PgConversationUserRepo;
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageRepo};
+use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -239,8 +239,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
     // Look up username once for group message attribution.
     let username = {
-        let user_repo = sober_db::PgUserRepo::new(state.db.clone());
         use sober_core::types::UserRepo;
+        let user_repo = sober_db::PgUserRepo::new(state.db.clone());
         user_repo
             .get_by_id(user_id)
             .await
@@ -358,8 +358,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 // Mark conversation as read for this user (best-effort).
                 {
                     let cu_repo = PgConversationUserRepo::new(state.db.clone());
-                    use sober_core::types::ConversationUserRepo;
-                    cu_repo.mark_read(conv_id, auth_user.user_id).await.ok();
+                    let msg_repo = PgMessageRepo::new(state.db.clone());
+                    if let Ok(messages) = msg_repo.list_paginated(conv_id, None, 1).await
+                        && let Some(latest) = messages.first()
+                    {
+                        cu_repo
+                            .mark_read(conv_id, auth_user.user_id, latest.id)
+                            .await
+                            .ok();
+                    }
                 }
             }
             ClientWsMessage::ChatMessage {

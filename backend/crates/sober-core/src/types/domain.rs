@@ -189,6 +189,8 @@ pub struct ConversationUser {
     pub unread_count: i32,
     /// When the user last read this conversation.
     pub last_read_at: Option<DateTime<Utc>>,
+    /// ID of the last message the user has read. Messages after this are unread.
+    pub last_read_message_id: Option<MessageId>,
     /// The user's role in this conversation.
     pub role: ConversationUserRole,
     /// When the user joined.
@@ -208,6 +210,8 @@ pub struct ConversationUserWithUsername {
     pub unread_count: i32,
     /// When the user last read this conversation.
     pub last_read_at: Option<DateTime<Utc>>,
+    /// ID of the last message the user has read.
+    pub last_read_message_id: Option<MessageId>,
     /// The user's role in this conversation.
     pub role: ConversationUserRole,
     /// When the user joined.
@@ -237,6 +241,9 @@ pub struct ConversationWithDetails {
     pub conversation: Conversation,
     /// Number of unread messages for the requesting user.
     pub unread_count: i32,
+    /// ID of the last message the requesting user has read (for unread divider).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_message_id: Option<MessageId>,
     /// Tags applied to this conversation.
     pub tags: Vec<Tag>,
     /// Users in this conversation (populated for detail view, empty for list view).

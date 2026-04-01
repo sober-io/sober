@@ -132,6 +132,26 @@
 	let settingsOpen = $state(false);
 	let messageTags = $state<Record<string, Tag[]>>({});
 	let skills = $state<SkillInfo[]>([]);
+	let lastReadMessageId = $state<string | null>(null);
+
+	const observeUnread = (node: HTMLElement) => {
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0].isIntersecting) {
+					lastReadMessageId = null;
+					const lastMsg = messages[messages.length - 1];
+					if (lastMsg) {
+						untrack(() => conversations.markRead(conversationId));
+						conversationService.markRead(conversationId, lastMsg.id);
+					}
+					observer.disconnect();
+				}
+			},
+			{ threshold: 0.5 }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	};
 
 	const conversationId = $derived($page.params.id ?? '');
 	const isGroup = $derived.by(() => {
@@ -199,8 +219,14 @@
 		}
 		messageTags = tagMap;
 
+		lastReadMessageId = data.conversation.last_read_message_id;
+
 		untrack(() => {
 			conversations.markRead(data.conversation.id);
+			const lastMsg = data.messages[data.messages.length - 1];
+			if (lastMsg) {
+				conversationService.markRead(data.conversation.id, lastMsg.id);
+			}
 		});
 	});
 
@@ -506,7 +532,7 @@
 					}
 					// Mark as read — user is actively viewing this conversation.
 					untrack(() => conversations.markRead(conversationId));
-					conversationService.markRead(conversationId);
+					conversationService.markRead(conversationId, msg.message_id);
 					break;
 				}
 
@@ -560,7 +586,7 @@
 				flushQueue();
 				// Mark as read — user is actively viewing this conversation.
 				untrack(() => conversations.markRead(conversationId));
-				conversationService.markRead(conversationId);
+				conversationService.markRead(conversationId, msg.message_id);
 				break;
 			}
 			case 'chat.title': {
@@ -846,7 +872,16 @@
 				</div>
 			{/if}
 
-			{#each messages as msg (msg.id)}
+			{#each messages as msg, i (msg.id)}
+				{#if lastReadMessageId && i > 0 && messages[i - 1].id === lastReadMessageId && msg.id !== lastReadMessageId}
+					<div class="unread-divider flex items-center gap-3 py-2" use:observeUnread>
+						<div class="h-px flex-1 bg-emerald-500/50"></div>
+						<span class="text-xs font-medium text-emerald-600 dark:text-emerald-400"
+							>New messages</span
+						>
+						<div class="h-px flex-1 bg-emerald-500/50"></div>
+					</div>
+				{/if}
 				<ChatMessage
 					role={msg.role}
 					content={msg.content}
