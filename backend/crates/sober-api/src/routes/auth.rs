@@ -11,7 +11,7 @@ use http::HeaderValue;
 use http::header::SET_COOKIE;
 use sober_auth::{AuthUser, cookie_name};
 use sober_core::error::AppError;
-use sober_core::types::{ApiResponse, ConversationRepo};
+use sober_core::types::{ApiResponse, ConversationRepo, RoleRepo, UserRepo};
 use sober_db::PgConversationRepo;
 
 use crate::state::AppState;
@@ -136,7 +136,6 @@ async fn me(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    use sober_core::types::{RoleRepo, UserRepo};
     let user_repo = sober_db::PgUserRepo::new(state.db.clone());
     let role_repo = sober_db::PgRoleRepo::new(state.db.clone());
     let user = user_repo.get_by_id(auth_user.user_id).await?;

@@ -17,7 +17,9 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
-use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageRepo};
+use sober_core::types::{
+    ContentBlock, ConversationId, ConversationUserRepo, MessageRepo, UserRepo,
+};
 use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -240,7 +242,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
     // Look up username once for group message attribution.
     let username = {
         let user_repo = sober_db::PgUserRepo::new(state.db.clone());
-        use sober_core::types::UserRepo;
         user_repo
             .get_by_id(user_id)
             .await
