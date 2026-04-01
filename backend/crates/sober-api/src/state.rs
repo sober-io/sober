@@ -10,6 +10,7 @@ use sober_auth::AuthService;
 use sober_core::config::AppConfig;
 use sober_core::error::AppError;
 use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
+use sober_workspace::BlobStore;
 use sqlx::PgPool;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -31,6 +32,8 @@ pub struct AppState {
     pub auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
     /// Application configuration.
     pub config: AppConfig,
+    /// Content-addressed blob store for attachment files.
+    pub blob_store: Arc<BlobStore>,
     /// Registry of active WebSocket connections per conversation.
     pub connections: ConnectionRegistry,
     /// Registry of active WebSocket connections per user (for unread notifications).
@@ -49,11 +52,16 @@ impl AppState {
         auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
         config: AppConfig,
     ) -> Arc<Self> {
+        let blob_root = config
+            .workspace_root
+            .join(sober_workspace::SOBER_DIR)
+            .join("blobs");
         Arc::new(Self {
             db,
             agent_client,
             auth,
             config,
+            blob_store: Arc::new(BlobStore::new(blob_root)),
             connections: ConnectionRegistry::new(),
             user_connections: UserConnectionRegistry::new(),
         })
@@ -82,11 +90,17 @@ impl AppState {
             config.auth.session_ttl_seconds,
         ));
 
+        let blob_root = config
+            .workspace_root
+            .join(sober_workspace::SOBER_DIR)
+            .join("blobs");
+
         Ok(Arc::new(Self {
             db,
             agent_client,
             auth,
             config,
+            blob_store: Arc::new(BlobStore::new(blob_root)),
             connections: ConnectionRegistry::new(),
             user_connections: UserConnectionRegistry::new(),
         }))

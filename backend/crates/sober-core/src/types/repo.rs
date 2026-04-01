@@ -6,10 +6,9 @@
 //!
 //! Uses Rust 2024 RPITIT — no `async_trait` crate needed.
 
-use std::collections::HashSet;
-
 use chrono::{DateTime, Utc};
 
+use super::content::ContentBlock;
 use super::domain::*;
 use super::enums::{
     AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, EvolutionStatus,
@@ -250,7 +249,7 @@ pub trait MessageRepo: Send + Sync {
     fn update_content(
         &self,
         id: MessageId,
-        content: &str,
+        content: &[ContentBlock],
         reasoning: Option<&str>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
@@ -262,6 +261,53 @@ pub trait MessageRepo: Send + Sync {
         conversation_id: Option<ConversationId>,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<MessageSearchHit>, AppError>> + Send;
+}
+
+/// Conversation attachment operations.
+pub trait ConversationAttachmentRepo: Send + Sync {
+    /// Creates a new attachment.
+    fn create(
+        &self,
+        input: CreateConversationAttachment,
+    ) -> impl Future<Output = Result<ConversationAttachment, AppError>> + Send;
+
+    /// Gets an attachment by ID.
+    fn get_by_id(
+        &self,
+        id: ConversationAttachmentId,
+    ) -> impl Future<Output = Result<ConversationAttachment, AppError>> + Send;
+
+    /// Lists all attachments for a conversation.
+    fn list_by_conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ConversationAttachment>, AppError>> + Send;
+
+    /// Gets multiple attachments by their IDs.
+    fn get_by_ids(
+        &self,
+        ids: &[ConversationAttachmentId],
+    ) -> impl Future<Output = Result<Vec<ConversationAttachment>, AppError>> + Send;
+
+    /// Deletes an attachment.
+    fn delete(
+        &self,
+        id: ConversationAttachmentId,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes orphaned attachments older than `max_age` not referenced by any message.
+    fn delete_orphaned(
+        &self,
+        max_age: std::time::Duration,
+    ) -> impl Future<Output = Result<u64, AppError>> + Send;
+
+    /// Finds attachment IDs from the given set that are not referenced by any
+    /// other message in the conversation.
+    fn find_unreferenced_by_message(
+        &self,
+        conversation_attachment_ids: &[ConversationAttachmentId],
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<ConversationAttachmentId>, AppError>> + Send;
 }
 
 /// Conversation membership and unread tracking operations.
@@ -623,9 +669,16 @@ pub trait ArtifactRepo: Send + Sync {
         target: ArtifactId,
         relation: ArtifactRelation,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+}
 
-    /// Returns all blob keys referenced by non-archived artifacts.
-    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
+/// Blob garbage collection — finds unreferenced blob keys.
+pub trait BlobGcRepo: Send + Sync {
+    /// Given a batch of blob keys, returns those not referenced by any
+    /// conversation attachment, plugin config, or active artifact.
+    fn find_unreferenced(
+        &self,
+        keys: &[String],
+    ) -> impl Future<Output = Result<Vec<String>, AppError>> + Send;
 }
 
 /// Role assignment query operations.
@@ -827,9 +880,6 @@ pub trait PluginRepo: Send + Sync {
         id: PluginId,
         scope: PluginScope,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
-
-    /// Returns all blob keys currently referenced by plugin configs.
-    fn blob_keys_in_use(&self) -> impl Future<Output = Result<HashSet<String>, AppError>> + Send;
 }
 
 /// Evolution event operations.

@@ -139,7 +139,7 @@ pub fn show(source: bool) -> Result<()> {
     );
     println!(
         "  workspace_root            = {}{suffix}",
-        config.agent.workspace_root.display()
+        config.workspace_root.display()
     );
     println!(
         "  sandbox_profile           = {}{suffix}",
@@ -170,7 +170,7 @@ pub fn show(source: bool) -> Result<()> {
     );
     println!(
         "  workspace_root            = {}{suffix}",
-        config.scheduler.workspace_root.display()
+        config.workspace_root.display()
     );
     println!(
         "  sandbox_profile           = {}{suffix}",

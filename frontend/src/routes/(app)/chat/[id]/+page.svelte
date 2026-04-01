@@ -5,6 +5,8 @@
 	import { resolve } from '$app/paths';
 	import { uuid } from '$lib/utils/id';
 	import type {
+		ContentBlock,
+		ConversationAttachment,
 		ToolExecution,
 		ServerWsMessage,
 		Conversation,
@@ -13,6 +15,7 @@
 		PermissionMode,
 		Tag
 	} from '$lib/types';
+	import { getMessageText, getContentText } from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -33,6 +36,8 @@
 		id: string;
 		role: 'user' | 'assistant' | 'system' | 'event';
 		content: string;
+		contentBlocks?: ContentBlock[];
+		attachments?: Record<string, ConversationAttachment>;
 		thinkingContent: string;
 		toolExecutions?: ToolExecution[];
 		streaming: boolean;
@@ -47,7 +52,8 @@
 
 	interface QueuedMessage {
 		id: string;
-		content: string;
+		content: ContentBlock[];
+		displayText: string;
 	}
 
 	interface PageData {
@@ -74,7 +80,9 @@
 	const toChat = (m: Message): ChatMsg => ({
 		id: m.id,
 		role: m.role,
-		content: m.content,
+		content: getMessageText(m),
+		contentBlocks: m.content,
+		attachments: m.attachments,
 		thinkingContent: m.reasoning ?? '',
 		toolExecutions: m.tool_executions,
 		streaming: false,
@@ -281,12 +289,17 @@
 		return () => observer.disconnect();
 	});
 
-	const dispatchMessage = (content: string) => {
+	const dispatchMessage = (blocks: ContentBlock[]) => {
 		const now = fmtTime();
+		const textContent = blocks
+			.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+			.map((b) => b.text)
+			.join('\n');
 		messages.push({
 			id: uuid(),
 			role: 'user',
-			content,
+			content: textContent,
+			contentBlocks: blocks,
 			thinkingContent: '',
 			streaming: false,
 			thinking: false,
@@ -306,7 +319,7 @@
 		websocket.send({
 			type: 'chat.message',
 			conversation_id: conversationId,
-			content
+			content: blocks
 		});
 	};
 
@@ -317,11 +330,15 @@
 		}
 	};
 
-	const sendMessage = (content: string) => {
+	const sendMessage = (blocks: ContentBlock[]) => {
 		if (isBusy) {
-			messageQueue.push({ id: uuid(), content });
+			const displayText = blocks
+				.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+				.map((b) => b.text)
+				.join('\n');
+			messageQueue.push({ id: uuid(), content: blocks, displayText });
 		} else {
-			dispatchMessage(content);
+			dispatchMessage(blocks);
 		}
 	};
 
@@ -333,7 +350,7 @@
 
 	const startEditQueued = (msg: QueuedMessage) => {
 		editingQueueId = msg.id;
-		editingContent = msg.content;
+		editingContent = msg.displayText;
 	};
 
 	const saveEditQueued = (id: string) => {
@@ -341,7 +358,8 @@
 		if (msg) {
 			const trimmed = editingContent.trim();
 			if (trimmed) {
-				msg.content = trimmed;
+				msg.content = [{ type: 'text', text: trimmed }];
+				msg.displayText = trimmed;
 			} else {
 				removeQueued(id);
 			}
@@ -475,7 +493,8 @@
 					messages.push({
 						id: msg.message_id,
 						role: 'user',
-						content: msg.content,
+						content: getContentText(msg.content),
+						contentBlocks: msg.content,
 						thinkingContent: '',
 						streaming: false,
 						thinking: false,
@@ -510,7 +529,8 @@
 				const newMsg: ChatMsg = {
 					id: msg.message_id,
 					role: msg.role as ChatMsg['role'],
-					content: msg.content,
+					content: getContentText(msg.content),
+					contentBlocks: msg.content,
 					thinkingContent: '',
 					streaming: false,
 					thinking: false,
@@ -531,6 +551,10 @@
 					last.streaming = false;
 					last.thinking = false;
 					last.id = msg.message_id;
+					// Convert accumulated streaming text to contentBlocks
+					if (!last.contentBlocks && last.content) {
+						last.contentBlocks = [{ type: 'text', text: last.content }];
+					}
 				}
 				assistantPhase = 'idle';
 				flushQueue();
@@ -719,7 +743,7 @@
 			default:
 				// Skill command — send as regular message with /skill-name prefix
 				if (skills.some((s) => `/${s.name}` === command)) {
-					sendMessage(command);
+					sendMessage([{ type: 'text', text: command }]);
 				}
 				break;
 		}
@@ -826,6 +850,8 @@
 				<ChatMessage
 					role={msg.role}
 					content={msg.content}
+					contentBlocks={msg.contentBlocks}
+					attachments={msg.attachments}
 					thinkingContent={msg.thinkingContent}
 					toolExecutions={msg.toolExecutions}
 					streaming={msg.streaming}
@@ -879,7 +905,7 @@
 										<div class="mb-1 text-[10px] font-medium uppercase tracking-wide opacity-60">
 											Queued
 										</div>
-										<div class="whitespace-pre-wrap">{qmsg.content}</div>
+										<div class="whitespace-pre-wrap">{qmsg.displayText}</div>
 									</div>
 									<div class="flex shrink-0 gap-1">
 										<button
@@ -924,7 +950,13 @@
 		</div>
 	{/if}
 
-	<ChatInput onsend={sendMessage} busy={isBusy} onSlashCommand={handleSlashCommand} {skills} />
+	<ChatInput
+		onsend={sendMessage}
+		busy={isBusy}
+		{conversationId}
+		onSlashCommand={handleSlashCommand}
+		{skills}
+	/>
 	<StatusBar mode={permissionMode} onModeChange={handleModeChange} />
 </div>
 

@@ -5,10 +5,123 @@
 //! message is mapped by role, and assistant messages with tool executions produce
 //! both the assistant tool-call message and the corresponding tool result messages.
 
+use std::collections::HashMap;
+
+use base64::Engine as _;
+use metrics::counter;
+use sober_core::types::content::ContentBlock;
+use sober_core::types::domain::ConversationAttachment;
 use sober_core::types::enums::{MessageRole, ToolExecutionStatus};
+use sober_core::types::ids::ConversationAttachmentId;
 use sober_core::types::tool_execution::{MessageWithExecutions, ToolExecution};
 use sober_llm::Message as LlmMessage;
-use sober_llm::types::{FunctionCall, ToolCall as LlmToolCall};
+use sober_llm::MessageContent;
+use sober_llm::types::{FunctionCall, ImageUrl, LlmContentBlock, ToolCall as LlmToolCall};
+
+/// Pre-loaded attachment data: metadata + blob bytes.
+pub type AttachmentDataMap = HashMap<ConversationAttachmentId, (ConversationAttachment, Vec<u8>)>;
+
+/// Resolves domain content blocks into LLM message content.
+///
+/// Text-only messages return `MessageContent::Text` for backward compatibility.
+/// Messages with image blocks return `MessageContent::Blocks` with base64 images.
+fn resolve_content_blocks(
+    blocks: &[ContentBlock],
+    attachments: &AttachmentDataMap,
+    vision: bool,
+) -> MessageContent {
+    let has_media = blocks
+        .iter()
+        .any(|b| !matches!(b, ContentBlock::Text { .. }));
+
+    if !has_media {
+        // Text-only: emit plain string for maximum provider compatibility.
+        let text = blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return MessageContent::Text(text);
+    }
+
+    // Multimodal: emit content block array.
+    let mut llm_blocks = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text { text } => {
+                llm_blocks.push(LlmContentBlock::Text { text: text.clone() });
+            }
+            ContentBlock::Image {
+                conversation_attachment_id,
+                alt,
+            } => {
+                if vision {
+                    if let Some((attachment, data)) = attachments.get(conversation_attachment_id) {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                        let data_uri = format!("data:{};base64,{}", attachment.content_type, b64);
+                        llm_blocks.push(LlmContentBlock::ImageUrl {
+                            image_url: ImageUrl { url: data_uri },
+                        });
+                        counter!("sober_llm_vision_blocks_resolved_total", "action" => "base64")
+                            .increment(1);
+                    } else {
+                        llm_blocks.push(LlmContentBlock::Text {
+                            text: format!(
+                                "[Image: {}]",
+                                alt.as_deref().unwrap_or("attached image")
+                            ),
+                        });
+                        counter!("sober_llm_vision_blocks_resolved_total", "action" => "placeholder")
+                            .increment(1);
+                    }
+                } else {
+                    llm_blocks.push(LlmContentBlock::Text {
+                        text: format!("[Image: {}]", alt.as_deref().unwrap_or("attached image")),
+                    });
+                    counter!("sober_llm_vision_blocks_resolved_total", "action" => "placeholder")
+                        .increment(1);
+                }
+            }
+            ContentBlock::File {
+                conversation_attachment_id,
+            } => {
+                if let Some((attachment, _)) = attachments.get(conversation_attachment_id) {
+                    let extracted = attachment
+                        .metadata
+                        .get("extracted_text")
+                        .and_then(|v| v.as_str());
+                    if let Some(text) = extracted {
+                        llm_blocks.push(LlmContentBlock::Text {
+                            text: format!("[File: {}]\n{text}", attachment.filename),
+                        });
+                    } else {
+                        llm_blocks.push(LlmContentBlock::Text {
+                            text: format!("[File: {}]", attachment.filename),
+                        });
+                    }
+                } else {
+                    llm_blocks.push(LlmContentBlock::Text {
+                        text: "[File]".to_owned(),
+                    });
+                }
+            }
+            ContentBlock::Audio { .. } => {
+                llm_blocks.push(LlmContentBlock::Text {
+                    text: "[Audio]".to_owned(),
+                });
+            }
+            ContentBlock::Video { .. } => {
+                llm_blocks.push(LlmContentBlock::Text {
+                    text: "[Video]".to_owned(),
+                });
+            }
+        }
+    }
+    MessageContent::Blocks(llm_blocks)
+}
 
 /// Converts domain messages (with associated tool executions) into the LLM
 /// message format expected by chat completion APIs.
@@ -23,7 +136,11 @@ use sober_llm::types::{FunctionCall, ToolCall as LlmToolCall};
 ///   1. An assistant message with `tool_calls` and optional `reasoning_content`.
 ///   2. One tool result message per execution, with content based on status.
 /// - `Assistant` messages without tool executions emit a plain assistant message.
-pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
+pub fn to_llm_messages(
+    messages: &[MessageWithExecutions],
+    attachments: &AttachmentDataMap,
+    vision: bool,
+) -> Vec<LlmMessage> {
     let mut result: Vec<LlmMessage> = Vec::with_capacity(messages.len());
 
     for mwe in messages {
@@ -33,22 +150,29 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
             MessageRole::Event => continue,
 
             MessageRole::User => {
-                result.push(LlmMessage::user(&msg.content));
+                result.push(LlmMessage {
+                    role: "user".to_owned(),
+                    content: Some(resolve_content_blocks(&msg.content, attachments, vision)),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
             }
 
             MessageRole::System => {
-                result.push(LlmMessage::system(&msg.content));
+                result.push(LlmMessage::system(msg.text_content()));
             }
 
             MessageRole::Assistant => {
+                let text = msg.text_content();
                 if mwe.tool_executions.is_empty() {
                     // Skip empty assistant messages (no content, no tool calls).
-                    if msg.content.is_empty() {
+                    if text.is_empty() {
                         continue;
                     }
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: Some(msg.content.clone()),
+                        content: Some(MessageContent::Text(text)),
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
                         reasoning_content: Some(msg.reasoning.clone().unwrap_or_default()),
@@ -66,10 +190,10 @@ pub fn to_llm_messages(messages: &[MessageWithExecutions]) -> Vec<LlmMessage> {
                     // Emit assistant message with tool_calls.
                     result.push(LlmMessage {
                         role: "assistant".to_owned(),
-                        content: if msg.content.is_empty() {
+                        content: if text.is_empty() {
                             None
                         } else {
-                            Some(msg.content.clone())
+                            Some(MessageContent::Text(text))
                         },
                         // Thinking-enabled models require reasoning_content on
                         // every assistant message. Use empty string when absent.
@@ -133,7 +257,11 @@ mod tests {
             id: MessageId::new(),
             conversation_id: ConversationId::new(),
             role,
-            content: content.to_owned(),
+            content: if content.is_empty() {
+                vec![]
+            } else {
+                vec![ContentBlock::text(content)]
+            },
             reasoning: None,
             token_count: None,
             user_id: None,
@@ -180,26 +308,26 @@ mod tests {
 
     #[test]
     fn empty_input_returns_empty() {
-        let result = to_llm_messages(&[]);
+        let result = to_llm_messages(&[], &HashMap::new(), true);
         assert!(result.is_empty());
     }
 
     #[test]
     fn user_message_converts() {
         let messages = vec![mwe(MessageRole::User, "Hello!")];
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
-        assert_eq!(result[0].content.as_deref(), Some("Hello!"));
+        assert_eq!(result[0].text_content(), Some("Hello!"));
     }
 
     #[test]
     fn system_message_converts() {
         let messages = vec![mwe(MessageRole::System, "You are helpful.")];
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "system");
-        assert_eq!(result[0].content.as_deref(), Some("You are helpful."));
+        assert_eq!(result[0].text_content(), Some("You are helpful."));
     }
 
     #[test]
@@ -209,7 +337,7 @@ mod tests {
             mwe(MessageRole::Event, "user_joined"),
             mwe(MessageRole::Assistant, "Hi there"),
         ];
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].role, "user");
         assert_eq!(result[1].role, "assistant");
@@ -221,7 +349,7 @@ mod tests {
             mwe(MessageRole::User, "Hello"),
             mwe(MessageRole::Assistant, ""),
         ];
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
     }
@@ -229,10 +357,10 @@ mod tests {
     #[test]
     fn assistant_without_tools_preserves_content() {
         let messages = vec![mwe(MessageRole::Assistant, "Here is the answer.")];
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
-        assert_eq!(result[0].content.as_deref(), Some("Here is the answer."));
+        assert_eq!(result[0].text_content(), Some("Here is the answer."));
         assert!(result[0].tool_calls.is_none());
     }
 
@@ -240,7 +368,7 @@ mod tests {
     fn assistant_without_tools_preserves_reasoning() {
         let mut m = mwe(MessageRole::Assistant, "Answer");
         m.message.reasoning = Some("I thought about it.".to_owned());
-        let result = to_llm_messages(&[m]);
+        let result = to_llm_messages(&[m], &HashMap::new(), true);
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0].reasoning_content.as_deref(),
@@ -269,14 +397,14 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
 
         // Should produce: assistant message + tool result message
         assert_eq!(result.len(), 2);
 
         // Assistant message with tool_calls
         assert_eq!(result[0].role, "assistant");
-        assert_eq!(result[0].content.as_deref(), Some("Let me search."));
+        assert_eq!(result[0].text_content(), Some("Let me search."));
         let tool_calls = result[0]
             .tool_calls
             .as_ref()
@@ -289,7 +417,7 @@ mod tests {
         // Tool result message
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].tool_call_id.as_deref(), Some("call_abc"));
-        assert_eq!(result[1].content.as_deref(), Some("Search results here"));
+        assert_eq!(result[1].text_content(), Some("Search results here"));
     }
 
     #[test]
@@ -313,7 +441,7 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 2);
 
         // Assistant message: empty content becomes None
@@ -322,10 +450,7 @@ mod tests {
 
         // Tool result with error
         assert_eq!(result[1].role, "tool");
-        assert_eq!(
-            result[1].content.as_deref(),
-            Some("Error: connection timeout")
-        );
+        assert_eq!(result[1].text_content(), Some("Error: connection timeout"));
     }
 
     #[test]
@@ -349,8 +474,8 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some("Error: Unknown error"));
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
+        assert_eq!(result[1].text_content(), Some("Error: Unknown error"));
     }
 
     #[test]
@@ -374,9 +499,9 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(
-            result[1].content.as_deref(),
+            result[1].text_content(),
             Some("Error: Agent restarted during execution")
         );
     }
@@ -402,9 +527,9 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(
-            result[1].content.as_deref(),
+            result[1].text_content(),
             Some("Error: Agent restarted during execution")
         );
     }
@@ -430,8 +555,8 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some("Cancelled by user"));
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
+        assert_eq!(result[1].text_content(), Some("Cancelled by user"));
     }
 
     #[test]
@@ -464,7 +589,7 @@ mod tests {
             tool_executions: vec![exec1, exec2],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
 
         // assistant + 2 tool results
         assert_eq!(result.len(), 3);
@@ -479,11 +604,11 @@ mod tests {
 
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].tool_call_id.as_deref(), Some("call_1"));
-        assert_eq!(result[1].content.as_deref(), Some("result 1"));
+        assert_eq!(result[1].text_content(), Some("result 1"));
 
         assert_eq!(result[2].role, "tool");
         assert_eq!(result[2].tool_call_id.as_deref(), Some("call_2"));
-        assert_eq!(result[2].content.as_deref(), Some("result 2"));
+        assert_eq!(result[2].text_content(), Some("result 2"));
     }
 
     #[test]
@@ -525,12 +650,12 @@ mod tests {
             tool_executions: vec![exec_completed, exec_failed, exec_cancelled],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         assert_eq!(result.len(), 4); // 1 assistant + 3 tool results
 
-        assert_eq!(result[1].content.as_deref(), Some("success"));
-        assert_eq!(result[2].content.as_deref(), Some("Error: boom"));
-        assert_eq!(result[3].content.as_deref(), Some("Cancelled by user"));
+        assert_eq!(result[1].text_content(), Some("success"));
+        assert_eq!(result[2].text_content(), Some("Error: boom"));
+        assert_eq!(result[3].text_content(), Some("Cancelled by user"));
     }
 
     #[test]
@@ -561,7 +686,7 @@ mod tests {
             mwe(MessageRole::User, "Thanks!"),
         ];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
 
         // system + user + assistant(tool) + tool_result + assistant + user = 6
         assert_eq!(result.len(), 6);
@@ -597,7 +722,7 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
         let tool_calls = result[0].tool_calls.as_ref().unwrap();
         // arguments should be a JSON string representation
         let args: serde_json::Value =
@@ -627,7 +752,7 @@ mod tests {
             tool_executions: vec![exec],
         }];
 
-        let result = to_llm_messages(&messages);
-        assert_eq!(result[1].content.as_deref(), Some(""));
+        let result = to_llm_messages(&messages, &HashMap::new(), true);
+        assert_eq!(result[1].text_content(), Some(""));
     }
 }

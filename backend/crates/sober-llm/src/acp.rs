@@ -185,11 +185,11 @@ impl AcpEngine {
         let text = messages
             .iter()
             .filter_map(|m| {
-                m.content.as_ref().map(|c| {
+                m.text_content().map(|c| {
                     if m.role == "system" {
                         format!("[System]: {c}")
                     } else if m.role == "user" {
-                        c.clone()
+                        c.to_owned()
                     } else {
                         format!("[{}]: {c}", m.role)
                     }
@@ -306,7 +306,7 @@ impl LlmEngine for AcpEngine {
                 index: 0,
                 message: Message {
                     role: "assistant".to_owned(),
-                    content,
+                    content: content.map(crate::types::MessageContent::Text),
                     reasoning_content: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -329,13 +329,14 @@ impl LlmEngine for AcpEngine {
             .choices
             .into_iter()
             .map(|choice| {
+                let text_content = choice.message.text_content().map(|s| s.to_owned());
                 Ok(StreamChunk {
                     id: response.id.clone(),
                     choices: vec![StreamChoice {
                         index: choice.index,
                         delta: MessageDelta {
                             role: Some(choice.message.role),
-                            content: choice.message.content,
+                            content: text_content,
                             reasoning_content: choice.message.reasoning_content,
                             tool_calls: None,
                         },

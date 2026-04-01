@@ -1,7 +1,5 @@
 //! PostgreSQL implementation of [`PluginRepo`].
 
-use std::collections::HashSet;
-
 use sober_core::error::AppError;
 use sober_core::types::{
     CreatePlugin, CreatePluginAuditLog, Plugin, PluginAuditLog, PluginFilter, PluginId,
@@ -297,20 +295,5 @@ impl sober_core::types::PluginRepo for PgPluginRepo {
             .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(())
-    }
-
-    async fn blob_keys_in_use(&self) -> Result<HashSet<String>, AppError> {
-        let rows: Vec<(Option<String>,)> = sqlx::query_as(
-            "SELECT config->>'wasm_blob_key' AS key FROM plugins \
-             WHERE config->>'wasm_blob_key' IS NOT NULL \
-             UNION \
-             SELECT config->>'manifest_blob_key' AS key FROM plugins \
-             WHERE config->>'manifest_blob_key' IS NOT NULL",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        Ok(rows.into_iter().filter_map(|(k,)| k).collect())
     }
 }

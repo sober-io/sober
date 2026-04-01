@@ -172,7 +172,7 @@ pub(crate) async fn run_detection_llm<R: AgentRepos>(
         let text = response
             .choices
             .first()
-            .and_then(|c| c.message.content.as_deref())
+            .and_then(|c| c.message.text_content())
             .unwrap_or("no response");
         info!(
             task_id = %task_id,

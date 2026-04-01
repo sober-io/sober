@@ -11,6 +11,7 @@ use sober_plugin::PluginManager;
 use tonic::{Request, Response, Status};
 
 mod agent;
+pub(crate) mod content_blocks;
 mod evolution;
 mod plugins;
 mod tasks;

@@ -51,17 +51,45 @@ export interface Conversation {
 	updated_at: string;
 }
 
+export type ContentBlock =
+	| { type: 'text'; text: string }
+	| { type: 'image'; conversation_attachment_id: string; alt?: string }
+	| { type: 'file'; conversation_attachment_id: string }
+	| { type: 'audio'; conversation_attachment_id: string }
+	| { type: 'video'; conversation_attachment_id: string };
+
+export interface ConversationAttachment {
+	id: string;
+	kind: 'image' | 'audio' | 'video' | 'document';
+	content_type: string;
+	filename: string;
+	size: number;
+	metadata: Record<string, unknown>;
+}
+
 export interface Message {
 	id: string;
 	role: 'user' | 'assistant' | 'system' | 'event';
-	content: string;
+	content: ContentBlock[];
 	reasoning?: string;
 	tool_executions?: ToolExecution[];
 	token_count: number;
 	user_id?: string;
 	metadata?: Record<string, unknown>;
+	attachments?: Record<string, ConversationAttachment>;
 	tags?: Tag[];
 	created_at: string;
+}
+
+export function getContentText(blocks: ContentBlock[]): string {
+	return blocks
+		.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+		.map((b) => b.text)
+		.join('\n');
+}
+
+export function getMessageText(msg: Message): string {
+	return getContentText(msg.content);
 }
 
 export interface ToolExecution {
@@ -94,7 +122,7 @@ export interface ConfirmRequest {
 /** Client-to-server messages — all include conversation_id */
 export type ClientWsMessage =
 	| { type: 'chat.subscribe'; conversation_id: string }
-	| { type: 'chat.message'; conversation_id: string; content: string }
+	| { type: 'chat.message'; conversation_id: string; content: ContentBlock[] }
 	| { type: 'chat.cancel'; conversation_id: string }
 	| {
 			type: 'chat.confirm_response';
@@ -131,7 +159,7 @@ export type ServerWsMessage =
 			conversation_id: string;
 			message_id: string;
 			role: string;
-			content: string;
+			content: ContentBlock[];
 			source: string;
 			user_id?: string;
 			username?: string;

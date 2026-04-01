@@ -1,6 +1,6 @@
 [package]
 name = "sober-workspace"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 
 [dependencies]
@@ -17,6 +17,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 hex = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+image = "0.25.10"
+pdf-extract = "0.10.0"
 
 [dev-dependencies]
 tempfile = "3.27"

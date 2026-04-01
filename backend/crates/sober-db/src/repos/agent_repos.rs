@@ -4,9 +4,9 @@ use sober_core::types::AgentRepos;
 use sqlx::PgPool;
 
 use super::{
-    PgArtifactRepo, PgAuditLogRepo, PgConversationRepo, PgEvolutionRepo, PgMessageRepo,
-    PgPluginRepo, PgSecretRepo, PgToolExecutionRepo, PgUserRepo, PgWorkspaceRepo,
-    PgWorkspaceSettingsRepo,
+    PgArtifactRepo, PgAuditLogRepo, PgConversationAttachmentRepo, PgConversationRepo,
+    PgEvolutionRepo, PgMessageRepo, PgPluginRepo, PgSecretRepo, PgToolExecutionRepo, PgUserRepo,
+    PgWorkspaceRepo, PgWorkspaceSettingsRepo,
 };
 
 /// Bundles all Pg repository implementations required by the agent.
@@ -25,6 +25,7 @@ pub struct PgAgentRepos {
     plugins: PgPluginRepo,
     tool_executions: PgToolExecutionRepo,
     evolution: PgEvolutionRepo,
+    attachments: PgConversationAttachmentRepo,
 }
 
 impl PgAgentRepos {
@@ -41,7 +42,8 @@ impl PgAgentRepos {
             workspace_settings: PgWorkspaceSettingsRepo::new(pool.clone()),
             plugins: PgPluginRepo::new(pool.clone()),
             tool_executions: PgToolExecutionRepo::new(pool.clone()),
-            evolution: PgEvolutionRepo::new(pool),
+            evolution: PgEvolutionRepo::new(pool.clone()),
+            attachments: PgConversationAttachmentRepo::new(pool),
         }
     }
 }
@@ -58,6 +60,7 @@ impl AgentRepos for PgAgentRepos {
     type ToolExec = PgToolExecutionRepo;
     type WsSettings = PgWorkspaceSettingsRepo;
     type Evo = PgEvolutionRepo;
+    type Attach = PgConversationAttachmentRepo;
 
     fn messages(&self) -> &PgMessageRepo {
         &self.messages
@@ -101,5 +104,9 @@ impl AgentRepos for PgAgentRepos {
 
     fn evolution(&self) -> &PgEvolutionRepo {
         &self.evolution
+    }
+
+    fn attachments(&self) -> &PgConversationAttachmentRepo {
+        &self.attachments
     }
 }

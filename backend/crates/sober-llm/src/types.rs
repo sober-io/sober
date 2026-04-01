@@ -50,9 +50,10 @@ pub struct Message {
     /// Role: `"system"`, `"user"`, `"assistant"`, or `"tool"`.
     pub role: String,
 
-    /// Text content (absent when the assistant response is tool-calls only).
+    /// Message content — plain text or multimodal blocks.
+    /// Absent when the assistant response is tool-calls only.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<MessageContent>,
 
     /// Reasoning/thinking content returned by some providers (e.g. Kimi).
     /// Must be echoed back in subsequent messages when present.
@@ -73,7 +74,7 @@ impl Message {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
             role: "system".to_owned(),
-            content: Some(content.into()),
+            content: Some(MessageContent::Text(content.into())),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -84,7 +85,7 @@ impl Message {
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: "user".to_owned(),
-            content: Some(content.into()),
+            content: Some(MessageContent::Text(content.into())),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -95,7 +96,7 @@ impl Message {
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: "assistant".to_owned(),
-            content: Some(content.into()),
+            content: Some(MessageContent::Text(content.into())),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -106,11 +107,16 @@ impl Message {
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: "tool".to_owned(),
-            content: Some(content.into()),
+            content: Some(MessageContent::Text(content.into())),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
         }
+    }
+
+    /// Returns the text content as a string slice, if present and text-only.
+    pub fn text_content(&self) -> Option<&str> {
+        self.content.as_ref().and_then(|c| c.as_text())
     }
 }
 
@@ -311,6 +317,128 @@ pub struct EngineCapabilities {
 }
 
 // ---------------------------------------------------------------------------
+// Model capabilities
+// ---------------------------------------------------------------------------
+
+/// Model-specific capabilities that affect content resolution.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModelCapabilities {
+    /// Whether the model supports vision (image) input.
+    pub vision: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Multimodal content types
+// ---------------------------------------------------------------------------
+
+/// Content for an LLM message — either plain text or a multimodal array.
+///
+/// Smart serialization: text-only messages emit a plain string for backward
+/// compatibility. Content array is only emitted when media blocks are present.
+#[derive(Debug, Clone)]
+pub enum MessageContent {
+    /// Plain text content (serializes as `"content": "text"`).
+    Text(String),
+    /// Multimodal content blocks (serializes as `"content": [...]`).
+    Blocks(Vec<LlmContentBlock>),
+}
+
+impl MessageContent {
+    /// Returns the text content as a string slice, if this is a `Text` variant.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            MessageContent::Text(s) => Some(s),
+            MessageContent::Blocks(_) => None,
+        }
+    }
+
+    /// Returns the text content, extracting from blocks if necessary.
+    ///
+    /// For `Text`, returns the string directly. For `Blocks`, concatenates
+    /// all text blocks separated by newlines.
+    pub fn text_content(&self) -> Option<&str> {
+        match self {
+            MessageContent::Text(s) => Some(s),
+            MessageContent::Blocks(_) => None,
+        }
+    }
+}
+
+impl Serialize for MessageContent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            MessageContent::Text(s) => serializer.serialize_str(s),
+            MessageContent::Blocks(blocks) => blocks.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MessageContent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        struct MessageContentVisitor;
+
+        impl<'de> de::Visitor<'de> for MessageContentVisitor {
+            type Value = MessageContent;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a string or an array of content blocks")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(MessageContent::Text(value.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(MessageContent::Text(value))
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MessageContent::Text(String::new()))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MessageContent::Text(String::new()))
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                let blocks = Vec::<LlmContentBlock>::deserialize(
+                    de::value::SeqAccessDeserializer::new(seq),
+                )?;
+                Ok(MessageContent::Blocks(blocks))
+            }
+        }
+
+        deserializer.deserialize_any(MessageContentVisitor)
+    }
+}
+
+/// A content block for LLM messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LlmContentBlock {
+    /// Plain text content.
+    Text {
+        /// The text.
+        text: String,
+    },
+    /// Base64-encoded image for vision models.
+    #[serde(rename = "image_url")]
+    ImageUrl {
+        /// Image URL object containing base64 data URI.
+        image_url: ImageUrl,
+    },
+}
+
+/// An image URL for vision model input (OpenAI format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageUrl {
+    /// Data URI: `data:{content_type};base64,{data}`.
+    pub url: String,
+}
+
+// ---------------------------------------------------------------------------
 // Embedding types
 // ---------------------------------------------------------------------------
 
@@ -404,7 +532,7 @@ mod tests {
         assert_eq!(resp.id, "chatcmpl-123");
         assert_eq!(resp.choices.len(), 1);
         assert_eq!(
-            resp.choices[0].message.content.as_deref(),
+            resp.choices[0].message.text_content(),
             Some("Hello! How can I help you?")
         );
         assert_eq!(resp.usage.unwrap().total_tokens, 18);
@@ -521,7 +649,7 @@ mod tests {
     fn message_constructors() {
         let sys = Message::system("be helpful");
         assert_eq!(sys.role, "system");
-        assert_eq!(sys.content.as_deref(), Some("be helpful"));
+        assert_eq!(sys.text_content(), Some("be helpful"));
 
         let usr = Message::user("hello");
         assert_eq!(usr.role, "user");

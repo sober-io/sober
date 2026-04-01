@@ -4,6 +4,7 @@
 //! can run locally without involving the agent's LLM pipeline.
 
 pub mod artifact;
+pub mod attachment_cleanup;
 pub mod blob_gc;
 pub mod memory_pruning;
 pub mod plugin_cleanup;

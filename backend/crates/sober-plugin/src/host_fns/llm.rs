@@ -84,7 +84,7 @@ pub(crate) fn host_llm_complete_impl(
 
     tracing::info!(
         choices_count = response.choices.len(),
-        first_content = ?response.choices.first().and_then(|c| c.message.content.as_deref()),
+        first_content = ?response.choices.first().and_then(|c| c.message.text_content()),
         first_reasoning = ?response.choices.first().and_then(|c| c.message.reasoning_content.as_deref()),
         first_role = ?response.choices.first().map(|c| &c.message.role),
         finish_reason = ?response.choices.first().map(|c| &c.finish_reason),
@@ -94,7 +94,7 @@ pub(crate) fn host_llm_complete_impl(
     let choice = response.choices.into_iter().next();
     let text = choice
         .as_ref()
-        .and_then(|c| c.message.content.as_deref())
+        .and_then(|c| c.message.text_content())
         .filter(|s| !s.is_empty())
         .unwrap_or("")
         .to_owned();

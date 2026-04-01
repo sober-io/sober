@@ -133,7 +133,7 @@ impl PluginGenerator {
             let raw = response
                 .choices
                 .first()
-                .and_then(|c| c.message.content.as_deref())
+                .and_then(|c| c.message.text_content())
                 .ok_or_else(|| GenError::Generate("LLM returned no content".to_string()))?;
 
             // Extract both TOML manifest and Rust source from the LLM response.
@@ -235,12 +235,12 @@ impl PluginGenerator {
         let raw = response
             .choices
             .first()
-            .and_then(|c| c.message.content.clone())
+            .and_then(|c| c.message.text_content())
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| GenError::Generate("LLM returned empty skill content".to_string()))?;
 
         // Strip code fences if the LLM wrapped the output.
-        let content = strip_markdown_fences(&raw);
+        let content = strip_markdown_fences(raw);
 
         // Validate frontmatter exists.
         if !content.starts_with("---") {
@@ -735,7 +735,7 @@ mod tests {
         let messages = mock.last_messages();
         // system message + user message
         assert_eq!(messages.len(), 2);
-        let user_content = messages[1].content.as_deref().unwrap_or("");
+        let user_content = messages[1].text_content().unwrap_or("");
         assert!(
             user_content.contains("weather-lookup"),
             "user prompt missing skill name"
@@ -827,7 +827,7 @@ mod tests {
             .await;
 
         let messages = mock.last_messages();
-        let user_content = messages[1].content.as_deref().unwrap_or("");
+        let user_content = messages[1].text_content().unwrap_or("");
         assert!(user_content.contains("my-plugin"), "missing plugin name");
         assert!(
             user_content.contains("Does something cool"),

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use sober_core::config::LlmConfig;
 use sober_core::types::AgentRepos;
+use sober_core::types::ContentBlock;
 use sober_core::types::access::{CallerContext, TriggerKind};
 use sober_core::types::enums::{ConversationKind, MessageRole};
 use sober_core::types::ids::{ConversationId, MessageId, UserId, WorkspaceId};
@@ -271,7 +272,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 content: if content_buffer.is_empty() {
                     None
                 } else {
-                    Some(content_buffer.clone())
+                    Some(sober_llm::MessageContent::Text(content_buffer.clone()))
                 },
                 reasoning_content: if reasoning_buffer.is_empty() {
                     None
@@ -305,7 +306,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                         .create(CreateMessage {
                             conversation_id: params.conversation_id,
                             role: MessageRole::Assistant,
-                            content: content_buffer.clone(),
+                            content: vec![ContentBlock::text(content_buffer.clone())],
                             reasoning: if reasoning_buffer.is_empty() {
                                 None
                             } else {
@@ -408,7 +409,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .messages()
                 .update_content(
                     existing_id,
-                    &text,
+                    &[ContentBlock::text(text.clone())],
                     if reasoning_buffer.is_empty() {
                         None
                     } else {
@@ -426,7 +427,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .create(CreateMessage {
                     conversation_id: params.conversation_id,
                     role: MessageRole::Assistant,
-                    content: text.clone(),
+                    content: vec![ContentBlock::text(text.clone())],
                     reasoning: if reasoning_buffer.is_empty() {
                         None
                     } else {
@@ -460,7 +461,9 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 proto::NewMessage {
                     message_id: assistant_msg_id.to_string(),
                     role: "Assistant".to_owned(),
-                    content: text.clone(),
+                    content: crate::grpc::content_blocks::domain_to_proto(&[ContentBlock::text(
+                        text.clone(),
+                    )]),
                     source: match params.trigger {
                         TriggerKind::Human => "human",
                         TriggerKind::Scheduler => "scheduler",
@@ -635,7 +638,7 @@ async fn build_context<R: AgentRepos>(
     let system_prompt = assembled
         .iter()
         .find(|m| m.role == MessageRole::System)
-        .map(|m| m.content.clone())
+        .map(|m| m.text_content())
         .unwrap_or_default();
 
     // e. Load messages with tool executions from DB for the conversation history.
@@ -650,9 +653,94 @@ async fn build_context<R: AgentRepos>(
         .await
         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
 
-    let history_messages = history::to_llm_messages(&messages_with_execs);
+    // f. Pre-load attachment data for multimodal content blocks (images, files).
+    let attachment_data = load_attachment_data(params, &messages_with_execs).await;
+
+    let history_messages = history::to_llm_messages(
+        &messages_with_execs,
+        &attachment_data,
+        params.ctx.config.vision,
+    );
 
     Ok((system_prompt, history_messages))
+}
+
+/// Collects all attachment IDs from message content blocks and batch-loads
+/// their metadata and blob data for multimodal LLM input.
+///
+/// Returns a best-effort map — attachments that fail to load are silently
+/// skipped (the LLM will see a fallback placeholder instead).
+async fn load_attachment_data<R: AgentRepos>(
+    params: &TurnParams<'_, R>,
+    messages: &[sober_core::types::tool_execution::MessageWithExecutions],
+) -> history::AttachmentDataMap {
+    use sober_core::types::ids::ConversationAttachmentId;
+    use sober_core::types::repo::ConversationAttachmentRepo;
+
+    // 1. Collect all attachment IDs from user message content blocks.
+    let mut ids: Vec<ConversationAttachmentId> = Vec::new();
+    for mwe in messages {
+        if mwe.message.role != MessageRole::User {
+            continue;
+        }
+        for block in &mwe.message.content {
+            let id = match block {
+                ContentBlock::Image {
+                    conversation_attachment_id,
+                    ..
+                } => Some(*conversation_attachment_id),
+                ContentBlock::File {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Audio {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Video {
+                    conversation_attachment_id,
+                } => Some(*conversation_attachment_id),
+                ContentBlock::Text { .. } => None,
+            };
+            if let Some(id) = id {
+                ids.push(id);
+            }
+        }
+    }
+
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+
+    ids.dedup();
+
+    // 2. Batch-load attachment metadata.
+    let attachments = match params.ctx.repos.attachments().get_by_ids(&ids).await {
+        Ok(a) => a,
+        Err(e) => {
+            warn!(error = %e, "failed to load attachment metadata for LLM context");
+            return HashMap::new();
+        }
+    };
+
+    // 3. Load blob data for each attachment.
+    let blob_store = &params.ctx.tool_bootstrap.blob_store;
+    let mut map = HashMap::with_capacity(attachments.len());
+    for attachment in attachments {
+        match blob_store.retrieve(&attachment.blob_key).await {
+            Ok(data) => {
+                map.insert(attachment.id, (attachment, data));
+            }
+            Err(e) => {
+                warn!(
+                    attachment_id = %attachment.id,
+                    blob_key = %attachment.blob_key,
+                    error = %e,
+                    "failed to load blob data for attachment"
+                );
+            }
+        }
+    }
+
+    map
 }
 
 /// Attempts to resolve a dynamic LLM engine from user-stored keys.
@@ -750,7 +838,7 @@ async fn auto_generate_title<R: AgentRepos>(
             // Primary: use content field if non-empty
             let title = c
                 .message
-                .content
+                .text_content()
                 .filter(|s| !s.trim().is_empty())
                 .map(|t| t.trim().trim_matches('"').to_owned());
 

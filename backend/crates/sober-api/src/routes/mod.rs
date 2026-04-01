@@ -1,5 +1,6 @@
 //! Route handlers and router assembly.
 
+pub mod attachments;
 pub mod auth;
 pub mod collaborators;
 pub mod conversations;
@@ -47,7 +48,7 @@ pub(crate) async fn insert_event_message(
         .create(CreateMessage {
             conversation_id,
             role: MessageRole::Event,
-            content: content.to_string(),
+            content: vec![sober_core::types::ContentBlock::text(content)],
             reasoning: None,
             token_count: None,
             metadata: Some(metadata),
@@ -65,6 +66,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .merge(health::routes())
         .merge(system::routes())
+        .merge(attachments::routes())
         .merge(auth::routes())
         .merge(conversations::routes())
         .merge(collaborators::routes())

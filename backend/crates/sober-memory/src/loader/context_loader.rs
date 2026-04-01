@@ -19,7 +19,7 @@ fn estimate_tokens(text: &str) -> usize {
 fn message_tokens(msg: &Message) -> usize {
     msg.token_count
         .map(|tc| tc.max(0) as usize)
-        .unwrap_or_else(|| estimate_tokens(&msg.content))
+        .unwrap_or_else(|| estimate_tokens(&msg.text_content()))
 }
 
 /// Assembles context from vector search and recent messages.

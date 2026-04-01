@@ -306,6 +306,7 @@ mod tests {
             max_tokens: 4096,
             embedding_model: "text-embedding-3-small".into(),
             embedding_dim: 1536,
+            vision: false,
         }
     }
 
@@ -357,6 +358,7 @@ mod tests {
             max_tokens: 4096,
             embedding_model: "text-embedding-3-small".into(),
             embedding_dim: 1536,
+            vision: false,
         };
         let resolver = LlmKeyResolver::new(repo, Arc::new(test_mek()), config);
         let result = resolver

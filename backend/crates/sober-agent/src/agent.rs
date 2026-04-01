@@ -14,6 +14,7 @@ use std::time::Duration;
 use dashmap::DashMap;
 use sober_core::config::{LlmConfig, MemoryConfig};
 use sober_core::types::AgentRepos;
+use sober_core::types::ContentBlock;
 use sober_core::types::access::TriggerKind;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use sober_core::types::repo::{ConversationRepo, WorkspaceRepo};
@@ -122,6 +123,8 @@ pub struct AgentConfig {
     pub max_tokens: u32,
     /// Root directory for workspaces.
     pub workspace_root: PathBuf,
+    /// Whether the configured model supports vision (image) inputs.
+    pub vision: bool,
 }
 
 impl Default for AgentConfig {
@@ -135,6 +138,7 @@ impl Default for AgentConfig {
             embedding_model: "text-embedding-3-small".to_owned(),
             max_tokens: 4096,
             workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
+            vision: false,
         }
     }
 }
@@ -381,11 +385,12 @@ impl<R: AgentRepos> Agent<R> {
         self: &Arc<Self>,
         user_id: UserId,
         conversation_id: ConversationId,
-        content: &str,
+        content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
     ) -> Result<AgentResponseStream, AgentError> {
         // 1. Pre-flight injection check (before routing to actor).
-        let verdict = Mind::check_injection(content);
+        let text_content = ContentBlock::extract_text(content);
+        let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {
                 return Err(AgentError::InjectionDetected(reason));
@@ -447,7 +452,7 @@ impl<R: AgentRepos> Agent<R> {
         // 4. Send the message to the actor's inbox.
         let msg = InboxMessage::UserMessage {
             user_id,
-            content: content.to_owned(),
+            content: content.to_vec(),
             trigger,
             event_tx,
         };

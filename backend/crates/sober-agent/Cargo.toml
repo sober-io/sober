@@ -1,6 +1,6 @@
 [package]
 name = "sober-agent"
-version = "0.20.0"
+version = "0.21.0"
 edition.workspace = true
 
 [[bin]]
@@ -24,6 +24,7 @@ sober-skill = { path = "../sober-skill" }
 sober-workspace = { path = "../sober-workspace" }
 sober-llm = { path = "../sober-llm" }
 sober-memory = { path = "../sober-memory" }
+base64 = "0.22"
 anyhow = { workspace = true }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 serde = { workspace = true }

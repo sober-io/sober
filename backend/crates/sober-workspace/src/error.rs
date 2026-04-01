@@ -42,6 +42,10 @@ pub enum WorkspaceError {
     #[error("snapshot error: {0}")]
     Snapshot(String),
 
+    /// Internal processing error.
+    #[error("{0}")]
+    Internal(String),
+
     /// Invalid state transition.
     #[error("invalid state transition: {from} -> {to}")]
     InvalidStateTransition {
@@ -65,7 +69,8 @@ impl From<WorkspaceError> for AppError {
             WorkspaceError::InvalidStateTransition { from, to } => {
                 AppError::Validation(format!("invalid state transition: {from} -> {to}"))
             }
-            WorkspaceError::Filesystem(_)
+            WorkspaceError::Internal(_)
+            | WorkspaceError::Filesystem(_)
             | WorkspaceError::Git(_)
             | WorkspaceError::Snapshot(_) => AppError::Internal(err.into()),
         }

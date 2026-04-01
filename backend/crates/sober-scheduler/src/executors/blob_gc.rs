@@ -1,15 +1,15 @@
 //! Blob garbage collection executor — deletes orphaned blobs from the store.
 //!
-//! A blob is "referenced" if a plugin config or a non-archived artifact
-//! points to it. Unreferenced blobs older than a grace period are deleted.
+//! Walks the blob store in batches and queries the DB per batch to find
+//! unreferenced keys. This scales better than loading all referenced keys
+//! into a HashSet.
 
-use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use sober_core::error::AppError;
 use sober_core::types::Job;
-use sober_core::types::repo::{ArtifactRepo, PluginRepo};
+use sober_core::types::repo::BlobGcRepo;
 use sober_workspace::BlobStore;
 use tracing::{info, warn};
 
@@ -21,76 +21,65 @@ pub const JOB_NAME: &str = "system::blob_gc";
 /// Executor operation key in [`crate::executor::JobExecutorRegistry`].
 pub const OP: &str = "blob_gc";
 
-/// Default grace period: blobs younger than this are never deleted,
-/// even if unreferenced (protects mid-installation blobs).
+/// Default grace period: blobs younger than this are never deleted.
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3600);
 
-/// Deletes orphaned blobs not referenced by any plugin or active artifact.
-pub struct BlobGcExecutor<P: PluginRepo, A: ArtifactRepo> {
+/// Batch size for filesystem walk.
+const BATCH_SIZE: usize = 100;
+
+/// Deletes orphaned blobs not referenced by any attachment, plugin, or artifact.
+pub struct BlobGcExecutor<G: BlobGcRepo> {
     blob_store: Arc<BlobStore>,
-    plugin_repo: P,
-    artifact_repo: A,
+    gc_repo: G,
     grace_period: Duration,
 }
 
-impl<P: PluginRepo, A: ArtifactRepo> BlobGcExecutor<P, A> {
+impl<G: BlobGcRepo> BlobGcExecutor<G> {
     /// Create a new blob GC executor.
-    pub fn new(blob_store: Arc<BlobStore>, plugin_repo: P, artifact_repo: A) -> Self {
+    pub fn new(blob_store: Arc<BlobStore>, gc_repo: G) -> Self {
         Self {
             blob_store,
-            plugin_repo,
-            artifact_repo,
+            gc_repo,
             grace_period: DEFAULT_GRACE_PERIOD,
         }
     }
 }
 
 #[tonic::async_trait]
-impl<P: PluginRepo + 'static, A: ArtifactRepo + 'static> JobExecutor for BlobGcExecutor<P, A> {
+impl<G: BlobGcRepo + 'static> JobExecutor for BlobGcExecutor<G> {
     async fn execute(&self, _job: &Job) -> Result<ExecutionResult, AppError> {
-        // 1. List all blobs on disk.
-        let all_blobs = self
+        let batches = self
             .blob_store
-            .list_keys()
+            .list_keys_batched(BATCH_SIZE, self.grace_period)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
-        let scanned = all_blobs.len();
 
-        // 2. Collect referenced keys from both sources.
-        let mut referenced: HashSet<String> = self.plugin_repo.blob_keys_in_use().await?;
-        let artifact_keys = self.artifact_repo.blob_keys_in_use().await?;
-        referenced.extend(artifact_keys);
-
-        // 3. Find and delete unreferenced blobs older than grace period.
-        let cutoff = SystemTime::now() - self.grace_period;
+        let mut scanned = 0usize;
         let mut deleted = 0u64;
         let mut bytes_freed = 0u64;
         let mut errors = Vec::new();
 
-        for (key, modified) in &all_blobs {
-            if referenced.contains(key) {
-                continue;
-            }
-            if *modified > cutoff {
-                continue;
-            }
+        for batch in &batches {
+            scanned += batch.len();
+            let orphans = self.gc_repo.find_unreferenced(batch).await?;
 
-            // Get size before deleting.
-            let path = self.blob_store.blob_path(key);
-            let size = tokio::fs::metadata(&path)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
+            for key in &orphans {
+                let path = self.blob_store.blob_path(key);
+                let size = tokio::fs::metadata(&path)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
 
-            match self.blob_store.delete(key).await {
-                Ok(()) => {
-                    info!(blob_key = %key, size, "deleted orphaned blob");
-                    deleted += 1;
-                    bytes_freed += size;
-                }
-                Err(e) => {
-                    warn!(blob_key = %key, error = %e, "failed to delete orphaned blob");
-                    errors.push(format!("{key}: {e}"));
+                match self.blob_store.delete(key).await {
+                    Ok(()) => {
+                        info!(blob_key = %key, size, "deleted orphaned blob");
+                        deleted += 1;
+                        bytes_freed += size;
+                    }
+                    Err(e) => {
+                        warn!(blob_key = %key, error = %e, "failed to delete orphaned blob");
+                        errors.push(format!("{key}: {e}"));
+                    }
                 }
             }
         }

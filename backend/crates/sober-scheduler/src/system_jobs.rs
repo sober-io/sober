@@ -53,6 +53,14 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
+            name: crate::executors::attachment_cleanup::JOB_NAME,
+            schedule: "every: 1h",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": crate::executors::attachment_cleanup::OP,
+            }),
+        },
+        SystemJobDef {
             name: crate::executors::blob_gc::JOB_NAME,
             schedule: "0 0 0 * * * *",
             payload: serde_json::json!({

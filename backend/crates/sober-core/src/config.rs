@@ -80,9 +80,12 @@ pub const DEFAULT_EVOLUTION_INTERVAL: &str = "2h";
 ///
 /// Loaded from environment variables at startup via [`load_from_env`](AppConfig::load_from_env).
 /// Unused sections are harmless — each section applies its own defaults.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    /// Root directory for workspaces (shared across all services).
+    #[serde(default = "default_workspace_root")]
+    pub workspace_root: PathBuf,
     /// PostgreSQL connection settings.
     pub database: DatabaseConfig,
     /// Qdrant vector database settings.
@@ -115,6 +118,34 @@ pub struct AppConfig {
     pub web: WebConfig,
     /// Self-evolution loop settings.
     pub evolution: EvolutionConfig,
+}
+
+fn default_workspace_root() -> PathBuf {
+    PathBuf::from(DEFAULT_WORKSPACE_ROOT)
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            workspace_root: default_workspace_root(),
+            database: DatabaseConfig::default(),
+            qdrant: QdrantConfig::default(),
+            llm: LlmConfig::default(),
+            server: ServerConfig::default(),
+            auth: AuthConfig::default(),
+            searxng: SearxngConfig::default(),
+            admin: AdminConfig::default(),
+            scheduler: SchedulerConfig::default(),
+            mcp: McpConfig::default(),
+            memory: MemoryConfig::default(),
+            acp: None,
+            crypto: CryptoConfig::default(),
+            environment: Environment::default(),
+            agent: AgentProcessConfig::default(),
+            web: WebConfig::default(),
+            evolution: EvolutionConfig::default(),
+        }
+    }
 }
 
 /// Runtime environment.
@@ -182,6 +213,8 @@ pub struct LlmConfig {
     pub embedding_model: String,
     /// Dimensionality of the embedding vectors produced by the embedding model.
     pub embedding_dim: u64,
+    /// Whether the configured model supports vision (image) inputs.
+    pub vision: bool,
 }
 
 impl Default for LlmConfig {
@@ -193,6 +226,7 @@ impl Default for LlmConfig {
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             embedding_model: DEFAULT_EMBEDDING_MODEL.to_owned(),
             embedding_dim: DEFAULT_EMBEDDING_DIM,
+            vision: true,
         }
     }
 }
@@ -287,8 +321,6 @@ pub struct SchedulerConfig {
     pub max_concurrent_jobs: u32,
     /// Prometheus metrics port.
     pub metrics_port: u16,
-    /// Root directory for workspaces.
-    pub workspace_root: PathBuf,
     /// Sandbox profile name.
     pub sandbox_profile: String,
 }
@@ -301,7 +333,6 @@ impl Default for SchedulerConfig {
             socket_path: PathBuf::from(DEFAULT_SCHEDULER_SOCKET_PATH),
             max_concurrent_jobs: DEFAULT_SCHEDULER_MAX_CONCURRENT_JOBS,
             metrics_port: DEFAULT_SCHEDULER_METRICS_PORT,
-            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
             sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
@@ -394,8 +425,6 @@ pub struct AgentProcessConfig {
     pub socket_path: PathBuf,
     /// Prometheus metrics port.
     pub metrics_port: u16,
-    /// Root directory for workspaces.
-    pub workspace_root: PathBuf,
     /// Sandbox profile name.
     pub sandbox_profile: String,
 }
@@ -405,7 +434,6 @@ impl Default for AgentProcessConfig {
         Self {
             socket_path: PathBuf::from(DEFAULT_AGENT_SOCKET_PATH),
             metrics_port: DEFAULT_AGENT_METRICS_PORT,
-            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
             sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
@@ -562,6 +590,11 @@ impl AppConfig {
     pub(crate) fn apply_env_overrides(&mut self, get_var: impl Fn(&str) -> Option<String>) {
         let env = EnvSource(&get_var);
 
+        // workspace root
+        if let Some(v) = get_var("SOBER_WORKSPACE_ROOT") {
+            self.workspace_root = PathBuf::from(v);
+        }
+
         // environment
         if let Some(val) = get_var("SOBER_ENV") {
             self.environment = match val.as_str() {
@@ -605,6 +638,9 @@ impl AppConfig {
         if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_EMBEDDING_DIM") {
             self.llm.embedding_dim = v;
         }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_VISION") {
+            self.llm.vision = v;
+        }
 
         // server
         if let Some(v) = get_var("SOBER_SERVER_HOST") {
@@ -645,9 +681,6 @@ impl AppConfig {
         if let Ok(Some(v)) = env.parse_opt("SOBER_AGENT_METRICS_PORT") {
             self.agent.metrics_port = v;
         }
-        if let Some(v) = get_var("SOBER_AGENT_WORKSPACE_ROOT") {
-            self.agent.workspace_root = PathBuf::from(v);
-        }
         if let Some(v) = get_var("SOBER_AGENT_SANDBOX_PROFILE") {
             self.agent.sandbox_profile = v;
         }
@@ -667,9 +700,6 @@ impl AppConfig {
         }
         if let Ok(Some(v)) = env.parse_opt("SOBER_SCHEDULER_METRICS_PORT") {
             self.scheduler.metrics_port = v;
-        }
-        if let Some(v) = get_var("SOBER_SCHEDULER_WORKSPACE_ROOT") {
-            self.scheduler.workspace_root = PathBuf::from(v);
         }
         if let Some(v) = get_var("SOBER_SCHEDULER_SANDBOX_PROFILE") {
             self.scheduler.sandbox_profile = v;
@@ -972,10 +1002,6 @@ max_connections = 20
         let cfg = AgentProcessConfig::default();
         assert_eq!(cfg.socket_path, PathBuf::from("/run/sober/agent.sock"));
         assert_eq!(cfg.metrics_port, 9100);
-        assert_eq!(
-            cfg.workspace_root,
-            PathBuf::from("/var/lib/sober/workspaces")
-        );
         assert_eq!(cfg.sandbox_profile, "standard");
     }
 
@@ -992,10 +1018,6 @@ max_connections = 20
     fn scheduler_config_has_new_fields() {
         let cfg = SchedulerConfig::default();
         assert_eq!(cfg.metrics_port, 9101);
-        assert_eq!(
-            cfg.workspace_root,
-            PathBuf::from("/var/lib/sober/workspaces")
-        );
         assert_eq!(cfg.sandbox_profile, "standard");
     }
 
