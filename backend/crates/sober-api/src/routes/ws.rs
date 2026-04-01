@@ -360,13 +360,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                     let cu_repo = PgConversationUserRepo::new(state.db.clone());
                     let msg_repo = PgMessageRepo::new(state.db.clone());
                     use sober_core::types::{ConversationUserRepo, MessageRepo};
-                    if let Ok(messages) = msg_repo.list_paginated(conv_id, None, 1).await {
-                        if let Some(latest) = messages.first() {
-                            cu_repo
-                                .mark_read(conv_id, auth_user.user_id, latest.id)
-                                .await
-                                .ok();
-                        }
+                    if let Ok(messages) = msg_repo.list_paginated(conv_id, None, 1).await
+                        && let Some(latest) = messages.first()
+                    {
+                        cu_repo
+                            .mark_read(conv_id, auth_user.user_id, latest.id)
+                            .await
+                            .ok();
                     }
                 }
             }
