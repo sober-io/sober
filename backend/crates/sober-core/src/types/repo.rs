@@ -320,18 +320,22 @@ pub trait ConversationUserRepo: Send + Sync {
         role: ConversationUserRole,
     ) -> impl Future<Output = Result<ConversationUser, AppError>> + Send;
 
-    /// Marks a conversation as read for a user (resets unread_count to 0).
+    /// Marks a conversation as read up to a given message for a user.
     fn mark_read(
         &self,
         conversation_id: ConversationId,
         user_id: UserId,
+        last_read_message_id: MessageId,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
-    /// Increments unread_count for all users in a conversation except the sender.
+    /// Increments unread_count for all users whose last_read_message_id is
+    /// before the new message (or NULL), excluding the message author.
+    /// Returns affected user IDs and new counts.
     fn increment_unread(
         &self,
         conversation_id: ConversationId,
-        exclude_user_id: UserId,
+        message_id: MessageId,
+        author_user_id: Option<UserId>,
     ) -> impl Future<Output = Result<Vec<(UserId, i32)>, AppError>> + Send;
 
     /// Gets the membership row for a user in a conversation.

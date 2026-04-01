@@ -4,7 +4,7 @@ use sober_core::{
     error::AppError,
     types::{
         ConversationId, ConversationUser, ConversationUserRepo, ConversationUserRole,
-        ConversationUserWithUsername, UserId,
+        ConversationUserWithUsername, MessageId, UserId,
     },
 };
 use sqlx::PgPool;
@@ -34,7 +34,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
         let row = sqlx::query_as::<_, ConversationUserRow>(
             "INSERT INTO conversation_users (conversation_id, user_id, role) \
              VALUES ($1, $2, $3) \
-             RETURNING conversation_id, user_id, unread_count, last_read_at, role, joined_at",
+             RETURNING conversation_id, user_id, unread_count, last_read_at, last_read_message_id, role, joined_at",
         )
         .bind(conversation_id.as_uuid())
         .bind(user_id.as_uuid())
@@ -50,14 +50,16 @@ impl ConversationUserRepo for PgConversationUserRepo {
         &self,
         conversation_id: ConversationId,
         user_id: UserId,
+        last_read_message_id: MessageId,
     ) -> Result<(), AppError> {
         sqlx::query(
             "UPDATE conversation_users \
-             SET unread_count = 0, last_read_at = now() \
+             SET unread_count = 0, last_read_at = now(), last_read_message_id = $3 \
              WHERE conversation_id = $1 AND user_id = $2",
         )
         .bind(conversation_id.as_uuid())
         .bind(user_id.as_uuid())
+        .bind(last_read_message_id.as_uuid())
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -68,7 +70,8 @@ impl ConversationUserRepo for PgConversationUserRepo {
     async fn increment_unread(
         &self,
         conversation_id: ConversationId,
-        exclude_user_id: UserId,
+        message_id: MessageId,
+        author_user_id: Option<UserId>,
     ) -> Result<Vec<(UserId, i32)>, AppError> {
         #[derive(sqlx::FromRow)]
         struct UnreadRow {
@@ -76,14 +79,24 @@ impl ConversationUserRepo for PgConversationUserRepo {
             unread_count: i32,
         }
 
+        // Exclude the message author — their own messages should not count
+        // as unread for themselves. Use nil UUID when there is no author
+        // (assistant messages) so the exclusion matches nobody.
+        let exclude_id = author_user_id
+            .map(|id| *id.as_uuid())
+            .unwrap_or(uuid::Uuid::nil());
+
         let rows = sqlx::query_as::<_, UnreadRow>(
             "UPDATE conversation_users \
              SET unread_count = unread_count + 1 \
-             WHERE conversation_id = $1 AND user_id != $2 \
+             WHERE conversation_id = $1 \
+               AND user_id != $3 \
+               AND (last_read_message_id IS NULL OR last_read_message_id < $2) \
              RETURNING user_id, unread_count",
         )
         .bind(conversation_id.as_uuid())
-        .bind(exclude_user_id.as_uuid())
+        .bind(message_id.as_uuid())
+        .bind(exclude_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -100,7 +113,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
         user_id: UserId,
     ) -> Result<ConversationUser, AppError> {
         let row = sqlx::query_as::<_, ConversationUserRow>(
-            "SELECT conversation_id, user_id, unread_count, last_read_at, role, joined_at \
+            "SELECT conversation_id, user_id, unread_count, last_read_at, last_read_message_id, role, joined_at \
              FROM conversation_users \
              WHERE conversation_id = $1 AND user_id = $2",
         )
@@ -119,7 +132,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
         conversation_id: ConversationId,
     ) -> Result<Vec<ConversationUser>, AppError> {
         let rows = sqlx::query_as::<_, ConversationUserRow>(
-            "SELECT conversation_id, user_id, unread_count, last_read_at, role, joined_at \
+            "SELECT conversation_id, user_id, unread_count, last_read_at, last_read_message_id, role, joined_at \
              FROM conversation_users \
              WHERE conversation_id = $1",
         )
@@ -147,7 +160,7 @@ impl ConversationUserRepo for PgConversationUserRepo {
     ) -> Result<Vec<ConversationUserWithUsername>, AppError> {
         let rows = sqlx::query_as::<_, ConversationUserWithUsernameRow>(
             "SELECT cu.conversation_id, cu.user_id, u.username, \
-             cu.unread_count, cu.last_read_at, cu.role, cu.joined_at \
+             cu.unread_count, cu.last_read_at, cu.last_read_message_id, cu.role, cu.joined_at \
              FROM conversation_users cu \
              JOIN users u ON cu.user_id = u.id \
              WHERE cu.conversation_id = $1 \
