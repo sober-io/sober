@@ -44,6 +44,7 @@ function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
 		is_archived: false,
 		agent_mode: 'always',
 		unread_count: 0,
+		last_read_message_id: null,
 		tags: [],
 		created_at: '2026-01-15T00:00:00Z',
 		updated_at: '2026-01-15T00:00:00Z',

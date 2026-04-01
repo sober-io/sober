@@ -43,7 +43,11 @@ export const conversationService = {
 
 	getInbox: () => api<Conversation>('/conversations/inbox'),
 
-	markRead: (id: string) => api('/conversations/' + id + '/read', { method: 'POST' }),
+	markRead: (id: string, messageId?: string) =>
+		api('/conversations/' + id + '/read', {
+			method: 'POST',
+			...(messageId ? { body: JSON.stringify({ message_id: messageId }) } : {})
+		}),
 
 	clearMessages: (id: string) => api(`/conversations/${id}/messages`, { method: 'DELETE' }),
 

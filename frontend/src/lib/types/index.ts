@@ -46,6 +46,7 @@ export interface Conversation {
 	is_archived: boolean;
 	agent_mode: AgentMode;
 	unread_count: number;
+	last_read_message_id: string | null;
 	tags: Tag[];
 	created_at: string;
 	updated_at: string;
