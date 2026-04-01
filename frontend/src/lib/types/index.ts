@@ -81,11 +81,15 @@ export interface Message {
 	created_at: string;
 }
 
-export function getMessageText(msg: Message): string {
-	return msg.content
+export function getContentText(blocks: ContentBlock[]): string {
+	return blocks
 		.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
 		.map((b) => b.text)
 		.join('\n');
+}
+
+export function getMessageText(msg: Message): string {
+	return getContentText(msg.content);
 }
 
 export interface ToolExecution {
@@ -155,7 +159,7 @@ export type ServerWsMessage =
 			conversation_id: string;
 			message_id: string;
 			role: string;
-			content: string;
+			content: ContentBlock[];
 			source: string;
 			user_id?: string;
 			username?: string;

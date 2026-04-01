@@ -656,7 +656,11 @@ async fn build_context<R: AgentRepos>(
     // f. Pre-load attachment data for multimodal content blocks (images, files).
     let attachment_data = load_attachment_data(params, &messages_with_execs).await;
 
-    let history_messages = history::to_llm_messages(&messages_with_execs, &attachment_data);
+    let history_messages = history::to_llm_messages(
+        &messages_with_execs,
+        &attachment_data,
+        params.ctx.config.vision,
+    );
 
     Ok((system_prompt, history_messages))
 }

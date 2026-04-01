@@ -213,6 +213,8 @@ pub struct LlmConfig {
     pub embedding_model: String,
     /// Dimensionality of the embedding vectors produced by the embedding model.
     pub embedding_dim: u64,
+    /// Whether the configured model supports vision (image) inputs.
+    pub vision: bool,
 }
 
 impl Default for LlmConfig {
@@ -224,6 +226,7 @@ impl Default for LlmConfig {
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             embedding_model: DEFAULT_EMBEDDING_MODEL.to_owned(),
             embedding_dim: DEFAULT_EMBEDDING_DIM,
+            vision: false,
         }
     }
 }
@@ -634,6 +637,9 @@ impl AppConfig {
         }
         if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_EMBEDDING_DIM") {
             self.llm.embedding_dim = v;
+        }
+        if let Ok(Some(v)) = env.parse_opt("SOBER_LLM_VISION") {
+            self.llm.vision = v;
         }
 
         // server

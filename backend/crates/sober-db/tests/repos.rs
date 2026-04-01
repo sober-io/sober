@@ -10,6 +10,7 @@ use chrono::Utc;
 use sober_core::types::*;
 use sober_db::*;
 use sqlx::PgPool;
+use std::time::Duration;
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
@@ -810,4 +811,399 @@ async fn search_by_user_empty_results(pool: PgPool) -> Result<(), sober_core::er
     assert!(results.is_empty(), "expected no hits for unrelated term");
 
     Ok(())
+}
+
+// ── Conversation Attachments ────────────────────────────────────────────────
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn attachment_create_and_get(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let attach_repo = PgConversationAttachmentRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "attach@example.com", "attachuser")
+        .await
+        .unwrap();
+    let conv = conv_repo
+        .create(user.id, Some("Attach Chat"), None)
+        .await
+        .unwrap();
+
+    let attachment = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "test-blob-key-abc123".to_string(),
+            kind: AttachmentKind::Image,
+            content_type: "image/jpeg".to_string(),
+            filename: "test.jpg".to_string(),
+            size: 12345,
+            metadata: serde_json::json!({"width": 800, "height": 600}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(attachment.blob_key, "test-blob-key-abc123");
+    assert_eq!(attachment.kind, AttachmentKind::Image);
+    assert_eq!(attachment.content_type, "image/jpeg");
+    assert_eq!(attachment.filename, "test.jpg");
+    assert_eq!(attachment.size, 12345);
+    assert_eq!(attachment.conversation_id, conv.id);
+    assert_eq!(attachment.user_id, user.id);
+
+    // Get by ID
+    let fetched = attach_repo.get_by_id(attachment.id).await.unwrap();
+    assert_eq!(fetched.id, attachment.id);
+    assert_eq!(fetched.blob_key, "test-blob-key-abc123");
+    assert_eq!(fetched.kind, AttachmentKind::Image);
+
+    // List by conversation
+    let list = attach_repo.list_by_conversation(conv.id).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, attachment.id);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn text_only_message_roundtrip(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "textonly@example.com", "textonlyuser")
+        .await
+        .unwrap();
+    let conv = conv_repo.create(user.id, None, None).await.unwrap();
+
+    let msg = msg_repo
+        .create(CreateMessage {
+            conversation_id: conv.id,
+            role: MessageRole::User,
+            content: vec![ContentBlock::text("hello")],
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+        .unwrap();
+
+    // Verify content roundtrips correctly
+    assert_eq!(msg.content.len(), 1);
+    match &msg.content[0] {
+        ContentBlock::Text { text } => assert_eq!(text, "hello"),
+        other => panic!("expected Text block, got: {other:?}"),
+    }
+    assert_eq!(msg.text_content(), "hello");
+
+    // Retrieve and verify again
+    let messages = msg_repo.list_by_conversation(conv.id, 10).await.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].text_content(), "hello");
+    assert_eq!(messages[0].content.len(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn multimodal_message_with_attachment(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let attach_repo = PgConversationAttachmentRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "multi@example.com", "multiuser")
+        .await
+        .unwrap();
+    let conv = conv_repo.create(user.id, None, None).await.unwrap();
+
+    let attachment = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-img-001".to_string(),
+            kind: AttachmentKind::Image,
+            content_type: "image/png".to_string(),
+            filename: "photo.png".to_string(),
+            size: 54321,
+            metadata: serde_json::json!({"width": 1024, "height": 768}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    // Create a message with both text and image content blocks
+    let msg = msg_repo
+        .create(CreateMessage {
+            conversation_id: conv.id,
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::text("Check out this image"),
+                ContentBlock::Image {
+                    conversation_attachment_id: attachment.id,
+                    alt: Some("a photo".into()),
+                },
+            ],
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(msg.content.len(), 2);
+
+    // Retrieve and verify both blocks are preserved
+    let messages = msg_repo.list_by_conversation(conv.id, 10).await.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].content.len(), 2);
+
+    match &messages[0].content[0] {
+        ContentBlock::Text { text } => assert_eq!(text, "Check out this image"),
+        other => panic!("expected Text block, got: {other:?}"),
+    }
+    match &messages[0].content[1] {
+        ContentBlock::Image {
+            conversation_attachment_id,
+            alt,
+        } => {
+            assert_eq!(*conversation_attachment_id, attachment.id);
+            assert_eq!(alt.as_deref(), Some("a photo"));
+        }
+        other => panic!("expected Image block, got: {other:?}"),
+    }
+
+    // text_content() should only return text blocks
+    assert_eq!(messages[0].text_content(), "Check out this image");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn conversation_delete_cascades_attachments(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let attach_repo = PgConversationAttachmentRepo::new(pool);
+
+    let user = create_test_user(&user_repo, "cascade@example.com", "cascadeuser")
+        .await
+        .unwrap();
+    let conv = conv_repo
+        .create(user.id, Some("To Delete"), None)
+        .await
+        .unwrap();
+
+    let attachment = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-cascade-001".to_string(),
+            kind: AttachmentKind::Document,
+            content_type: "application/pdf".to_string(),
+            filename: "doc.pdf".to_string(),
+            size: 99999,
+            metadata: serde_json::json!({}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    // Verify attachment exists
+    attach_repo.get_by_id(attachment.id).await.unwrap();
+
+    // Delete the conversation
+    conv_repo.delete(conv.id).await.unwrap();
+
+    // Attachment should be gone (CASCADE)
+    let err = attach_repo.get_by_id(attachment.id).await.unwrap_err();
+    assert!(matches!(err, sober_core::error::AppError::NotFound(_)));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn delete_orphaned_attachments(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let attach_repo = PgConversationAttachmentRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool.clone());
+
+    let user = create_test_user(&user_repo, "orphan@example.com", "orphanuser")
+        .await
+        .unwrap();
+    let conv = conv_repo.create(user.id, None, None).await.unwrap();
+
+    // Create two attachments
+    let referenced = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-ref-001".to_string(),
+            kind: AttachmentKind::Image,
+            content_type: "image/jpeg".to_string(),
+            filename: "referenced.jpg".to_string(),
+            size: 1000,
+            metadata: serde_json::json!({}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    let orphaned = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-orphan-001".to_string(),
+            kind: AttachmentKind::Image,
+            content_type: "image/png".to_string(),
+            filename: "orphaned.png".to_string(),
+            size: 2000,
+            metadata: serde_json::json!({}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    // Create a message referencing only the first attachment
+    msg_repo
+        .create(CreateMessage {
+            conversation_id: conv.id,
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::text("See this"),
+                ContentBlock::Image {
+                    conversation_attachment_id: referenced.id,
+                    alt: None,
+                },
+            ],
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+        .unwrap();
+
+    // Backdate the orphaned attachment to > 24h ago
+    sqlx::query("UPDATE conversation_attachments SET created_at = NOW() - INTERVAL '25 hours' WHERE id = $1")
+        .bind(orphaned.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Call delete_orphaned with 24h threshold
+    let deleted = attach_repo
+        .delete_orphaned(Duration::from_secs(86400))
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+
+    // Referenced attachment still exists
+    attach_repo.get_by_id(referenced.id).await.unwrap();
+
+    // Orphaned attachment is gone
+    let err = attach_repo.get_by_id(orphaned.id).await.unwrap_err();
+    assert!(matches!(err, sober_core::error::AppError::NotFound(_)));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn find_unreferenced_by_message(pool: PgPool) {
+    let user_repo = PgUserRepo::new(pool.clone());
+    let conv_repo = PgConversationRepo::new(pool.clone());
+    let attach_repo = PgConversationAttachmentRepo::new(pool.clone());
+    let msg_repo = PgMessageRepo::new(pool.clone());
+
+    let user = create_test_user(&user_repo, "unref@example.com", "unrefuser")
+        .await
+        .unwrap();
+    let conv = conv_repo.create(user.id, None, None).await.unwrap();
+
+    // Create two attachments
+    let attach1 = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-a1".to_string(),
+            kind: AttachmentKind::Image,
+            content_type: "image/jpeg".to_string(),
+            filename: "a1.jpg".to_string(),
+            size: 100,
+            metadata: serde_json::json!({}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    let attach2 = attach_repo
+        .create(CreateConversationAttachment {
+            blob_key: "blob-a2".to_string(),
+            kind: AttachmentKind::Document,
+            content_type: "application/pdf".to_string(),
+            filename: "a2.pdf".to_string(),
+            size: 200,
+            metadata: serde_json::json!({}),
+            conversation_id: conv.id,
+            user_id: user.id,
+        })
+        .await
+        .unwrap();
+
+    // message1 references attachment1 only
+    msg_repo
+        .create(CreateMessage {
+            conversation_id: conv.id,
+            role: MessageRole::User,
+            content: vec![ContentBlock::Image {
+                conversation_attachment_id: attach1.id,
+                alt: None,
+            }],
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+        .unwrap();
+
+    // message2 references both attachment1 and attachment2
+    let msg2 = msg_repo
+        .create(CreateMessage {
+            conversation_id: conv.id,
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::Image {
+                    conversation_attachment_id: attach1.id,
+                    alt: None,
+                },
+                ContentBlock::File {
+                    conversation_attachment_id: attach2.id,
+                },
+            ],
+            reasoning: None,
+            token_count: None,
+            metadata: None,
+            user_id: None,
+        })
+        .await
+        .unwrap();
+
+    // Both should be referenced
+    let unreferenced = attach_repo
+        .find_unreferenced_by_message(&[attach1.id, attach2.id], conv.id)
+        .await
+        .unwrap();
+    assert!(
+        unreferenced.is_empty(),
+        "both attachments should be referenced, got: {unreferenced:?}"
+    );
+
+    // Delete message2 — now attachment2 is only referenced by message2 (gone)
+    msg_repo.delete(msg2.id).await.unwrap();
+
+    // attachment2 should now be unreferenced (message1 only refs attach1)
+    let unreferenced = attach_repo
+        .find_unreferenced_by_message(&[attach2.id], conv.id)
+        .await
+        .unwrap();
+    assert_eq!(unreferenced.len(), 1);
+    assert_eq!(unreferenced[0], attach2.id);
+
+    // attachment1 should still be referenced (by message1)
+    let unreferenced = attach_repo
+        .find_unreferenced_by_message(&[attach1.id], conv.id)
+        .await
+        .unwrap();
+    assert!(
+        unreferenced.is_empty(),
+        "attachment1 should still be referenced by message1"
+    );
 }

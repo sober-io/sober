@@ -177,8 +177,8 @@ pub enum ServerWsMessage {
         message_id: String,
         /// Role of the message author.
         role: String,
-        /// Message content.
-        content: String,
+        /// Message content blocks.
+        content: Vec<ContentBlock>,
         /// What produced this message.
         source: sober_core::types::access::TriggerKind,
         /// User ID of the sender (if applicable).
@@ -404,16 +404,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                         .await;
                 }
 
-                // Extract text summary for the broadcast message.
-                let text_summary = ContentBlock::extract_text(&content);
-
                 // Broadcast the user's message to all other subscribers
                 // so group members see it in real-time.
                 let user_msg = ServerWsMessage::ChatNewMessage {
                     conversation_id: conversation_id.clone(),
                     message_id: uuid::Uuid::now_v7().to_string(),
                     role: "user".into(),
-                    content: text_summary,
+                    content: content.clone(),
                     source: sober_core::types::access::TriggerKind::Human,
                     user_id: Some(user_id.to_string()),
                     username: Some(username.clone()),

@@ -15,7 +15,7 @@
 		PermissionMode,
 		Tag
 	} from '$lib/types';
-	import { getMessageText } from '$lib/types';
+	import { getMessageText, getContentText } from '$lib/types';
 	import { websocket } from '$lib/stores/websocket.svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -493,8 +493,8 @@
 					messages.push({
 						id: msg.message_id,
 						role: 'user',
-						content: msg.content,
-						contentBlocks: [{ type: 'text', text: msg.content }],
+						content: getContentText(msg.content),
+						contentBlocks: msg.content,
 						thinkingContent: '',
 						streaming: false,
 						thinking: false,
@@ -529,8 +529,8 @@
 				const newMsg: ChatMsg = {
 					id: msg.message_id,
 					role: msg.role as ChatMsg['role'],
-					content: msg.content,
-					contentBlocks: [{ type: 'text', text: msg.content }],
+					content: getContentText(msg.content),
+					contentBlocks: msg.content,
 					thinkingContent: '',
 					streaming: false,
 					thinking: false,

@@ -31,6 +31,7 @@ pub fn test_config() -> AppConfig {
             max_tokens: 1024,
             embedding_model: "test-embed".to_owned(),
             embedding_dim: 1536,
+            vision: false,
         },
         server: ServerConfig {
             host: "127.0.0.1".to_owned(),

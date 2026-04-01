@@ -5,7 +5,7 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
-use sober_core::types::{ConversationId, ConversationUserRepo, UserId};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, UserId};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -193,8 +193,10 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             )
             .unwrap_or(sober_core::types::access::TriggerKind::Human);
 
-            // Extract text content from proto ContentBlock list.
-            let text_content: String = nm
+            // Extract text content from proto ContentBlock list and wrap as
+            // domain ContentBlock. Full proto-to-domain conversion for non-text
+            // blocks can be added later when the API has its own conversion layer.
+            let extracted_text: String = nm
                 .content
                 .iter()
                 .filter_map(|b| match b.block.as_ref()? {
@@ -208,7 +210,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 conversation_id: cid,
                 message_id: nm.message_id,
                 role: nm.role,
-                content: text_content,
+                content: vec![ContentBlock::text(extracted_text)],
                 source,
                 user_id: nm.user_id.filter(|s| !s.is_empty()),
                 username: None,
@@ -276,7 +278,7 @@ mod tests {
                 assert_eq!(conversation_id, "conv-1");
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
-                assert_eq!(content, "hi");
+                assert_eq!(content, vec![ContentBlock::text("hi")]);
                 assert_eq!(source, sober_core::types::access::TriggerKind::Scheduler);
             }
             _ => panic!("unexpected message type"),

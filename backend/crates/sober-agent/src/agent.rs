@@ -123,6 +123,8 @@ pub struct AgentConfig {
     pub max_tokens: u32,
     /// Root directory for workspaces.
     pub workspace_root: PathBuf,
+    /// Whether the configured model supports vision (image) inputs.
+    pub vision: bool,
 }
 
 impl Default for AgentConfig {
@@ -136,6 +138,7 @@ impl Default for AgentConfig {
             embedding_model: "text-embedding-3-small".to_owned(),
             max_tokens: 4096,
             workspace_root: PathBuf::from("/var/lib/sober/workspaces"),
+            vision: false,
         }
     }
 }

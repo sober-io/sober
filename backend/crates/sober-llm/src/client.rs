@@ -401,6 +401,7 @@ mod tests {
             max_tokens: 8192,
             embedding_model: "text-embedding-3-small".to_owned(),
             embedding_dim: 1536,
+            vision: false,
         };
         let engine = OpenAiCompatibleEngine::from_config(&config);
         assert_eq!(engine.model_id(), "anthropic/claude-sonnet-4");

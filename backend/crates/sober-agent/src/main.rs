@@ -257,6 +257,7 @@ async fn main() -> Result<()> {
         embedding_model: config.llm.embedding_model.clone(),
         max_tokens: config.llm.max_tokens,
         workspace_root: config.workspace_root.clone(),
+        vision: config.llm.vision,
         ..AgentConfig::default()
     };
 

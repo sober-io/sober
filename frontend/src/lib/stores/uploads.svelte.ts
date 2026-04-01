@@ -1,5 +1,6 @@
 import { SvelteMap } from 'svelte/reactivity';
 import type { ContentBlock, ConversationAttachment } from '$lib/types';
+import { uploadAttachment } from '$lib/services/attachments';
 
 export type UploadStatus = 'uploading' | 'ready' | 'failed';
 
@@ -28,16 +29,7 @@ export const uploads = (() => {
 			});
 
 			try {
-				const formData = new FormData();
-				formData.append('file', file);
-				const res = await fetch(`/api/v1/conversations/${conversationId}/attachments`, {
-					method: 'POST',
-					body: formData
-				});
-				if (!res.ok) {
-					throw new Error(`Upload failed: ${res.status}`);
-				}
-				const { data } = await res.json();
+				const data = await uploadAttachment(conversationId, file);
 				const current = attachments.get(tempId);
 				if (current) {
 					attachments.set(tempId, { ...current, status: 'ready', attachment: data });
