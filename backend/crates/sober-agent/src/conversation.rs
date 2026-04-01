@@ -20,7 +20,7 @@ use sober_core::types::Conversation;
 use sober_core::types::access::TriggerKind;
 use sober_core::types::domain::WorkspaceSettings;
 use sober_core::types::enums::{AgentMode, MessageRole, ToolExecutionStatus};
-use sober_core::types::ids::{ConversationId, MessageId, UserId};
+use sober_core::types::ids::{ConversationId, UserId};
 use sober_core::types::input::CreateMessage;
 use sober_core::types::repo::{
     ConversationRepo, MessageRepo, ToolExecutionRepo, WorkspaceRepo, WorkspaceSettingsRepo,
@@ -258,27 +258,23 @@ impl<R: AgentRepos> ConversationActor<R> {
         let (workspace_dir, workspace_settings) =
             self.ensure_workspace(&mut conversation, user_id).await;
 
-        // 3. Store user message (human-triggered only)
-        let user_msg_id = if trigger == TriggerKind::Human {
-            let user_msg = self
-                .ctx
-                .repos
-                .messages()
-                .create(CreateMessage {
-                    conversation_id: self.conversation_id,
-                    role: MessageRole::User,
-                    content: content.to_vec(),
-                    reasoning: None,
-                    token_count: None,
-                    metadata: None,
-                    user_id: Some(user_id),
-                })
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
-            user_msg.id
-        } else {
-            MessageId::new()
-        };
+        // 3. Store user message
+        let user_msg = self
+            .ctx
+            .repos
+            .messages()
+            .create(CreateMessage {
+                conversation_id: self.conversation_id,
+                role: MessageRole::User,
+                content: content.to_vec(),
+                reasoning: None,
+                token_count: None,
+                metadata: None,
+                user_id: Some(user_id),
+            })
+            .await
+            .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+        let user_msg_id = user_msg.id;
 
         // 4. Check agent mode — decide whether to run the LLM pipeline
         let should_respond = match conversation.agent_mode {
