@@ -1,11 +1,11 @@
 import { goto } from '$app/navigation';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used inside IIFE closure
+import { resolve } from '$app/paths';
 
 interface NotifyOptions {
 	conversationId: string;
 	title: string;
 	body: string;
-	/** Whether this conversation is currently being viewed. */
-	isActiveConversation?: boolean;
 }
 
 /** Desktop notification permission and dispatch. */
@@ -29,7 +29,8 @@ export const notifications = (() => {
 		const n = new Notification(title, { body, tag: conversationId });
 		n.onclick = () => {
 			window.focus();
-			goto(`/chat/${conversationId}`);
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is called; lint doesn't see through IIFE
+			goto(resolve('/(app)/chat/[id]', { id: conversationId }));
 			n.close();
 		};
 	};

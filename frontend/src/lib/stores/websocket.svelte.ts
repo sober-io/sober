@@ -1,7 +1,9 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { ClientWsMessage, ServerWsMessage } from '$lib/types';
 import { conversations } from '$lib/stores/conversations.svelte';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used inside IIFE closure
 import { notifications } from '$lib/stores/notifications.svelte';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used inside IIFE closure
 import { auth } from '$lib/stores/auth.svelte';
 
 type MessageHandler = (data: ServerWsMessage) => void;

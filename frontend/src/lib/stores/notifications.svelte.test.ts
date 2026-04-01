@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock $app/navigation before importing the module under test
+// Mock $app/navigation and $app/paths before importing the module under test
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/paths', () => ({
+	resolve: (route: string, params?: Record<string, string>) =>
+		route.replace(/\[(\w+)\]/g, (_, key) => params?.[key] ?? '')
+}));
 
 import { notifications } from './notifications.svelte';
 import { goto } from '$app/navigation';
@@ -75,8 +79,7 @@ describe('notifications.notify', () => {
 		notifications.notify({
 			conversationId: 'conv-1',
 			title: 'Alice',
-			body: 'Hello there',
-			isActiveConversation: false
+			body: 'Hello there'
 		});
 
 		expect(MockNotification).not.toHaveBeenCalled();
@@ -95,26 +98,9 @@ describe('notifications.notify', () => {
 		expect(MockNotification).not.toHaveBeenCalled();
 	});
 
-	it('creates a Notification when tab is focused but conversation is not active', () => {
-		mockPermission = 'granted';
-		vi.stubGlobal('document', { hidden: false });
-
-		notifications.notify({
-			conversationId: 'conv-1',
-			title: 'Alice',
-			body: 'Hello there',
-			isActiveConversation: false
-		});
-
-		// Tab is focused — no notification even for non-active conversation.
-		// We only notify when the tab itself is hidden.
-		expect(MockNotification).not.toHaveBeenCalled();
-	});
-
 	it('navigates to conversation on notification click', () => {
 		mockPermission = 'granted';
 		vi.stubGlobal('document', { hidden: true });
-		// Mock window.focus
 		vi.stubGlobal('window', { ...window, focus: vi.fn() });
 
 		notifications.notify({
@@ -126,6 +112,6 @@ describe('notifications.notify', () => {
 		// Simulate click
 		mockNotificationInstance.onclick!();
 		expect(window.focus).toHaveBeenCalled();
-		expect(goto).toHaveBeenCalledWith('/chat/conv-1');
+		expect(goto).toHaveBeenCalledWith('/(app)/chat/conv-1');
 	});
 });
