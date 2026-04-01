@@ -3,7 +3,10 @@
 //! Resizes images to a single variant (max 2048px longest side) and
 //! re-encodes them. GIF files are passed through without modification.
 
+use std::time::Instant;
+
 use image::ImageFormat;
+use metrics::histogram;
 
 use crate::error::WorkspaceError;
 
@@ -33,10 +36,14 @@ const JPEG_QUALITY: u8 = 85;
 ///
 /// Returns an error if the image cannot be decoded.
 pub fn process_image(data: &[u8], content_type: &str) -> Result<ProcessedImage, WorkspaceError> {
+    let start = Instant::now();
+
     // GIF: pass through (animated GIF resize is complex and rarely needed)
     if content_type == "image/gif" {
         let img = image::load_from_memory(data)
             .map_err(|e| WorkspaceError::Internal(format!("failed to decode GIF: {e}")))?;
+        histogram!("sober_attachment_image_processing_seconds")
+            .record(start.elapsed().as_secs_f64());
         return Ok(ProcessedImage {
             data: data.to_vec(),
             content_type: "image/gif".into(),
@@ -79,6 +86,8 @@ pub fn process_image(data: &[u8], content_type: &str) -> Result<ProcessedImage, 
             .map_err(|e| WorkspaceError::Internal(format!("failed to encode JPEG: {e}")))?;
         "image/jpeg".to_string()
     };
+
+    histogram!("sober_attachment_image_processing_seconds").record(start.elapsed().as_secs_f64());
 
     Ok(ProcessedImage {
         data: buf,

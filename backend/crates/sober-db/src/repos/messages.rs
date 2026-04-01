@@ -1,5 +1,6 @@
 //! PostgreSQL implementation of [`MessageRepo`].
 
+use metrics::counter;
 use sober_core::error::AppError;
 use sober_core::types::{
     ContentBlock, ConversationId, CreateMessage, Message, MessageId, MessageSearchHit, UserId,
@@ -47,6 +48,17 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
+
+        for block in &input.content {
+            let block_type = match block {
+                ContentBlock::Text { .. } => "text",
+                ContentBlock::Image { .. } => "image",
+                ContentBlock::File { .. } => "file",
+                ContentBlock::Audio { .. } => "audio",
+                ContentBlock::Video { .. } => "video",
+            };
+            counter!("sober_message_content_blocks_total", "type" => block_type).increment(1);
+        }
 
         Ok(row.into())
     }

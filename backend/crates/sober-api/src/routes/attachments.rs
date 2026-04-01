@@ -1,6 +1,7 @@
 //! Attachment upload and serving endpoints.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Router;
 use axum::body::Body;
@@ -8,6 +9,7 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::{get, post};
+use metrics::{counter, histogram};
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
@@ -41,6 +43,8 @@ async fn upload_attachment(
     Path(id): Path<ConversationId>,
     mut multipart: Multipart,
 ) -> Result<ApiResponse<ConversationAttachment>, AppError> {
+    let start = Instant::now();
+
     // Verify membership.
     let _membership = super::verify_membership(&state.db, id, auth_user.user_id).await?;
 
@@ -127,6 +131,17 @@ async fn upload_attachment(
             user_id: auth_user.user_id,
         })
         .await?;
+
+    let kind_label = match kind {
+        AttachmentKind::Image => "image",
+        AttachmentKind::Audio => "audio",
+        AttachmentKind::Video => "video",
+        AttachmentKind::Document => "document",
+    };
+    counter!("sober_attachment_uploads_total", "kind" => kind_label, "status" => "success")
+        .increment(1);
+    histogram!("sober_attachment_upload_bytes").record(store_data.len() as f64);
+    histogram!("sober_attachment_upload_duration_seconds").record(start.elapsed().as_secs_f64());
 
     Ok(ApiResponse::new(attachment))
 }

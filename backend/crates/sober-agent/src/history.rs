@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
+use metrics::counter;
 use sober_core::types::content::ContentBlock;
 use sober_core::types::domain::ConversationAttachment;
 use sober_core::types::enums::{MessageRole, ToolExecutionStatus};
@@ -64,6 +65,8 @@ fn resolve_content_blocks(
                         llm_blocks.push(LlmContentBlock::ImageUrl {
                             image_url: ImageUrl { url: data_uri },
                         });
+                        counter!("sober_llm_vision_blocks_resolved_total", "action" => "base64")
+                            .increment(1);
                     } else {
                         llm_blocks.push(LlmContentBlock::Text {
                             text: format!(
@@ -71,11 +74,15 @@ fn resolve_content_blocks(
                                 alt.as_deref().unwrap_or("attached image")
                             ),
                         });
+                        counter!("sober_llm_vision_blocks_resolved_total", "action" => "placeholder")
+                            .increment(1);
                     }
                 } else {
                     llm_blocks.push(LlmContentBlock::Text {
                         text: format!("[Image: {}]", alt.as_deref().unwrap_or("attached image")),
                     });
+                    counter!("sober_llm_vision_blocks_resolved_total", "action" => "placeholder")
+                        .increment(1);
                 }
             }
             ContentBlock::File {
