@@ -227,18 +227,30 @@ async fn delete_message(
         })
         .collect();
 
-    msg_repo.delete(id).await?;
+    // Delete message + clean up orphaned attachments atomically.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
-    // Clean up orphaned attachments.
+    PgMessageRepo::delete_tx(&mut tx, id).await?;
+
     if !attachment_ids.is_empty() {
-        let attachment_repo = PgConversationAttachmentRepo::new(state.db.clone());
-        let orphaned = attachment_repo
-            .find_unreferenced_by_message(&attachment_ids, msg.conversation_id)
-            .await?;
+        let orphaned = PgConversationAttachmentRepo::find_unreferenced_by_message_tx(
+            &mut tx,
+            &attachment_ids,
+            msg.conversation_id,
+        )
+        .await?;
         for orphan_id in orphaned {
-            let _ = attachment_repo.delete(orphan_id).await;
+            PgConversationAttachmentRepo::delete_tx(&mut tx, orphan_id).await?;
         }
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     Ok(ApiResponse::new(serde_json::json!({ "deleted": true })))
 }

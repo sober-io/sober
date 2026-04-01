@@ -3,6 +3,7 @@
 use sober_core::error::AppError;
 use sober_core::types::{UserId, Workspace, WorkspaceId, WorkspaceSettings};
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 use crate::rows::{WorkspaceRow, WorkspaceSettingsRow};
@@ -16,6 +17,50 @@ impl PgWorkspaceRepo {
     /// Creates a new repository backed by the given connection pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Provisions a workspace + settings on the given connection.
+    ///
+    /// This contains the raw SQL logic without transaction management,
+    /// allowing callers to compose it into larger transactions.
+    pub async fn provision_tx(
+        conn: &mut PgConnection,
+        user_id: UserId,
+        name: &str,
+        root_path: &str,
+    ) -> Result<(Workspace, WorkspaceSettings), AppError> {
+        let id = Uuid::now_v7();
+        let uid = user_id.as_uuid();
+
+        let ws_row = sqlx::query_as::<_, WorkspaceRow>(
+            "INSERT INTO workspaces (id, user_id, name, root_path, created_by) \
+             VALUES ($1, $2, $3, $4, $2) \
+             RETURNING id, user_id, name, description, root_path, state, \
+                       created_by, archived_at, deleted_at, created_at, updated_at",
+        )
+        .bind(id)
+        .bind(uid)
+        .bind(name)
+        .bind(root_path)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        let settings_row = sqlx::query_as::<_, WorkspaceSettingsRow>(
+            "INSERT INTO workspace_settings (workspace_id) \
+             VALUES ($1) \
+             RETURNING workspace_id, permission_mode, auto_snapshot, max_snapshots, \
+                       sandbox_profile, sandbox_net_mode, sandbox_allowed_domains, \
+                       sandbox_max_execution_seconds, sandbox_allow_spawn, \
+                       disabled_tools, disabled_plugins, \
+                       created_at, updated_at",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok((ws_row.into(), settings_row.into()))
     }
 }
 
@@ -134,46 +179,18 @@ impl sober_core::types::WorkspaceRepo for PgWorkspaceRepo {
         name: &str,
         root_path: &str,
     ) -> Result<(Workspace, WorkspaceSettings), AppError> {
-        let id = Uuid::now_v7();
-        let uid = user_id.as_uuid();
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        let ws_row = sqlx::query_as::<_, WorkspaceRow>(
-            "INSERT INTO workspaces (id, user_id, name, root_path, created_by) \
-             VALUES ($1, $2, $3, $4, $2) \
-             RETURNING id, user_id, name, description, root_path, state, \
-                       created_by, archived_at, deleted_at, created_at, updated_at",
-        )
-        .bind(id)
-        .bind(uid)
-        .bind(name)
-        .bind(root_path)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        let settings_row = sqlx::query_as::<_, WorkspaceSettingsRow>(
-            "INSERT INTO workspace_settings (workspace_id) \
-             VALUES ($1) \
-             RETURNING workspace_id, permission_mode, auto_snapshot, max_snapshots, \
-                       sandbox_profile, sandbox_net_mode, sandbox_allowed_domains, \
-                       sandbox_max_execution_seconds, sandbox_allow_spawn, \
-                       disabled_tools, disabled_plugins, \
-                       created_at, updated_at",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let result = Self::provision_tx(&mut tx, user_id, name, root_path).await?;
 
         tx.commit()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok((ws_row.into(), settings_row.into()))
+        Ok(result)
     }
 }
