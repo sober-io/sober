@@ -6,6 +6,7 @@ use sober_core::types::{
     ListConversationsFilter, Tag, UserId, WorkspaceId,
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 use crate::rows::ConversationRow;
@@ -24,21 +25,15 @@ impl PgConversationRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-}
 
-impl sober_core::types::ConversationRepo for PgConversationRepo {
-    async fn create(
-        &self,
+    /// Creates a conversation + owner membership on the given connection.
+    pub async fn create_tx(
+        conn: &mut PgConnection,
         user_id: UserId,
         title: Option<&str>,
         workspace_id: Option<WorkspaceId>,
     ) -> Result<Conversation, AppError> {
         let id = Uuid::now_v7();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
 
         let row = sqlx::query_as::<_, ConversationRow>(&format!(
             "INSERT INTO conversations (id, user_id, title, workspace_id, kind) \
@@ -49,7 +44,7 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         .bind(user_id.as_uuid())
         .bind(title)
         .bind(workspace_id.map(|w| *w.as_uuid()))
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -60,15 +55,132 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         )
         .bind(id)
         .bind(user_id.as_uuid())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.into())
+    }
+
+    /// Creates an inbox conversation + owner membership on the given connection.
+    pub async fn create_inbox_tx(
+        conn: &mut PgConnection,
+        user_id: UserId,
+    ) -> Result<Conversation, AppError> {
+        let id = Uuid::now_v7();
+
+        let row = sqlx::query_as::<_, ConversationRow>(&format!(
+            "INSERT INTO conversations (id, user_id, kind, created_at, updated_at) \
+                 VALUES ($1, $2, 'inbox', now(), now()) \
+                 RETURNING {CONV_COLUMNS}"
+        ))
+        .bind(id)
+        .bind(user_id.as_uuid())
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        // Also create a conversation_users row with role = 'owner'.
+        sqlx::query(
+            "INSERT INTO conversation_users (conversation_id, user_id, role) \
+             VALUES ($1, $2, 'owner')",
+        )
+        .bind(id)
+        .bind(user_id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.into())
+    }
+
+    /// Updates conversation title on the given connection.
+    pub async fn update_title_tx(
+        conn: &mut PgConnection,
+        id: ConversationId,
+        title: &str,
+    ) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2")
+                .bind(title)
+                .bind(id.as_uuid())
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
+
+    /// Converts a direct conversation to group on the given connection.
+    pub async fn convert_to_group_tx(
+        conn: &mut PgConnection,
+        id: ConversationId,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET kind = 'group', updated_at = now() \
+             WHERE id = $1 AND kind = 'direct'",
+        )
+        .bind(id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::Validation(
+                "conversation is not a direct conversation".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Updates agent mode on the given connection.
+    pub async fn update_agent_mode_tx(
+        conn: &mut PgConnection,
+        id: ConversationId,
+        agent_mode: AgentMode,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversations SET agent_mode = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(id.as_uuid())
+        .bind(agent_mode)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation".into()));
+        }
+
+        Ok(())
+    }
+}
+
+impl sober_core::types::ConversationRepo for PgConversationRepo {
+    async fn create(
+        &self,
+        user_id: UserId,
+        title: Option<&str>,
+        workspace_id: Option<WorkspaceId>,
+    ) -> Result<Conversation, AppError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        let conv = Self::create_tx(&mut tx, user_id, title, workspace_id).await?;
 
         tx.commit()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.into())
+        Ok(conv)
     }
 
     async fn get_by_id(&self, id: ConversationId) -> Result<Conversation, AppError> {
@@ -98,19 +210,12 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
     }
 
     async fn update_title(&self, id: ConversationId, title: &str) -> Result<(), AppError> {
-        let result =
-            sqlx::query("UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2")
-                .bind(title)
-                .bind(id.as_uuid())
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound("conversation".into()));
-        }
-
-        Ok(())
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Self::update_title_tx(&mut conn, id, title).await
     }
 
     async fn delete(&self, id: ConversationId) -> Result<(), AppError> {
@@ -313,40 +418,19 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
     }
 
     async fn create_inbox(&self, user_id: UserId) -> Result<Conversation, AppError> {
-        let id = Uuid::now_v7();
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        let row = sqlx::query_as::<_, ConversationRow>(&format!(
-            "INSERT INTO conversations (id, user_id, kind, created_at, updated_at) \
-                 VALUES ($1, $2, 'inbox', now(), now()) \
-                 RETURNING {CONV_COLUMNS}"
-        ))
-        .bind(id)
-        .bind(user_id.as_uuid())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        // Also create a conversation_users row with role = 'owner'.
-        sqlx::query(
-            "INSERT INTO conversation_users (conversation_id, user_id, role) \
-             VALUES ($1, $2, 'owner')",
-        )
-        .bind(id)
-        .bind(user_id.as_uuid())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let conv = Self::create_inbox_tx(&mut tx, user_id).await?;
 
         tx.commit()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        Ok(row.into())
+        Ok(conv)
     }
 
     async fn update_archived(&self, id: ConversationId, archived: bool) -> Result<(), AppError> {
@@ -389,39 +473,21 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
         id: ConversationId,
         agent_mode: AgentMode,
     ) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE conversations SET agent_mode = $2, updated_at = now() WHERE id = $1",
-        )
-        .bind(id.as_uuid())
-        .bind(agent_mode)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound("conversation".into()));
-        }
-
-        Ok(())
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Self::update_agent_mode_tx(&mut conn, id, agent_mode).await
     }
 
     async fn convert_to_group(&self, id: ConversationId) -> Result<(), AppError> {
-        let result = sqlx::query(
-            "UPDATE conversations SET kind = 'group', updated_at = now() \
-             WHERE id = $1 AND kind = 'direct'",
-        )
-        .bind(id.as_uuid())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::Validation(
-                "conversation is not a direct conversation".into(),
-            ));
-        }
-
-        Ok(())
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Self::convert_to_group_tx(&mut conn, id).await
     }
 
     async fn convert_to_direct(&self, id: ConversationId) -> Result<(), AppError> {

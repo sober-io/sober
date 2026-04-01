@@ -6,6 +6,7 @@ use sober_core::types::{
     ContentBlock, ConversationId, CreateMessage, Message, MessageId, MessageSearchHit, UserId,
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 use crate::rows::{MessageRow, MessageSearchHitRow};
@@ -24,6 +25,35 @@ impl PgMessageRepo {
     /// Creates a new repository backed by the given connection pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Deletes a message on the given connection.
+    pub async fn delete_tx(conn: &mut PgConnection, id: MessageId) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM conversation_messages WHERE id = $1")
+            .bind(id.as_uuid())
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("message".into()));
+        }
+
+        Ok(())
+    }
+
+    /// Clears all messages in a conversation on the given connection.
+    pub async fn clear_conversation_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+    ) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM conversation_messages WHERE conversation_id = $1")
+            .bind(conversation_id.as_uuid())
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
     }
 }
 
@@ -132,27 +162,21 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
     }
 
     async fn delete(&self, id: MessageId) -> Result<(), AppError> {
-        let result = sqlx::query("DELETE FROM conversation_messages WHERE id = $1")
-            .bind(id.as_uuid())
-            .execute(&self.pool)
+        let mut conn = self
+            .pool
+            .acquire()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound("message".into()));
-        }
-
-        Ok(())
+        Self::delete_tx(&mut conn, id).await
     }
 
     async fn clear_conversation(&self, conversation_id: ConversationId) -> Result<(), AppError> {
-        sqlx::query("DELETE FROM conversation_messages WHERE conversation_id = $1")
-            .bind(conversation_id.as_uuid())
-            .execute(&self.pool)
+        let mut conn = self
+            .pool
+            .acquire()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
-
-        Ok(())
+        Self::clear_conversation_tx(&mut conn, conversation_id).await
     }
 
     async fn get_by_id(&self, id: MessageId) -> Result<Message, AppError> {
