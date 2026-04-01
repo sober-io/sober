@@ -13,7 +13,7 @@ export interface AttachmentState {
 }
 
 export const uploads = (() => {
-	let attachments = $state(new SvelteMap<string, AttachmentState>());
+	const attachments = new SvelteMap<string, AttachmentState>();
 
 	async function addFiles(conversationId: string, files: FileList | File[]) {
 		for (const file of files) {

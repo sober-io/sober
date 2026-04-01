@@ -9,6 +9,10 @@
 	const src = $derived(`/api/v1/attachments/${attachmentId}/content`);
 </script>
 
-<a href={src} target="_blank" rel="noopener noreferrer" class="inline-block">
+<button
+	type="button"
+	onclick={() => window.open(src, '_blank')}
+	class="inline-block cursor-pointer border-0 bg-transparent p-0"
+>
 	<img loading="lazy" {src} {alt} class="max-h-96 max-w-full rounded-md object-contain" />
-</a>
+</button>

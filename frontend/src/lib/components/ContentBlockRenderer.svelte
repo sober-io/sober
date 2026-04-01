@@ -13,7 +13,7 @@
 	let { blocks, attachments, streaming = false }: Props = $props();
 </script>
 
-{#each blocks as block, i}
+{#each blocks as block (block.type === 'text' ? `text-${blocks.indexOf(block)}` : block.type === 'image' || block.type === 'file' || block.type === 'audio' || block.type === 'video' ? block.conversation_attachment_id : blocks.indexOf(block))}
 	{#if block.type === 'text'}
 		{@const rendered = block.text ? (highlighterReady.version, renderMarkdown(block.text)) : ''}
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- DOMPurify-sanitized in renderMarkdown -->
