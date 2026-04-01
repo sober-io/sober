@@ -226,7 +226,7 @@ impl Default for LlmConfig {
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             embedding_model: DEFAULT_EMBEDDING_MODEL.to_owned(),
             embedding_dim: DEFAULT_EMBEDDING_DIM,
-            vision: false,
+            vision: true,
         }
     }
 }
