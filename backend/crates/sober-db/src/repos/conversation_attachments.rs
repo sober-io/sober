@@ -128,7 +128,10 @@ impl sober_core::types::ConversationAttachmentRepo for PgConversationAttachmentR
                AND NOT EXISTS ( \
                    SELECT 1 FROM conversation_messages cm \
                    WHERE cm.conversation_id = ca.conversation_id \
-                     AND cm.content::text LIKE '%' || ca.id::text || '%' \
+                     AND EXISTS ( \
+                         SELECT 1 FROM jsonb_array_elements(cm.content) AS elem \
+                         WHERE elem->>'conversation_attachment_id' = ca.id::text \
+                     ) \
                ) \
              RETURNING ca.id",
         )
@@ -157,7 +160,10 @@ impl sober_core::types::ConversationAttachmentRepo for PgConversationAttachmentR
              WHERE NOT EXISTS ( \
                  SELECT 1 FROM conversation_messages cm \
                  WHERE cm.conversation_id = $2 \
-                   AND cm.content::text LIKE '%' || a.id::text || '%' \
+                   AND EXISTS ( \
+                       SELECT 1 FROM jsonb_array_elements(cm.content) AS elem \
+                       WHERE elem->>'conversation_attachment_id' = a.id::text \
+                   ) \
              )",
         )
         .bind(&uuids)

@@ -170,15 +170,16 @@ pub fn validate_content_type(data: &[u8]) -> Option<&'static str> {
 
 /// Derives the attachment kind from a validated content type.
 #[must_use]
-pub fn derive_attachment_kind(content_type: &str) -> &'static str {
+pub fn derive_attachment_kind(content_type: &str) -> sober_core::types::AttachmentKind {
+    use sober_core::types::AttachmentKind;
     if content_type.starts_with("image/") {
-        "image"
+        AttachmentKind::Image
     } else if content_type.starts_with("audio/") {
-        "audio"
+        AttachmentKind::Audio
     } else if content_type.starts_with("video/") {
-        "video"
+        AttachmentKind::Video
     } else {
-        "document"
+        AttachmentKind::Document
     }
 }
 
@@ -225,12 +226,19 @@ mod tests {
 
     #[test]
     fn derive_kind_from_content_type() {
-        assert_eq!(derive_attachment_kind("image/jpeg"), "image");
-        assert_eq!(derive_attachment_kind("image/png"), "image");
-        assert_eq!(derive_attachment_kind("audio/mpeg"), "audio");
-        assert_eq!(derive_attachment_kind("video/mp4"), "video");
-        assert_eq!(derive_attachment_kind("application/pdf"), "document");
-        assert_eq!(derive_attachment_kind("text/plain"), "document");
+        use sober_core::types::AttachmentKind;
+        assert_eq!(derive_attachment_kind("image/jpeg"), AttachmentKind::Image);
+        assert_eq!(derive_attachment_kind("image/png"), AttachmentKind::Image);
+        assert_eq!(derive_attachment_kind("audio/mpeg"), AttachmentKind::Audio);
+        assert_eq!(derive_attachment_kind("video/mp4"), AttachmentKind::Video);
+        assert_eq!(
+            derive_attachment_kind("application/pdf"),
+            AttachmentKind::Document
+        );
+        assert_eq!(
+            derive_attachment_kind("text/plain"),
+            AttachmentKind::Document
+        );
     }
 
     #[test]

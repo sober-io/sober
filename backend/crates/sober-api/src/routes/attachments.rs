@@ -81,13 +81,7 @@ async fn upload_attachment(
         .ok_or_else(|| AppError::Validation("unsupported or unrecognised file type".into()))?;
 
     // Derive attachment kind from content type.
-    let kind_str = image_processing::derive_attachment_kind(content_type);
-    let kind = match kind_str {
-        "image" => AttachmentKind::Image,
-        "audio" => AttachmentKind::Audio,
-        "video" => AttachmentKind::Video,
-        _ => AttachmentKind::Document,
-    };
+    let kind = image_processing::derive_attachment_kind(content_type);
 
     // Process the file based on kind.
     let (store_data, final_content_type, metadata) = match kind {

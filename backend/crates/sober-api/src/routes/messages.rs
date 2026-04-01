@@ -205,7 +205,41 @@ async fn delete_message(
         return Err(AppError::NotFound("message not found".into()));
     }
 
+    // Extract attachment IDs from content blocks before deleting.
+    let attachment_ids: Vec<ConversationAttachmentId> = msg
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Image {
+                conversation_attachment_id,
+                ..
+            }
+            | ContentBlock::File {
+                conversation_attachment_id,
+            }
+            | ContentBlock::Audio {
+                conversation_attachment_id,
+            }
+            | ContentBlock::Video {
+                conversation_attachment_id,
+            } => Some(*conversation_attachment_id),
+            ContentBlock::Text { .. } => None,
+        })
+        .collect();
+
     msg_repo.delete(id).await?;
+
+    // Clean up orphaned attachments.
+    if !attachment_ids.is_empty() {
+        let attachment_repo = PgConversationAttachmentRepo::new(state.db.clone());
+        let orphaned = attachment_repo
+            .find_unreferenced_by_message(&attachment_ids, msg.conversation_id)
+            .await?;
+        for orphan_id in orphaned {
+            let _ = attachment_repo.delete(orphan_id).await;
+        }
+    }
+
     Ok(ApiResponse::new(serde_json::json!({ "deleted": true })))
 }
 
