@@ -42,6 +42,51 @@ impl PgMessageRepo {
         Ok(())
     }
 
+    /// Creates a message and increments unread counts on the given connection.
+    pub async fn create_tx(
+        conn: &mut PgConnection,
+        input: CreateMessage,
+    ) -> Result<Message, AppError> {
+        let id = Uuid::now_v7();
+        let row = sqlx::query_as::<_, MessageRow>(
+            &format!(
+                "INSERT INTO conversation_messages (id, conversation_id, role, content, reasoning, token_count, metadata, user_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                 RETURNING {MSG_COLUMNS}"
+            ),
+        )
+        .bind(id)
+        .bind(input.conversation_id.as_uuid())
+        .bind(input.role)
+        .bind(sqlx::types::Json(&input.content))
+        .bind(&input.reasoning)
+        .bind(input.token_count)
+        .bind(&input.metadata)
+        .bind(input.user_id.map(|u| *u.as_uuid()))
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        // Increment unread for all conversation members whose read position
+        // is before this message (or NULL), excluding the message author.
+        let exclude_author = input.user_id.map(|u| *u.as_uuid()).unwrap_or(Uuid::nil());
+        sqlx::query(
+            "UPDATE conversation_users \
+             SET unread_count = unread_count + 1 \
+             WHERE conversation_id = $1 \
+               AND user_id != $3 \
+               AND (last_read_message_id IS NULL OR last_read_message_id < $2)",
+        )
+        .bind(input.conversation_id.as_uuid())
+        .bind(id)
+        .bind(exclude_author)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.into())
+    }
+
     /// Clears all messages in a conversation on the given connection.
     pub async fn clear_conversation_tx(
         conn: &mut PgConnection,
@@ -59,46 +104,21 @@ impl PgMessageRepo {
 
 impl sober_core::types::MessageRepo for PgMessageRepo {
     async fn create(&self, input: CreateMessage) -> Result<Message, AppError> {
-        let id = Uuid::now_v7();
-        let row = sqlx::query_as::<_, MessageRow>(
-            &format!(
-                "INSERT INTO conversation_messages (id, conversation_id, role, content, reasoning, token_count, metadata, user_id) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
-                 RETURNING {MSG_COLUMNS}"
-            ),
-        )
-        .bind(id)
-        .bind(input.conversation_id.as_uuid())
-        .bind(input.role)
-        .bind(sqlx::types::Json(&input.content))
-        .bind(&input.reasoning)
-        .bind(input.token_count)
-        .bind(&input.metadata)
-        .bind(input.user_id.map(|u| *u.as_uuid()))
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let content = input.content.clone();
 
-        // Increment unread for all conversation members whose read position
-        // is before this message (or NULL), excluding the message author.
-        // This is the single centralized path for unread tracking — every
-        // stored message goes through here.
-        let exclude_author = input.user_id.map(|u| *u.as_uuid()).unwrap_or(Uuid::nil());
-        sqlx::query(
-            "UPDATE conversation_users \
-             SET unread_count = unread_count + 1 \
-             WHERE conversation_id = $1 \
-               AND user_id != $3 \
-               AND (last_read_message_id IS NULL OR last_read_message_id < $2)",
-        )
-        .bind(input.conversation_id.as_uuid())
-        .bind(id)
-        .bind(exclude_author)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
 
-        for block in &input.content {
+        let msg = Self::create_tx(&mut tx, input).await?;
+
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        for block in &content {
             let block_type = match block {
                 ContentBlock::Text { .. } => "text",
                 ContentBlock::Image { .. } => "image",
@@ -109,7 +129,7 @@ impl sober_core::types::MessageRepo for PgMessageRepo {
             counter!("sober_message_content_blocks_total", "type" => block_type).increment(1);
         }
 
-        Ok(row.into())
+        Ok(msg)
     }
 
     async fn list_by_conversation(

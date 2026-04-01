@@ -244,7 +244,7 @@ async fn delete_message(
         )
         .await?;
         for orphan_id in orphaned {
-            let _ = PgConversationAttachmentRepo::delete_tx(&mut tx, orphan_id).await;
+            PgConversationAttachmentRepo::delete_tx(&mut tx, orphan_id).await?;
         }
     }
 
