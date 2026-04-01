@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
     );
 
     // 10. Resolve workspace and sandbox configuration
-    let workspace_root = config.agent.workspace_root.clone();
+    let workspace_root = config.workspace_root.clone();
     let sandbox_profile = match config.agent.sandbox_profile.as_str() {
         "unrestricted" => SandboxProfile::Unrestricted,
         "locked_down" => SandboxProfile::LockedDown,
@@ -256,7 +256,7 @@ async fn main() -> Result<()> {
         model: config.llm.model.clone(),
         embedding_model: config.llm.embedding_model.clone(),
         max_tokens: config.llm.max_tokens,
-        workspace_root: config.agent.workspace_root.clone(),
+        workspace_root: config.workspace_root.clone(),
         ..AgentConfig::default()
     };
 

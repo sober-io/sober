@@ -109,7 +109,7 @@ async fn create_conversation(
         .collect::<String>();
     let ws_root = format!(
         "{}/{}",
-        state.config.agent.workspace_root.display(),
+        state.config.workspace_root.display(),
         uuid::Uuid::now_v7()
     );
     let (workspace, _settings) = ws_repo

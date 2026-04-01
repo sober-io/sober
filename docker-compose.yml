@@ -140,7 +140,7 @@ services:
       SOBER_AGENT_SOCKET_PATH: /run/sober/agent.sock
       SOBER_AGENT_SANDBOX_PROFILE: unrestricted
       SOBER_AGENT_METRICS_PORT: "9100"
-      SOBER_AGENT_WORKSPACE_ROOT: /var/lib/sober/workspaces
+      SOBER_WORKSPACE_ROOT: /var/lib/sober/workspaces
       SOBER_ADMIN_SOCKET_PATH: /run/sober/agent-admin.sock
       SOBER_SEARXNG_URL: http://searxng:8080
       OTEL_SERVICE_NAME: sober-agent
@@ -202,7 +202,7 @@ services:
       SOBER_SCHEDULER_SOCKET_PATH: /run/sober/scheduler.sock
       SOBER_SCHEDULER_MAX_CONCURRENT_JOBS: "10"
       SOBER_SCHEDULER_METRICS_PORT: "9101"
-      SOBER_SCHEDULER_WORKSPACE_ROOT: /var/lib/sober/workspaces
+      SOBER_WORKSPACE_ROOT: /var/lib/sober/workspaces
       SOBER_SCHEDULER_SANDBOX_PROFILE: unrestricted
       OTEL_SERVICE_NAME: sober-scheduler
     volumes:

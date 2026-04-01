@@ -318,8 +318,6 @@ pub struct SchedulerConfig {
     pub max_concurrent_jobs: u32,
     /// Prometheus metrics port.
     pub metrics_port: u16,
-    /// Root directory for workspaces.
-    pub workspace_root: PathBuf,
     /// Sandbox profile name.
     pub sandbox_profile: String,
 }
@@ -332,7 +330,6 @@ impl Default for SchedulerConfig {
             socket_path: PathBuf::from(DEFAULT_SCHEDULER_SOCKET_PATH),
             max_concurrent_jobs: DEFAULT_SCHEDULER_MAX_CONCURRENT_JOBS,
             metrics_port: DEFAULT_SCHEDULER_METRICS_PORT,
-            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
             sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
@@ -425,8 +422,6 @@ pub struct AgentProcessConfig {
     pub socket_path: PathBuf,
     /// Prometheus metrics port.
     pub metrics_port: u16,
-    /// Root directory for workspaces.
-    pub workspace_root: PathBuf,
     /// Sandbox profile name.
     pub sandbox_profile: String,
 }
@@ -436,7 +431,6 @@ impl Default for AgentProcessConfig {
         Self {
             socket_path: PathBuf::from(DEFAULT_AGENT_SOCKET_PATH),
             metrics_port: DEFAULT_AGENT_METRICS_PORT,
-            workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
             sandbox_profile: DEFAULT_SANDBOX_PROFILE.to_owned(),
         }
     }
@@ -593,7 +587,7 @@ impl AppConfig {
     pub(crate) fn apply_env_overrides(&mut self, get_var: impl Fn(&str) -> Option<String>) {
         let env = EnvSource(&get_var);
 
-        // workspace root (shared across services)
+        // workspace root
         if let Some(v) = get_var("SOBER_WORKSPACE_ROOT") {
             self.workspace_root = PathBuf::from(v);
         }
@@ -681,9 +675,6 @@ impl AppConfig {
         if let Ok(Some(v)) = env.parse_opt("SOBER_AGENT_METRICS_PORT") {
             self.agent.metrics_port = v;
         }
-        if let Some(v) = get_var("SOBER_AGENT_WORKSPACE_ROOT") {
-            self.agent.workspace_root = PathBuf::from(v);
-        }
         if let Some(v) = get_var("SOBER_AGENT_SANDBOX_PROFILE") {
             self.agent.sandbox_profile = v;
         }
@@ -703,9 +694,6 @@ impl AppConfig {
         }
         if let Ok(Some(v)) = env.parse_opt("SOBER_SCHEDULER_METRICS_PORT") {
             self.scheduler.metrics_port = v;
-        }
-        if let Some(v) = get_var("SOBER_SCHEDULER_WORKSPACE_ROOT") {
-            self.scheduler.workspace_root = PathBuf::from(v);
         }
         if let Some(v) = get_var("SOBER_SCHEDULER_SANDBOX_PROFILE") {
             self.scheduler.sandbox_profile = v;
@@ -1008,10 +996,6 @@ max_connections = 20
         let cfg = AgentProcessConfig::default();
         assert_eq!(cfg.socket_path, PathBuf::from("/run/sober/agent.sock"));
         assert_eq!(cfg.metrics_port, 9100);
-        assert_eq!(
-            cfg.workspace_root,
-            PathBuf::from("/var/lib/sober/workspaces")
-        );
         assert_eq!(cfg.sandbox_profile, "standard");
     }
 
@@ -1028,10 +1012,6 @@ max_connections = 20
     fn scheduler_config_has_new_fields() {
         let cfg = SchedulerConfig::default();
         assert_eq!(cfg.metrics_port, 9101);
-        assert_eq!(
-            cfg.workspace_root,
-            PathBuf::from("/var/lib/sober/workspaces")
-        );
         assert_eq!(cfg.sandbox_profile, "standard");
     }
 

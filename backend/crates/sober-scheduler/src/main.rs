@@ -165,7 +165,6 @@ fn build_executor_registry(
 
     // Artifact executor
     let blob_root = config
-        .scheduler
         .workspace_root
         .join(sober_workspace::SOBER_DIR)
         .join("blobs");
