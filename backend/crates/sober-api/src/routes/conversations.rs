@@ -96,10 +96,6 @@ async fn create_conversation(
     auth_user: AuthUser,
     Json(body): Json<CreateConversationRequest>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let ws_repo = PgWorkspaceRepo::new(state.db.clone());
-    let conv_repo = PgConversationRepo::new(state.db.clone());
-
-    // Provision workspace + settings atomically.
     let ws_name = body
         .title
         .as_deref()
@@ -112,14 +108,28 @@ async fn create_conversation(
         state.config.workspace_root.display(),
         uuid::Uuid::now_v7()
     );
-    let (workspace, _settings) = ws_repo
-        .provision(auth_user.user_id, &ws_name, &ws_root)
-        .await?;
 
-    // Create conversation linked to the new workspace.
-    let conversation = conv_repo
-        .create(auth_user.user_id, body.title.as_deref(), Some(workspace.id))
-        .await?;
+    // Provision workspace + conversation atomically in a single transaction.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    let (workspace, _settings) =
+        PgWorkspaceRepo::provision_tx(&mut tx, auth_user.user_id, &ws_name, &ws_root).await?;
+
+    let conversation = PgConversationRepo::create_tx(
+        &mut tx,
+        auth_user.user_id,
+        body.title.as_deref(),
+        Some(workspace.id),
+    )
+    .await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": conversation.id.to_string(),
@@ -344,13 +354,6 @@ async fn update_settings(
         .workspace_id
         .ok_or_else(|| AppError::NotFound("workspace_settings".into()))?;
 
-    // Update agent_mode on conversation if provided.
-    if let Some(agent_mode) = body.agent_mode {
-        conv_repo
-            .update_agent_mode(conversation_id, agent_mode)
-            .await?;
-    }
-
     // Load current settings and apply partial updates.
     let mut settings = ws_settings_repo.get_by_workspace(ws_id).await?;
 
@@ -388,7 +391,22 @@ async fn update_settings(
             .collect();
     }
 
-    let updated = ws_settings_repo.upsert(&settings).await?;
+    // Update agent_mode + workspace settings atomically.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    if let Some(agent_mode) = body.agent_mode {
+        PgConversationRepo::update_agent_mode_tx(&mut tx, conversation_id, agent_mode).await?;
+    }
+
+    let updated = PgWorkspaceSettingsRepo::upsert_tx(&mut tx, &settings).await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     // Re-fetch conversation for current agent_mode.
     let conv = conv_repo.get_by_id(conversation_id).await?;
@@ -528,8 +546,17 @@ async fn convert_to_group(
         ));
     }
 
-    conv_repo.convert_to_group(conversation_id).await?;
-    conv_repo.update_title(conversation_id, &body.title).await?;
+    // Convert kind + update title atomically.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    PgConversationRepo::convert_to_group_tx(&mut tx, conversation_id).await?;
+    PgConversationRepo::update_title_tx(&mut tx, conversation_id, &body.title).await?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     let updated = conv_repo.get_by_id(conversation_id).await?;
 
@@ -557,10 +584,17 @@ async fn clear_messages(
         return Err(AppError::Forbidden);
     }
 
-    let msg_repo = PgMessageRepo::new(state.db.clone());
-    let cu_repo = PgConversationUserRepo::new(state.db.clone());
-    msg_repo.clear_conversation(conversation_id).await?;
-    cu_repo.reset_all_unread(conversation_id).await?;
+    // Clear messages + reset unread counts atomically.
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    PgMessageRepo::clear_conversation_tx(&mut tx, conversation_id).await?;
+    PgConversationUserRepo::reset_all_unread_tx(&mut tx, conversation_id).await?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     Ok(ApiResponse::new(serde_json::json!({"ok": true})))
 }

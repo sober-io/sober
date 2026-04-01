@@ -8,6 +8,7 @@ use sober_core::{
     },
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 use crate::rows::{ConversationUserRow, ConversationUserWithUsernameRow};
@@ -21,6 +22,20 @@ impl PgConversationUserRepo {
     /// Creates a new repository backed by the given connection pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Resets unread counts for all members of a conversation on the given connection.
+    pub async fn reset_all_unread_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+    ) -> Result<(), AppError> {
+        sqlx::query("UPDATE conversation_users SET unread_count = 0 WHERE conversation_id = $1")
+            .bind(conversation_id.as_uuid())
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
     }
 }
 
@@ -145,13 +160,12 @@ impl ConversationUserRepo for PgConversationUserRepo {
     }
 
     async fn reset_all_unread(&self, conversation_id: ConversationId) -> Result<(), AppError> {
-        sqlx::query("UPDATE conversation_users SET unread_count = 0 WHERE conversation_id = $1")
-            .bind(conversation_id.as_uuid())
-            .execute(&self.pool)
+        let mut conn = self
+            .pool
+            .acquire()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
-
-        Ok(())
+        Self::reset_all_unread_tx(&mut conn, conversation_id).await
     }
 
     async fn list_collaborators(

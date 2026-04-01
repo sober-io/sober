@@ -5,6 +5,7 @@ use sober_core::types::{
     ConversationAttachment, ConversationAttachmentId, ConversationId, CreateConversationAttachment,
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 use crate::rows::ConversationAttachmentRow;
@@ -23,6 +24,60 @@ impl PgConversationAttachmentRepo {
     /// Creates a new repository backed by the given connection pool.
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Finds attachment IDs not referenced by any message on the given connection.
+    pub async fn find_unreferenced_by_message_tx(
+        conn: &mut PgConnection,
+        conversation_attachment_ids: &[ConversationAttachmentId],
+        conversation_id: ConversationId,
+    ) -> Result<Vec<ConversationAttachmentId>, AppError> {
+        if conversation_attachment_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let uuids: Vec<Uuid> = conversation_attachment_ids
+            .iter()
+            .map(|id| *id.as_uuid())
+            .collect();
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT a.id FROM unnest($1::uuid[]) AS a(id) \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM conversation_messages cm \
+                 WHERE cm.conversation_id = $2 \
+                   AND EXISTS ( \
+                       SELECT 1 FROM jsonb_array_elements(cm.content) AS elem \
+                       WHERE elem->>'conversation_attachment_id' = a.id::text \
+                   ) \
+             )",
+        )
+        .bind(&uuids)
+        .bind(conversation_id.as_uuid())
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id,)| ConversationAttachmentId::from_uuid(id))
+            .collect())
+    }
+
+    /// Deletes an attachment on the given connection.
+    pub async fn delete_tx(
+        conn: &mut PgConnection,
+        id: ConversationAttachmentId,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM conversation_attachments WHERE id = $1")
+            .bind(id.as_uuid())
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("attachment".into()));
+        }
+
+        Ok(())
     }
 }
 
@@ -107,17 +162,12 @@ impl sober_core::types::ConversationAttachmentRepo for PgConversationAttachmentR
     }
 
     async fn delete(&self, id: ConversationAttachmentId) -> Result<(), AppError> {
-        let result = sqlx::query("DELETE FROM conversation_attachments WHERE id = $1")
-            .bind(id.as_uuid())
-            .execute(&self.pool)
+        let mut conn = self
+            .pool
+            .acquire()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound("attachment".into()));
-        }
-
-        Ok(())
+        Self::delete_tx(&mut conn, id).await
     }
 
     async fn delete_orphaned(&self, max_age: std::time::Duration) -> Result<u64, AppError> {
@@ -148,34 +198,17 @@ impl sober_core::types::ConversationAttachmentRepo for PgConversationAttachmentR
         conversation_attachment_ids: &[ConversationAttachmentId],
         conversation_id: ConversationId,
     ) -> Result<Vec<ConversationAttachmentId>, AppError> {
-        if conversation_attachment_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let uuids: Vec<Uuid> = conversation_attachment_ids
-            .iter()
-            .map(|id| *id.as_uuid())
-            .collect();
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
-            "SELECT a.id FROM unnest($1::uuid[]) AS a(id) \
-             WHERE NOT EXISTS ( \
-                 SELECT 1 FROM conversation_messages cm \
-                 WHERE cm.conversation_id = $2 \
-                   AND EXISTS ( \
-                       SELECT 1 FROM jsonb_array_elements(cm.content) AS elem \
-                       WHERE elem->>'conversation_attachment_id' = a.id::text \
-                   ) \
-             )",
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        Self::find_unreferenced_by_message_tx(
+            &mut conn,
+            conversation_attachment_ids,
+            conversation_id,
         )
-        .bind(&uuids)
-        .bind(conversation_id.as_uuid())
-        .fetch_all(&self.pool)
         .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-        Ok(rows
-            .into_iter()
-            .map(|(id,)| ConversationAttachmentId::from_uuid(id))
-            .collect())
     }
 }
 
