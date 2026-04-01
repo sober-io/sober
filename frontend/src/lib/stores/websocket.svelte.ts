@@ -1,6 +1,8 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { ClientWsMessage, ServerWsMessage } from '$lib/types';
 import { conversations } from '$lib/stores/conversations.svelte';
+import { notifications } from '$lib/stores/notifications.svelte';
+import { auth } from '$lib/stores/auth.svelte';
 
 type MessageHandler = (data: ServerWsMessage) => void;
 
@@ -105,6 +107,23 @@ export const websocket = (() => {
 			if (msg.type === 'chat.unread') {
 				conversations.updateUnread(msg.conversation_id, msg.unread_count);
 				return;
+			}
+			if (msg.type === 'chat.new_message') {
+				if (msg.role === 'user' && msg.user_id && msg.user_id !== auth.user?.id) {
+					notifications.requestPermission();
+					const title = msg.username ?? 'New message';
+					const text =
+						msg.content
+							.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+							.map((b) => b.text)
+							.join('\n')
+							.slice(0, 200) || 'Sent an attachment';
+					notifications.notify({
+						conversationId: msg.conversation_id,
+						title,
+						body: text
+					});
+				}
 			}
 			const handler = handlers.get(msg.conversation_id);
 			if (handler) handler(msg);
