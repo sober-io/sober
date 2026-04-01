@@ -451,8 +451,7 @@ async fn mark_read(
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
     let conversation_id = ConversationId::from_uuid(id);
 
-    let _membership =
-        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
+    super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
 
     // Resolve the message ID to mark as read.
     let message_id = if let Some(axum::Json(req)) = body {

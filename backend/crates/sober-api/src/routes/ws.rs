@@ -17,7 +17,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use sober_auth::AuthUser;
-use sober_core::types::{ContentBlock, ConversationId};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageRepo};
 use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -359,7 +359,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
                 {
                     let cu_repo = PgConversationUserRepo::new(state.db.clone());
                     let msg_repo = PgMessageRepo::new(state.db.clone());
-                    use sober_core::types::{ConversationUserRepo, MessageRepo};
                     if let Ok(messages) = msg_repo.list_paginated(conv_id, None, 1).await
                         && let Some(latest) = messages.first()
                     {
