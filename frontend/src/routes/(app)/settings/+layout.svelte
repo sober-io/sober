@@ -23,14 +23,12 @@
 
 	<div class="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
 		<RequireRole role="admin">
-			{#snippet children()}
-				<a
-					href={resolve('/(app)/settings/evolution')}
-					class={tabClass(resolve('/(app)/settings/evolution'))}
-				>
-					Evolution
-				</a>
-			{/snippet}
+			<a
+				href={resolve('/(app)/settings/evolution')}
+				class={tabClass(resolve('/(app)/settings/evolution'))}
+			>
+				Evolution
+			</a>
 		</RequireRole>
 		<a
 			href={resolve('/(app)/settings/plugins')}
