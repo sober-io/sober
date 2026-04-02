@@ -1,7 +1,8 @@
-# API Observability Improvement
+# System Observability
 
-Improve observability in `sober-api` and `sober-core` telemetry by adding structured
-request context, service-layer instrumentation, and richer trace spans.
+Add structured tracing, service-layer instrumentation, and metrics cleanup across
+all backend crates: `sober-api`, `sober-core`, `sober-agent`, `sober-scheduler`,
+and `sober-llm`.
 
 ## Current State
 
@@ -11,35 +12,28 @@ The observability stack has solid foundations:
 - Prometheus metrics (request count, latency, in-flight, WebSocket, rate limiting)
 - Optional OpenTelemetry OTLP export with W3C TraceContext propagation
 - Structured JSON logging in production, pretty-print in development
+- Extensive `metrics.toml` declarations across 15 crates
 
-Key gaps: zero `#[instrument]` attributes on any handler or service, no domain
-context (user_id, conversation_id) attached to trace spans, service layer is
-invisible to tracing, and `TraceLayer` uses defaults with no response classification.
+Key gaps:
+- Zero `#[instrument]` attributes on any handler, service, or agent function
+- No domain context (user_id, conversation_id) attached to trace spans
+- Service layer invisible to tracing; `TraceLayer` uses defaults
+- Agent core loop (turn, dispatch, tools) is a tracing black box
+- Scheduler tick engine and job executors have no structured spans
+- LLM streaming path has no observability
+- 11 ghost metrics (declared but never emitted), 9 undocumented metrics
+- sqlx query tracing suppressed by default filter strings
 
 ## Approach
 
 Hybrid: a middleware injects shared cross-cutting context (user_id, request_id)
-into spans created by `TraceLayer`, while `#[instrument]` on service methods adds
-domain-specific context (conversation_id, message_id, etc.).
+into spans created by `TraceLayer`, while `#[instrument]` on service/agent/scheduler
+methods adds domain-specific context. Existing manual gRPC spans are kept for OTel
+trace context propagation. Metrics cleanup ensures declared metrics match reality.
 
 ## Components
 
-### 1. Request Context Middleware (`RequestContextLayer`)
-
-New middleware in `sober-api/src/middleware/request_context.rs`.
-
-Runs after auth middleware, before handlers. Reads `AuthUser` from request
-extensions and `X-Request-ID` from headers, then records them on the current
-span via `Span::current().record(...)`.
-
-Fields injected:
-- `user.id` -- from `AuthUser` extension (empty for unauthenticated routes)
-- `request.id` -- from `X-Request-ID` header
-
-This is a recording-only middleware -- it creates no new spans, just fills in
-fields that the customized `TraceLayer` span declares as empty.
-
-### 2. Customized `TraceLayer`
+### 1. Customized `TraceLayer` (sober-api)
 
 Replace `TraceLayer::new_for_http()` in `main.rs` with a configured version:
 
@@ -58,6 +52,9 @@ TraceLayer::new_for_http()
             http.status_code = tracing::field::Empty,
             user.id = tracing::field::Empty,
             request.id = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+            error.type_ = tracing::field::Empty,
+            error.message = tracing::field::Empty,
         )
     })
     .on_response(|response: &Response, latency: Duration, span: &Span| {
@@ -77,78 +74,169 @@ TraceLayer::new_for_http()
     })
 ```
 
-This creates spans with semantic field names aligned to OpenTelemetry conventions,
+Creates spans with semantic field names aligned to OpenTelemetry conventions,
 and classifies responses by status code range for appropriate log levels.
 
-### 3. Service Layer Instrumentation
+### 2. Request Context Middleware (`RequestContextLayer`)
 
-Add `#[instrument]` to all public service methods across all 11 service files.
+New middleware in `sober-api/src/middleware/request_context.rs`.
 
-Pattern:
-```rust
-#[instrument(skip(self), fields(conversation.id = %conversation_id))]
-pub async fn get(&self, conversation_id: ConversationId, user_id: UserId) -> Result<...> {
-```
+Runs after auth middleware, before handlers. Reads `AuthUser` from request
+extensions and `X-Request-ID` from headers, then records them on the current
+span via `Span::current().record(...)`.
 
-Rules:
-- `skip(self)` always -- the pool/clients aren't useful in traces
-- `skip` large input structs (e.g., `UpdateSettingsInput`) -- only record IDs
-- Record domain IDs relevant to the operation: `conversation.id`, `message.id`,
-  `user.id`, `workspace.id`
-- Level: `level = "info"` for mutations (create, update, delete), `level = "debug"` for reads (list, get)
+Fields injected:
+- `user.id` -- from `AuthUser` extension (empty for unauthenticated routes)
+- `request.id` -- from `X-Request-ID` header
 
-Service files to instrument:
-- `conversation.rs` (~11 methods)
-- `message.rs`
-- `auth.rs`
-- `user.rs`
-- `attachment.rs`
-- `collaborator.rs`
-- `evolution.rs`
-- `plugin.rs`
-- `tag.rs`
-- `ws_dispatch.rs` (already partially instrumented -- extend)
-- `verify_membership.rs`
+Recording-only middleware -- creates no new spans, fills fields declared by
+the customized `TraceLayer`.
 
-### 4. Error Span Recording
+### 3. Error Span Recording (sober-core)
 
-Add span recording in `AppError`'s `IntoResponse` implementation (in `sober-core`).
+Add span recording in `AppError`'s `IntoResponse` implementation.
 
-When an `AppError` is converted to an HTTP response, record `error.type` (the
-variant name) and `error.message` on the current span. This ensures every error
-response is captured in the trace tree without requiring each handler to log
-errors explicitly.
+When an `AppError` is converted to an HTTP response, record `otel.status_code`,
+`error.type_`, and `error.message` on the current span. Every error response
+is captured in the trace tree without explicit error logging per handler.
 
 ```rust
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let span = Span::current();
+        let span = tracing::Span::current();
         span.record("otel.status_code", "ERROR");
-        span.record("error.type", self.code());
-        span.record("error.message", &self.to_string());
+        span.record("error.type_", error_type);
+        span.record("error.message", &tracing::field::display(&self));
         // ... existing response construction
     }
 }
 ```
 
-Note: The span must have these fields declared as `Empty` in `make_span_with` for
-recording to work. Since `AppError` responses flow through the `TraceLayer` span,
-we add `otel.status_code`, `error.type`, and `error.message` as empty fields in
-the custom `make_span_with` closure.
+### 4. API Service Layer Instrumentation
+
+Add `#[instrument]` to all public service methods across all 11 service files
+in `sober-api/src/services/`.
+
+Rules:
+- `skip(self)` always -- the pool/clients aren't useful in traces
+- `skip` large input structs -- only record IDs
+- Record domain IDs: `conversation.id`, `message.id`, `user.id`, `workspace.id`
+- Level: `level = "info"` for mutations, `level = "debug"` for reads
+
+Service files:
+- `conversation.rs`, `message.rs`, `auth.rs`, `user.rs`, `attachment.rs`
+- `collaborator.rs`, `evolution.rs`, `plugin.rs`, `tag.rs`
+- `ws_dispatch.rs`, `verify_membership.rs`
 
 ### 5. sober-web Proxy Instrumentation
 
-Add `#[instrument]` to the two proxy handler functions in `sober-web/src/main.rs`:
+Add `#[instrument]` to the HTTP reverse proxy and WebSocket proxy handlers.
+Record `upstream.path` on the HTTP proxy span.
 
-- HTTP reverse proxy handler: record `upstream.path`
-- WebSocket proxy handler: record `upstream.path`
+### 6. Agent Instrumentation (sober-agent)
 
-These are the only two functions that need instrumentation in sober-web; the
-`TraceLayer` already handles request-level spans.
+Comprehensive `#[instrument]` across all public methods (~40 functions).
 
-## Middleware Stack Order
+**gRPC handlers** (`grpc/agent.rs`): Keep existing manual spans for OTel trace
+context propagation. Normalize field names to system convention (`conversation.id`,
+`user.id`, etc.).
 
-The layer order in `main.rs` (outermost first, meaning last in `.layer()` chain):
+**Actor model:**
+- `Agent::handle_message()` -- fields: `conversation.id`, `user.id`
+- `Agent::resolve_workspace_dir()`, `resolve_delivery_conversation()`
+- `ConversationActor::run()`, `handle_message()`, `recover_incomplete_executions()`
+
+**Core agentic loop:**
+- `run_turn()` -- fields: `conversation.id`, `iteration`
+- `build_context()`, `try_resolve_dynamic_engine()`, `load_attachment_data()`,
+  `auto_generate_title()`
+- `execute_tool_calls()` -- fields: `tool_count`
+
+**Tool implementations:** `#[instrument]` on every tool's `execute()` method
+(shell, memory, artifacts, scheduler, secrets, propose_*, etc.).
+
+**Evolution:**
+- `execute_evolution()` -- fields: `event.id`, `evolution.type`
+- Type-specific executors (plugin, skill, instruction, automation)
+
+**Ingestion pipeline:** memory extraction, embedding, storage functions.
+
+**Spawn instrumentation:** Add `.instrument(span)` to `tokio::spawn` for
+conversation actors, connecting child spans to the parent trace.
+
+### 7. Scheduler Instrumentation (sober-scheduler)
+
+Comprehensive `#[instrument]` across all public methods.
+
+**Tick engine:**
+- `TickEngine::tick()` -- `debug` level for the tick itself; meaningful span
+  created conditionally only when `due_job_count > 0`, wrapping the job
+  execution loop. Avoids noise from idle ticks.
+- `route_job()` -- fields: `job.id`, `job.type`
+
+**All 6 job executors** -- `execute()` on each:
+- `ArtifactExecutor`, `MemoryPruningExecutor`, `SessionCleanupExecutor`,
+  `BlobGcExecutor`, `AttachmentCleanupExecutor`, `PluginCleanupExecutor`
+
+**gRPC service:**
+- `pause()`, `resume()`, `force_run()`, `list_jobs()`, `get_job()`, `cancel_job()`
+
+**Spawn instrumentation:** `.instrument(span)` on per-job `tokio::spawn` calls.
+
+### 8. LLM Instrumentation (sober-llm)
+
+`#[instrument]` on all public methods:
+
+- `OpenAiCompatibleEngine::stream()` -- fields: `model`, `provider`
+- `OpenAiCompatibleEngine::complete()` -- fields: `model`, `provider`
+- `OpenAiCompatibleEngine::embed()` -- fields: `model`
+- `AcpEngine::stream()` -- fields: `model`
+- SSE parsing functions -- `debug` level
+
+### 9. Metrics Cleanup
+
+**Wire 4 ghost agent metrics:**
+- `sober_agent_requests_total` -- emit in `Agent::handle_message()`
+- `sober_agent_request_duration_seconds` -- emit in `Agent::handle_message()`
+- `sober_agent_tool_calls_total` -- emit in `execute_tool_calls()`
+- `sober_agent_tool_call_duration_seconds` -- emit in `execute_tool_calls()`
+
+**Remove 7 ghost metrics from `metrics.toml`:**
+- `sober-core`: 4 process metrics (`cpu_seconds`, `resident_memory`, `open_fds`,
+  `uptime`)
+- `sober-plugin`: 3 metrics (`installed` gauge, `audit_runs_total`,
+  `sandbox_violations_total`)
+
+**Document 9 undocumented metrics** -- add to respective `metrics.toml`:
+- `sober-api`: 3 attachment metrics (`uploads_total`, `upload_bytes`,
+  `upload_duration_seconds`)
+- `sober-scheduler`: 4 metrics (`blob_gc_runs_total`, `blob_gc_deleted_total`,
+  `blob_gc_bytes_freed_total`, `attachment_cleanup_deleted_total`)
+- `sober-db`: `sober_message_content_blocks_total`
+- `sober-workspace`: `sober_attachment_image_processing_seconds`
+- `sober-agent`: `sober_llm_vision_blocks_resolved_total`
+
+### 10. Database Query Tracing
+
+Add `sqlx::query=warn` to default filter strings in all 4 binaries:
+- `sober-api`, `sober-agent`, `sober-scheduler`, `sober-web`
+
+Zero code changes beyond the filter string -- sqlx already emits tracing events
+at `DEBUG` level. The `warn` filter surfaces only failed or slow queries.
+
+## Instrumentation Rules (System-Wide)
+
+- `skip(self)` always
+- `skip` large payloads (content blocks, binary data, tool outputs)
+- `level = "info"` for mutations (create, update, delete)
+- `level = "debug"` for reads (list, get)
+- Domain IDs as span fields: `conversation.id`, `message.id`, `user.id`,
+  `job.id`, `event.id`, `tool.name`
+- OpenTelemetry field naming conventions
+
+## Middleware Stack Order (sober-api)
+
+The layer order in `main.rs` (outermost first, last in `.layer()` chain):
 
 ```
 PropagateRequestIdLayer   -- propagate X-Request-ID to response
@@ -168,6 +256,7 @@ inside-out, `RequestContextLayer` goes before the others in the `.layer()` chain
 ## What This Does NOT Include
 
 - Request/response body logging (security risk, unnecessary overhead)
-- New Prometheus metrics or metrics.toml changes
-- Database query timing (sqlx has its own tracing integration if enabled)
-- Handler-level `#[instrument]` (the TraceLayer span + service span is sufficient)
+- New Prometheus metric definitions beyond wiring existing ghost metrics
+- Handler-level `#[instrument]` (TraceLayer span + service span is sufficient)
+- Database query-level Prometheus metrics (separate effort if needed)
+- Custom histogram buckets for sqlx query timing
