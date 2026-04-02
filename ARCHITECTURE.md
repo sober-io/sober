@@ -25,10 +25,10 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Clients                              │
-│  PWA (Svelte)  │  Discord Bot  │  WhatsApp  │  CLI (sober)  │  API │
-└──────┬──────────────┬──────────────┬──────────┬──────┬──────┘
-       │              │              │          │      │
-       ▼              ▼              ▼          ▼      ▼
+│  PWA (Svelte)  │  CLI (sober)  │  API                       │
+└──────┬──────────────┬───────────────────────────────────────┘
+       │              │
+       ▼              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    sober-web (reverse proxy)                 │
 │  Embedded static files │ SPA fallback │ API/WS proxy        │
@@ -50,20 +50,25 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 │ • HW Tokens  │  │ • Streaming    │  │ • Code Gen     │
 │ • RBAC/ABAC  │  │                │  │                │
 └──────────────┘  └───────┬────────┘  └────────────────┘
-                          │ gRPC/UDS
-                          ▲
-                          │
-                 ┌────────┴────────┐
-                 │ sober-scheduler │
-                 │                 │
-                 │ • Tick Engine   │
-                 │ • Cron + Interval│
-                 │ • Job Persist   │
-                 │ • Admin Socket  │
-                 └─────────────────┘
-                          │
-       ┌──────────────────┼──────────────────┐
-       ▼                  ▼                  ▼
+                          │ gRPC/UDS            ▲ gRPC/UDS
+                          ▲                     │
+                          │          ┌──────────┴──────────┐
+                 ┌────────┴────────┐ │   sober-gateway     │
+                 │ sober-scheduler │ │                     │
+                 │                 │ │ • Discord/Telegram  │
+                 │ • Tick Engine   │ │ • Matrix/WhatsApp   │
+                 │ • Cron + Interval│ │ • Channel Mapping  │
+                 │ • Job Persist   │ │ • Inbound Routing   │
+                 │ • Admin Socket  │ │ • Outbound Delivery │
+                 └─────────────────┘ └──────────┬──────────┘
+                          │                     │
+       ┌──────────────────┘    ┌────────────────┴─────────────────┐
+       │                       │         External Platforms        │
+       │                       │  Discord │ Telegram │ Matrix │ WA │
+       │                       └───────────────────────────────────┘
+       ▼
+       ┌──────────────────┬──────────────┐
+       ▼                  ▼              ▼
 ┌──────────────┐  ┌────────────────┐  ┌────────────────┐
 │ sober-memory │  │  sober-crypto  │  │   sober-llm    │
 │              │  │                │  │                │
@@ -97,6 +102,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-skill` | Skill discovery, loading, and activation. Provides `SkillCatalog`, `SkillLoader`, `ActivateSkillTool`, frontmatter parsing. |
 | `sober-crypto` | Keypair management, envelope encryption, signing |
 | `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket. Thin route handlers delegate to `services/` module for business logic; services compose `_tx` repo methods in transactions. |
+| `sober-gateway` | **Binary crate (gRPC server process).** External messaging platform bridge. Connects to Discord/Telegram/Matrix/WhatsApp via SDK libraries, routes inbound messages to `sober-agent` via gRPC/UDS, delivers agent responses back to platforms. In-memory mapping caches for O(1) routing. Exposes `ListChannels`/`Reload`/`Status` RPCs for `sober-api` admin integration. |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
 | `sober-cli` | Unified CLI: config, user management, migrations (offline, direct DB), scheduler control (runtime, via UDS) |
 | `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection. Instruction overlay loading for evolution-generated overrides with guardrail blocklist. |
@@ -501,6 +507,7 @@ Docker Compose (dev) → Kubernetes (prod). Four independent processes:
 | `sober-api` | HTTP/WS gateway, user-driven entry point | `/run/sober/api-admin.sock` |
 | `sober-scheduler` | Autonomous tick engine, time-driven entry point | `/run/sober/scheduler.sock` |
 | `sober-agent` | gRPC server, invoked by both API and scheduler | `/run/sober/agent.sock` |
+| `sober-gateway` | External platform bridge | `/run/sober/gateway.sock` |
 
 Each process can be started, stopped, and scaled independently.
 
@@ -526,8 +533,8 @@ Two Dockerfile strategies serve different purposes:
 
 **CI builds** use a unified multi-stage Dockerfile with [cargo-chef](https://github.com/LukeMathWalker/cargo-chef)
 to separate dependency compilation (slow, cacheable) from application code compilation (fast).
-All 5 binaries are compiled in a single `cargo build --release`, then each service image copies
-its binary into a minimal `debian:trixie-slim` runtime stage. `docker-bake.hcl` defines all 5
+All 6 binaries are compiled in a single `cargo build --release`, then each service image copies
+its binary into a minimal `debian:trixie-slim` runtime stage. `docker-bake.hcl` defines all 6
 targets for `docker buildx bake`, sharing the builder layers across all images.
 
 **Dev builds** keep per-service Dockerfiles for fast iteration — `docker-compose.yml` is unchanged.
