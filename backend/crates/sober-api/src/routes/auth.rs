@@ -44,7 +44,7 @@ async fn register(
         .await?;
 
     // Create inbox conversation for the new user.
-    state.auth_api.create_inbox_for_user(user.id).await?;
+    state.auth_service.create_inbox_for_user(user.id).await?;
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": user.id.to_string(),
@@ -130,7 +130,7 @@ async fn me(
     auth_user: AuthUser,
 ) -> Result<ApiResponse<UserProfile>, AppError> {
     let profile = state
-        .auth_api
+        .auth_service
         .get_user_with_roles(auth_user.user_id)
         .await?;
     Ok(ApiResponse::new(profile))

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use hyper_util::rt::TokioIo;
-use sober_auth::AuthService;
+use sober_auth::AuthService as SoberAuthService;
 use sober_core::config::AppConfig;
 use sober_core::error::AppError;
 use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
@@ -19,7 +19,7 @@ use tracing::info;
 use crate::connections::{ConnectionRegistry, UserConnectionRegistry};
 use crate::proto;
 use crate::services::{
-    attachment::AttachmentService, auth::AuthApiService, collaborator::CollaboratorService,
+    attachment::AttachmentService, auth::AuthService, collaborator::CollaboratorService,
     conversation::ConversationService, evolution::EvolutionService, message::MessageService,
     plugin::PluginService, tag::TagService, user::UserService, ws_dispatch::WsDispatchService,
 };
@@ -34,7 +34,7 @@ pub struct AppState {
     /// gRPC client for the agent service.
     pub agent_client: AgentClient,
     /// Authentication service.
-    pub auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
+    pub auth: Arc<SoberAuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
     /// Application configuration.
     pub config: AppConfig,
     /// Content-addressed blob store for attachment files.
@@ -62,7 +62,7 @@ pub struct AppState {
     /// Attachment upload service.
     pub attachment: Arc<AttachmentService>,
     /// API-level auth service (inbox creation, user profile).
-    pub auth_api: Arc<AuthApiService>,
+    pub auth_service: Arc<AuthService>,
 }
 
 impl AppState {
@@ -74,7 +74,7 @@ impl AppState {
     pub fn from_parts(
         db: PgPool,
         agent_client: AgentClient,
-        auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
+        auth: Arc<SoberAuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
         config: AppConfig,
     ) -> Arc<Self> {
         let blob_root = config
@@ -105,7 +105,7 @@ impl AppState {
             config.clone(),
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
-        let auth_api = Arc::new(AuthApiService::new(db.clone()));
+        let auth_service = Arc::new(AuthService::new(db.clone()));
 
         Arc::new(Self {
             db,
@@ -124,7 +124,7 @@ impl AppState {
             plugin,
             evolution,
             attachment,
-            auth_api,
+            auth_service,
         })
     }
 
@@ -144,7 +144,7 @@ impl AppState {
         let users = PgUserRepo::new(db.clone());
         let sessions = PgSessionRepo::new(db.clone());
         let roles = PgRoleRepo::new(db.clone());
-        let auth = Arc::new(AuthService::new(
+        let auth = Arc::new(SoberAuthService::new(
             users,
             sessions,
             roles,
@@ -179,7 +179,7 @@ impl AppState {
             config.clone(),
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
-        let auth_api = Arc::new(AuthApiService::new(db.clone()));
+        let auth_service = Arc::new(AuthService::new(db.clone()));
 
         Ok(Arc::new(Self {
             db,
@@ -198,7 +198,7 @@ impl AppState {
             plugin,
             evolution,
             attachment,
-            auth_api,
+            auth_service,
         }))
     }
 }

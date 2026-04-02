@@ -117,7 +117,7 @@ impl TagRepo for PgTagRepo {
 
     async fn tag_message(&self, message_id: MessageId, tag_id: TagId) -> Result<(), AppError> {
         sqlx::query(
-            "INSERT INTO message_tags (message_id, tag_id) \
+            "INSERT INTO conversation_message_tags (message_id, tag_id) \
              VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
         .bind(message_id.as_uuid())
@@ -130,7 +130,7 @@ impl TagRepo for PgTagRepo {
     }
 
     async fn untag_message(&self, message_id: MessageId, tag_id: TagId) -> Result<(), AppError> {
-        sqlx::query("DELETE FROM message_tags WHERE message_id = $1 AND tag_id = $2")
+        sqlx::query("DELETE FROM conversation_message_tags WHERE message_id = $1 AND tag_id = $2")
             .bind(message_id.as_uuid())
             .bind(tag_id.as_uuid())
             .execute(&self.pool)
@@ -170,7 +170,7 @@ impl TagRepo for PgTagRepo {
         let uuids: Vec<uuid::Uuid> = message_ids.iter().map(|id| *id.as_uuid()).collect();
         let rows = sqlx::query_as::<_, MessageTagRow>(
             "SELECT mt.message_id, t.id, t.user_id, t.name, t.color, t.created_at \
-             FROM message_tags mt \
+             FROM conversation_message_tags mt \
              JOIN tags t ON t.id = mt.tag_id \
              WHERE mt.message_id = ANY($1) \
              ORDER BY mt.message_id, t.name",

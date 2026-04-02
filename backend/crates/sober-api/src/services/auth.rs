@@ -14,11 +14,11 @@ pub struct UserProfile {
     pub roles: Vec<String>,
 }
 
-pub struct AuthApiService {
+pub struct AuthService {
     db: PgPool,
 }
 
-impl AuthApiService {
+impl AuthService {
     pub fn new(db: PgPool) -> Self {
         Self { db }
     }

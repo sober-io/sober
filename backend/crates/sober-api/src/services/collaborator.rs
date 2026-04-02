@@ -1,6 +1,6 @@
 use sober_core::error::AppError;
 use sober_core::types::{
-    ContentBlock, ConversationId, ConversationUserRepo, ConversationUserRole,
+    ContentBlock, ConversationId, ConversationRepo, ConversationUserRepo, ConversationUserRole,
     ConversationUserWithUsername, CreateMessage, MessageRole, UserId, UserRepo,
 };
 use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgUserRepo};
@@ -250,12 +250,6 @@ impl CollaboratorService {
             .await?;
         Self::insert_event_message_tx(&mut tx, conversation_id, &content, metadata).await?;
 
-        // Auto-convert back to direct if only the owner remains.
-        // Check count after removal (current - 1, since we removed in this tx).
-        if remaining.len() == 2 {
-            PgConversationRepo::convert_to_direct_tx(&mut tx, conversation_id).await?;
-        }
-
         tx.commit()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
@@ -274,6 +268,15 @@ impl CollaboratorService {
         self.user_connections
             .send(&target_user_id.to_string(), ws_msg)
             .await;
+
+        // Auto-convert back to direct if only the owner remains.
+        let current = cu_repo.list_by_conversation(conversation_id).await?;
+        if current.len() == 1 {
+            PgConversationRepo::new(self.db.clone())
+                .convert_to_direct(conversation_id)
+                .await
+                .ok();
+        }
 
         Ok(())
     }
@@ -310,11 +313,6 @@ impl CollaboratorService {
         PgConversationUserRepo::remove_collaborator_tx(&mut tx, conversation_id, user_id).await?;
         Self::insert_event_message_tx(&mut tx, conversation_id, &content, metadata).await?;
 
-        // Auto-convert back to direct if only the owner remains.
-        if remaining.len() == 2 {
-            PgConversationRepo::convert_to_direct_tx(&mut tx, conversation_id).await?;
-        }
-
         tx.commit()
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
@@ -332,6 +330,15 @@ impl CollaboratorService {
         self.user_connections
             .send(&user_id.to_string(), ws_msg)
             .await;
+
+        // Auto-convert back to direct if only the owner remains.
+        let current = cu_repo.list_by_conversation(conversation_id).await?;
+        if current.len() == 1 {
+            PgConversationRepo::new(self.db.clone())
+                .convert_to_direct(conversation_id)
+                .await
+                .ok();
+        }
 
         Ok(())
     }
