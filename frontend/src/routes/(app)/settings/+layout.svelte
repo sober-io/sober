@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
-	import { isAdmin } from '$lib/guards';
+	import RequireRole from '$lib/components/guards/RequireRole.svelte';
 
 	interface Props {
 		children: Snippet;
@@ -11,7 +11,6 @@
 	let { children }: Props = $props();
 
 	const activePath = $derived($page.url.pathname);
-	const showAdmin = $derived(isAdmin());
 
 	const tabClass = (path: string) =>
 		activePath.startsWith(path)
@@ -23,14 +22,16 @@
 	<h1 class="mb-6 text-xl font-semibold text-zinc-900 dark:text-zinc-100">Settings</h1>
 
 	<div class="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-		{#if showAdmin}
-			<a
-				href={resolve('/(app)/settings/evolution')}
-				class={tabClass(resolve('/(app)/settings/evolution'))}
-			>
-				Evolution
-			</a>
-		{/if}
+		<RequireRole role="admin">
+			{#snippet children()}
+				<a
+					href={resolve('/(app)/settings/evolution')}
+					class={tabClass(resolve('/(app)/settings/evolution'))}
+				>
+					Evolution
+				</a>
+			{/snippet}
+		</RequireRole>
 		<a
 			href={resolve('/(app)/settings/plugins')}
 			class={tabClass(resolve('/(app)/settings/plugins'))}

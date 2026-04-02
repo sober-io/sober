@@ -241,7 +241,6 @@ impl PluginService {
         }
 
         if let Some(config) = config {
-            let repo = PgPluginRepo::new(self.db.clone());
             repo.update_config(plugin_id, config).await?;
         }
 

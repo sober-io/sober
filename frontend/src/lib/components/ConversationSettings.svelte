@@ -17,7 +17,7 @@
 	import { toolService } from '$lib/services/tools';
 	import { pluginService } from '$lib/services/plugins';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { canManageConversation } from '$lib/guards';
+	import { canManageConversation, canDeleteConversation } from '$lib/guards';
 	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
@@ -172,6 +172,7 @@
 		return me?.role ?? 'member';
 	});
 	let canEditAgentMode = $derived(canManageConversation(currentUserRole));
+	let canDeleteOrClear = $derived(canDeleteConversation(currentUserRole));
 
 	// Load data when panel opens — only track `open`, not conversation fields
 	$effect(() => {
@@ -916,19 +917,21 @@
 					>
 						{conversation.is_archived ? 'Unarchive conversation' : 'Archive conversation'}
 					</button>
-					<button
-						onclick={() => (confirmClear = true)}
-						class="w-full rounded-md border border-red-200 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-					>
-						Clear message history
-					</button>
-					{#if conversation.kind !== 'inbox'}
+					{#if canDeleteOrClear}
 						<button
-							onclick={() => (confirmDelete = true)}
-							class="w-full rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-left text-sm font-medium text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+							onclick={() => (confirmClear = true)}
+							class="w-full rounded-md border border-red-200 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
 						>
-							Delete conversation
+							Clear message history
 						</button>
+						{#if conversation.kind !== 'inbox'}
+							<button
+								onclick={() => (confirmDelete = true)}
+								class="w-full rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-left text-sm font-medium text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+							>
+								Delete conversation
+							</button>
+						{/if}
 					{/if}
 				</div>
 			</SettingsSection>

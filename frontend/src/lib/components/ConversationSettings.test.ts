@@ -6,7 +6,15 @@ import type { Conversation, PermissionMode, Tag } from '$lib/types';
 
 vi.mock('$lib/services/conversations', () => ({
 	conversationService: {
-		listCollaborators: vi.fn().mockResolvedValue([]),
+		listCollaborators: vi.fn().mockResolvedValue([
+			{
+				conversation_id: 'conv-1',
+				user_id: 'user-1',
+				username: 'alice',
+				role: 'owner',
+				joined_at: '2026-01-15T00:00:00Z'
+			}
+		]),
 		addCollaborator: vi.fn(),
 		removeCollaborator: vi.fn(),
 		updateCollaboratorRole: vi.fn(),
@@ -25,7 +33,13 @@ vi.mock('$lib/services/jobs', () => ({
 vi.mock('$lib/stores/auth.svelte', () => ({
 	auth: {
 		get user() {
-			return { id: 'user-1', email: 'a@b.com', username: 'alice', status: 'active' };
+			return {
+				id: 'user-1',
+				email: 'a@b.com',
+				username: 'alice',
+				status: 'active',
+				roles: ['user']
+			};
 		}
 	}
 }));
@@ -126,6 +140,9 @@ describe('ConversationSettings', () => {
 		const user = userEvent.setup();
 		render(ConversationSettings, { props: defaultProps });
 
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Clear message history' })).toBeInTheDocument();
+		});
 		await user.click(screen.getByRole('button', { name: 'Clear message history' }));
 
 		expect(
@@ -150,6 +167,9 @@ describe('ConversationSettings', () => {
 			props: { ...defaultProps, onDelete }
 		});
 
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Delete conversation' })).toBeInTheDocument();
+		});
 		await user.click(screen.getByRole('button', { name: 'Delete conversation' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
