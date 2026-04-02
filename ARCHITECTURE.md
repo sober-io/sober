@@ -96,7 +96,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
 | `sober-skill` | Skill discovery, loading, and activation. Provides `SkillCatalog`, `SkillLoader`, `ActivateSkillTool`, frontmatter parsing. |
 | `sober-crypto` | Keypair management, envelope encryption, signing |
-| `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket |
+| `sober-api` | HTTP/WebSocket API gateway, rate limiting, channel adapters, Unix admin socket. Thin route handlers delegate to `services/` module for business logic; services compose `_tx` repo methods in transactions. |
 | `sober-web` | **Binary crate.** Serves SvelteKit frontend (embedded via `rust-embed` or from disk), reverse-proxies `/api/*` and WebSocket to `sober-api`. |
 | `sober-cli` | Unified CLI: config, user management, migrations (offline, direct DB), scheduler control (runtime, via UDS) |
 | `sober-mind` | Agent identity (structured instructions + soul.md layering), prompt assembly, visibility filtering, trait evolution, injection detection. Instruction overlay loading for evolution-generated overrides with guardrail blocklist. |
