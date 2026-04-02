@@ -19,23 +19,10 @@ use std::sync::Arc;
 use axum::Router;
 use sober_auth::AuthLayer;
 use sober_core::error::AppError;
-use sober_core::types::{
-    ConversationId, ConversationUser, ConversationUserRepo, CreateMessage, Message, MessageRepo,
-    MessageRole, UserId,
-};
-use sober_db::{PgConversationUserRepo, PgMessageRepo, PgRoleRepo, PgSessionRepo, PgUserRepo};
-use sqlx::PgPool;
+use sober_core::types::{ConversationId, CreateMessage, Message, MessageRepo, MessageRole};
+use sober_db::{PgMessageRepo, PgRoleRepo, PgSessionRepo, PgUserRepo};
 
-/// Verify the authenticated user is a member of the conversation.
-/// Returns the membership info, or `NotFound` if not a member.
-pub async fn verify_membership(
-    db: &PgPool,
-    conversation_id: ConversationId,
-    user_id: UserId,
-) -> Result<ConversationUser, AppError> {
-    let cu_repo = PgConversationUserRepo::new(db.clone());
-    cu_repo.get(conversation_id, user_id).await
-}
+pub(crate) use crate::services::verify_membership;
 
 /// Inserts a timeline event message into a conversation.
 pub(crate) async fn insert_event_message(

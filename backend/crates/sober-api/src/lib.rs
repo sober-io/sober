@@ -6,6 +6,7 @@ pub mod admin;
 pub mod connections;
 pub mod middleware;
 pub mod routes;
+pub mod services;
 pub mod state;
 pub mod subscribe;
 pub mod ws_types;
