@@ -4,11 +4,13 @@ use serde::Serialize;
 use sober_core::error::AppError;
 use sober_core::types::{
     ContentBlock, ConversationAttachment, ConversationAttachmentId, ConversationAttachmentRepo,
-    ConversationId, ConversationUserRole, Message, MessageId, MessageRepo, MessageRole, Tag,
-    TagRepo, ToolExecution, ToolExecutionRepo, UserId,
+    ConversationId, Message, MessageId, MessageRepo, MessageRole, Tag, TagRepo, ToolExecution,
+    ToolExecutionRepo, UserId,
 };
 use sober_db::{PgConversationAttachmentRepo, PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
 use sqlx::PgPool;
+
+use crate::guards;
 
 /// A message with its associated tags, tool executions, and attachments.
 #[derive(Serialize)]
@@ -134,11 +136,7 @@ impl MessageService {
 
         let membership = super::verify_membership(&self.db, msg.conversation_id, user_id).await?;
 
-        let is_owner = membership.role == ConversationUserRole::Owner;
-        let is_sender = msg.user_id == Some(user_id);
-        if !is_owner && !is_sender {
-            return Err(AppError::NotFound("message not found".into()));
-        }
+        guards::require_owner_or_sender(&membership, msg.user_id, user_id)?;
 
         let attachment_ids: Vec<ConversationAttachmentId> = msg
             .content
