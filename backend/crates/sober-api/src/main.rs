@@ -9,8 +9,8 @@ use std::time::Duration;
 use axum::extract::MatchedPath;
 use axum::routing::get;
 use axum_core::body::Body;
-use http::{Method, Response};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use http::{Method, Response};
 use sober_api::admin;
 use sober_api::middleware::metrics::HttpMetricsLayer;
 use sober_api::middleware::rate_limit::{RateLimitConfig, RateLimitLayer};
@@ -91,10 +91,7 @@ async fn main() -> anyhow::Result<()> {
                                 "request failed"
                             );
                         } else if status >= 400 {
-                            tracing::warn!(
-                                latency_ms = latency.as_millis() as u64,
-                                "client error"
-                            );
+                            tracing::warn!(latency_ms = latency.as_millis() as u64, "client error");
                         } else {
                             tracing::info!(
                                 latency_ms = latency.as_millis() as u64,
