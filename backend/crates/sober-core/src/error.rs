@@ -67,6 +67,11 @@ impl IntoResponse for AppError {
             AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
 
+        let span = tracing::Span::current();
+        span.record("otel.status_code", "ERROR");
+        span.record("error.type_", error_type);
+        span.record("error.message", tracing::field::display(&self));
+
         let body = ApiErrorEnvelope {
             error: ApiErrorBody {
                 code: error_type.to_owned(),

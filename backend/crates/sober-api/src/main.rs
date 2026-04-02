@@ -6,8 +6,10 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use axum::extract::MatchedPath;
 use axum::routing::get;
-use http::Method;
+use axum_core::body::Body;
+use http::{Method, Response};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use sober_api::admin;
 use sober_api::middleware::metrics::HttpMetricsLayer;
@@ -21,7 +23,7 @@ use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{Span, info, info_span};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -58,7 +60,61 @@ async fn main() -> anyhow::Result<()> {
     let app = app
         .layer(cors)
         .layer(rate_limit)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &http::Request<Body>| {
+                    let matched_path = request
+                        .extensions()
+                        .get::<MatchedPath>()
+                        .map(|p| p.as_str().to_owned());
+
+                    info_span!(
+                        "http_request",
+                        http.method = %request.method(),
+                        http.route = matched_path.as_deref().unwrap_or(""),
+                        http.status_code = tracing::field::Empty,
+                        user.id = tracing::field::Empty,
+                        request.id = tracing::field::Empty,
+                        otel.status_code = tracing::field::Empty,
+                        error.type_ = tracing::field::Empty,
+                        error.message = tracing::field::Empty,
+                    )
+                })
+                .on_response(
+                    |response: &Response<Body>, latency: Duration, span: &Span| {
+                        let status = response.status().as_u16();
+                        span.record("http.status_code", status);
+
+                        if status >= 500 {
+                            tracing::error!(
+                                latency_ms = latency.as_millis() as u64,
+                                "request failed"
+                            );
+                        } else if status >= 400 {
+                            tracing::warn!(
+                                latency_ms = latency.as_millis() as u64,
+                                "client error"
+                            );
+                        } else {
+                            tracing::info!(
+                                latency_ms = latency.as_millis() as u64,
+                                "request completed"
+                            );
+                        }
+                    },
+                )
+                .on_failure(
+                    |error: tower_http::classify::ServerErrorsFailureClass,
+                     latency: Duration,
+                     _span: &Span| {
+                        tracing::error!(
+                            %error,
+                            latency_ms = latency.as_millis() as u64,
+                            "request error"
+                        );
+                    },
+                ),
+        )
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(PropagateRequestIdLayer::x_request_id());
 
