@@ -111,9 +111,9 @@ export const websocket = (() => {
 				return;
 			}
 			if (msg.type === 'chat.new_message') {
-				if (msg.role === 'user' && msg.user_id && msg.user_id !== auth.user?.id) {
-					notifications.requestPermission();
-					const title = msg.username ?? 'New message';
+				const isOwnMessage = msg.role === 'user' && msg.user_id === auth.user?.id;
+				if (!isOwnMessage) {
+					const title = msg.role === 'assistant' ? 'Sõber' : (msg.username ?? 'New message');
 					const text =
 						msg.content
 							.filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
@@ -137,6 +137,7 @@ export const websocket = (() => {
 	const connect = () => {
 		intentionalClose = false;
 		reconnectAttempt = 0;
+		notifications.requestPermission();
 		connectInner();
 	};
 
