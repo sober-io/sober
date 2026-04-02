@@ -27,10 +27,12 @@ done <<< "$STAGED"
 ERRORS=""
 
 if [ "$HAS_RUST" -eq 1 ]; then
-    if ! (cd "$REPO_ROOT/backend" && cargo clippy -q -- -D warnings) >/dev/null 2>&1; then
+    # Exclude sober-web: requires frontend build/ which is absent in dev without Docker.
+    if ! (cd "$REPO_ROOT/backend" && cargo clippy --workspace --exclude sober-web -q -- -D warnings) >/dev/null 2>&1; then
         ERRORS="cargo clippy failed"
     fi
-    if ! (cd "$REPO_ROOT/backend" && cargo test --workspace -q) >/dev/null 2>&1; then
+    # Run only unit tests (lib + doc tests); integration tests require Docker (PostgreSQL).
+    if ! (cd "$REPO_ROOT/backend" && cargo test --workspace --exclude sober-web -q --lib) >/dev/null 2>&1; then
         ERRORS="${ERRORS:+$ERRORS; }cargo test failed"
     fi
 fi
