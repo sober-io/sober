@@ -19,7 +19,9 @@ mime_guess = "2"
 rust-embed = { version = "8.11.0", features = ["mime-guess", "include-exclude"] }
 tokio = { workspace = true }
 tokio-tungstenite = "0.28"
+opentelemetry = { workspace = true }
 tower = { workspace = true }
 tower-http = { version = "0.6.8", features = ["trace", "fs"] }
 tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -147,6 +147,9 @@ async fn reverse_proxy(
         .parse::<Uri>()
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
+    // Propagate W3C TraceContext so the upstream sober-api span joins this trace.
+    inject_http_trace_context(req.headers_mut());
+
     state
         .client
         .request(req)
@@ -195,6 +198,8 @@ async fn proxy_websocket(
             .headers_mut()
             .insert(http::header::COOKIE, cookie.clone());
     }
+    // Propagate trace context into the upstream WebSocket handshake.
+    inject_http_trace_context(request.headers_mut());
 
     let (upstream_socket, _) = tokio_tungstenite::connect_async(request).await?;
 
@@ -265,6 +270,30 @@ async fn serve_embedded(uri: axum::extract::OriginalUri) -> Response {
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("not found"))
             .unwrap(),
+    }
+}
+
+/// Injects the current span's W3C TraceContext (`traceparent`/`tracestate`)
+/// into HTTP request headers so upstream services join the same trace.
+fn inject_http_trace_context(headers: &mut http::HeaderMap) {
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let cx = tracing::Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|p| {
+        p.inject_context(&cx, &mut HttpHeaderInjector(headers));
+    });
+}
+
+/// Adapter that lets the OTel propagator write into an [`http::HeaderMap`].
+struct HttpHeaderInjector<'a>(&'a mut http::HeaderMap);
+
+impl opentelemetry::propagation::Injector for HttpHeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        if let (Ok(name), Ok(val)) = (
+            http::header::HeaderName::try_from(key),
+            http::header::HeaderValue::from_str(&value),
+        ) {
+            self.0.insert(name, val);
+        }
     }
 }
 

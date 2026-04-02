@@ -5153,6 +5153,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "mime_guess",
+ "opentelemetry",
  "rust-embed",
  "sober-core",
  "tokio",
@@ -5160,6 +5161,7 @@ dependencies = [
  "tower 0.5.3",
  "tower-http",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
 ]
 
