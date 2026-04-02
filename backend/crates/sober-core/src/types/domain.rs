@@ -11,13 +11,13 @@ use super::content::ContentBlock;
 use super::enums::{
     AgentMode, ArtifactKind, ArtifactState, AttachmentKind, AutonomyLevel, ConversationKind,
     ConversationUserRole, EvolutionStatus, EvolutionType, JobStatus, MessageRole, PermissionMode,
-    PluginKind, PluginOrigin, PluginScope, PluginStatus, SandboxNetMode, UserStatus,
+    PlatformType, PluginKind, PluginOrigin, PluginScope, PluginStatus, SandboxNetMode, UserStatus,
     WorkspaceState, WorktreeState,
 };
 use super::ids::{
     ArtifactId, AuditLogId, ConversationAttachmentId, ConversationId, EncryptionKeyId,
-    EvolutionEventId, JobId, JobRunId, MessageId, PluginId, RoleId, ScopeId, SecretId, SessionId,
-    TagId, UserId, WorkspaceId, WorkspaceRepoId, WorktreeId,
+    EvolutionEventId, JobId, JobRunId, MappingId, MessageId, PlatformId, PluginId, RoleId, ScopeId,
+    SecretId, SessionId, TagId, UserId, UserMappingId, WorkspaceId, WorkspaceRepoId, WorktreeId,
 };
 
 /// A user account.
@@ -660,6 +660,61 @@ pub struct EvolutionEvent {
     pub created_at: DateTime<Utc>,
     /// When the event was last updated.
     pub updated_at: DateTime<Utc>,
+}
+
+/// A registered external messaging platform connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayPlatform {
+    /// Unique identifier.
+    pub id: PlatformId,
+    /// The platform type (Discord, Telegram, etc.).
+    pub platform_type: PlatformType,
+    /// Human-readable display name.
+    pub display_name: String,
+    /// Whether this platform connection is active.
+    pub is_enabled: bool,
+    /// When the platform was registered.
+    pub created_at: DateTime<Utc>,
+    /// When the platform was last updated.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A mapping from an external channel to a Sõber conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayChannelMapping {
+    /// Unique identifier.
+    pub id: MappingId,
+    /// The platform this mapping belongs to.
+    pub platform_id: PlatformId,
+    /// External channel identifier (platform-specific).
+    pub external_channel_id: String,
+    /// Human-readable channel name.
+    pub external_channel_name: String,
+    /// The Sõber conversation receiving messages from this channel.
+    pub conversation_id: ConversationId,
+    /// Whether this mapping is for a thread within a parent channel.
+    pub is_thread: bool,
+    /// The parent channel mapping, if this is a thread mapping.
+    pub parent_mapping_id: Option<MappingId>,
+    /// When the mapping was created.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A mapping from an external user to a Sõber user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayUserMapping {
+    /// Unique identifier.
+    pub id: UserMappingId,
+    /// The platform this mapping belongs to.
+    pub platform_id: PlatformId,
+    /// External user identifier (platform-specific).
+    pub external_user_id: String,
+    /// External username at time of mapping.
+    pub external_username: String,
+    /// The Sõber user this external user maps to.
+    pub user_id: UserId,
+    /// When the mapping was created.
+    pub created_at: DateTime<Utc>,
 }
 
 /// DB-backed autonomy configuration for self-evolution.

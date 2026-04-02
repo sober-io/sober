@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{
-    ArtifactKind, ArtifactState, EvolutionStatus, EvolutionType, PluginKind, PluginOrigin,
-    PluginScope, PluginStatus,
+    ArtifactKind, ArtifactState, EvolutionStatus, EvolutionType, PlatformType, PluginKind,
+    PluginOrigin, PluginScope, PluginStatus,
 };
 use super::ids::{ArtifactId, ConversationId, PluginId, UserId, WorkspaceId};
 
@@ -339,6 +339,46 @@ pub struct PluginFilter {
     pub workspace_id: Option<WorkspaceId>,
     /// Filter by status.
     pub status: Option<PluginStatus>,
+}
+
+/// Input for creating a new platform connection.
+#[derive(Debug, Deserialize)]
+pub struct CreatePlatform {
+    /// The platform type (Discord, Telegram, etc.).
+    pub platform_type: PlatformType,
+    /// Human-readable display name.
+    pub display_name: String,
+}
+
+/// Input for updating a platform connection.
+#[derive(Debug, Deserialize)]
+pub struct UpdatePlatform {
+    /// New display name.
+    pub display_name: Option<String>,
+    /// Whether the platform is enabled.
+    pub is_enabled: Option<bool>,
+}
+
+/// Input for creating a channel mapping.
+#[derive(Debug, Deserialize)]
+pub struct CreateChannelMapping {
+    /// External channel identifier (platform-specific).
+    pub external_channel_id: String,
+    /// Human-readable channel name.
+    pub external_channel_name: String,
+    /// The Sõber conversation to route messages to.
+    pub conversation_id: ConversationId,
+}
+
+/// Input for creating a user mapping.
+#[derive(Debug, Deserialize)]
+pub struct CreateUserMapping {
+    /// External user identifier (platform-specific).
+    pub external_user_id: String,
+    /// External username at time of mapping.
+    pub external_username: String,
+    /// The Sõber user to map to.
+    pub user_id: UserId,
 }
 
 /// Input for creating an evolution event.
