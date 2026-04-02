@@ -4765,7 +4765,7 @@ dependencies = [
 
 [[package]]
 name = "sober-agent"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4809,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "sober-api"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
