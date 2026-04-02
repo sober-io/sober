@@ -23,7 +23,7 @@ WhatsApp ──┘                    │               │──SQL────
 
 - **gRPC/UDS** to `sober-agent` for `HandleMessage` + `SubscribeConversationUpdates`
   (same pattern as `sober-scheduler`)
-- **Direct DB access** via `sober-db` for conversation CRUD, mapping tables, config
+- **DB access** via `sober-db` repos for mapping tables, user lookups, config
 - **Admin socket** (UDS) at `/run/sober/gateway.sock` for runtime control
 
 ### Crate Dependencies
@@ -31,10 +31,44 @@ WhatsApp ──┘                    │               │──SQL────
 ```
 sober-gateway → sober-core   (types, errors)
               → sober-db     (repos, pool)
+              → sober-auth   (AuthUser, for API endpoint auth)
               → sober-agent  (gRPC client — proto only)
 ```
 
 No crate depends on `sober-gateway`. It is a leaf binary like `sober-api`.
+
+### Service Layer
+
+Following the service layer pattern from `sober-api`, the gateway extracts business
+logic into service structs. Handlers/event processors remain thin.
+
+```rust
+pub struct GatewayService {
+    db: PgPool,
+    agent: AgentClient,
+    bridges: Arc<PlatformBridgeRegistry>,
+}
+```
+
+`GatewayService` owns:
+- **Inbound routing** — mapping lookup, auto-create conversation, user attribution
+- **Outbound delivery** — buffer management, platform dispatch
+- **Mapping CRUD** — platform/channel/user mapping management
+
+Methods return `Result<T, AppError>` with typed response DTOs. Multi-table
+operations (e.g., auto-create conversation + mapping) use the `_tx` pattern
+for atomicity.
+
+### Authorization
+
+Gateway API endpoints (platform/mapping/user CRUD) are admin-only. Two-layer
+defense following the pattern from `sober-api`:
+
+1. **Route-level**: `RequireAdmin` extractor on all `/admin/gateway/*` routes
+2. **Service-level**: `guards::require_admin()` calls where needed
+
+The gateway binary itself is a trusted internal service — its gRPC calls to
+`sober-agent` use the bridge service account, not per-request auth.
 
 ### Event Delivery
 
@@ -227,11 +261,32 @@ platform-specific format. Inbound messages are normalized to plain text/markdown
 3. Gateway core receives event
 4. Look up mapping: `(platform_id, channel_id)` → `ConversationId`
    - Found → use it
-   - Not found → create conversation, insert mapping, cache it
+   - Not found → auto-create (see below)
 5. Look up user: `(platform_id, external_user_id)` → `UserId`
    - Found → use mapped `user_id`
    - Not found → use bridge service account, prefix content with `[username]`
 6. Call `agent.HandleMessage(user_id, conversation_id, content)`
+
+#### Auto-Create with `_tx` Transactions
+
+When no mapping exists, the gateway creates a conversation and mapping atomically
+using the `_tx` pattern. This prevents races when concurrent platform messages
+arrive for the same unmapped channel:
+
+```rust
+let mut tx = db.begin().await?;
+let conversation = PgConversationRepo::create_tx(
+    &mut tx, bridge_user_id, Some(channel_name), None,
+).await?;
+PgGatewayMappingRepo::create_tx(
+    &mut tx, platform_id, external_channel_id, conversation.id, agent_mode,
+).await?;
+tx.commit().await?;
+```
+
+The unique constraint `(platform_id, external_channel_id)` on `gateway_channel_mappings`
+acts as a second safety net — a concurrent insert will fail and the losing task
+retries with a lookup.
 
 ### Outbound Flow (Sõber → Platform)
 
@@ -273,7 +328,8 @@ Platforms have rate limits and different editing capabilities:
 
 ## API Endpoints
 
-All under `/api/v1/admin/gateway/`, admin-only.
+All under `/api/v1/admin/gateway/`, gated by `RequireAdmin` extractor.
+Handlers delegate to `GatewayService` methods (thin handler pattern).
 
 ### Platform Management
 
@@ -308,24 +364,53 @@ Settings pages:
 
 ### Metrics
 
-| Metric | Type | Labels |
-|--------|------|--------|
-| `gateway_messages_received_total` | counter | `platform`, `channel_id` |
-| `gateway_messages_sent_total` | counter | `platform`, `channel_id` |
-| `gateway_message_handle_duration_seconds` | histogram | `platform` |
-| `gateway_message_delivery_duration_seconds` | histogram | `platform` |
-| `gateway_platform_connections` | gauge | `platform`, `status` |
-| `gateway_mappings_auto_created_total` | counter | `platform` |
-| `gateway_buffer_flush_size_bytes` | histogram | `platform` |
-| `gateway_platform_errors_total` | counter | `platform`, `error_type` |
+| Metric | Type | Labels | Location | Description |
+|--------|------|--------|----------|-------------|
+| `sober_gateway_messages_received_total` | counter | `platform`, `status` | `GatewayService::handle_event` | Inbound platform messages (success/error) |
+| `sober_gateway_messages_sent_total` | counter | `platform`, `status` | `GatewayService::deliver_outbound` | Outbound messages to platforms |
+| `sober_gateway_message_handle_duration_seconds` | histogram | `platform` | `GatewayService::handle_event` | Inbound message processing latency |
+| `sober_gateway_message_delivery_duration_seconds` | histogram | `platform` | `GatewayService::deliver_outbound` | Outbound delivery latency |
+| `sober_gateway_platform_connections` | gauge | `platform`, `status` | `PlatformBridgeRegistry` | Active platform connections (connected/reconnecting/disconnected) |
+| `sober_gateway_mappings_auto_created_total` | counter | `platform` | `GatewayService::handle_event` | Auto-created channel mappings |
+| `sober_gateway_buffer_flush_size_bytes` | histogram | `platform` | `GatewayService::deliver_outbound` | Size of buffered content flushed to platforms |
+| `sober_gateway_platform_errors_total` | counter | `platform`, `error_type` | various | Platform SDK errors (auth, rate_limit, network, api) |
 
-### Dashboard Panels
+Cardinality: `platform` is bounded (discord/telegram/matrix/whatsapp). `status`
+is bounded (success/error or connected/reconnecting/disconnected). No `channel_id`
+labels — use logs for per-channel debugging.
 
-- Connection status per platform (uptime, state)
-- Message throughput (inbound/outbound rate)
-- Latency p50/p95/p99 (handle + delivery)
-- Error rate by platform and type
-- Active mapping count per platform
+### Trace Spans
+
+| Span Name | Kind | Attributes | Context Propagation |
+|-----------|------|------------|-------------------|
+| `gateway.handle_event` | server | `platform`, `event_type`, `channel_id` | New root span per event |
+| `gateway.resolve_mapping` | client | `platform`, `channel_id`, `auto_created` | Child of handle_event |
+| `gateway.deliver_outbound` | client | `platform`, `conversation_id` | Extract from gRPC subscription metadata |
+| `gateway.platform_connect` | client | `platform` | New root span |
+
+Service methods use `#[instrument]` with `skip(self)` and relevant field bindings,
+following the pattern established in `sober-api` services.
+
+### metrics.toml Updates
+
+New file: `backend/crates/sober-gateway/metrics.toml` — declares all metrics
+listed above with alerts:
+
+- `GatewayHighErrorRate`: `rate(sober_gateway_platform_errors_total[5m]) > 5` for 5m (warning)
+- `GatewayPlatformDisconnected`: `sober_gateway_platform_connections{status="disconnected"} > 0` for 5m (warning)
+- `GatewayHighP95Latency`: `histogram_quantile(0.95, rate(sober_gateway_message_handle_duration_seconds_bucket[5m])) > 2.0` for 5m (warning)
+
+### Dashboard
+
+New row: "Messaging Gateway" on the overview dashboard.
+
+| Panel | Type | PromQL |
+|-------|------|--------|
+| Platform connections | stat | `sober_gateway_platform_connections` |
+| Message throughput | timeseries | `rate(sober_gateway_messages_received_total[5m])`, `rate(sober_gateway_messages_sent_total[5m])` |
+| Handle latency p50/p95/p99 | timeseries | `histogram_quantile(0.5\|0.95\|0.99, rate(sober_gateway_message_handle_duration_seconds_bucket[5m]))` |
+| Error rate | timeseries | `rate(sober_gateway_platform_errors_total[5m])` by `platform`, `error_type` |
+| Auto-created mappings | timeseries | `rate(sober_gateway_mappings_auto_created_total[5m])` |
 
 ### Logging
 
@@ -339,9 +424,11 @@ Structured tracing:
 ## Deployment
 
 - **Docker**: `infra/docker/Dockerfile.gateway`, added to `docker-compose.yml` and `docker-bake.hcl`
+- **CI**: new target in `docker-bake.hcl`, binary added to `Dockerfile.ci` multi-stage build
 - **Systemd**: `sober-gateway.service` unit file
 - **Install script**: updated to include gateway binary + service
 - **Admin socket**: `/run/sober/gateway.sock`
+- **Metrics**: `/metrics` endpoint for Prometheus scraping (same pattern as other services)
 
 ## Credential Storage
 
