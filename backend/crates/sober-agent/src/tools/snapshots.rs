@@ -16,6 +16,7 @@ use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
 use sober_workspace::SnapshotManager;
+use tracing::instrument;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> CreateSnapshotTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "create_snapshot"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
 
@@ -185,6 +187,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> ListSnapshotsTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, _input), fields(tool.name = "list_snapshots"))]
     async fn execute_inner(&self, _input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let artifacts = self
             .ctx
@@ -265,6 +268,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> RestoreSnapshotTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "restore_snapshot"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
 

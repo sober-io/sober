@@ -8,7 +8,7 @@ use std::time::Duration;
 use sober_core::error::AppError;
 use sober_core::types::ConversationAttachmentRepo;
 use sober_core::types::Job;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::executor::{ExecutionResult, JobExecutor};
 
@@ -35,6 +35,7 @@ impl<R: ConversationAttachmentRepo> AttachmentCleanupExecutor<R> {
 
 #[tonic::async_trait]
 impl<R: ConversationAttachmentRepo + 'static> JobExecutor for AttachmentCleanupExecutor<R> {
+    #[instrument(skip(self, _job))]
     async fn execute(&self, _job: &Job) -> Result<ExecutionResult, AppError> {
         let deleted = self.repo.delete_orphaned(DEFAULT_MAX_AGE).await?;
 

@@ -7,7 +7,7 @@ use sober_core::config::MemoryConfig;
 use sober_core::error::AppError;
 use sober_core::types::{Job, UserId};
 use sober_memory::MemoryStore;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::executor::{ExecutionResult, JobExecutor};
 
@@ -29,6 +29,7 @@ impl MemoryPruningExecutor {
 
 #[tonic::async_trait]
 impl JobExecutor for MemoryPruningExecutor {
+    #[instrument(skip(self, job), fields(job.id = %job.id, job.name = %job.name))]
     async fn execute(&self, job: &Job) -> Result<ExecutionResult, AppError> {
         // Extract user_id from the job's owner_id (system-wide prune if absent).
         let user_id = job

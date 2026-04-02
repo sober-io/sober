@@ -18,6 +18,7 @@ use sober_core::types::tool::{
 };
 use sober_core::{ArtifactId, ConversationId, UserId, WorkspaceId};
 use sober_workspace::BlobStore;
+use tracing::instrument;
 use uuid::Uuid;
 
 /// Shared context for all artifact tools.
@@ -101,6 +102,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> CreateArtifactTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "create_artifact"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let title = input
             .get("title")
@@ -239,6 +241,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> ListArtifactsTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "list_artifacts"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let kind = input
             .get("kind")
@@ -339,6 +342,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> ReadArtifactTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "read_artifact"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let id_str = input
             .get("artifact_id")
@@ -444,6 +448,7 @@ impl<A: ArtifactRepo, Au: AuditLogRepo> DeleteArtifactTool<A, Au> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "delete_artifact"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let id_str = input
             .get("artifact_id")

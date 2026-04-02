@@ -22,7 +22,7 @@ use sober_core::types::tool::ToolError;
 use sober_core::types::tool_execution::CreateToolExecution;
 use sober_llm::types::ToolCall as LlmToolCall;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{Instrument, info, instrument, warn};
 
 use crate::broadcast::ConversationUpdateSender;
 use crate::context::AgentContext;
@@ -96,6 +96,7 @@ struct ConfirmDetail {
 ///
 /// Returns a [`DispatchOutcome`] with per-tool results for the next LLM
 /// iteration, plus aggregate flags.
+#[instrument(skip(ctx, req), fields(conversation.id = %req.conversation_id, user.id = %req.user_id, tool_count = req.tool_calls.len()))]
 pub async fn execute_tool_calls<R: AgentRepos>(
     ctx: &AgentContext<R>,
     req: &DispatchRequest<'_>,
@@ -104,6 +105,13 @@ pub async fn execute_tool_calls<R: AgentRepos>(
     let mut results = Vec::with_capacity(req.tool_calls.len());
     let mut any_context_modifying = false;
     let mut any_errors = false;
+
+    let tool_names: Vec<&str> = req
+        .tool_calls
+        .iter()
+        .map(|tc| tc.function.name.as_str())
+        .collect();
+    info!(tool_count = req.tool_calls.len(), tool_names = ?tool_names, "dispatching tool calls");
 
     for tc in req.tool_calls {
         let tool_name = &tc.function.name;
@@ -326,6 +334,13 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             .await;
         }
 
+        info!(
+            tool.name = %tool_name,
+            is_error,
+            output_len = output.len(),
+            "tool execution completed"
+        );
+
         results.push(ToolResult {
             tool_call_id: tc.id.clone(),
             name: tool_name.clone(),
@@ -344,6 +359,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
 /// Executes a single tool, handling the confirmation flow and panic catching.
 ///
 /// Returns `(output_string, is_error)`.
+#[instrument(skip(ctx, tool_registry, tool_input, event_tx, conv_id_str, user_id), fields(tool.name = %tool_name))]
 async fn execute_single_tool<R: AgentRepos>(
     ctx: &AgentContext<R>,
     tool_registry: &ToolRegistry,
@@ -360,7 +376,10 @@ async fn execute_single_tool<R: AgentRepos>(
             let execute_result = {
                 let tool_ref = Arc::clone(&tool);
                 let input_clone = tool_input.clone();
-                let handle = tokio::spawn(async move { tool_ref.execute(input_clone).await });
+                let tool_span = tracing::info_span!("tool.execute", tool.name = %tool_name);
+                let handle = tokio::spawn(
+                    async move { tool_ref.execute(input_clone).await }.instrument(tool_span),
+                );
                 match handle.await {
                     Ok(result) => result,
                     Err(join_err) => {
@@ -388,6 +407,7 @@ async fn execute_single_tool<R: AgentRepos>(
                     risk_level,
                     reason,
                 }) => {
+                    info!(tool.name = %tool_name, "tool requires confirmation");
                     let detail = ConfirmDetail {
                         confirm_id,
                         command,
@@ -440,6 +460,7 @@ async fn execute_single_tool<R: AgentRepos>(
 /// Sends the confirmation event to the client, waits for the user's response,
 /// and re-executes the tool if approved. If the tool execution is denied or
 /// times out, an appropriate message is returned.
+#[instrument(skip(ctx, tool, tool_input, confirm, event_tx, conv_id_str, user_id))]
 async fn handle_confirmation<R: AgentRepos>(
     ctx: &AgentContext<R>,
     tool: &Arc<dyn sober_core::types::tool::Tool>,
@@ -484,6 +505,7 @@ async fn handle_confirmation<R: AgentRepos>(
 
     match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await {
         Ok(Ok(approved)) => {
+            info!(approved, "confirmation response received");
             // Log the confirmation decision.
             let _ = crate::audit::log_confirmation(
                 ctx.repos.audit_log(),
@@ -529,6 +551,7 @@ fn status_to_str(status: ToolExecutionStatus) -> &'static str {
 /// Sends a [`AgentEvent::ToolExecutionUpdate`] through both the per-request
 /// event channel and the broadcast channel.
 #[allow(clippy::too_many_arguments)]
+#[instrument(level = "debug", skip(event_tx, broadcast_tx, conv_id_str, exec_id, message_id, tool_call_id, output, error, input), fields(tool.name = %tool_name))]
 async fn send_execution_update(
     event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     broadcast_tx: &ConversationUpdateSender,

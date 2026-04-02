@@ -13,6 +13,7 @@ use sober_core::types::repo::EvolutionRepo;
 use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
+use tracing::instrument;
 
 /// Maximum number of auto-approved evolutions per day.
 const AUTO_APPROVE_DAILY_LIMIT: i64 = 3;
@@ -85,6 +86,7 @@ impl<R: AgentRepos> Tool for ProposeSkillTool<R> {
 }
 
 impl<R: AgentRepos> ProposeSkillTool<R> {
+    #[instrument(skip(self, input), fields(tool.name = "propose_skill"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         // 1. Parse and validate input.
         let name = input

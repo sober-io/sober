@@ -21,6 +21,7 @@ use sober_plugin::registry::InstallRequest;
 use sober_plugin::{AuditPipeline, PluginManager};
 use sober_plugin_gen::PluginGenerator;
 use sober_workspace::BlobStore;
+use tracing::instrument;
 
 /// Configuration for [`GeneratePluginTool`] construction.
 ///
@@ -133,6 +134,7 @@ impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> Tool for GeneratePlugin
 
 impl<R: PluginRepo + 'static, A: ArtifactRepo + 'static> GeneratePluginTool<R, A> {
     /// Inner async implementation for [`Tool::execute`].
+    #[instrument(skip(self, input), fields(tool.name = "generate_plugin"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let name = input
             .get("name")

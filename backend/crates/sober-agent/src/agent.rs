@@ -25,7 +25,7 @@ use sober_mind::assembly::Mind;
 use sober_mind::injection::InjectionVerdict;
 
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, instrument, warn};
 
 use crate::broadcast::ConversationUpdateSender;
 use crate::confirm::ConfirmationRegistrar;
@@ -248,6 +248,7 @@ impl<R: AgentRepos> Agent<R> {
     ///
     /// Returns `None` if the conversation has no workspace or the workspace
     /// doesn't exist in the database.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn resolve_workspace_dir(&self, conversation_id: ConversationId) -> Option<PathBuf> {
         let conversation = self
             .repos
@@ -300,6 +301,7 @@ impl<R: AgentRepos> Agent<R> {
     ///
     /// Tries the original `conversation_id` first; falls back to the user's
     /// most recent conversation in the same workspace.
+    #[instrument(level = "debug", skip(self))]
     pub async fn resolve_delivery_conversation(
         &self,
         conversation_id: Option<ConversationId>,
@@ -381,6 +383,7 @@ impl<R: AgentRepos> Agent<R> {
     /// If a [`ConversationActor`] already exists for this conversation, the
     /// message is sent to its inbox. Otherwise a new actor is spawned. Returns
     /// a stream of [`AgentEvent`]s for the caller to consume.
+    #[instrument(skip(self, content), fields(conversation.id = %conversation_id, trigger = ?trigger))]
     pub async fn handle_message(
         self: &Arc<Self>,
         user_id: UserId,
@@ -435,10 +438,15 @@ impl<R: AgentRepos> Agent<R> {
 
             let registry = self.registry.clone();
             let cid = conversation_id;
-            tokio::spawn(async move {
-                actor.run().await;
-                registry.remove(&cid);
-            });
+            let actor_span =
+                tracing::info_span!("conversation_actor", conversation.id = %conversation_id);
+            tokio::spawn(
+                async move {
+                    actor.run().await;
+                    registry.remove(&cid);
+                }
+                .instrument(actor_span),
+            );
 
             self.registry.insert(
                 conversation_id,
@@ -479,6 +487,7 @@ impl<R: AgentRepos> Agent<R> {
     ///
     /// Sends [`InboxMessage::Shutdown`] to every actor and waits briefly for
     /// them to drain their current work.
+    #[instrument(skip(self))]
     pub async fn shutdown(&self) {
         self.registry.shutdown_all().await;
     }

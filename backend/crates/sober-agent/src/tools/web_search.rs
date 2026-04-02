@@ -7,6 +7,7 @@ use serde::Deserialize;
 use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
+use tracing::instrument;
 
 use super::http_client;
 
@@ -101,6 +102,7 @@ impl Tool for WebSearchTool {
 
 impl WebSearchTool {
     /// Inner async implementation for [`Tool::execute`].
+    #[instrument(skip(self, input), fields(tool.name = "web_search"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let query = input
             .get("query")

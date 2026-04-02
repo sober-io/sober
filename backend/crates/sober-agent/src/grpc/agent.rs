@@ -13,7 +13,7 @@ use sober_core::types::JobPayload;
 use sober_core::types::ids::{ConversationId, UserId, WorkspaceId};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::error;
+use tracing::{Instrument, error};
 
 use super::{AgentGrpcService, proto};
 use crate::grpc::content_blocks;
@@ -85,11 +85,16 @@ pub(crate) async fn handle_message<R: AgentRepos>(
             // The stream must be consumed to drive the spawned task, but
             // we don't need its output — the broadcast channel delivers
             // events. Spawn a drainer task.
-            tokio::spawn(async move {
-                use futures::StreamExt;
-                let mut stream = stream;
-                while stream.next().await.is_some() {}
-            });
+            let drainer_span =
+                tracing::debug_span!("agent.drain_stream", conversation.id = %conversation_id);
+            tokio::spawn(
+                async move {
+                    use futures::StreamExt;
+                    let mut stream = stream;
+                    while stream.next().await.is_some() {}
+                }
+                .instrument(drainer_span),
+            );
 
             // Return a placeholder message_id. The actual user message ID
             // is not directly available from handle_message's current API,
@@ -187,40 +192,44 @@ pub(crate) async fn execute_task<R: AgentRepos>(
     let task_type = req.task_type;
     let payload = req.payload;
 
-    tokio::spawn(async move {
-        // Try to deserialize as a typed JobPayload; fall back to raw prompt.
-        match serde_json::from_slice::<JobPayload>(&payload) {
-            Ok(job_payload) => {
-                tasks::execute_typed_payload(
-                    &agent,
-                    job_payload,
-                    user_id,
-                    conversation_id,
-                    workspace_id,
-                    &task_id,
-                    &tx,
-                )
-                .await;
-            }
-            Err(_) => {
-                // Legacy path: treat payload as a UTF-8 prompt string.
-                let prompt = match String::from_utf8(payload) {
-                    Ok(s) if !s.is_empty() => s,
-                    _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
-                };
+    let task_span = tracing::info_span!("agent.execute_task_worker", task.id = %task_id);
+    tokio::spawn(
+        async move {
+            // Try to deserialize as a typed JobPayload; fall back to raw prompt.
+            match serde_json::from_slice::<JobPayload>(&payload) {
+                Ok(job_payload) => {
+                    tasks::execute_typed_payload(
+                        &agent,
+                        job_payload,
+                        user_id,
+                        conversation_id,
+                        workspace_id,
+                        &task_id,
+                        &tx,
+                    )
+                    .await;
+                }
+                Err(_) => {
+                    // Legacy path: treat payload as a UTF-8 prompt string.
+                    let prompt = match String::from_utf8(payload) {
+                        Ok(s) if !s.is_empty() => s,
+                        _ => format!("Execute scheduled task: {task_type} (id: {task_id})"),
+                    };
 
-                tasks::execute_prompt_conversational(
-                    &agent,
-                    &prompt,
-                    user_id,
-                    conversation_id,
-                    &task_id,
-                    &tx,
-                )
-                .await;
+                    tasks::execute_prompt_conversational(
+                        &agent,
+                        &prompt,
+                        user_id,
+                        conversation_id,
+                        &task_id,
+                        &tx,
+                    )
+                    .await;
+                }
             }
         }
-    });
+        .instrument(task_span),
+    );
 
     Ok(Response::new(ReceiverStream::new(rx)))
 }
@@ -242,25 +251,32 @@ pub(crate) async fn subscribe_conversation_updates<R: AgentRepos>(
     let mut rx = service.broadcast_tx().subscribe();
     let (tx, out_rx) = tokio::sync::mpsc::channel(64);
 
-    tokio::spawn(async move {
-        loop {
-            match rx.recv().await {
-                Ok(update) => {
-                    if tx.send(Ok(update)).await.is_err() {
-                        // Client disconnected.
+    let subscription_span = tracing::debug_span!("agent.subscribe_conversation_updates");
+    tokio::spawn(
+        async move {
+            loop {
+                match rx.recv().await {
+                    Ok(update) => {
+                        if tx.send(Ok(update)).await.is_err() {
+                            // Client disconnected.
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(
+                            skipped = n,
+                            "subscription lagged, some events were dropped"
+                        );
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "subscription lagged, some events were dropped");
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    break;
-                }
             }
         }
-    });
+        .instrument(subscription_span),
+    );
 
     Ok(Response::new(ReceiverStream::new(out_rx)))
 }

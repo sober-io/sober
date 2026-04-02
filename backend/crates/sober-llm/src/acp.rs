@@ -13,7 +13,7 @@ use futures::{Stream, stream};
 use metrics::{counter, histogram};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 
 use crate::engine::LlmEngine;
 use crate::error::LlmError;
@@ -251,6 +251,7 @@ impl AcpEngine {
 
 #[async_trait]
 impl LlmEngine for AcpEngine {
+    #[instrument(skip(self, req), fields(agent = %self.config.name))]
     async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let mut state = self.state.lock().await;
 
@@ -317,6 +318,7 @@ impl LlmEngine for AcpEngine {
         })
     }
 
+    #[instrument(skip(self, req), fields(agent = %self.config.name))]
     async fn stream(
         &self,
         req: CompletionRequest,
@@ -350,6 +352,7 @@ impl LlmEngine for AcpEngine {
         Ok(Box::pin(stream::iter(chunks)))
     }
 
+    #[instrument(skip(self, _texts), fields(agent = %self.config.name))]
     async fn embed(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
         Err(LlmError::Unsupported(
             "ACP agents do not support embedding generation".to_owned(),
