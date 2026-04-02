@@ -8,15 +8,16 @@ use sober_core::types::{
     AgentMode, ArtifactId, ArtifactKind, ArtifactState, AttachmentKind, AuditLogId,
     ConversationAttachmentId, ConversationId, ConversationKind, ConversationUserRole,
     EncryptionKeyId, EvolutionEventId, EvolutionStatus, EvolutionType, JobId, JobRunId, JobStatus,
-    MessageId, MessageRole, PermissionMode, PluginId, PluginKind, PluginOrigin, PluginScope,
-    PluginStatus, RoleId, SandboxNetMode, ScopeId, SecretId, SessionId, TagId, ToolExecutionId,
-    ToolExecutionSource, ToolExecutionStatus, UserId, UserStatus, WorkspaceId, WorkspaceRepoId,
-    WorkspaceState, WorktreeId, WorktreeState,
+    MappingId, MessageId, MessageRole, PermissionMode, PlatformId, PluginId, PluginKind,
+    PluginOrigin, PluginScope, PluginStatus, RoleId, SandboxNetMode, ScopeId, SecretId, SessionId,
+    TagId, ToolExecutionId, ToolExecutionSource, ToolExecutionStatus, UserId, UserMappingId,
+    UserStatus, WorkspaceId, WorkspaceRepoId, WorkspaceState, WorktreeId, WorktreeState,
 };
 use sober_core::types::{
     Artifact, AuditLogEntry, AutonomyLevel, ContentBlock, Conversation, ConversationAttachment,
-    ConversationUser, ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent, Job,
-    JobRun, Message, MessageSearchHit, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
+    ConversationUser, ConversationUserWithUsername, EvolutionConfigRow, EvolutionEvent,
+    GatewayChannelMapping, GatewayPlatform, GatewayUserMapping, Job, JobRun, Message,
+    MessageSearchHit, PlatformType, Plugin, PluginAuditLog, Role, SecretMetadata, SecretRow,
     Session, StoredDek, Tag, ToolExecution, User, UserRole, Workspace, WorkspaceRepoEntry,
     WorkspaceSettings, Worktree,
 };
@@ -907,6 +908,79 @@ impl From<EvolutionConfigDbRow> for EvolutionConfigRow {
             instruction_autonomy: parse_autonomy(&row.instruction_autonomy),
             automation_autonomy: parse_autonomy(&row.automation_autonomy),
             updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct GatewayPlatformRow {
+    pub id: Uuid,
+    pub platform_type: String,
+    pub display_name: String,
+    pub is_enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<GatewayPlatformRow> for GatewayPlatform {
+    fn from(row: GatewayPlatformRow) -> Self {
+        Self {
+            id: PlatformId::from_uuid(row.id),
+            platform_type: row.platform_type.parse().unwrap_or(PlatformType::Discord),
+            display_name: row.display_name,
+            is_enabled: row.is_enabled,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct GatewayChannelMappingRow {
+    pub id: Uuid,
+    pub platform_id: Uuid,
+    pub external_channel_id: String,
+    pub external_channel_name: String,
+    pub conversation_id: Uuid,
+    pub is_thread: bool,
+    pub parent_mapping_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<GatewayChannelMappingRow> for GatewayChannelMapping {
+    fn from(row: GatewayChannelMappingRow) -> Self {
+        Self {
+            id: MappingId::from_uuid(row.id),
+            platform_id: PlatformId::from_uuid(row.platform_id),
+            external_channel_id: row.external_channel_id,
+            external_channel_name: row.external_channel_name,
+            conversation_id: ConversationId::from_uuid(row.conversation_id),
+            is_thread: row.is_thread,
+            parent_mapping_id: row.parent_mapping_id.map(MappingId::from_uuid),
+            created_at: row.created_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub(crate) struct GatewayUserMappingRow {
+    pub id: Uuid,
+    pub platform_id: Uuid,
+    pub external_user_id: String,
+    pub external_username: String,
+    pub user_id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<GatewayUserMappingRow> for GatewayUserMapping {
+    fn from(row: GatewayUserMappingRow) -> Self {
+        Self {
+            id: UserMappingId::from_uuid(row.id),
+            platform_id: PlatformId::from_uuid(row.platform_id),
+            external_user_id: row.external_user_id,
+            external_username: row.external_username,
+            user_id: UserId::from_uuid(row.user_id),
+            created_at: row.created_at,
         }
     }
 }
