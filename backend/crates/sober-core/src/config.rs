@@ -75,6 +75,12 @@ pub const DEFAULT_MEMORY_PRUNE_THRESHOLD: f64 = 0.1;
 pub const DEFAULT_ACP_ARGS: &str = "acp";
 /// Default evolution check interval.
 pub const DEFAULT_EVOLUTION_INTERVAL: &str = "2h";
+/// Default gateway gRPC socket path.
+pub const DEFAULT_GATEWAY_SOCKET_PATH: &str = "/run/sober/gateway.sock";
+/// Default gateway metrics port.
+pub const DEFAULT_GATEWAY_METRICS_PORT: u16 = 9102;
+/// Default gateway agent socket path.
+pub const DEFAULT_GATEWAY_AGENT_SOCKET_PATH: &str = "/run/sober/agent.sock";
 
 /// Top-level application configuration.
 ///
@@ -118,6 +124,8 @@ pub struct AppConfig {
     pub web: WebConfig,
     /// Self-evolution loop settings.
     pub evolution: EvolutionConfig,
+    /// Gateway process settings (sober-gateway binary).
+    pub gateway: GatewayConfig,
 }
 
 fn default_workspace_root() -> PathBuf {
@@ -144,6 +152,7 @@ impl Default for AppConfig {
             agent: AgentProcessConfig::default(),
             web: WebConfig::default(),
             evolution: EvolutionConfig::default(),
+            gateway: GatewayConfig::default(),
         }
     }
 }
@@ -495,6 +504,30 @@ impl Default for EvolutionConfig {
             detection_msg_limit: 200,
             detection_max_tokens: 4096,
             detection_temperature: 0.3,
+        }
+    }
+}
+
+/// Gateway process settings (sober-gateway binary).
+///
+/// Configurable via `[gateway]` TOML section or `SOBER_GATEWAY_*` env vars.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct GatewayConfig {
+    /// Path to the gateway gRPC socket.
+    pub socket_path: PathBuf,
+    /// Prometheus metrics port.
+    pub metrics_port: u16,
+    /// Path to the agent gRPC socket (for HandleMessage + Subscribe).
+    pub agent_socket_path: PathBuf,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: PathBuf::from(DEFAULT_GATEWAY_SOCKET_PATH),
+            metrics_port: DEFAULT_GATEWAY_METRICS_PORT,
+            agent_socket_path: PathBuf::from(DEFAULT_GATEWAY_AGENT_SOCKET_PATH),
         }
     }
 }
