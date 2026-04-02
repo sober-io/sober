@@ -586,6 +586,52 @@ impl<'de> Deserialize<'de> for RoleKind {
     }
 }
 
+/// External messaging platform type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "postgres", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "postgres",
+    sqlx(type_name = "text", rename_all = "lowercase")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum PlatformType {
+    /// Discord messaging platform.
+    Discord,
+    /// Telegram messaging platform.
+    Telegram,
+    /// Matrix messaging protocol.
+    Matrix,
+    /// WhatsApp messaging platform.
+    Whatsapp,
+}
+
+impl fmt::Display for PlatformType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Discord => write!(f, "discord"),
+            Self::Telegram => write!(f, "telegram"),
+            Self::Matrix => write!(f, "matrix"),
+            Self::Whatsapp => write!(f, "whatsapp"),
+        }
+    }
+}
+
+impl std::str::FromStr for PlatformType {
+    type Err = crate::error::AppError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "discord" => Ok(Self::Discord),
+            "telegram" => Ok(Self::Telegram),
+            "matrix" => Ok(Self::Matrix),
+            "whatsapp" => Ok(Self::Whatsapp),
+            _ => Err(crate::error::AppError::Validation(format!(
+                "unknown platform type: {s}"
+            ))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

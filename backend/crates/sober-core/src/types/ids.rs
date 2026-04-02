@@ -170,6 +170,21 @@ define_id!(
     ConversationAttachmentId
 );
 
+define_id!(
+    /// Unique identifier for a registered messaging platform connection.
+    PlatformId
+);
+
+define_id!(
+    /// Unique identifier for a channel-to-conversation mapping.
+    MappingId
+);
+
+define_id!(
+    /// Unique identifier for an external-user-to-Sõber-user mapping.
+    UserMappingId
+);
+
 /// Unique identifier for a tool (string-based, not UUID).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);
