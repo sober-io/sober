@@ -65,12 +65,20 @@ async fn main() -> anyhow::Result<()> {
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &http::Request<Body>| {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
                     let matched_path = request
                         .extensions()
                         .get::<MatchedPath>()
                         .map(|p| p.as_str().to_owned());
 
-                    info_span!(
+                    // Extract W3C TraceContext from incoming headers so this
+                    // span joins the caller's trace (e.g. sober-web proxy).
+                    let parent_cx = opentelemetry::global::get_text_map_propagator(|p| {
+                        p.extract(&HttpHeaderExtractor(request.headers()))
+                    });
+
+                    let span = info_span!(
                         "http_request",
                         http.method = %request.method(),
                         http.route = matched_path.as_deref().unwrap_or(""),
@@ -80,7 +88,9 @@ async fn main() -> anyhow::Result<()> {
                         otel.status_code = tracing::field::Empty,
                         error.type_ = tracing::field::Empty,
                         error.message = tracing::field::Empty,
-                    )
+                    );
+                    let _ = span.set_parent(parent_cx);
+                    span
                 })
                 .on_response(
                     |response: &Response<Body>, latency: Duration, span: &Span| {
@@ -154,6 +164,19 @@ fn build_cors(config: &AppConfig) -> CorsLayer {
             .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
             .allow_headers([AUTHORIZATION, CONTENT_TYPE])
             .allow_credentials(true),
+    }
+}
+
+/// Adapter that lets the OTel propagator read from an [`http::HeaderMap`].
+struct HttpHeaderExtractor<'a>(&'a http::HeaderMap);
+
+impl opentelemetry::propagation::Extractor for HttpHeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect()
     }
 }
 
