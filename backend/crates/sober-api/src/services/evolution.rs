@@ -2,6 +2,7 @@ use crate::state::AgentClient;
 use sober_core::config::AppConfig;
 use sqlx::PgPool;
 
+#[allow(dead_code)]
 pub struct EvolutionService {
     pub(crate) db: PgPool,
     pub(crate) agent_client: AgentClient,

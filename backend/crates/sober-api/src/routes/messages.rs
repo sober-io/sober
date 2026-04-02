@@ -12,8 +12,7 @@ use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{
     ApiResponse, ContentBlock, ConversationAttachmentId, ConversationAttachmentRepo,
-    ConversationId, CreateTag, MessageId, MessageRepo, MessageRole, Tag, TagId, TagRepo,
-    ToolExecutionRepo,
+    ConversationId, MessageId, MessageRepo, MessageRole, Tag, TagId, TagRepo, ToolExecutionRepo,
 };
 use sober_db::{PgConversationAttachmentRepo, PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
 
@@ -268,22 +267,10 @@ async fn add_message_tag(
     Path(id): Path<MessageId>,
     Json(body): Json<AddTagRequest>,
 ) -> Result<ApiResponse<Tag>, AppError> {
-    let msg_repo = PgMessageRepo::new(state.db.clone());
-    let tag_repo = PgTagRepo::new(state.db.clone());
-
-    // Verify membership.
-    let msg = msg_repo.get_by_id(id).await?;
-    let _membership =
-        super::verify_membership(&state.db, msg.conversation_id, auth_user.user_id).await?;
-
-    let tag = tag_repo
-        .create_or_get(CreateTag {
-            user_id: auth_user.user_id,
-            name: body.name,
-        })
+    let tag = state
+        .tag
+        .add_to_message(id, auth_user.user_id, body.name)
         .await?;
-
-    tag_repo.tag_message(id, tag.id).await?;
     Ok(ApiResponse::new(tag))
 }
 
@@ -293,14 +280,9 @@ async fn remove_message_tag(
     auth_user: AuthUser,
     Path((id, tag_id)): Path<(MessageId, TagId)>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let msg_repo = PgMessageRepo::new(state.db.clone());
-    let tag_repo = PgTagRepo::new(state.db.clone());
-
-    // Verify membership.
-    let msg = msg_repo.get_by_id(id).await?;
-    let _membership =
-        super::verify_membership(&state.db, msg.conversation_id, auth_user.user_id).await?;
-
-    tag_repo.untag_message(id, tag_id).await?;
+    state
+        .tag
+        .remove_from_message(id, auth_user.user_id, tag_id)
+        .await?;
     Ok(ApiResponse::new(serde_json::json!({ "removed": true })))
 }

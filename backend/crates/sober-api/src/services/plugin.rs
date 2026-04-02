@@ -1,6 +1,7 @@
 use crate::state::AgentClient;
 use sqlx::PgPool;
 
+#[allow(dead_code)]
 pub struct PluginService {
     pub(crate) db: PgPool,
     pub(crate) agent_client: AgentClient,

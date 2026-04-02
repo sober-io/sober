@@ -2,6 +2,7 @@ use crate::connections::ConnectionRegistry;
 use crate::state::AgentClient;
 use sqlx::PgPool;
 
+#[allow(dead_code)]
 pub struct WsDispatchService {
     pub(crate) db: PgPool,
     pub(crate) agent_client: AgentClient,

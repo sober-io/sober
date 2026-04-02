@@ -8,8 +8,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use sober_auth::AuthUser;
 use sober_core::error::AppError;
-use sober_core::types::{ApiResponse, ConversationId, CreateTag, Tag, TagId, TagRepo};
-use sober_db::PgTagRepo;
+use sober_core::types::{ApiResponse, ConversationId, Tag, TagId};
 
 use crate::state::AppState;
 
@@ -29,8 +28,7 @@ async fn list_tags(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<ApiResponse<Vec<Tag>>, AppError> {
-    let tag_repo = PgTagRepo::new(state.db.clone());
-    let tags = tag_repo.list_by_user(auth_user.user_id).await?;
+    let tags = state.tag.list_by_user(auth_user.user_id).await?;
     Ok(ApiResponse::new(tags))
 }
 
@@ -41,33 +39,16 @@ struct AddTagRequest {
 }
 
 /// `POST /api/v1/conversations/:id/tags` — add a tag to a conversation.
-///
-/// Creates the tag if it does not already exist (idempotent by name), then
-/// attaches it to the conversation. Color is assigned deterministically by
-/// the repository based on the tag name.
 async fn add_conversation_tag(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
     Json(body): Json<AddTagRequest>,
 ) -> Result<ApiResponse<Tag>, AppError> {
-    let tag_repo = PgTagRepo::new(state.db.clone());
-
-    let conversation_id = ConversationId::from_uuid(id);
-
-    // Verify membership.
-    let _membership =
-        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
-
-    let tag = tag_repo
-        .create_or_get(CreateTag {
-            user_id: auth_user.user_id,
-            name: body.name,
-        })
+    let tag = state
+        .tag
+        .add_to_conversation(ConversationId::from_uuid(id), auth_user.user_id, body.name)
         .await?;
-
-    tag_repo.tag_conversation(conversation_id, tag.id).await?;
-
     Ok(ApiResponse::new(tag))
 }
 
@@ -77,16 +58,13 @@ async fn remove_conversation_tag(
     auth_user: AuthUser,
     Path((id, tag_id)): Path<(uuid::Uuid, uuid::Uuid)>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    let tag_repo = PgTagRepo::new(state.db.clone());
-
-    let conversation_id = ConversationId::from_uuid(id);
-    let tag_id = TagId::from_uuid(tag_id);
-
-    // Verify membership.
-    let _membership =
-        super::verify_membership(&state.db, conversation_id, auth_user.user_id).await?;
-
-    tag_repo.untag_conversation(conversation_id, tag_id).await?;
-
+    state
+        .tag
+        .remove_from_conversation(
+            ConversationId::from_uuid(id),
+            auth_user.user_id,
+            TagId::from_uuid(tag_id),
+        )
+        .await?;
     Ok(ApiResponse::new(serde_json::json!({ "removed": true })))
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use sober_workspace::BlobStore;
 use sqlx::PgPool;
 
+#[allow(dead_code)]
 pub struct AttachmentService {
     pub(crate) db: PgPool,
     pub(crate) blob_store: Arc<BlobStore>,

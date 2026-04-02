@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 
+#[allow(dead_code)]
 pub struct AuthApiService {
     pub(crate) db: PgPool,
 }
