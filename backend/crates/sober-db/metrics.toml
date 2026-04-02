@@ -15,3 +15,10 @@ type = "gauge"
 help = "Idle connections in the pool"
 labels = []
 group = "Connection Pool"
+
+[[metrics]]
+name = "sober_message_content_blocks_total"
+type = "counter"
+help = "Total message content blocks stored"
+labels = []
+group = "Messages"

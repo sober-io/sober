@@ -72,3 +72,10 @@ type = "histogram"
 help = "Git push latency"
 labels = ["status"]
 group = "Git Push"
+
+[[metrics]]
+name = "sober_attachment_image_processing_seconds"
+type = "histogram"
+help = "Duration of attachment image processing (resize, thumbnail)"
+labels = []
+group = "Attachments"

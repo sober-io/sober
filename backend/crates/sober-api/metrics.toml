@@ -69,3 +69,24 @@ type = "counter"
 help = "Admin socket commands executed"
 labels = ["command", "status"]
 group = "Admin"
+
+[[metrics]]
+name = "sober_attachment_uploads_total"
+type = "counter"
+help = "Total attachment uploads"
+labels = ["status"]
+group = "Attachments"
+
+[[metrics]]
+name = "sober_attachment_upload_bytes"
+type = "counter"
+help = "Total bytes uploaded via attachments"
+labels = []
+group = "Attachments"
+
+[[metrics]]
+name = "sober_attachment_upload_duration_seconds"
+type = "histogram"
+help = "Attachment upload duration"
+labels = []
+group = "Attachments"

@@ -67,3 +67,31 @@ name = "sober_scheduler_paused"
 type = "gauge"
 description = "Whether the scheduler engine is paused (1) or running (0)."
 labels = []
+
+[group.garbage_collection]
+name = "Garbage Collection"
+description = "Metrics for blob and attachment cleanup jobs."
+
+[[group.garbage_collection.metrics]]
+name = "sober_blob_gc_runs_total"
+type = "counter"
+description = "Total blob garbage collection runs"
+labels = ["status"]
+
+[[group.garbage_collection.metrics]]
+name = "sober_blob_gc_deleted_total"
+type = "counter"
+description = "Total blobs deleted by GC"
+labels = []
+
+[[group.garbage_collection.metrics]]
+name = "sober_blob_gc_bytes_freed_total"
+type = "counter"
+description = "Total bytes freed by blob GC"
+labels = []
+
+[[group.garbage_collection.metrics]]
+name = "sober_attachment_cleanup_deleted_total"
+type = "counter"
+description = "Total expired attachments cleaned up"
+labels = []
