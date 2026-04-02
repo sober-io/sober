@@ -234,6 +234,45 @@ at `DEBUG` level. The `warn` filter surfaces only failed or slow queries.
   `job.id`, `event.id`, `tool.name`
 - OpenTelemetry field naming conventions
 
+## Structured Log Events at Key Decision Points
+
+Beyond `#[instrument]` spans, the critical request paths need explicit log
+events (`tracing::info!`, `debug!`, `warn!`) with structured metadata at
+important decision points, state transitions, and lifecycle boundaries.
+`#[instrument]` tells you a function was entered/exited; log events tell you
+what happened inside.
+
+### Agent Core Loop (`turn.rs`, `dispatch.rs`)
+
+- **Context loading**: message count, memory chunk count, system prompt length
+- **LLM stream start**: model, tool count, history message count
+- **LLM stream end**: content length, tool call count and names
+- **Tool dispatch start**: tool count and names
+- **Per-tool completion**: tool name, is_error, output length
+- **Dispatch outcome**: any_context_modifying, any_errors flags
+- **Confirmation flow**: request registered, response received (approved/denied)
+
+### Conversation Actor (`conversation.rs`)
+
+- **Agent mode resolved**: which mode (silent/mention/always)
+- **Injection verdict**: rejected verdicts (warn level)
+- **Workspace resolution**: dir, has_settings
+- **Tool registry built**: tool count
+- **Skills loaded**: skill count
+- **Crash recovery**: count of recovered executions
+
+### LLM Client (`client.rs`)
+
+- **Stream/complete request sent**: model, provider, max_tokens, tool count
+- **HTTP error response**: status code, model
+- **Embedding request**: model, text count
+
+### Scheduler Engine (`engine.rs`)
+
+- **Job routing**: job ID/name, route (agent vs local)
+- **Agent gRPC call**: before/after with job ID
+- **Agent client connect/disconnect**: state transitions
+
 ## Middleware Stack Order (sober-api)
 
 The layer order in `main.rs` (outermost first, last in `.layer()` chain):

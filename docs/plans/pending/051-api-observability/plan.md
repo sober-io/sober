@@ -820,7 +820,41 @@ async fn ensure_workspace(...)
 async fn recover_incomplete_executions(...)
 ```
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 4: Add structured log events to conversation.rs**
+
+Add meaningful log events at key decision points in `handle_message_inner`:
+
+```rust
+// After injection verdict decision (~line 240-246):
+// If InjectionVerdict::Rejected, add:
+tracing::warn!(verdict = "rejected", "input flagged as injection, aborting");
+
+// After agent mode decision (~line 283-289):
+// Log which mode was selected:
+tracing::debug!(mode = ?agent_mode, "agent mode resolved");
+
+// After workspace resolution (~line 310-325):
+// Log workspace state:
+tracing::debug!(
+    workspace_dir = ?workspace_dir,
+    has_settings = workspace_settings.is_some(),
+    "workspace resolved"
+);
+
+// After tool registry building:
+tracing::debug!(tool_count = tool_registry.len(), "tool registry built");
+
+// After skill catalog loading:
+tracing::debug!(skill_count = skills.len(), "skills loaded");
+```
+
+In `recover_incomplete_executions`:
+```rust
+// Log recovery count:
+tracing::info!(recovered = count, "recovered incomplete tool executions");
+```
+
+- [ ] **Step 5: Build and verify**
 
 Run: `cd backend && cargo build -p sober-agent -q`
 Expected: Compiles without errors.
@@ -911,17 +945,118 @@ let handle = tokio::spawn(async move {
 
 Add `use tracing::Instrument;` to imports if not present.
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 4: Add structured log events to turn.rs**
+
+Add meaningful log events at key points in `run_turn` and `build_context`:
+
+In `build_context` (~line 528), after successful context loading:
+```rust
+// After memory context loaded:
+tracing::debug!(
+    memory_chunks = loaded_context.chunks.len(),
+    "memory context loaded"
+);
+
+// After system prompt assembled:
+tracing::debug!(
+    system_prompt_len = system_prompt.len(),
+    "system prompt assembled"
+);
+
+// After history messages loaded:
+tracing::debug!(
+    history_messages = messages.len(),
+    "conversation history loaded"
+);
+```
+
+In `run_turn` (~line 86), at key lifecycle points:
+```rust
+// Before LLM stream call (~line 173):
+tracing::info!(
+    model = %engine.model_id(),
+    tool_count = tool_definitions.len(),
+    history_messages = messages.len(),
+    "starting LLM stream"
+);
+
+// After LLM stream completes and tool calls are buffered (~line 246):
+tracing::info!(
+    content_len = content_buffer.len(),
+    tool_call_count = tool_calls.len(),
+    tool_names = ?tool_calls.iter().map(|tc| &tc.name).collect::<Vec<_>>(),
+    "LLM stream completed"
+);
+
+// After tool dispatch returns (~line 340):
+tracing::info!(
+    context_modifying = outcome.any_context_modifying,
+    any_errors = outcome.any_errors,
+    "tool dispatch completed"
+);
+
+// After title auto-generation:
+tracing::debug!("title auto-generated");
+```
+
+- [ ] **Step 5: Add structured log events to dispatch.rs**
+
+In `execute_tool_calls` (~line 99):
+```rust
+// At start of function:
+tracing::info!(
+    tool_count = req.tool_calls.len(),
+    tool_names = ?req.tool_calls.iter().map(|tc| &tc.name).collect::<Vec<_>>(),
+    "dispatching tool calls"
+);
+
+// After each tool completes in the loop:
+tracing::info!(
+    tool.name = %tc.name,
+    is_error = result.is_error,
+    output_len = result.content.len(),
+    "tool execution completed"
+);
+
+// At end of function, before returning DispatchOutcome:
+tracing::debug!(
+    any_context_modifying = outcome.any_context_modifying,
+    any_errors = outcome.any_errors,
+    "dispatch outcome"
+);
+```
+
+In `execute_single_tool` (~line 347):
+```rust
+// When tool needs confirmation:
+tracing::info!(
+    tool.name = %tool_name,
+    risk_level = ?confirm.risk_level,
+    "tool requires confirmation"
+);
+```
+
+In `handle_confirmation` (~line 443):
+```rust
+// When confirmation received:
+tracing::info!(
+    approved,
+    confirm_id = %confirm.confirm_id,
+    "confirmation response received"
+);
+```
+
+- [ ] **Step 6: Build and verify**
 
 Run: `cd backend && cargo build -p sober-agent -q`
 Expected: Compiles without errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sober-agent/src/turn.rs \
        backend/crates/sober-agent/src/dispatch.rs
-git commit -m "feat(agent): instrument agentic loop (run_turn, dispatch, tool execution)"
+git commit -m "feat(agent): instrument agentic loop with spans and structured log events"
 ```
 
 ---
@@ -1339,16 +1474,48 @@ async fn wake_agent(...)
 pub async fn force_run_job(...)
 ```
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 4: Add structured log events to engine.rs**
+
+Add meaningful log events at key decision points:
+
+```rust
+// In route_job, after determining the execution path:
+tracing::info!(
+    job.id = %job.id,
+    job.name = %job.name,
+    route = if is_agent_job { "agent" } else { "local" },
+    "routing job for execution"
+);
+
+// In execute_via_agent, before gRPC call:
+tracing::debug!(
+    job.id = %job.id,
+    "sending job to agent via gRPC"
+);
+
+// In execute_via_agent, after gRPC response:
+tracing::debug!(
+    job.id = %job.id,
+    "agent execution completed"
+);
+
+// When agent client is set/cleared:
+// In set_agent_client:
+tracing::info!("agent client connected");
+// In clear_agent_client:
+tracing::info!("agent client disconnected");
+```
+
+- [ ] **Step 5: Build and verify**
 
 Run: `cd backend && cargo build -p sober-scheduler -q`
 Expected: Compiles without errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sober-scheduler/src/engine.rs
-git commit -m "feat(scheduler): instrument tick engine with conditional spans and job routing"
+git commit -m "feat(scheduler): instrument tick engine with conditional spans, routing logs"
 ```
 
 ---
@@ -1529,18 +1696,61 @@ Add `use tracing::instrument;` at the top of `streaming.rs`, then:
 pub fn parse_sse_stream(...)
 ```
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 4: Add structured log events to client.rs**
+
+Add meaningful log events for the LLM request lifecycle:
+
+In `stream()`:
+```rust
+// Before HTTP request is sent:
+tracing::info!(
+    model = %self.model,
+    provider = %self.base_url,
+    max_tokens = req.max_tokens,
+    tool_count = req.tools.as_ref().map_or(0, |t| t.len()),
+    "sending LLM stream request"
+);
+
+// On HTTP error response (non-2xx):
+tracing::warn!(
+    status = %response.status(),
+    model = %self.model,
+    "LLM request failed"
+);
+```
+
+In `complete()`:
+```rust
+// Before HTTP request is sent:
+tracing::info!(
+    model = %self.model,
+    provider = %self.base_url,
+    "sending LLM completion request"
+);
+```
+
+In `embed()`:
+```rust
+// Before HTTP request:
+tracing::debug!(
+    model = %self.embedding_model,
+    text_count = texts.len(),
+    "sending embedding request"
+);
+```
+
+- [ ] **Step 5: Build and verify**
 
 Run: `cd backend && cargo build -p sober-llm -q`
 Expected: Compiles without errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/crates/sober-llm/src/client.rs \
        backend/crates/sober-llm/src/acp.rs \
        backend/crates/sober-llm/src/streaming.rs
-git commit -m "feat(llm): instrument LLM engine methods and SSE parsing"
+git commit -m "feat(llm): instrument LLM engine methods with spans and request lifecycle logs"
 ```
 
 ---
