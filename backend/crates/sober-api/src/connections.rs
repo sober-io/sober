@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::debug;
 
-use crate::routes::ws::ServerWsMessage;
+use crate::ws_types::ServerWsMessage;
 
 /// Registry of active WebSocket connections per conversation.
 ///

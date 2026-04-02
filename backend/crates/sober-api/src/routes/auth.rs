@@ -11,9 +11,9 @@ use http::HeaderValue;
 use http::header::SET_COOKIE;
 use sober_auth::{AuthUser, cookie_name};
 use sober_core::error::AppError;
-use sober_core::types::{ApiResponse, ConversationRepo};
-use sober_db::PgConversationRepo;
+use sober_core::types::ApiResponse;
 
+use crate::services::auth::UserProfile;
 use crate::state::AppState;
 
 /// Returns the auth routes.
@@ -44,9 +44,7 @@ async fn register(
         .await?;
 
     // Create inbox conversation for the new user.
-    // `create_inbox` handles the conversation_users row internally.
-    let conv_repo = PgConversationRepo::new(state.db.clone());
-    let _inbox = conv_repo.create_inbox(user.id).await?;
+    state.auth_service.create_inbox_for_user(user.id).await?;
 
     Ok(ApiResponse::new(serde_json::json!({
         "id": user.id.to_string(),
@@ -64,9 +62,6 @@ struct LoginRequest {
 }
 
 /// `POST /api/v1/auth/login` — authenticate and receive a session token.
-///
-/// Sets an `HttpOnly` session cookie and also returns the token in the
-/// response body for programmatic clients.
 async fn login(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LoginRequest>,
@@ -112,12 +107,10 @@ async fn logout(
     ),
     AppError,
 > {
-    // Extract the raw token from the request to invalidate it.
     let raw_token = extract_raw_token(&req).ok_or(AppError::Unauthorized)?;
-    let _ = auth_user; // Ensure user is authenticated.
+    let _ = auth_user;
     state.auth.logout(&raw_token).await?;
 
-    // Clear the cookie.
     let clear_cookie = format!(
         "{}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
         cookie_name(),
@@ -135,36 +128,16 @@ async fn logout(
 async fn me(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    use sober_core::types::{RoleRepo, UserRepo};
-    let user_repo = sober_db::PgUserRepo::new(state.db.clone());
-    let role_repo = sober_db::PgRoleRepo::new(state.db.clone());
-    let user = user_repo.get_by_id(auth_user.user_id).await?;
-    let roles = role_repo
-        .get_roles_for_user(auth_user.user_id)
-        .await
-        .unwrap_or_default();
-    let role_names: Vec<&str> = roles
-        .iter()
-        .map(|r| match r {
-            sober_core::types::RoleKind::User => "user",
-            sober_core::types::RoleKind::Admin => "admin",
-            sober_core::types::RoleKind::Custom(name) => name.as_str(),
-        })
-        .collect();
-
-    Ok(ApiResponse::new(serde_json::json!({
-        "id": user.id.to_string(),
-        "email": user.email,
-        "username": user.username,
-        "status": format!("{:?}", user.status),
-        "roles": role_names,
-    })))
+) -> Result<ApiResponse<UserProfile>, AppError> {
+    let profile = state
+        .auth_service
+        .get_user_with_roles(auth_user.user_id)
+        .await?;
+    Ok(ApiResponse::new(profile))
 }
 
 /// Extracts the raw session token from the request (Bearer header or cookie).
 fn extract_raw_token(req: &axum::extract::Request) -> Option<String> {
-    // Try Authorization header first.
     if let Some(auth_header) = req.headers().get(http::header::AUTHORIZATION)
         && let Ok(val) = auth_header.to_str()
         && let Some(token) = val.strip_prefix("Bearer ")
@@ -175,7 +148,6 @@ fn extract_raw_token(req: &axum::extract::Request) -> Option<String> {
         }
     }
 
-    // Fall back to cookie.
     if let Some(cookie_header) = req.headers().get(http::header::COOKIE)
         && let Ok(val) = cookie_header.to_str()
     {

@@ -18,44 +18,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use sober_auth::AuthLayer;
-use sober_core::error::AppError;
-use sober_core::types::{
-    ConversationId, ConversationUser, ConversationUserRepo, CreateMessage, Message, MessageRepo,
-    MessageRole, UserId,
-};
-use sober_db::{PgConversationUserRepo, PgMessageRepo, PgRoleRepo, PgSessionRepo, PgUserRepo};
-use sqlx::PgPool;
-
-/// Verify the authenticated user is a member of the conversation.
-/// Returns the membership info, or `NotFound` if not a member.
-pub async fn verify_membership(
-    db: &PgPool,
-    conversation_id: ConversationId,
-    user_id: UserId,
-) -> Result<ConversationUser, AppError> {
-    let cu_repo = PgConversationUserRepo::new(db.clone());
-    cu_repo.get(conversation_id, user_id).await
-}
-
-/// Inserts a timeline event message into a conversation.
-pub(crate) async fn insert_event_message(
-    msg_repo: &PgMessageRepo,
-    conversation_id: ConversationId,
-    content: &str,
-    metadata: serde_json::Value,
-) -> Result<Message, AppError> {
-    msg_repo
-        .create(CreateMessage {
-            conversation_id,
-            role: MessageRole::Event,
-            content: vec![sober_core::types::ContentBlock::text(content)],
-            reasoning: None,
-            token_count: None,
-            metadata: Some(metadata),
-            user_id: None,
-        })
-        .await
-}
+use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
 
 use crate::state::AppState;
 

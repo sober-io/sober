@@ -28,10 +28,26 @@
 
 ### Handler Pattern
 
-- **Thin handlers** — extract input (via axum extractors), call repo, return response. Zero business logic.
+- **Thin handlers** — extract HTTP input (via axum extractors), call service, wrap in `ApiResponse`. Zero business logic.
 - State injected via `State(Arc<AppState>)`.
 - Auth via `AuthUser` extractor (set by middleware). `RequireAdmin` wrapper for role-gated endpoints.
-- No explicit service layer in handlers — business logic lives in repository trait implementations.
+- Business logic lives in `services/` module; handlers never construct repos directly.
+
+### Service Layer Pattern
+
+- Service structs hold `PgPool` + needed clients (e.g., `AgentClient`, `ConnectionRegistry`).
+- Constructed in `AppState::new()` and `::from_parts()`, wrapped in `Arc`.
+- Methods return `Result<T, AppError>` with typed response DTOs (replace `serde_json::json!()`).
+- Multi-table operations use `_tx` repo methods within a service-level transaction.
+- WS broadcasts and other side effects happen **outside** the transaction.
+- Repos are instantiated per method call: `PgFooRepo::new(self.db.clone())`.
+
+### Transaction Composition (`_tx` pattern)
+
+- Repos provide `_tx` method variants: `pub async fn method_tx(conn: &mut PgConnection, ...) -> Result<T, AppError>`.
+- Services call `self.db.begin()`, compose `_tx` calls on `&mut *tx`, then `tx.commit()`.
+- Read-only operations and single-table writes use pool-based repo methods directly.
+- The `_tx` methods are associated functions on the repo struct (not trait methods), accepting `&mut PgConnection`.
 
 ### Repository Pattern
 
@@ -65,8 +81,8 @@
 ### Config & State
 
 - `AppConfig` in `sober-core/src/config.rs` — nested structs per subsystem, loaded from env vars.
-- `AppState` holds `PgPool`, `AgentClient`, `Arc<AuthService<...>>`, `AppConfig`, `ConnectionRegistry`.
-- `AppState::new()` for production (connects to DB + gRPC), `::from_parts()` for tests.
+- `AppState` holds `PgPool`, `AgentClient`, `Arc<AuthService<...>>`, `AppConfig`, `ConnectionRegistry`, and `Arc<*Service>` for each domain service.
+- `AppState::new()` for production (connects to DB + gRPC), `::from_parts()` for tests. Both construct all services.
 - Always wrapped in `Arc` for sharing across handlers.
 
 ### Module Organization

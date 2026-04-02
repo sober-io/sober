@@ -12,8 +12,8 @@ use tracing::{error, info, warn};
 
 use crate::connections::{ConnectionRegistry, UserConnectionRegistry};
 use crate::proto;
-use crate::routes::ws::ServerWsMessage;
 use crate::state::AgentClient;
+use crate::ws_types::ServerWsMessage;
 
 /// Spawns the subscription background task.
 ///

@@ -138,6 +138,23 @@ impl PgConversationRepo {
         Ok(())
     }
 
+    /// Converts a group conversation back to direct on the given connection.
+    pub async fn convert_to_direct_tx(
+        conn: &mut PgConnection,
+        id: ConversationId,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE conversations SET kind = 'direct', agent_mode = 'always', updated_at = now() \
+             WHERE id = $1 AND kind = 'group'",
+        )
+        .bind(id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
     /// Updates agent mode on the given connection.
     pub async fn update_agent_mode_tx(
         conn: &mut PgConnection,

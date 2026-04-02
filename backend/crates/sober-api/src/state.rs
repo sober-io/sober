@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use hyper_util::rt::TokioIo;
-use sober_auth::AuthService;
+use sober_auth::AuthService as SoberAuthService;
 use sober_core::config::AppConfig;
 use sober_core::error::AppError;
 use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
@@ -18,6 +18,11 @@ use tracing::info;
 
 use crate::connections::{ConnectionRegistry, UserConnectionRegistry};
 use crate::proto;
+use crate::services::{
+    attachment::AttachmentService, auth::AuthService, collaborator::CollaboratorService,
+    conversation::ConversationService, evolution::EvolutionService, message::MessageService,
+    plugin::PluginService, tag::TagService, user::UserService, ws_dispatch::WsDispatchService,
+};
 
 /// gRPC client for the agent service, connected via Unix domain socket.
 pub type AgentClient = proto::agent_service_client::AgentServiceClient<Channel>;
@@ -29,7 +34,7 @@ pub struct AppState {
     /// gRPC client for the agent service.
     pub agent_client: AgentClient,
     /// Authentication service.
-    pub auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
+    pub auth: Arc<SoberAuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
     /// Application configuration.
     pub config: AppConfig,
     /// Content-addressed blob store for attachment files.
@@ -38,6 +43,26 @@ pub struct AppState {
     pub connections: ConnectionRegistry,
     /// Registry of active WebSocket connections per user (for unread notifications).
     pub user_connections: UserConnectionRegistry,
+    /// Tag management service.
+    pub tag: Arc<TagService>,
+    /// User search service.
+    pub user: Arc<UserService>,
+    /// Conversation lifecycle service.
+    pub conversation: Arc<ConversationService>,
+    /// Collaborator management service.
+    pub collaborator: Arc<CollaboratorService>,
+    /// Message listing and deletion service.
+    pub message: Arc<MessageService>,
+    /// WebSocket dispatch service.
+    pub ws_dispatch: Arc<WsDispatchService>,
+    /// Plugin management service.
+    pub plugin: Arc<PluginService>,
+    /// Evolution lifecycle service.
+    pub evolution: Arc<EvolutionService>,
+    /// Attachment upload service.
+    pub attachment: Arc<AttachmentService>,
+    /// API-level auth service (inbox creation, user profile).
+    pub auth_service: Arc<AuthService>,
 }
 
 impl AppState {
@@ -49,21 +74,57 @@ impl AppState {
     pub fn from_parts(
         db: PgPool,
         agent_client: AgentClient,
-        auth: Arc<AuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
+        auth: Arc<SoberAuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
         config: AppConfig,
     ) -> Arc<Self> {
         let blob_root = config
             .workspace_root
             .join(sober_workspace::SOBER_DIR)
             .join("blobs");
+        let blob_store = Arc::new(BlobStore::new(blob_root));
+        let connections = ConnectionRegistry::new();
+        let user_connections = UserConnectionRegistry::new();
+
+        let tag = Arc::new(TagService::new(db.clone()));
+        let user = Arc::new(UserService::new(db.clone()));
+        let conversation = Arc::new(ConversationService::new(db.clone(), config.clone()));
+        let collaborator = Arc::new(CollaboratorService::new(
+            db.clone(),
+            user_connections.clone(),
+        ));
+        let message = Arc::new(MessageService::new(db.clone()));
+        let ws_dispatch = Arc::new(WsDispatchService::new(
+            db.clone(),
+            agent_client.clone(),
+            connections.clone(),
+        ));
+        let plugin = Arc::new(PluginService::new(db.clone(), agent_client.clone()));
+        let evolution = Arc::new(EvolutionService::new(
+            db.clone(),
+            agent_client.clone(),
+            config.clone(),
+        ));
+        let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
+        let auth_service = Arc::new(AuthService::new(db.clone()));
+
         Arc::new(Self {
             db,
             agent_client,
             auth,
             config,
-            blob_store: Arc::new(BlobStore::new(blob_root)),
-            connections: ConnectionRegistry::new(),
-            user_connections: UserConnectionRegistry::new(),
+            blob_store,
+            connections,
+            user_connections,
+            tag,
+            user,
+            conversation,
+            collaborator,
+            message,
+            ws_dispatch,
+            plugin,
+            evolution,
+            attachment,
+            auth_service,
         })
     }
 
@@ -83,7 +144,7 @@ impl AppState {
         let users = PgUserRepo::new(db.clone());
         let sessions = PgSessionRepo::new(db.clone());
         let roles = PgRoleRepo::new(db.clone());
-        let auth = Arc::new(AuthService::new(
+        let auth = Arc::new(SoberAuthService::new(
             users,
             sessions,
             roles,
@@ -94,15 +155,50 @@ impl AppState {
             .workspace_root
             .join(sober_workspace::SOBER_DIR)
             .join("blobs");
+        let blob_store = Arc::new(BlobStore::new(blob_root));
+        let connections = ConnectionRegistry::new();
+        let user_connections = UserConnectionRegistry::new();
+
+        let tag = Arc::new(TagService::new(db.clone()));
+        let user = Arc::new(UserService::new(db.clone()));
+        let conversation = Arc::new(ConversationService::new(db.clone(), config.clone()));
+        let collaborator = Arc::new(CollaboratorService::new(
+            db.clone(),
+            user_connections.clone(),
+        ));
+        let message = Arc::new(MessageService::new(db.clone()));
+        let ws_dispatch = Arc::new(WsDispatchService::new(
+            db.clone(),
+            agent_client.clone(),
+            connections.clone(),
+        ));
+        let plugin = Arc::new(PluginService::new(db.clone(), agent_client.clone()));
+        let evolution = Arc::new(EvolutionService::new(
+            db.clone(),
+            agent_client.clone(),
+            config.clone(),
+        ));
+        let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
+        let auth_service = Arc::new(AuthService::new(db.clone()));
 
         Ok(Arc::new(Self {
             db,
             agent_client,
             auth,
             config,
-            blob_store: Arc::new(BlobStore::new(blob_root)),
-            connections: ConnectionRegistry::new(),
-            user_connections: UserConnectionRegistry::new(),
+            blob_store,
+            connections,
+            user_connections,
+            tag,
+            user,
+            conversation,
+            collaborator,
+            message,
+            ws_dispatch,
+            plugin,
+            evolution,
+            attachment,
+            auth_service,
         }))
     }
 }

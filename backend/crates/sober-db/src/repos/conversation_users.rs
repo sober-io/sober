@@ -37,6 +37,76 @@ impl PgConversationUserRepo {
 
         Ok(())
     }
+
+    /// Adds a user to a conversation on the given connection.
+    pub async fn create_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> Result<ConversationUser, AppError> {
+        let row = sqlx::query_as::<_, ConversationUserRow>(
+            "INSERT INTO conversation_users (conversation_id, user_id, role) \
+             VALUES ($1, $2, $3) \
+             RETURNING conversation_id, user_id, unread_count, last_read_at, last_read_message_id, role, joined_at",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .bind(role)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.into())
+    }
+
+    /// Updates a collaborator's role on the given connection.
+    pub async fn update_role_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+        user_id: UserId,
+        role: ConversationUserRole,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE conversation_users SET role = $3 \
+             WHERE conversation_id = $1 AND user_id = $2",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .bind(role)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation_user".into()));
+        }
+
+        Ok(())
+    }
+
+    /// Removes a collaborator from a conversation on the given connection.
+    pub async fn remove_collaborator_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+        user_id: UserId,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "DELETE FROM conversation_users \
+             WHERE conversation_id = $1 AND user_id = $2",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("conversation_user".into()));
+        }
+
+        Ok(())
+    }
 }
 
 impl ConversationUserRepo for PgConversationUserRepo {
