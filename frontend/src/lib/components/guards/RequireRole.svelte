@@ -1,9 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { SystemRole } from '$lib/types';
 	import { hasRole } from '$lib/guards';
 
 	interface Props {
-		role: string;
+		role: SystemRole;
 		children: Snippet;
 		fallback?: Snippet;
 	}

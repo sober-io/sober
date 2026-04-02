@@ -1,5 +1,5 @@
 import { auth } from '$lib/stores/auth.svelte';
-import type { ConversationUserRole } from '$lib/types';
+import type { ConversationUserRole, SystemRole } from '$lib/types';
 import type { Plugin } from '$lib/types/plugin';
 
 const ROLE_HIERARCHY: Record<ConversationUserRole, number> = {
@@ -11,7 +11,7 @@ const ROLE_HIERARCHY: Record<ConversationUserRole, number> = {
 // --- System-level guards ---
 
 /** Returns true if the current user holds the given system role. */
-export function hasRole(role: string): boolean {
+export function hasRole(role: SystemRole): boolean {
 	return auth.user?.roles?.includes(role) ?? false;
 }
 
