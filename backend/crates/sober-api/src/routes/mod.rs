@@ -20,8 +20,6 @@ use axum::Router;
 use sober_auth::AuthLayer;
 use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
 
-pub(crate) use crate::services::verify_membership;
-
 use crate::state::AppState;
 
 /// Builds the complete API router with all routes and middleware.
