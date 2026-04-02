@@ -17,6 +17,7 @@
 	import { toolService } from '$lib/services/tools';
 	import { pluginService } from '$lib/services/plugins';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { canManageConversation } from '$lib/guards';
 	import { untrack } from 'svelte';
 	import { conversations } from '$lib/stores/conversations.svelte';
 	import PermissionModeSelector from '$lib/components/PermissionModeSelector.svelte';
@@ -170,7 +171,7 @@
 		const me = collaborators.find((c) => c.user_id === currentUserId);
 		return me?.role ?? 'member';
 	});
-	let canEditAgentMode = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
+	let canEditAgentMode = $derived(canManageConversation(currentUserRole));
 
 	// Load data when panel opens — only track `open`, not conversation fields
 	$effect(() => {
