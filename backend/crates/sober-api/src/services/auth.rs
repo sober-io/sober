@@ -3,6 +3,7 @@ use sober_core::error::AppError;
 use sober_core::types::{ConversationRepo, RoleKind, RoleRepo, UserId, UserRepo};
 use sober_db::{PgConversationRepo, PgRoleRepo, PgUserRepo};
 use sqlx::PgPool;
+use tracing::instrument;
 
 /// Typed response for user profile.
 #[derive(Serialize)]
@@ -24,6 +25,7 @@ impl AuthService {
     }
 
     /// Create an inbox conversation for a newly registered user.
+    #[instrument(skip(self))]
     pub async fn create_inbox_for_user(&self, user_id: UserId) -> Result<(), AppError> {
         let conv_repo = PgConversationRepo::new(self.db.clone());
         conv_repo.create_inbox(user_id).await?;
@@ -31,6 +33,7 @@ impl AuthService {
     }
 
     /// Get user profile with roles for /me endpoint.
+    #[instrument(level = "debug", skip(self))]
     pub async fn get_user_with_roles(&self, user_id: UserId) -> Result<UserProfile, AppError> {
         let user_repo = PgUserRepo::new(self.db.clone());
         let role_repo = PgRoleRepo::new(self.db.clone());

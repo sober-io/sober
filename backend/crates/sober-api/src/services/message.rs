@@ -10,6 +10,8 @@ use sober_core::types::{
 use sober_db::{PgConversationAttachmentRepo, PgMessageRepo, PgTagRepo, PgToolExecutionRepo};
 use sqlx::PgPool;
 
+use tracing::instrument;
+
 use crate::guards;
 
 /// A message with its associated tags, tool executions, and attachments.
@@ -33,6 +35,7 @@ impl MessageService {
     }
 
     /// List messages with tags, tool executions, and attachments.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn list(
         &self,
         conversation_id: ConversationId,
@@ -130,6 +133,7 @@ impl MessageService {
     }
 
     /// Delete a message and clean up orphaned attachments.
+    #[instrument(skip(self), fields(message.id = %message_id))]
     pub async fn delete(&self, message_id: MessageId, user_id: UserId) -> Result<(), AppError> {
         let msg_repo = PgMessageRepo::new(self.db.clone());
         let msg = msg_repo.get_by_id(message_id).await?;
