@@ -29,8 +29,10 @@ use tracing::{Span, info, info_span};
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load()?;
 
-    let telemetry =
-        sober_core::init_telemetry(config.environment, "sober_api=debug,tower_http=debug,info");
+    let telemetry = sober_core::init_telemetry(
+        config.environment,
+        "sober_api=debug,tower_http=debug,sqlx::query=warn,info",
+    );
 
     let state = AppState::new(config.clone()).await?;
 

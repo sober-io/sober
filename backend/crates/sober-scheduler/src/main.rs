@@ -41,7 +41,10 @@ async fn main() -> Result<()> {
     let config = AppConfig::load().context("failed to load config")?;
 
     // 2. Initialise telemetry (tracing + metrics + OTel)
-    let telemetry = sober_core::init_telemetry(config.environment, "sober_scheduler=info");
+    let telemetry = sober_core::init_telemetry(
+        config.environment,
+        "sober_scheduler=info,sqlx::query=warn,info",
+    );
 
     // 3. Spawn Prometheus metrics HTTP server for scraping
     sober_core::spawn_metrics_server(telemetry.prometheus.clone(), config.scheduler.metrics_port);

@@ -48,7 +48,8 @@ async fn main() -> Result<()> {
         Ok("production") => sober_core::config::Environment::Production,
         _ => sober_core::config::Environment::Development,
     };
-    let _telemetry = sober_core::init_telemetry(environment, "sober_web=info");
+    let _telemetry =
+        sober_core::init_telemetry(environment, "sober_web=info,sqlx::query=warn,info");
 
     let config = AppConfig::load_unvalidated()?;
 
