@@ -31,16 +31,17 @@ WhatsApp ──┘                    │               │──SQL────
 ```
 sober-gateway → sober-core   (types, errors)
               → sober-db     (repos, pool)
-              → sober-auth   (AuthUser, for API endpoint auth)
               → sober-agent  (gRPC client — proto only)
 ```
 
-No crate depends on `sober-gateway`. It is a leaf binary like `sober-api`.
+No crate depends on `sober-gateway`. It is a leaf binary like `sober-scheduler`.
+It has no HTTP server — platform/mapping CRUD endpoints live in `sober-api`
+(see API Endpoints section).
 
 ### Service Layer
 
-Following the service layer pattern from `sober-api`, the gateway extracts business
-logic into service structs. Handlers/event processors remain thin.
+The gateway binary extracts business logic into a service struct. The event
+loop remains thin — receives events, calls service, dispatches results.
 
 ```rust
 pub struct GatewayService {
@@ -51,24 +52,32 @@ pub struct GatewayService {
 ```
 
 `GatewayService` owns:
-- **Inbound routing** — mapping lookup, auto-create conversation, user attribution
+- **Inbound routing** — mapping lookup, user attribution, message forwarding
 - **Outbound delivery** — buffer management, platform dispatch
-- **Mapping CRUD** — platform/channel/user mapping management
 
-Methods return `Result<T, AppError>` with typed response DTOs. Multi-table
-operations (e.g., auto-create conversation + mapping) use the `_tx` pattern
-for atomicity.
+Methods return `Result<T, AppError>` with typed response DTOs.
+
+Platform/mapping/user CRUD is handled by a separate `GatewayAdminService` in
+`sober-api` (see API Endpoints section), not in this binary.
 
 ### Authorization
 
-Gateway API endpoints (platform/mapping/user CRUD) are admin-only. Two-layer
-defense following the pattern from `sober-api`:
+The gateway binary is a headless event processor with no HTTP server. It
+authenticates to `sober-agent` via UDS filesystem permissions (same pattern
+as `sober-scheduler`).
+
+Admin API routes for platform/mapping/user CRUD live in `sober-api` and use
+the existing two-layer auth:
 
 1. **Route-level**: `RequireAdmin` extractor on all `/admin/gateway/*` routes
 2. **Service-level**: `guards::require_admin()` calls where needed
 
-The gateway binary itself is a trusted internal service — its gRPC calls to
-`sober-agent` use the bridge service account, not per-request auth.
+### Bridge Bot User
+
+A dedicated bot user is seeded in migrations with a service/bot role. All
+platform messages from unmapped users use this bot's `user_id` in
+`HandleMessage`. The bot user provides a real identity for conversation
+membership and memory scoping.
 
 ### Event Delivery
 
@@ -102,21 +111,21 @@ Each external channel, group, or room maps to exactly one Sõber conversation.
 | WhatsApp | Group               |
 | DMs (any)| DM conversation     |
 
-### Threads → New Independent Conversation
+### Threads
 
-When a thread is created in a mapped channel, the gateway creates a new,
-independent Sõber conversation. No parent-child link in the conversation model.
-The mapping table tracks the thread→channel relationship for cleanup purposes
-only (`parent_mapping_id`).
+Thread support is deferred. Messages in threads of a mapped channel are routed
+to the parent channel's conversation. The `is_thread` and `parent_mapping_id`
+columns on `gateway_channel_mappings` exist for future per-thread conversation
+mapping.
 
-### Auto-Create on First Interaction
+### Pre-Configured Mappings Only
 
-Default behavior: the bot sits idle in a channel until someone @mentions it or
-sends a DM. On first interaction, the gateway auto-creates a Sõber conversation
-and stores the mapping. No upfront configuration needed beyond adding the bot token.
+Conversations must be created in Sõber first (via web UI or API), then mapped
+to an external channel. The gateway does not auto-create conversations.
 
-Manual mapping is also supported: users can pre-configure channel→conversation
-mappings via the web UI, including mapping to existing conversations.
+Admins configure mappings via the web UI: select a platform channel, pick an
+existing Sõber conversation, and set the agent mode. The gateway picks up new
+mappings on its next DB poll or admin socket `reload` command.
 
 ### Agent Mode Defaults
 
@@ -134,8 +143,9 @@ Hybrid model:
 - **Mapped users**: Admin links external user → Sõber user in the web UI.
   Messages from mapped users are attributed to their Sõber account (proper
   `user_id`, memory scoping, permissions).
-- **Unmapped users**: Messages go through a bridge service account. The external
-  username is prefixed in the message content: `[harri] hey can you check the logs?`.
+- **Unmapped users**: Messages go through the bridge bot user (seeded in
+  migrations). The external username is prefixed in the message content:
+  `[harri] hey can you check the logs?`.
 
 This keeps the barrier low (works immediately without mapping every user) while
 allowing proper attribution for key users.
@@ -261,32 +271,11 @@ platform-specific format. Inbound messages are normalized to plain text/markdown
 3. Gateway core receives event
 4. Look up mapping: `(platform_id, channel_id)` → `ConversationId`
    - Found → use it
-   - Not found → auto-create (see below)
+   - Not found → drop message, log warning (unmapped channel)
 5. Look up user: `(platform_id, external_user_id)` → `UserId`
    - Found → use mapped `user_id`
-   - Not found → use bridge service account, prefix content with `[username]`
+   - Not found → use bridge bot user, prefix content with `[username]`
 6. Call `agent.HandleMessage(user_id, conversation_id, content)`
-
-#### Auto-Create with `_tx` Transactions
-
-When no mapping exists, the gateway creates a conversation and mapping atomically
-using the `_tx` pattern. This prevents races when concurrent platform messages
-arrive for the same unmapped channel:
-
-```rust
-let mut tx = db.begin().await?;
-let conversation = PgConversationRepo::create_tx(
-    &mut tx, bridge_user_id, Some(channel_name), None,
-).await?;
-PgGatewayMappingRepo::create_tx(
-    &mut tx, platform_id, external_channel_id, conversation.id, agent_mode,
-).await?;
-tx.commit().await?;
-```
-
-The unique constraint `(platform_id, external_channel_id)` on `gateway_channel_mappings`
-acts as a second safety net — a concurrent insert will fail and the losing task
-retries with a lookup.
 
 ### Outbound Flow (Sõber → Platform)
 
@@ -314,9 +303,9 @@ Platforms have rate limits and different editing capabilities:
 
 1. Load platform configs from DB (`gateway_platforms`)
 2. Connect to `sober-agent` gRPC/UDS
-3. Subscribe to `SubscribeConversationUpdates` (with reconnect + backoff)
+3. Subscribe to `SubscribeConversationUpdates` (with reconnect + exponential backoff)
 4. For each enabled platform: spawn `PlatformBridge`, call `connect()`
-5. Load all `gateway_channel_mappings` into in-memory `DashMap`
+5. Load all `gateway_channel_mappings` + `gateway_user_mappings` into in-memory `DashMap`
 6. Start `GatewayEvent` processing loop
 7. Open admin socket at `/run/sober/gateway.sock`
 
@@ -328,8 +317,11 @@ Platforms have rate limits and different editing capabilities:
 
 ## API Endpoints
 
-All under `/api/v1/admin/gateway/`, gated by `RequireAdmin` extractor.
-Handlers delegate to `GatewayService` methods (thin handler pattern).
+All routes live in `sober-api` (not in the gateway binary) under
+`/api/v1/admin/gateway/`, gated by `RequireAdmin` extractor.
+Handlers delegate to a `GatewayAdminService` that reads/writes
+gateway DB tables directly. The gateway binary picks up config
+changes via admin socket `reload` or periodic DB polling.
 
 ### Platform Management
 
@@ -371,7 +363,7 @@ Settings pages:
 | `sober_gateway_message_handle_duration_seconds` | histogram | `platform` | `GatewayService::handle_event` | Inbound message processing latency |
 | `sober_gateway_message_delivery_duration_seconds` | histogram | `platform` | `GatewayService::deliver_outbound` | Outbound delivery latency |
 | `sober_gateway_platform_connections` | gauge | `platform`, `status` | `PlatformBridgeRegistry` | Active platform connections (connected/reconnecting/disconnected) |
-| `sober_gateway_mappings_auto_created_total` | counter | `platform` | `GatewayService::handle_event` | Auto-created channel mappings |
+| `sober_gateway_unmapped_messages_total` | counter | `platform` | `GatewayService::handle_event` | Messages dropped due to unmapped channel |
 | `sober_gateway_buffer_flush_size_bytes` | histogram | `platform` | `GatewayService::deliver_outbound` | Size of buffered content flushed to platforms |
 | `sober_gateway_platform_errors_total` | counter | `platform`, `error_type` | various | Platform SDK errors (auth, rate_limit, network, api) |
 
@@ -384,7 +376,7 @@ labels — use logs for per-channel debugging.
 | Span Name | Kind | Attributes | Context Propagation |
 |-----------|------|------------|-------------------|
 | `gateway.handle_event` | server | `platform`, `event_type`, `channel_id` | New root span per event |
-| `gateway.resolve_mapping` | client | `platform`, `channel_id`, `auto_created` | Child of handle_event |
+| `gateway.resolve_mapping` | client | `platform`, `channel_id`, `matched` | Child of handle_event |
 | `gateway.deliver_outbound` | client | `platform`, `conversation_id` | Extract from gRPC subscription metadata |
 | `gateway.platform_connect` | client | `platform` | New root span |
 
@@ -410,7 +402,7 @@ New row: "Messaging Gateway" on the overview dashboard.
 | Message throughput | timeseries | `rate(sober_gateway_messages_received_total[5m])`, `rate(sober_gateway_messages_sent_total[5m])` |
 | Handle latency p50/p95/p99 | timeseries | `histogram_quantile(0.5\|0.95\|0.99, rate(sober_gateway_message_handle_duration_seconds_bucket[5m]))` |
 | Error rate | timeseries | `rate(sober_gateway_platform_errors_total[5m])` by `platform`, `error_type` |
-| Auto-created mappings | timeseries | `rate(sober_gateway_mappings_auto_created_total[5m])` |
+| Unmapped messages | timeseries | `rate(sober_gateway_unmapped_messages_total[5m])` by `platform` |
 
 ### Logging
 
@@ -454,11 +446,12 @@ Encryption via `sober-crypto` envelope encryption (same as MCP server credential
 
 ### This Plan
 
-- Gateway core: event loop, mapping logic, gRPC client, auto-create, buffering
-- Platform trait: `PlatformBridge`, `GatewayEvent`, `PlatformMessage`
+- Gateway binary: event loop, mapping lookup, gRPC client, response buffering
+- Event types: `GatewayEvent`, `PlatformMessage`
 - Discord implementation: channels, threads, message editing, @mention detection
+- Bridge bot user: seeded in migrations
 - Data model: 3 tables + migrations
-- API endpoints: platform/mapping/user CRUD
+- API endpoints in sober-api: platform/mapping/user CRUD (`GatewayAdminService`)
 - Web UI: gateway settings pages
 - Metrics, dashboard, service files, docs
 
@@ -472,6 +465,7 @@ Each is a self-contained `PlatformBridge` implementation + cargo feature.
 
 ### Future Enhancements (not in scope)
 
+- Auto-create conversations on first platform interaction
 - Rich content (embeds, buttons, reactions)
 - File/image attachments via blob store
 - Per-channel tool restrictions
