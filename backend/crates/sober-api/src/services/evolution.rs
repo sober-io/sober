@@ -73,23 +73,7 @@ impl EvolutionService {
         let repo = PgEvolutionRepo::new(self.db.clone());
         let current = repo.get_by_id(id).await?;
 
-        // Validate status transition.
-        match (&current.status, &target_status) {
-            (EvolutionStatus::Proposed | EvolutionStatus::Failed, EvolutionStatus::Approved) => {}
-            (EvolutionStatus::Proposed, EvolutionStatus::Rejected) => {}
-            (EvolutionStatus::Active, EvolutionStatus::Reverted) => {}
-            _ => {
-                return Err(AppError::Validation(format!(
-                    "cannot transition from {} to {}",
-                    serde_json::to_string(&current.status)
-                        .unwrap_or_default()
-                        .trim_matches('"'),
-                    serde_json::to_string(&target_status)
-                        .unwrap_or_default()
-                        .trim_matches('"'),
-                )));
-            }
-        }
+        validate_status_transition(&current.status, &target_status)?;
 
         repo.update_status(id, target_status, Some(admin_user_id))
             .await?;
@@ -174,5 +158,84 @@ impl EvolutionService {
     ) -> Result<Vec<EvolutionEvent>, AppError> {
         let repo = PgEvolutionRepo::new(self.db.clone());
         repo.list_timeline(limit, evolution_type, status).await
+    }
+}
+
+/// Validates that a status transition is allowed.
+fn validate_status_transition(
+    from: &EvolutionStatus,
+    to: &EvolutionStatus,
+) -> Result<(), AppError> {
+    match (from, to) {
+        (EvolutionStatus::Proposed | EvolutionStatus::Failed, EvolutionStatus::Approved) => Ok(()),
+        (EvolutionStatus::Proposed, EvolutionStatus::Rejected) => Ok(()),
+        (EvolutionStatus::Active, EvolutionStatus::Reverted) => Ok(()),
+        _ => Err(AppError::Validation(format!(
+            "cannot transition from {} to {}",
+            serde_json::to_string(from)
+                .unwrap_or_default()
+                .trim_matches('"'),
+            serde_json::to_string(to)
+                .unwrap_or_default()
+                .trim_matches('"'),
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_transitions() {
+        // Proposed → Approved
+        assert!(
+            validate_status_transition(&EvolutionStatus::Proposed, &EvolutionStatus::Approved)
+                .is_ok()
+        );
+        // Failed → Approved (retry)
+        assert!(
+            validate_status_transition(&EvolutionStatus::Failed, &EvolutionStatus::Approved)
+                .is_ok()
+        );
+        // Proposed → Rejected
+        assert!(
+            validate_status_transition(&EvolutionStatus::Proposed, &EvolutionStatus::Rejected)
+                .is_ok()
+        );
+        // Active → Reverted
+        assert!(
+            validate_status_transition(&EvolutionStatus::Active, &EvolutionStatus::Reverted)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn invalid_transitions() {
+        // Active → Approved (already past approval)
+        assert!(
+            validate_status_transition(&EvolutionStatus::Active, &EvolutionStatus::Approved)
+                .is_err()
+        );
+        // Rejected → Approved (must re-propose)
+        assert!(
+            validate_status_transition(&EvolutionStatus::Rejected, &EvolutionStatus::Approved)
+                .is_err()
+        );
+        // Proposed → Reverted (not yet active)
+        assert!(
+            validate_status_transition(&EvolutionStatus::Proposed, &EvolutionStatus::Reverted)
+                .is_err()
+        );
+        // Active → Rejected (already active)
+        assert!(
+            validate_status_transition(&EvolutionStatus::Active, &EvolutionStatus::Rejected)
+                .is_err()
+        );
+        // Reverted → anything
+        assert!(
+            validate_status_transition(&EvolutionStatus::Reverted, &EvolutionStatus::Approved)
+                .is_err()
+        );
     }
 }

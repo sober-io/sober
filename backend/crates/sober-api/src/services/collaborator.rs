@@ -212,21 +212,7 @@ impl CollaboratorService {
         let caller_cu = cu_repo.get(conversation_id, caller_user_id).await?;
         let target_cu = cu_repo.get(conversation_id, target_user_id).await?;
 
-        if target_cu.role == ConversationUserRole::Owner {
-            return Err(AppError::Forbidden);
-        }
-
-        match caller_cu.role {
-            ConversationUserRole::Owner => {}
-            ConversationUserRole::Admin => {
-                if target_cu.role != ConversationUserRole::Member {
-                    return Err(AppError::Forbidden);
-                }
-            }
-            ConversationUserRole::Member => {
-                return Err(AppError::Forbidden);
-            }
-        }
+        check_can_remove(caller_cu.role, target_cu.role)?;
 
         let remaining = cu_repo.list_by_conversation(conversation_id).await?;
 
@@ -363,5 +349,80 @@ impl CollaboratorService {
             },
         )
         .await
+    }
+}
+
+/// Check whether `caller_role` is allowed to remove a user with `target_role`.
+fn check_can_remove(
+    caller_role: ConversationUserRole,
+    target_role: ConversationUserRole,
+) -> Result<(), AppError> {
+    // Cannot remove the owner.
+    if target_role == ConversationUserRole::Owner {
+        return Err(AppError::Forbidden);
+    }
+    match caller_role {
+        ConversationUserRole::Owner => Ok(()),
+        ConversationUserRole::Admin => {
+            if target_role != ConversationUserRole::Member {
+                return Err(AppError::Forbidden);
+            }
+            Ok(())
+        }
+        ConversationUserRole::Member => Err(AppError::Forbidden),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_can_remove_admin() {
+        assert!(check_can_remove(ConversationUserRole::Owner, ConversationUserRole::Admin).is_ok());
+    }
+
+    #[test]
+    fn owner_can_remove_member() {
+        assert!(
+            check_can_remove(ConversationUserRole::Owner, ConversationUserRole::Member).is_ok()
+        );
+    }
+
+    #[test]
+    fn nobody_can_remove_owner() {
+        assert!(
+            check_can_remove(ConversationUserRole::Owner, ConversationUserRole::Owner).is_err()
+        );
+        assert!(
+            check_can_remove(ConversationUserRole::Admin, ConversationUserRole::Owner).is_err()
+        );
+        assert!(
+            check_can_remove(ConversationUserRole::Member, ConversationUserRole::Owner).is_err()
+        );
+    }
+
+    #[test]
+    fn admin_can_remove_member() {
+        assert!(
+            check_can_remove(ConversationUserRole::Admin, ConversationUserRole::Member).is_ok()
+        );
+    }
+
+    #[test]
+    fn admin_cannot_remove_admin() {
+        assert!(
+            check_can_remove(ConversationUserRole::Admin, ConversationUserRole::Admin).is_err()
+        );
+    }
+
+    #[test]
+    fn member_cannot_remove_anyone() {
+        assert!(
+            check_can_remove(ConversationUserRole::Member, ConversationUserRole::Member).is_err()
+        );
+        assert!(
+            check_can_remove(ConversationUserRole::Member, ConversationUserRole::Admin).is_err()
+        );
     }
 }

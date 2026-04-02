@@ -192,3 +192,53 @@ fn attachment_id_from_block(block: &ContentBlock) -> Option<ConversationAttachme
         ContentBlock::Text { .. } => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_image_attachment_id() {
+        let id = ConversationAttachmentId::new();
+        let block = ContentBlock::Image {
+            conversation_attachment_id: id,
+            alt: Some("test".into()),
+        };
+        assert_eq!(attachment_id_from_block(&block), Some(id));
+    }
+
+    #[test]
+    fn extracts_file_attachment_id() {
+        let id = ConversationAttachmentId::new();
+        let block = ContentBlock::File {
+            conversation_attachment_id: id,
+        };
+        assert_eq!(attachment_id_from_block(&block), Some(id));
+    }
+
+    #[test]
+    fn extracts_audio_attachment_id() {
+        let id = ConversationAttachmentId::new();
+        let block = ContentBlock::Audio {
+            conversation_attachment_id: id,
+        };
+        assert_eq!(attachment_id_from_block(&block), Some(id));
+    }
+
+    #[test]
+    fn extracts_video_attachment_id() {
+        let id = ConversationAttachmentId::new();
+        let block = ContentBlock::Video {
+            conversation_attachment_id: id,
+        };
+        assert_eq!(attachment_id_from_block(&block), Some(id));
+    }
+
+    #[test]
+    fn text_block_returns_none() {
+        let block = ContentBlock::Text {
+            text: "hello".into(),
+        };
+        assert_eq!(attachment_id_from_block(&block), None);
+    }
+}
