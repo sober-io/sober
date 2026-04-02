@@ -11,6 +11,8 @@ use sober_db::{
     PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
     PgWorkspaceRepo, PgWorkspaceSettingsRepo,
 };
+
+use crate::guards;
 use sqlx::PgPool;
 
 /// Maximum length for auto-generated workspace names (truncated from conversation title).
@@ -240,9 +242,7 @@ impl ConversationService {
         user_id: sober_core::types::UserId,
     ) -> Result<(), AppError> {
         let membership = super::verify_membership(&self.db, conversation_id, user_id).await?;
-        if membership.role != ConversationUserRole::Owner {
-            return Err(AppError::Forbidden);
-        }
+        guards::require_owner(&membership)?;
 
         PgConversationRepo::new(self.db.clone())
             .delete(conversation_id)
@@ -276,7 +276,8 @@ impl ConversationService {
         user_id: sober_core::types::UserId,
         input: UpdateSettingsInput,
     ) -> Result<SettingsResponse, AppError> {
-        super::verify_membership(&self.db, conversation_id, user_id).await?;
+        let membership = super::verify_membership(&self.db, conversation_id, user_id).await?;
+        guards::require_conversation_role(&membership, ConversationUserRole::Admin)?;
 
         let conv_repo = PgConversationRepo::new(self.db.clone());
         let ws_settings_repo = PgWorkspaceSettingsRepo::new(self.db.clone());
@@ -400,9 +401,7 @@ impl ConversationService {
         let conv_repo = PgConversationRepo::new(self.db.clone());
 
         let membership = super::verify_membership(&self.db, conversation_id, user_id).await?;
-        if membership.role != ConversationUserRole::Owner {
-            return Err(AppError::Forbidden);
-        }
+        guards::require_owner(&membership)?;
 
         let conversation = conv_repo.get_by_id(conversation_id).await?;
         if conversation.kind != ConversationKind::Direct {
@@ -440,9 +439,7 @@ impl ConversationService {
         user_id: sober_core::types::UserId,
     ) -> Result<(), AppError> {
         let membership = super::verify_membership(&self.db, conversation_id, user_id).await?;
-        if membership.role != ConversationUserRole::Owner {
-            return Err(AppError::Forbidden);
-        }
+        guards::require_owner(&membership)?;
 
         let mut tx = self
             .db
