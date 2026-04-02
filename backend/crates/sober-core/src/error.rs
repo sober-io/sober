@@ -68,7 +68,9 @@ impl IntoResponse for AppError {
         };
 
         let span = tracing::Span::current();
-        span.record("otel.status_code", "ERROR");
+        if status.is_server_error() {
+            span.record("otel.status_code", "ERROR");
+        }
         span.record("error.type_", error_type);
         span.record("error.message", tracing::field::display(&self));
 

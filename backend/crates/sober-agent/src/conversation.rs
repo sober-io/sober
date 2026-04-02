@@ -170,7 +170,6 @@ impl<R: AgentRepos> ConversationActor<R> {
     /// 6. Load skill catalog.
     /// 7. Delegate to [`turn::run_turn`].
     /// 8. Report metrics and broadcast errors.
-    #[instrument(skip(self, content, event_tx), fields(trigger = ?trigger))]
     async fn handle_message(
         &self,
         user_id: UserId,
