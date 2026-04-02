@@ -283,6 +283,13 @@ platform-specific format. Inbound messages are normalized to plain text/markdown
    - Not found → use bridge bot user, prefix content with `[username]`
 6. Call `agent.HandleMessage(user_id, conversation_id, content)`
 
+#### ChannelDeleted Handler
+
+When a platform reports a channel deletion, the gateway removes the mapping
+from DB and the in-memory `DashMap`. Logged at INFO level. The conversation
+is preserved — only the mapping is removed. Admins can re-create the mapping
+if the deletion was a false alarm.
+
 ### Outbound Flow (Sõber → Platform)
 
 1. `ConversationUpdate` arrives via `SubscribeConversationUpdates`
@@ -294,6 +301,10 @@ platform-specific format. Inbound messages are normalized to plain text/markdown
 assistant responses — user messages are not broadcast. All assistant responses
 should be forwarded to mapped platforms (cross-channel visibility is the
 intended behavior).
+
+**Unmapped conversations skipped:** If the reverse mapping lookup returns no
+entries (conversation has no gateway mapping), the event is discarded. The
+in-memory `DashMap` makes this an O(1) check per event.
 
 ### Response Buffering Strategy
 
@@ -336,6 +347,10 @@ Handlers delegate to a `GatewayAdminService` that reads/writes
 gateway DB tables directly. The gateway binary picks up config
 changes via gRPC `Reload` or periodic DB polling.
 
+sober-api's `GatewayClient` is optional — the gateway is not required for
+sober-api to start. All gateway admin endpoints except `GET /channels`
+are DB-backed and work independently of the gateway process.
+
 ### Platform Management
 
 - `GET /platforms` — list configured platforms
@@ -346,7 +361,7 @@ changes via gRPC `Reload` or periodic DB polling.
 ### Channel Mapping Management
 
 - `GET /platforms/:id/channels` — list available channels from platform (calls
-  gateway via gRPC; requires gateway to be running and platform connected)
+  gateway via gRPC; returns 503 if gateway is unavailable)
 - `GET /platforms/:id/mappings` — list existing mappings
 - `POST /platforms/:id/mappings` — create manual mapping
 - `DELETE /mappings/:id` — remove mapping (keeps conversation)
@@ -354,7 +369,9 @@ changes via gRPC `Reload` or periodic DB polling.
 ### User Mapping Management
 
 - `GET /platforms/:id/users` — list user mappings
-- `POST /platforms/:id/users` — map external user → Sõber user
+- `POST /platforms/:id/users` — map external user → Sõber user. Also adds
+  the Sõber user as a member to all conversations currently mapped for this
+  platform (eager, via `_tx` transaction).
 - `DELETE /user-mappings/:id` — remove user mapping
 
 ## Web UI
