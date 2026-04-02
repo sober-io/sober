@@ -296,6 +296,18 @@ HttpMetricsLayer          -- Prometheus counters
 and after `AuthLayer` (so `AuthUser` is in extensions). Since layers execute
 inside-out, `RequestContextLayer` goes before the others in the `.layer()` chain.
 
+### 11. Curated Overview Dashboard Updates
+
+Add two new rows to `infra/grafana/dashboards/curated/overview.json`:
+
+**Evolution row** (4 panels): events by type, proposals by autonomy, execution
+duration p95, reverts + cycle duration. Uses existing evolution metrics that
+are already emitted.
+
+**Tracing row** (3 panels): cross-service trace volume, p95 duration by service
+(api/agent/llm), error traces by service. Uses Prometheus metrics as proxy
+for trace volume (direct Tempo queries as stretch goal).
+
 ## What This Does NOT Include
 
 - Request/response body logging (security risk, unnecessary overhead)

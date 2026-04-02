@@ -1886,7 +1886,92 @@ git commit -m "chore(metrics): remove 7 ghost metrics, document 9 undocumented, 
 
 ---
 
-### Task 21: Add `sqlx::query=warn` to default filter strings
+### Task 21: Add Evolution and Tracing rows to curated overview dashboard
+
+Add an Evolution row and a Tracing row to `infra/grafana/dashboards/curated/overview.json`.
+
+**Files:**
+- Modify: `infra/grafana/dashboards/curated/overview.json`
+
+- [ ] **Step 1: Add Evolution row**
+
+Add a new row after the existing "Agent Details" row (id=15, y=27). Insert
+at `y=36` (shifting the Scheduler row and everything below down by 9). Use the
+next available panel IDs (start from 68).
+
+Panels to add (4 panels in one row):
+
+1. **Evolution Events by Type** (timeseries, 6w):
+   Query: `sum by (type) (rate(sober_evolution_events_total[$__rate_interval]))`
+
+2. **Evolution Proposals** (timeseries, 6w):
+   Query: `sum by (type, autonomy) (rate(sober_evolution_proposals_total[$__rate_interval]))`
+
+3. **Evolution Execution Duration (p95)** (timeseries, 6w):
+   Query: `histogram_quantile(0.95, sum by (le, type) (rate(sober_evolution_execution_duration_seconds_bucket[$__rate_interval])))`
+
+4. **Evolution Reverts & Cycle Duration** (timeseries, 6w):
+   Queries:
+   - `sum by (type) (rate(sober_evolution_reverts_total[$__rate_interval]))` (legendFormat: "reverts: {{type}}")
+   - `histogram_quantile(0.95, sum by (le) (rate(sober_evolution_cycle_duration_seconds_bucket[$__rate_interval])))` (legendFormat: "cycle p95")
+
+- [ ] **Step 2: Add Tracing row**
+
+Add a Tracing row after the Evolution row. This uses the Tempo datasource.
+
+Panels to add (3 panels in one row):
+
+1. **Trace Count by Service** (timeseries, 8w):
+   Datasource: Tempo
+   Query type: `traceql`
+   Query: `{} | count() by (resource.service.name)` with rate
+   Note: If TraceQL rate isn't available, use Prometheus with:
+   `sum by (service) (rate(traces_spanmetrics_calls_total[$__rate_interval]))`
+   (requires span metrics — check if tempo is configured for it. If not, use
+   a simpler Prometheus query: `sum(rate(sober_api_request_total[$__rate_interval]))` as
+   a proxy for API trace volume, with separate series for agent/scheduler.)
+
+2. **Trace Duration (p95) by Service** (timeseries, 8w):
+   Datasource: Prometheus
+   Queries:
+   - `histogram_quantile(0.95, sum by (le) (rate(sober_api_request_duration_seconds_bucket[$__rate_interval])))` (legendFormat: "api")
+   - `histogram_quantile(0.95, sum by (le) (rate(sober_agent_request_duration_seconds_bucket[$__rate_interval])))` (legendFormat: "agent")
+   - `histogram_quantile(0.95, sum by (le) (rate(sober_llm_request_duration_seconds_bucket[$__rate_interval])))` (legendFormat: "llm")
+
+3. **Error Traces** (timeseries, 8w):
+   Datasource: Prometheus
+   Queries:
+   - `sum(rate(sober_api_request_total{status=~"5.."}[$__rate_interval]))` (legendFormat: "api 5xx")
+   - `sum(rate(sober_agent_requests_total{status="error"}[$__rate_interval]))` (legendFormat: "agent errors")
+   - `sum(rate(sober_llm_request_total{status="error"}[$__rate_interval]))` (legendFormat: "llm errors")
+
+Use the same panel styling (dark background, transparent mode) as existing
+panels. All panels use `${datasource}` template variable for Prometheus queries
+and hardcoded `tempo` uid for Tempo queries.
+
+- [ ] **Step 3: Shift existing panel y-coordinates**
+
+All panels from the Scheduler row (id=20) onward need their `gridPos.y`
+increased by 18 (9 per new row) to make room for the two new rows.
+
+- [ ] **Step 4: Build the JSON manually or via script**
+
+The overview.json is a hand-curated file. Add the panels following the exact
+same JSON structure as existing panels. Copy an existing timeseries panel as
+a template and adjust `id`, `title`, `targets[].expr`, `gridPos`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add infra/grafana/dashboards/curated/overview.json
+git commit -m "feat(grafana): add Evolution and Tracing rows to overview dashboard"
+```
+
+---
+
+### Task 22: Add `sqlx::query=warn` to default filter strings
+
+> Note: previously Task 21.
 
 Enable sqlx query tracing at warn level in all binaries.
 
@@ -1931,7 +2016,7 @@ git commit -m "feat(telemetry): enable sqlx::query=warn in all binary filter str
 
 ---
 
-### Task 22: Full workspace build, clippy, test, and format check
+### Task 23: Full workspace build, clippy, test, and format check
 
 Verify everything compiles together, passes lints, and existing tests pass.
 
