@@ -11,6 +11,7 @@ use sober_db::{
     PgConversationRepo, PgConversationUserRepo, PgJobRepo, PgMessageRepo, PgTagRepo,
     PgWorkspaceRepo, PgWorkspaceSettingsRepo,
 };
+use tracing::instrument;
 
 use crate::guards;
 use sqlx::PgPool;
@@ -112,6 +113,7 @@ impl ConversationService {
     }
 
     /// List conversations with details for a user.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list(
         &self,
         user_id: sober_core::types::UserId,
@@ -122,6 +124,7 @@ impl ConversationService {
     }
 
     /// Create a new direct conversation with workspace provisioning.
+    #[instrument(skip(self))]
     pub async fn create(
         &self,
         user_id: sober_core::types::UserId,
@@ -169,6 +172,7 @@ impl ConversationService {
     }
 
     /// Get a conversation with full details.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn get(
         &self,
         conversation_id: ConversationId,
@@ -206,6 +210,7 @@ impl ConversationService {
     }
 
     /// Update conversation title and/or archived status.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn update(
         &self,
         conversation_id: ConversationId,
@@ -236,6 +241,7 @@ impl ConversationService {
     }
 
     /// Delete a conversation (owner only).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn delete(
         &self,
         conversation_id: ConversationId,
@@ -250,6 +256,7 @@ impl ConversationService {
     }
 
     /// Get combined settings for a conversation.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn get_settings(
         &self,
         conversation_id: ConversationId,
@@ -270,6 +277,7 @@ impl ConversationService {
     }
 
     /// Partial update of conversation settings.
+    #[instrument(skip(self, input), fields(conversation.id = %conversation_id))]
     pub async fn update_settings(
         &self,
         conversation_id: ConversationId,
@@ -345,6 +353,7 @@ impl ConversationService {
     }
 
     /// Mark a conversation as read.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn mark_read(
         &self,
         conversation_id: ConversationId,
@@ -374,6 +383,7 @@ impl ConversationService {
     }
 
     /// Get the user's inbox conversation.
+    #[instrument(level = "debug", skip(self))]
     pub async fn get_inbox(
         &self,
         user_id: sober_core::types::UserId,
@@ -392,6 +402,7 @@ impl ConversationService {
     }
 
     /// Convert a direct conversation to a group (owner only).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn convert_to_group(
         &self,
         conversation_id: ConversationId,
@@ -433,6 +444,7 @@ impl ConversationService {
     }
 
     /// Clear all messages in a conversation (owner only).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn clear_messages(
         &self,
         conversation_id: ConversationId,
@@ -456,6 +468,7 @@ impl ConversationService {
     }
 
     /// List jobs linked to a conversation.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn list_jobs(
         &self,
         conversation_id: ConversationId,
