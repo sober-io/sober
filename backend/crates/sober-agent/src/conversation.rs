@@ -28,7 +28,7 @@ use sober_core::types::repo::{
 use sober_mind::assembly::Mind;
 use sober_mind::injection::InjectionVerdict;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::context::AgentContext;
 use crate::error::AgentError;
@@ -107,6 +107,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     /// This method consumes the actor. The caller (typically [`ActorRegistry`])
     /// spawns it in a `tokio::spawn` and handles registry cleanup when the
     /// future completes.
+    #[instrument(skip_all, fields(conversation.id = %self.conversation_id))]
     pub async fn run(mut self) {
         info!(
             conversation_id = %self.conversation_id,
@@ -220,6 +221,7 @@ impl<R: AgentRepos> ConversationActor<R> {
 
     /// Inner implementation of message handling — returns `Result` so the outer
     /// method can handle error reporting uniformly.
+    #[instrument(skip(self, content, event_tx), fields(trigger = ?trigger))]
     async fn handle_message_inner(
         &self,
         user_id: UserId,
@@ -234,6 +236,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {
+                warn!(verdict = "rejected", "input flagged as injection, aborting");
                 return Err(AgentError::InjectionDetected(reason));
             }
             InjectionVerdict::Flagged { reason } => {
@@ -257,6 +260,7 @@ impl<R: AgentRepos> ConversationActor<R> {
 
         let (workspace_dir, workspace_settings) =
             self.ensure_workspace(&mut conversation, user_id).await;
+        debug!(workspace_dir = ?workspace_dir, has_settings = workspace_settings.is_some(), "workspace resolved");
 
         // 3. Store user message (human-triggered only)
         let user_msg_id = if trigger == TriggerKind::Human {
@@ -286,6 +290,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             AgentMode::Silent => false,
             AgentMode::Mention => text_content.to_lowercase().contains(MENTION_TRIGGER),
         };
+        debug!(mode = ?conversation.agent_mode, "agent mode resolved");
 
         if !should_respond {
             debug!(
@@ -323,6 +328,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                     .await,
             )
         };
+        debug!(tool_count = tool_registry.len(), "tool registry built");
 
         // 6. Load skill catalog XML for system prompt injection
         let skill_catalog_xml = {
@@ -365,6 +371,7 @@ impl<R: AgentRepos> ConversationActor<R> {
 
     /// Provisions a workspace for the conversation if one doesn't exist yet,
     /// resolves the workspace directory path, and loads workspace settings.
+    #[instrument(skip(self, conversation))]
     async fn ensure_workspace(
         &self,
         conversation: &mut Conversation,
@@ -444,6 +451,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     /// If the agent process was killed mid-execution, some tool executions
     /// may be stuck in `Pending` or `Running` status. This marks them as
     /// `Failed` so they don't block future context reconstruction.
+    #[instrument(skip(self))]
     async fn recover_incomplete_executions(&self) {
         match self
             .ctx
@@ -454,9 +462,10 @@ impl<R: AgentRepos> ConversationActor<R> {
         {
             Ok(incomplete) if incomplete.is_empty() => {}
             Ok(incomplete) => {
+                let count = incomplete.len();
                 info!(
                     conversation_id = %self.conversation_id,
-                    count = incomplete.len(),
+                    count,
                     "recovering incomplete tool executions"
                 );
                 for exec in incomplete {
@@ -479,6 +488,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                         );
                     }
                 }
+                info!(recovered = count, "recovered incomplete tool executions");
             }
             Err(e) => {
                 warn!(

@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
     // 2. Initialise telemetry (tracing + metrics + OTel)
     let telemetry = sober_core::init_telemetry(
         config.environment,
-        "sober_agent=info,sober_mind=info,sober_memory=info",
+        "sober_agent=info,sober_mind=info,sober_memory=info,sqlx::query=warn,info",
     );
 
     // 3. Spawn Prometheus metrics HTTP server for scraping

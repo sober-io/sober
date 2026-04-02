@@ -56,3 +56,4 @@ overrides:
       processors:
         - service-graphs
         - span-metrics
+        - local-blocks

@@ -13,7 +13,7 @@ use metrics::{counter, histogram};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use sober_core::config::LlmConfig;
-use tracing::debug;
+use tracing::{debug, info, instrument, warn};
 
 use crate::engine::LlmEngine;
 use crate::error::LlmError;
@@ -197,6 +197,7 @@ impl OpenAiCompatibleEngine {
 
 #[async_trait]
 impl LlmEngine for OpenAiCompatibleEngine {
+    #[instrument(skip(self, req), fields(model = %self.model, provider = %self.base_url))]
     async fn complete(&self, mut req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         req.stream = false;
         if req.max_tokens.is_none() {
@@ -204,7 +205,7 @@ impl LlmEngine for OpenAiCompatibleEngine {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
-        debug!(url = %url, model = %req.model, "sending completion request");
+        info!(model = %self.model, provider = %self.base_url, "sending LLM completion request");
 
         let provider = self.provider_label();
         let model = req.model.clone();
@@ -219,6 +220,7 @@ impl LlmEngine for OpenAiCompatibleEngine {
             .await?;
 
         if !response.status().is_success() {
+            warn!(status = %response.status(), model = %self.model, "LLM request failed");
             counter!("sober_llm_request_total", "provider" => provider.to_owned(), "model" => model, "status" => "error").increment(1);
             return Err(Self::handle_error_response(response).await);
         }
@@ -239,6 +241,7 @@ impl LlmEngine for OpenAiCompatibleEngine {
         Ok(resp)
     }
 
+    #[instrument(skip(self, req), fields(model = %self.model, provider = %self.base_url))]
     async fn stream(
         &self,
         mut req: CompletionRequest,
@@ -249,7 +252,8 @@ impl LlmEngine for OpenAiCompatibleEngine {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
-        debug!(url = %url, model = %req.model, "sending streaming request");
+        let tool_count = req.tools.len();
+        info!(model = %self.model, provider = %self.base_url, max_tokens = req.max_tokens, tool_count, "sending LLM stream request");
 
         let provider = self.provider_label().to_owned();
         let model = req.model.clone();
@@ -264,6 +268,7 @@ impl LlmEngine for OpenAiCompatibleEngine {
             .await?;
 
         if !response.status().is_success() {
+            warn!(status = %response.status(), model = %self.model, "LLM request failed");
             counter!("sober_llm_request_total", "provider" => provider, "model" => model, "status" => "error").increment(1);
             return Err(Self::handle_error_response(response).await);
         }
@@ -274,9 +279,10 @@ impl LlmEngine for OpenAiCompatibleEngine {
         Ok(Box::pin(metered))
     }
 
+    #[instrument(skip(self, texts), fields(model = %self.embedding_model))]
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
         let url = format!("{}/embeddings", self.base_url);
-        debug!(url = %url, model = %self.embedding_model, count = texts.len(), "sending embedding request");
+        debug!(model = %self.embedding_model, text_count = texts.len(), "sending embedding request");
 
         let provider = self.provider_label().to_owned();
         let start = Instant::now();

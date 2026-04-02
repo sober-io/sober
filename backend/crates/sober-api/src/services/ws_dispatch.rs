@@ -3,7 +3,7 @@ use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, Mess
 use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 
 use crate::connections::ConnectionRegistry;
 use crate::proto;
@@ -26,6 +26,7 @@ impl WsDispatchService {
     }
 
     /// Verify membership and mark conversation as read (best-effort).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn subscribe(
         &self,
         conversation_id: ConversationId,
@@ -49,6 +50,7 @@ impl WsDispatchService {
     }
 
     /// Process a chat message: verify membership, broadcast, and fire-and-forget gRPC.
+    #[instrument(skip(self, content, error_tx), fields(conversation.id = %conversation_id))]
     pub async fn send_message(
         &self,
         conversation_id: ConversationId,
@@ -144,27 +146,32 @@ impl WsDispatchService {
     }
 
     /// Submit a confirmation response.
+    #[instrument(skip(self))]
     pub async fn confirm_response(
         &self,
         confirm_id: String,
         approved: bool,
     ) -> Result<(), AppError> {
         let mut agent_client = self.agent_client.clone();
-        let resp = proto::ConfirmResponse {
+        let mut request = tonic::Request::new(proto::ConfirmResponse {
             confirm_id,
             approved,
-        };
-        if let Err(e) = agent_client.submit_confirmation(resp).await {
+        });
+        sober_core::inject_trace_context(request.metadata_mut());
+        if let Err(e) = agent_client.submit_confirmation(request).await {
             warn!(error = %e, "failed to submit confirmation");
         }
         Ok(())
     }
 
     /// Set the permission mode on the agent.
+    #[instrument(skip(self))]
     pub async fn set_permission_mode(&self, mode: String) -> Result<(), AppError> {
         let mut agent_client = self.agent_client.clone();
-        let req = proto::SetPermissionModeRequest { mode: mode.clone() };
-        if let Err(e) = agent_client.set_permission_mode(req).await {
+        let mut request =
+            tonic::Request::new(proto::SetPermissionModeRequest { mode: mode.clone() });
+        sober_core::inject_trace_context(request.metadata_mut());
+        if let Err(e) = agent_client.set_permission_mode(request).await {
             warn!(error = %e, mode, "failed to set permission mode");
         }
         Ok(())

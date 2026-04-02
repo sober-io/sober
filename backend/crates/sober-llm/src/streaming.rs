@@ -13,13 +13,14 @@ use std::time::Instant;
 use futures::stream::{self, Stream};
 use metrics::{counter, histogram};
 use reqwest::Response;
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use crate::error::LlmError;
 use crate::types::StreamChunk;
 
 /// Parse an SSE response from an OpenAI-compatible provider into a stream of
 /// [`StreamChunk`]s.
+#[instrument(level = "debug", skip(response))]
 pub fn parse_sse_stream(
     response: Response,
 ) -> impl Stream<Item = Result<StreamChunk, LlmError>> + Send {

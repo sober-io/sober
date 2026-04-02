@@ -22,7 +22,7 @@ use sober_plugin::PluginManager;
 use sober_plugin::manifest::PluginManifest;
 use sober_plugin::registry::InstallRequest;
 use sober_plugin_gen::PluginGenerator;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 use crate::SharedSchedulerClient;
 use crate::error::AgentError;
@@ -64,6 +64,7 @@ pub(crate) fn evolution_type_str(t: EvolutionType) -> &'static str {
 ///
 /// If the event is not in `Approved` status (already picked up by another
 /// trigger), this returns `Ok(())` silently.
+#[instrument(skip(repos, mind, ctx), fields(evolution.id = %event.id, evolution.type_ = ?event.evolution_type, evolution.title = %event.title))]
 pub async fn execute_evolution<R: AgentRepos>(
     event: &EvolutionEvent,
     repos: &R,
@@ -156,6 +157,7 @@ pub async fn execute_evolution<R: AgentRepos>(
 /// Extracts `name`, `description`, and `capabilities` from the event payload.
 /// The generator produces compiled WASM bytes + a manifest, which are passed
 /// directly to `PluginRegistry::install`.
+#[instrument(skip(ctx), fields(evolution.id = %event.id))]
 async fn execute_plugin<R: AgentRepos>(
     event: &EvolutionEvent,
     ctx: &EvolutionContext<R>,
@@ -244,6 +246,7 @@ async fn execute_plugin<R: AgentRepos>(
 /// written to `~/.sober/skills/<name>/SKILL.md` so that [`SkillLoader`]
 /// discovers it on the next scan. The skill loader cache is invalidated to
 /// force immediate rediscovery.
+#[instrument(skip(ctx), fields(evolution.id = %event.id))]
 async fn execute_skill<R: AgentRepos>(
     event: &EvolutionEvent,
     ctx: &EvolutionContext<R>,
@@ -355,6 +358,7 @@ async fn execute_skill<R: AgentRepos>(
 }
 
 /// Writes an instruction overlay file and reloads the mind.
+#[instrument(skip(mind), fields(evolution.id = %event.id))]
 async fn execute_instruction(
     event: &EvolutionEvent,
     mind: &Arc<Mind>,
@@ -378,6 +382,7 @@ async fn execute_instruction(
 }
 
 /// Creates a scheduled job via the scheduler gRPC service.
+#[instrument(skip(scheduler_client), fields(evolution.id = %event.id))]
 async fn execute_automation(
     event: &EvolutionEvent,
     scheduler_client: &SharedSchedulerClient,

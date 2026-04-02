@@ -4,6 +4,7 @@ use sober_core::error::AppError;
 use sober_core::types::{PluginId, PluginRepo, UserId};
 use sober_db::PgPluginRepo;
 use sqlx::PgPool;
+use tracing::instrument;
 
 use crate::guards;
 use crate::proto;
@@ -101,6 +102,7 @@ impl PluginService {
     }
 
     /// List plugins with optional filters.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list(
         &self,
         kind: Option<String>,
@@ -126,6 +128,7 @@ impl PluginService {
     }
 
     /// Install a new plugin.
+    #[instrument(skip(self, config))]
     pub async fn install(
         &self,
         name: String,
@@ -153,6 +156,7 @@ impl PluginService {
     }
 
     /// Batch import plugins from `.mcp.json` config.
+    #[instrument(skip(self, mcp_servers))]
     pub async fn import(&self, mcp_servers: serde_json::Value) -> Result<ImportResult, AppError> {
         let mut client = self.agent_client.clone();
         let mcp_servers_json =
@@ -171,11 +175,14 @@ impl PluginService {
     }
 
     /// Reload all plugins.
+    #[instrument(skip(self))]
     pub async fn reload(&self, user: &AuthUser) -> Result<ReloadResult, AppError> {
         guards::require_admin(user)?;
         let mut client = self.agent_client.clone();
+        let mut request = tonic::Request::new(proto::ReloadPluginsRequest {});
+        sober_core::inject_trace_context(request.metadata_mut());
         let response = client
-            .reload_plugins(proto::ReloadPluginsRequest {})
+            .reload_plugins(request)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -185,6 +192,7 @@ impl PluginService {
     }
 
     /// Get a single plugin by ID.
+    #[instrument(level = "debug", skip(self), fields(plugin.id = %id))]
     pub async fn get(&self, id: uuid::Uuid) -> Result<PluginInfo, AppError> {
         let mut client = self.agent_client.clone();
         let response = client
@@ -207,6 +215,7 @@ impl PluginService {
     }
 
     /// Update a plugin (enable/disable, config, scope).
+    #[instrument(skip(self, config), fields(plugin.id = %id))]
     pub async fn update(
         &self,
         id: uuid::Uuid,
@@ -275,6 +284,7 @@ impl PluginService {
     }
 
     /// Uninstall a plugin.
+    #[instrument(skip(self), fields(plugin.id = %id))]
     pub async fn uninstall(&self, id: uuid::Uuid, user: &AuthUser) -> Result<(), AppError> {
         let plugin_id = PluginId::from_uuid(id);
         let repo = PgPluginRepo::new(self.db.clone());
@@ -291,6 +301,7 @@ impl PluginService {
     }
 
     /// List audit log entries for a plugin.
+    #[instrument(level = "debug", skip(self), fields(plugin.id = %id))]
     pub async fn list_audit_logs(
         &self,
         id: uuid::Uuid,
@@ -324,6 +335,7 @@ impl PluginService {
     }
 
     /// List available skills.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list_skills(
         &self,
         user_id: UserId,
@@ -350,6 +362,7 @@ impl PluginService {
     }
 
     /// Reload skills and return fresh list.
+    #[instrument(skip(self))]
     pub async fn reload_skills(
         &self,
         user_id: UserId,
@@ -376,6 +389,7 @@ impl PluginService {
     }
 
     /// List all available tools.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list_tools(&self) -> Result<Vec<ToolInfo>, AppError> {
         let mut client = self.agent_client.clone();
         let response = client

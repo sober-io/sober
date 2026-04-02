@@ -20,6 +20,8 @@ use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, CommandPolicy, RiskLevel, SandboxPolicy};
 use sober_workspace::SnapshotManager;
 
+use tracing::instrument;
+
 use super::ShellToolConfig;
 
 /// Maximum output length returned to the LLM to avoid blowing up context.
@@ -86,6 +88,7 @@ impl ShellTool {
         }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "shell"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let input: ShellInput = serde_json::from_value(input)
             .map_err(|e| ToolError::InvalidInput(format!("invalid input: {e}")))?;

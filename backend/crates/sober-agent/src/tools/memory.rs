@@ -17,6 +17,7 @@ use sober_core::{ScopeId, UserId};
 use sober_llm::LlmEngine;
 use sober_memory::ChunkType;
 use sober_memory::store::{MemoryStore, StoreChunk, StoreQuery};
+use tracing::instrument;
 use uuid::Uuid;
 
 /// Default number of results for recall queries.
@@ -113,6 +114,7 @@ impl<M: MessageRepo> RecallTool<M> {
         }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "recall"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
 
@@ -379,6 +381,7 @@ impl RememberTool {
         }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "remember"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
         let scope_id = resolve_scope(&input, user_id);

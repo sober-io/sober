@@ -11,7 +11,7 @@ use sober_core::error::AppError;
 use sober_core::types::Job;
 use sober_core::types::repo::BlobGcRepo;
 use sober_workspace::BlobStore;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::executor::{ExecutionResult, JobExecutor};
 
@@ -47,6 +47,7 @@ impl<G: BlobGcRepo> BlobGcExecutor<G> {
 
 #[tonic::async_trait]
 impl<G: BlobGcRepo + 'static> JobExecutor for BlobGcExecutor<G> {
+    #[instrument(skip(self, _job))]
     async fn execute(&self, _job: &Job) -> Result<ExecutionResult, AppError> {
         let batches = self
             .blob_store

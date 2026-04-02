@@ -6,6 +6,7 @@ use sober_core::types::{
 use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgUserRepo};
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
+use tracing::instrument;
 
 use crate::connections::UserConnectionRegistry;
 use crate::guards;
@@ -25,6 +26,7 @@ impl CollaboratorService {
     }
 
     /// List all collaborators in a conversation.
+    #[instrument(level = "debug", skip(self), fields(conversation.id = %conversation_id))]
     pub async fn list(
         &self,
         conversation_id: ConversationId,
@@ -36,6 +38,7 @@ impl CollaboratorService {
     }
 
     /// Add a collaborator to a conversation.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn add(
         &self,
         conversation_id: ConversationId,
@@ -123,6 +126,7 @@ impl CollaboratorService {
     }
 
     /// Change a collaborator's role.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn update_role(
         &self,
         conversation_id: ConversationId,
@@ -195,6 +199,7 @@ impl CollaboratorService {
     }
 
     /// Remove a collaborator from a conversation.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn remove(
         &self,
         conversation_id: ConversationId,
@@ -263,6 +268,7 @@ impl CollaboratorService {
     }
 
     /// Leave a conversation (non-owner only).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn leave(
         &self,
         conversation_id: ConversationId,

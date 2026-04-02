@@ -29,7 +29,7 @@ use sober_llm::{LlmEngine, Message as LlmMessage, OpenAiCompatibleEngine};
 use sober_memory::LoadRequest;
 use sober_mind::assembly::TaskContext;
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::agent::format_memory_context;
 use crate::context::AgentContext;
@@ -83,6 +83,7 @@ pub struct TurnParams<'a, R: AgentRepos> {
 ///
 /// Returns [`AgentError`] if context loading, LLM streaming, or persistence fails
 /// fatally. Tool execution errors are handled internally (fed back to the LLM).
+#[instrument(skip(params), fields(conversation.id = %params.conversation_id, user.id = %params.user_id))]
 pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), AgentError> {
     let conv_id_str = params.conversation_id.to_string();
     let mut llm_messages: Vec<LlmMessage> = Vec::new();
@@ -145,6 +146,13 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         if params.trigger == TriggerKind::Scheduler {
             tool_definitions.retain(|t| t.function.name != "scheduler");
         }
+
+        info!(
+            model = %params.ctx.config.model,
+            tool_count = tool_definitions.len(),
+            history_messages = llm_messages.len(),
+            "starting LLM stream"
+        );
 
         let req = CompletionRequest {
             model: params.ctx.config.model.clone(),
@@ -259,6 +267,11 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 })
                 .collect()
         };
+        info!(
+            content_len = content_buffer.len(),
+            tool_call_count = tool_calls.len(),
+            "LLM stream completed"
+        );
         let has_tool_calls = !tool_calls.is_empty();
 
         // -----------------------------------------------------------------
@@ -338,6 +351,12 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             };
             let outcome: DispatchOutcome =
                 dispatch::execute_tool_calls(params.ctx, &dispatch_req).await;
+
+            info!(
+                context_modifying = outcome.any_context_modifying,
+                any_errors = outcome.any_errors,
+                "tool dispatch completed"
+            );
 
             // Append tool result messages to in-memory LLM messages.
             for result in &outcome.results {
@@ -525,6 +544,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
 /// - `system_prompt` is the assembled system prompt from Mind
 /// - `history_messages` are the conversation messages in LLM format, built
 ///   from persisted messages + tool executions via `history::to_llm_messages`
+#[instrument(level = "debug", skip(params, _conv_id_str))]
 async fn build_context<R: AgentRepos>(
     params: &TurnParams<'_, R>,
     _conv_id_str: &str,
@@ -567,6 +587,14 @@ async fn build_context<R: AgentRepos>(
         )
         .await
         .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+
+    debug!(
+        conversation_memories = loaded_context.conversation_memories.len(),
+        user_memories = loaded_context.user_memories.len(),
+        system_memories = loaded_context.system_memories.len(),
+        estimated_tokens = loaded_context.estimated_tokens,
+        "memory context loaded"
+    );
 
     // c. Assemble prompt via Mind
     let caller = CallerContext {
@@ -641,6 +669,11 @@ async fn build_context<R: AgentRepos>(
         .map(|m| m.text_content())
         .unwrap_or_default();
 
+    debug!(
+        system_prompt_len = system_prompt.len(),
+        "system prompt assembled"
+    );
+
     // e. Load messages with tool executions from DB for the conversation history.
     let messages_with_execs = params
         .ctx
@@ -662,6 +695,11 @@ async fn build_context<R: AgentRepos>(
         params.ctx.config.vision,
     );
 
+    debug!(
+        history_messages = history_messages.len(),
+        "conversation history loaded"
+    );
+
     Ok((system_prompt, history_messages))
 }
 
@@ -670,6 +708,7 @@ async fn build_context<R: AgentRepos>(
 ///
 /// Returns a best-effort map — attachments that fail to load are silently
 /// skipped (the LLM will see a fallback placeholder instead).
+#[instrument(level = "debug", skip(params, messages))]
 async fn load_attachment_data<R: AgentRepos>(
     params: &TurnParams<'_, R>,
     messages: &[sober_core::types::tool_execution::MessageWithExecutions],
@@ -747,6 +786,7 @@ async fn load_attachment_data<R: AgentRepos>(
 ///
 /// Returns `Some(engine)` if the user has a stored `llm_provider` secret
 /// that decrypts successfully and differs from the system default.
+#[instrument(level = "debug", skip(repos, llm_config, mek))]
 async fn try_resolve_dynamic_engine<R: AgentRepos>(
     repos: &Arc<R>,
     user_id: UserId,
@@ -790,6 +830,7 @@ async fn try_resolve_dynamic_engine<R: AgentRepos>(
 }
 
 /// Auto-generates a conversation title if one doesn't exist yet.
+#[instrument(level = "debug", skip(params, assistant_text))]
 async fn auto_generate_title<R: AgentRepos>(
     params: &TurnParams<'_, R>,
     conv_id_str: &str,

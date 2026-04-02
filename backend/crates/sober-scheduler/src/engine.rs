@@ -14,7 +14,7 @@ use sober_core::types::repo::{JobRepo, JobRunRepo};
 use sober_core::types::{Job, JobId, JobStatus};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
-use tracing::{Instrument, error, info, warn};
+use tracing::{Instrument, error, info, instrument, warn};
 
 use crate::executor::JobExecutorRegistry;
 use crate::grpc::agent_proto;
@@ -65,12 +65,14 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     ) {
         let mut lock = self.agent_client.write().await;
         *lock = Some(client);
+        info!("agent client connected");
     }
 
     /// Clear the agent gRPC client (called when the connection is lost).
     pub async fn clear_agent_client(&self) {
         let mut lock = self.agent_client.write().await;
         *lock = None;
+        info!("agent client disconnected");
     }
 
     /// Get a clone of the shared agent client handle.
@@ -89,6 +91,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     }
 
     /// Pause the tick engine (stops executing jobs but keeps running).
+    #[instrument(skip(self))]
     pub fn pause(&self) {
         self.paused
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -96,6 +99,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
     }
 
     /// Resume the tick engine.
+    #[instrument(skip(self))]
     pub fn resume(&self) {
         self.paused
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -153,6 +157,8 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
             return;
         }
 
+        // due_job_count is logged in the info! below; no inner span needed
+        // (entered spans are !Send and cannot be held across .await)
         info!(count = due_jobs.len(), "executing due jobs");
 
         let mut handles = Vec::new();
@@ -304,6 +310,7 @@ impl<J: JobRepo + 'static, R: JobRunRepo + 'static> TickEngine<J, R> {
 /// - `{"type": "prompt", ...}` or no `type` field → agent gRPC
 /// - `{"type": "internal", "op": "<op>"}` → local executor
 /// - `{"type": "artifact", "op": "<op>"}` → local executor
+#[instrument(skip(agent_client, executor_registry, job), fields(job.id = %job.id, job.name = %job.name))]
 async fn route_job(
     agent_client: &SharedAgentClient,
     executor_registry: &JobExecutorRegistry,
@@ -312,9 +319,13 @@ async fn route_job(
     let payload_type = job.payload["type"].as_str().unwrap_or("prompt");
 
     match payload_type {
-        "prompt" => execute_via_agent(agent_client, job).await,
+        "prompt" => {
+            tracing::info!(job.id = %job.id, job.name = %job.name, route = "agent", "routing job");
+            execute_via_agent(agent_client, job).await
+        }
 
         "internal" | "artifact" => {
+            tracing::info!(job.id = %job.id, job.name = %job.name, route = "local", "routing job");
             let op = match job.payload["op"].as_str() {
                 Some(op) => op,
                 None => {
@@ -359,6 +370,7 @@ async fn route_job(
 }
 
 /// Notify the agent about a completed local job execution (fire-and-forget).
+#[instrument(level = "debug", skip(agent_client, job, summary), fields(job.id = %job.id))]
 async fn wake_agent(agent_client: &SharedAgentClient, job: &Job, summary: &str) {
     let client = agent_client.read().await;
     let Some(client) = client.as_ref() else {
@@ -385,15 +397,18 @@ async fn wake_agent(agent_client: &SharedAgentClient, job: &Job, summary: &str) 
 }
 
 /// Execute a job via the agent's `ExecuteTask` RPC.
+#[instrument(skip(agent_client, job), fields(job.id = %job.id))]
 async fn execute_via_agent(
     agent_client: &SharedAgentClient,
     job: &sober_core::types::Job,
 ) -> (Vec<u8>, Option<String>) {
     let client = agent_client.read().await;
     let Some(client) = client.as_ref() else {
+        tracing::debug!("agent client not connected, skipping gRPC dispatch");
         return (vec![], Some("agent client not connected".into()));
     };
 
+    tracing::debug!("sending job to agent via gRPC");
     let mut request = tonic::Request::new(agent_proto::ExecuteTaskRequest {
         task_id: job.id.as_uuid().to_string(),
         task_type: "scheduled_job".into(),
@@ -406,7 +421,7 @@ async fn execute_via_agent(
     sober_core::inject_trace_context(request.metadata_mut());
 
     let mut client = client.clone();
-    match client.execute_task(request).await {
+    let result = match client.execute_task(request).await {
         Ok(response) => {
             let mut stream = response.into_inner();
             let mut collected = Vec::new();
@@ -440,10 +455,13 @@ async fn execute_via_agent(
             (collected, last_error)
         }
         Err(status) => (vec![], Some(format!("gRPC call failed: {status}"))),
-    }
+    };
+    tracing::debug!("agent gRPC dispatch complete");
+    result
 }
 
 /// Force-run a specific job immediately by ID.
+#[instrument(skip(job_repo, run_repo, agent_client, executor_registry), fields(job.id = %job_id))]
 pub async fn force_run_job<J: JobRepo + 'static, R: JobRunRepo + 'static>(
     job_repo: &Arc<J>,
     run_repo: &Arc<R>,

@@ -12,6 +12,7 @@ use sober_workspace::BlobStore;
 use sober_workspace::image_processing;
 use sober_workspace::text_extraction;
 use sqlx::PgPool;
+use tracing::instrument;
 
 pub struct AttachmentService {
     db: PgPool,
@@ -24,6 +25,7 @@ impl AttachmentService {
     }
 
     /// Process and store an uploaded file attachment.
+    #[instrument(skip(self, data), fields(conversation.id = %conversation_id, attachment.filename = %filename))]
     pub async fn upload(
         &self,
         conversation_id: ConversationId,

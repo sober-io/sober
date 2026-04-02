@@ -2,8 +2,10 @@ use sober_core::error::AppError;
 use sober_core::types::{ConversationId, ConversationUser, ConversationUserRepo, UserId};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
+use tracing::instrument;
 
 /// Verify the authenticated user is a member of the conversation.
+#[instrument(level = "debug", skip(db), fields(conversation.id = %conversation_id))]
 pub(crate) async fn verify_membership(
     db: &PgPool,
     conversation_id: ConversationId,

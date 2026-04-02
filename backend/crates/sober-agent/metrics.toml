@@ -94,6 +94,16 @@ description = "Evolution reverts by type."
 labels = ["type"]
 # type: plugin, skill, instruction, automation
 
+[group.vision]
+name = "Vision"
+description = "Metrics for multimodal vision content block resolution."
+
+[[group.vision.metrics]]
+name = "sober_llm_vision_blocks_resolved_total"
+type = "counter"
+description = "Total vision content blocks resolved from attachments"
+labels = ["status"]
+
 # --- Deferred metrics (not yet implemented) ---
 #
 # The following metrics are planned but depend on features not yet built:

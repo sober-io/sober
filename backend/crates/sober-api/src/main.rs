@@ -6,9 +6,11 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use axum::extract::MatchedPath;
 use axum::routing::get;
-use http::Method;
+use axum_core::body::Body;
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use http::{Method, Response};
 use sober_api::admin;
 use sober_api::middleware::metrics::HttpMetricsLayer;
 use sober_api::middleware::rate_limit::{RateLimitConfig, RateLimitLayer};
@@ -21,14 +23,16 @@ use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{Span, info, info_span};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load()?;
 
-    let telemetry =
-        sober_core::init_telemetry(config.environment, "sober_api=debug,tower_http=debug,info");
+    let telemetry = sober_core::init_telemetry(
+        config.environment,
+        "sober_api=debug,tower_http=debug,sqlx::query=warn,info",
+    );
 
     let state = AppState::new(config.clone()).await?;
 
@@ -58,7 +62,68 @@ async fn main() -> anyhow::Result<()> {
     let app = app
         .layer(cors)
         .layer(rate_limit)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &http::Request<Body>| {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+                    let matched_path = request
+                        .extensions()
+                        .get::<MatchedPath>()
+                        .map(|p| p.as_str().to_owned());
+
+                    // Extract W3C TraceContext from incoming headers so this
+                    // span joins the caller's trace (e.g. sober-web proxy).
+                    let parent_cx = opentelemetry::global::get_text_map_propagator(|p| {
+                        p.extract(&HttpHeaderExtractor(request.headers()))
+                    });
+
+                    let span = info_span!(
+                        "http_request",
+                        http.method = %request.method(),
+                        http.route = matched_path.as_deref().unwrap_or(""),
+                        http.status_code = tracing::field::Empty,
+                        user.id = tracing::field::Empty,
+                        request.id = tracing::field::Empty,
+                        otel.status_code = tracing::field::Empty,
+                        error.type_ = tracing::field::Empty,
+                        error.message = tracing::field::Empty,
+                    );
+                    let _ = span.set_parent(parent_cx);
+                    span
+                })
+                .on_response(
+                    |response: &Response<Body>, latency: Duration, span: &Span| {
+                        let status = response.status().as_u16();
+                        span.record("http.status_code", status);
+
+                        if status >= 500 {
+                            tracing::error!(
+                                latency_ms = latency.as_millis() as u64,
+                                "request failed"
+                            );
+                        } else if status >= 400 {
+                            tracing::warn!(latency_ms = latency.as_millis() as u64, "client error");
+                        } else {
+                            tracing::info!(
+                                latency_ms = latency.as_millis() as u64,
+                                "request completed"
+                            );
+                        }
+                    },
+                )
+                .on_failure(
+                    |error: tower_http::classify::ServerErrorsFailureClass,
+                     latency: Duration,
+                     _span: &Span| {
+                        tracing::error!(
+                            %error,
+                            latency_ms = latency.as_millis() as u64,
+                            "request error"
+                        );
+                    },
+                ),
+        )
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(PropagateRequestIdLayer::x_request_id());
 
@@ -99,6 +164,19 @@ fn build_cors(config: &AppConfig) -> CorsLayer {
             .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
             .allow_headers([AUTHORIZATION, CONTENT_TYPE])
             .allow_credentials(true),
+    }
+}
+
+/// Adapter that lets the OTel propagator read from an [`http::HeaderMap`].
+struct HttpHeaderExtractor<'a>(&'a http::HeaderMap);
+
+impl opentelemetry::propagation::Extractor for HttpHeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect()
     }
 }
 

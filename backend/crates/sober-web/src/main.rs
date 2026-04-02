@@ -23,7 +23,7 @@ use tokio::signal;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 /// Static files built by SvelteKit (`pnpm build` → `frontend/build/`).
 ///
@@ -48,7 +48,8 @@ async fn main() -> Result<()> {
         Ok("production") => sober_core::config::Environment::Production,
         _ => sober_core::config::Environment::Development,
     };
-    let _telemetry = sober_core::init_telemetry(environment, "sober_web=info");
+    let _telemetry =
+        sober_core::init_telemetry(environment, "sober_web=info,sqlx::query=warn,info");
 
     let config = AppConfig::load_unvalidated()?;
 
@@ -131,6 +132,7 @@ fn build_router(state: ProxyState, static_dir: Option<&str>) -> Router {
 
 /// Reverse-proxy handler: forwards the request to `sober-api`, preserving the
 /// original URI path (including `/api` prefix).
+#[instrument(skip_all, fields(upstream.path = %original_uri.path()))]
 async fn reverse_proxy(
     State(state): State<ProxyState>,
     original_uri: axum::extract::OriginalUri,
@@ -145,6 +147,9 @@ async fn reverse_proxy(
         .parse::<Uri>()
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
+    // Propagate W3C TraceContext so the upstream sober-api span joins this trace.
+    inject_http_trace_context(req.headers_mut());
+
     state
         .client
         .request(req)
@@ -155,6 +160,7 @@ async fn reverse_proxy(
 
 /// WebSocket reverse proxy: upgrades the client connection, connects to the
 /// upstream `sober-api` WebSocket, and pipes messages between the two.
+#[instrument(skip_all)]
 async fn ws_reverse_proxy(
     State(state): State<ProxyState>,
     headers: http::HeaderMap,
@@ -192,6 +198,8 @@ async fn proxy_websocket(
             .headers_mut()
             .insert(http::header::COOKIE, cookie.clone());
     }
+    // Propagate trace context into the upstream WebSocket handshake.
+    inject_http_trace_context(request.headers_mut());
 
     let (upstream_socket, _) = tokio_tungstenite::connect_async(request).await?;
 
@@ -262,6 +270,30 @@ async fn serve_embedded(uri: axum::extract::OriginalUri) -> Response {
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("not found"))
             .unwrap(),
+    }
+}
+
+/// Injects the current span's W3C TraceContext (`traceparent`/`tracestate`)
+/// into HTTP request headers so upstream services join the same trace.
+fn inject_http_trace_context(headers: &mut http::HeaderMap) {
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let cx = tracing::Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|p| {
+        p.inject_context(&cx, &mut HttpHeaderInjector(headers));
+    });
+}
+
+/// Adapter that lets the OTel propagator write into an [`http::HeaderMap`].
+struct HttpHeaderInjector<'a>(&'a mut http::HeaderMap);
+
+impl opentelemetry::propagation::Injector for HttpHeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        if let (Ok(name), Ok(val)) = (
+            http::header::HeaderName::try_from(key),
+            http::header::HeaderValue::from_str(&value),
+        ) {
+            self.0.insert(name, val);
+        }
     }
 }
 

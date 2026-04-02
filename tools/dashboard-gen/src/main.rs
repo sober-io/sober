@@ -42,6 +42,46 @@ struct Cli {
 // metrics.toml model
 // ---------------------------------------------------------------------------
 
+/// Flat format: `[crate]` + `[[metrics]]` (sober-api, sober-core, sober-db, etc.)
+#[derive(Debug, Deserialize)]
+struct FlatMetricsFile {
+    #[serde(rename = "crate")]
+    crate_info: CrateInfo,
+    #[serde(default)]
+    metrics: Vec<MetricDef>,
+}
+
+/// Grouped format: `[group.<name>]` + `[[group.<name>.metrics]]` (sober-agent, sober-scheduler)
+#[derive(Debug, Deserialize)]
+struct GroupedMetricsFile {
+    #[serde(default)]
+    group: BTreeMap<String, GroupDef>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroupDef {
+    name: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    metrics: Vec<GroupedMetricDef>,
+}
+
+/// A metric in the grouped format uses `description` instead of `help`.
+#[derive(Debug, Deserialize, Clone)]
+struct GroupedMetricDef {
+    name: String,
+    #[serde(rename = "type")]
+    metric_type: String,
+    description: String,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    buckets: Option<Vec<f64>>,
+}
+
+/// Normalised representation used by both formats.
 #[derive(Debug, Deserialize)]
 struct MetricsFile {
     #[serde(rename = "crate")]
@@ -80,6 +120,61 @@ struct AlertDef {
     #[serde(rename = "for")]
     for_duration: String,
     summary: String,
+}
+
+/// Parse a metrics.toml that may be in either flat or grouped format.
+fn parse_metrics_file(content: &str, path: &std::path::Path) -> Result<MetricsFile> {
+    // Try flat format first (has [crate] section)
+    if let Ok(flat) = toml::from_str::<FlatMetricsFile>(content) {
+        return Ok(MetricsFile {
+            crate_info: flat.crate_info,
+            metrics: flat.metrics,
+        });
+    }
+
+    // Try grouped format (has [group.*] sections)
+    let grouped: GroupedMetricsFile = toml::from_str(content)
+        .with_context(|| format!("Failed to parse {} as either flat or grouped format", path.display()))?;
+
+    // Derive crate name from directory name
+    let crate_name = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let dashboard_title = crate_name
+        .strip_prefix("sober-")
+        .unwrap_or(&crate_name)
+        .to_string();
+    let dashboard_title = format!(
+        "{}{}",
+        dashboard_title[..1].to_uppercase(),
+        &dashboard_title[1..]
+    );
+
+    let mut metrics = Vec::new();
+    for (_key, group) in &grouped.group {
+        for gm in &group.metrics {
+            metrics.push(MetricDef {
+                name: gm.name.clone(),
+                metric_type: gm.metric_type.clone(),
+                help: gm.description.clone(),
+                labels: gm.labels.clone(),
+                group: Some(group.name.clone()),
+                buckets: gm.buckets.clone(),
+                alerts: Vec::new(),
+            });
+        }
+    }
+
+    Ok(MetricsFile {
+        crate_info: CrateInfo {
+            name: crate_name,
+            dashboard_title,
+        },
+        metrics,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -646,8 +741,7 @@ fn main() -> Result<()> {
     for path in &files {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let metrics_file: MetricsFile = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", path.display()))?;
+        let metrics_file = parse_metrics_file(&content, path)?;
 
         // Generate dashboard JSON
         let dashboard = generate_dashboard(&metrics_file.crate_info, &metrics_file.metrics);

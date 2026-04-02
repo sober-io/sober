@@ -20,6 +20,7 @@ use axum::Router;
 use sober_auth::AuthLayer;
 use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
 
+use crate::middleware::request_context::RequestContextLayer;
 use crate::state::AppState;
 
 /// Builds the complete API router with all routes and middleware.
@@ -40,6 +41,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(users::routes())
         .merge(workspaces::routes())
         .merge(ws::routes())
+        .layer(RequestContextLayer::new())
         .layer(auth_layer)
         .with_state(state);
 

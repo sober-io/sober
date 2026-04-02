@@ -16,6 +16,7 @@ use sober_core::types::{
     AuditLogRepo, ConversationId, CreateAuditLog, NewSecret, SecretRepo, UserId,
 };
 use sober_crypto::envelope::{Dek, EncryptedBlob, Mek};
+use tracing::instrument;
 use uuid::Uuid;
 
 /// Shared context for all secret tools.
@@ -130,6 +131,7 @@ impl<S: SecretRepo, A: AuditLogRepo> StoreSecretTool<S, A> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "store_secret"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
         let ctx_conversation_id = resolve_conversation_id(&input);
@@ -273,6 +275,7 @@ impl<S: SecretRepo, A: AuditLogRepo> ReadSecretTool<S, A> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "read_secret"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
         let conversation_id = resolve_conversation_id(&input).or(self.ctx.conversation_id);
@@ -370,6 +373,7 @@ impl<S: SecretRepo, A: AuditLogRepo> ListSecretsTool<S, A> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "list_secrets"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
         let conversation_id = resolve_conversation_id(&input).or(self.ctx.conversation_id);
@@ -466,6 +470,7 @@ impl<S: SecretRepo, A: AuditLogRepo> DeleteSecretTool<S, A> {
         Self { ctx }
     }
 
+    #[instrument(skip(self, input), fields(tool.name = "delete_secret"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let user_id = resolve_user_id(&input)?;
         let conversation_id = resolve_conversation_id(&input).or(self.ctx.conversation_id);

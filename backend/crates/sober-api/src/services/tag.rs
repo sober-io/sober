@@ -4,6 +4,7 @@ use sober_core::types::{
 };
 use sober_db::{PgMessageRepo, PgTagRepo};
 use sqlx::PgPool;
+use tracing::instrument;
 
 pub struct TagService {
     db: PgPool,
@@ -15,12 +16,14 @@ impl TagService {
     }
 
     /// List all tags owned by a user.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list_by_user(&self, user_id: UserId) -> Result<Vec<Tag>, AppError> {
         let repo = PgTagRepo::new(self.db.clone());
         repo.list_by_user(user_id).await
     }
 
     /// Add a tag to a conversation (creates the tag if needed).
+    #[instrument(skip(self), fields(conversation.id = %conversation_id))]
     pub async fn add_to_conversation(
         &self,
         conversation_id: ConversationId,
@@ -35,6 +38,7 @@ impl TagService {
     }
 
     /// Remove a tag from a conversation.
+    #[instrument(skip(self), fields(conversation.id = %conversation_id, tag.id = %tag_id))]
     pub async fn remove_from_conversation(
         &self,
         conversation_id: ConversationId,
@@ -48,6 +52,7 @@ impl TagService {
     }
 
     /// Add a tag to a message (creates the tag if needed).
+    #[instrument(skip(self), fields(message.id = %message_id))]
     pub async fn add_to_message(
         &self,
         message_id: MessageId,
@@ -65,6 +70,7 @@ impl TagService {
     }
 
     /// Remove a tag from a message.
+    #[instrument(skip(self), fields(message.id = %message_id, tag.id = %tag_id))]
     pub async fn remove_from_message(
         &self,
         message_id: MessageId,

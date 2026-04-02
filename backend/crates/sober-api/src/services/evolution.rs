@@ -6,6 +6,7 @@ use sober_core::types::{
 };
 use sober_db::PgEvolutionRepo;
 use sqlx::PgPool;
+use tracing::instrument;
 
 use crate::proto;
 use crate::state::AgentClient;
@@ -48,6 +49,7 @@ impl EvolutionService {
     }
 
     /// List evolution events with optional filters.
+    #[instrument(level = "debug", skip(self))]
     pub async fn list_events(
         &self,
         evolution_type: Option<EvolutionType>,
@@ -58,12 +60,14 @@ impl EvolutionService {
     }
 
     /// Get a single evolution event.
+    #[instrument(level = "debug", skip(self), fields(evolution.id = %id))]
     pub async fn get_event(&self, id: EvolutionEventId) -> Result<EvolutionEvent, AppError> {
         let repo = PgEvolutionRepo::new(self.db.clone());
         repo.get_by_id(id).await
     }
 
     /// Update an evolution event's status with state machine validation.
+    #[instrument(skip(self), fields(evolution.id = %id))]
     pub async fn update_event(
         &self,
         id: EvolutionEventId,
@@ -82,19 +86,23 @@ impl EvolutionService {
         match target_status {
             EvolutionStatus::Approved => {
                 let mut client = self.agent_client.clone();
+                let mut request = tonic::Request::new(proto::ExecuteEvolutionRequest {
+                    evolution_event_id: id.to_string(),
+                });
+                sober_core::inject_trace_context(request.metadata_mut());
                 client
-                    .execute_evolution(proto::ExecuteEvolutionRequest {
-                        evolution_event_id: id.to_string(),
-                    })
+                    .execute_evolution(request)
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
             }
             EvolutionStatus::Reverted => {
                 let mut client = self.agent_client.clone();
+                let mut request = tonic::Request::new(proto::RevertEvolutionRequest {
+                    evolution_event_id: id.to_string(),
+                });
+                sober_core::inject_trace_context(request.metadata_mut());
                 client
-                    .revert_evolution(proto::RevertEvolutionRequest {
-                        evolution_event_id: id.to_string(),
-                    })
+                    .revert_evolution(request)
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
             }
@@ -105,6 +113,7 @@ impl EvolutionService {
     }
 
     /// Get evolution config.
+    #[instrument(level = "debug", skip(self))]
     pub async fn get_config(&self) -> Result<EvolutionConfigResponse, AppError> {
         let repo = PgEvolutionRepo::new(self.db.clone());
         let config = repo.get_config().await?;
@@ -119,6 +128,7 @@ impl EvolutionService {
     }
 
     /// Update evolution config.
+    #[instrument(skip(self, input))]
     pub async fn update_config(
         &self,
         input: UpdateConfigInput,
@@ -150,6 +160,7 @@ impl EvolutionService {
     }
 
     /// Get timeline of evolution events.
+    #[instrument(level = "debug", skip(self))]
     pub async fn get_timeline(
         &self,
         limit: i64,

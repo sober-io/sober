@@ -11,7 +11,7 @@ use sober_core::types::repo::SandboxExecutionLogRepo;
 use sober_db::PgSandboxExecutionLogRepo;
 use sober_sandbox::{BwrapSandbox, SandboxPolicy};
 use sober_workspace::BlobStore;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::executor::{ExecutionResult, JobExecutor};
 
@@ -40,6 +40,7 @@ impl ArtifactExecutor {
 
 #[tonic::async_trait]
 impl JobExecutor for ArtifactExecutor {
+    #[instrument(skip(self, job), fields(job.id = %job.id, job.name = %job.name))]
     async fn execute(&self, job: &Job) -> Result<ExecutionResult, AppError> {
         // Extract fields from the job's JSON payload.
         let blob_ref = job.payload["blob_ref"]

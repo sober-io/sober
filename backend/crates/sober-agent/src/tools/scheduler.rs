@@ -7,6 +7,7 @@
 use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::SharedSchedulerClient;
@@ -408,6 +409,7 @@ impl SchedulerTools {
     }
 
     /// Inner dispatch for the [`Tool`] implementation.
+    #[instrument(skip(self, input), fields(tool.name = "scheduler"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let action = input
             .get("action")

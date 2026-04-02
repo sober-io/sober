@@ -9,6 +9,7 @@ use reqwest::Client;
 use sober_core::types::tool::{
     BoxToolFuture, Tool, ToolError, ToolMetadata, ToolOutput, ToolVisibility,
 };
+use tracing::instrument;
 
 /// Maximum response body size in bytes (10 MB).
 const MAX_BODY_SIZE: usize = 10_485_760;
@@ -215,6 +216,7 @@ impl Tool for FetchUrlTool {
 
 impl FetchUrlTool {
     /// Inner async implementation for [`Tool::execute`].
+    #[instrument(skip(self, input), fields(tool.name = "fetch_url"))]
     async fn execute_inner(&self, input: serde_json::Value) -> Result<ToolOutput, ToolError> {
         let url = input
             .get("url")
