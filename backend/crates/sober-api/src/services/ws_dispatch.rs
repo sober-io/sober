@@ -153,11 +153,12 @@ impl WsDispatchService {
         approved: bool,
     ) -> Result<(), AppError> {
         let mut agent_client = self.agent_client.clone();
-        let resp = proto::ConfirmResponse {
+        let mut request = tonic::Request::new(proto::ConfirmResponse {
             confirm_id,
             approved,
-        };
-        if let Err(e) = agent_client.submit_confirmation(resp).await {
+        });
+        sober_core::inject_trace_context(request.metadata_mut());
+        if let Err(e) = agent_client.submit_confirmation(request).await {
             warn!(error = %e, "failed to submit confirmation");
         }
         Ok(())
@@ -167,8 +168,10 @@ impl WsDispatchService {
     #[instrument(skip(self))]
     pub async fn set_permission_mode(&self, mode: String) -> Result<(), AppError> {
         let mut agent_client = self.agent_client.clone();
-        let req = proto::SetPermissionModeRequest { mode: mode.clone() };
-        if let Err(e) = agent_client.set_permission_mode(req).await {
+        let mut request =
+            tonic::Request::new(proto::SetPermissionModeRequest { mode: mode.clone() });
+        sober_core::inject_trace_context(request.metadata_mut());
+        if let Err(e) = agent_client.set_permission_mode(request).await {
             warn!(error = %e, mode, "failed to set permission mode");
         }
         Ok(())

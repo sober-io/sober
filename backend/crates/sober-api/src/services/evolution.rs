@@ -86,19 +86,23 @@ impl EvolutionService {
         match target_status {
             EvolutionStatus::Approved => {
                 let mut client = self.agent_client.clone();
+                let mut request = tonic::Request::new(proto::ExecuteEvolutionRequest {
+                    evolution_event_id: id.to_string(),
+                });
+                sober_core::inject_trace_context(request.metadata_mut());
                 client
-                    .execute_evolution(proto::ExecuteEvolutionRequest {
-                        evolution_event_id: id.to_string(),
-                    })
+                    .execute_evolution(request)
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
             }
             EvolutionStatus::Reverted => {
                 let mut client = self.agent_client.clone();
+                let mut request = tonic::Request::new(proto::RevertEvolutionRequest {
+                    evolution_event_id: id.to_string(),
+                });
+                sober_core::inject_trace_context(request.metadata_mut());
                 client
-                    .revert_evolution(proto::RevertEvolutionRequest {
-                        evolution_event_id: id.to_string(),
-                    })
+                    .revert_evolution(request)
                     .await
                     .map_err(|e| AppError::Internal(e.into()))?;
             }

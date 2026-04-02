@@ -179,8 +179,10 @@ impl PluginService {
     pub async fn reload(&self, user: &AuthUser) -> Result<ReloadResult, AppError> {
         guards::require_admin(user)?;
         let mut client = self.agent_client.clone();
+        let mut request = tonic::Request::new(proto::ReloadPluginsRequest {});
+        sober_core::inject_trace_context(request.metadata_mut());
         let response = client
-            .reload_plugins(proto::ReloadPluginsRequest {})
+            .reload_plugins(request)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
