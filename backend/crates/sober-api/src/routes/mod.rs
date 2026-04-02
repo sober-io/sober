@@ -18,31 +18,9 @@ use std::sync::Arc;
 
 use axum::Router;
 use sober_auth::AuthLayer;
-use sober_core::error::AppError;
-use sober_core::types::{ConversationId, CreateMessage, Message, MessageRepo, MessageRole};
-use sober_db::{PgMessageRepo, PgRoleRepo, PgSessionRepo, PgUserRepo};
+use sober_db::{PgRoleRepo, PgSessionRepo, PgUserRepo};
 
 pub(crate) use crate::services::verify_membership;
-
-/// Inserts a timeline event message into a conversation.
-pub(crate) async fn insert_event_message(
-    msg_repo: &PgMessageRepo,
-    conversation_id: ConversationId,
-    content: &str,
-    metadata: serde_json::Value,
-) -> Result<Message, AppError> {
-    msg_repo
-        .create(CreateMessage {
-            conversation_id,
-            role: MessageRole::Event,
-            content: vec![sober_core::types::ContentBlock::text(content)],
-            reasoning: None,
-            token_count: None,
-            metadata: Some(metadata),
-            user_id: None,
-        })
-        .await
-}
 
 use crate::state::AppState;
 
