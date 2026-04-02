@@ -49,6 +49,7 @@ pub(crate) fn plugin_to_proto(plugin: &sober_core::types::Plugin) -> proto::Plug
         config: plugin.config.to_string(),
         installed_at: plugin.installed_at.to_rfc3339(),
         scope: format!("{:?}", plugin.scope).to_lowercase(),
+        owner_id: plugin.owner_id.map(|id| id.to_string()),
     }
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Collaborator, ConversationUserRole, ConversationKind } from '$lib/types';
+	import { canManageConversation } from '$lib/guards';
 	import AddCollaboratorInput from './AddCollaboratorInput.svelte';
 
 	interface Props {
@@ -24,7 +25,7 @@
 		onLeave
 	}: Props = $props();
 
-	let canManage = $derived(currentUserRole === 'owner' || currentUserRole === 'admin');
+	let canManage = $derived(canManageConversation(currentUserRole));
 
 	function roleBadgeClass(role: ConversationUserRole): string {
 		switch (role) {

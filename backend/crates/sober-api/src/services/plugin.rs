@@ -1,9 +1,11 @@
 use serde::Serialize;
+use sober_auth::AuthUser;
 use sober_core::error::AppError;
 use sober_core::types::{PluginId, PluginRepo, UserId};
 use sober_db::PgPluginRepo;
 use sqlx::PgPool;
 
+use crate::guards;
 use crate::proto;
 use crate::state::AgentClient;
 
@@ -17,6 +19,7 @@ pub struct PluginInfo {
     pub description: String,
     pub status: String,
     pub scope: String,
+    pub owner_id: Option<String>,
     pub config: serde_json::Value,
     pub installed_at: String,
 }
@@ -33,6 +36,7 @@ impl From<proto::PluginInfo> for PluginInfo {
             description: info.description,
             status: info.status,
             scope: info.scope,
+            owner_id: info.owner_id,
             config,
             installed_at: info.installed_at,
         }
@@ -167,7 +171,8 @@ impl PluginService {
     }
 
     /// Reload all plugins.
-    pub async fn reload(&self) -> Result<ReloadResult, AppError> {
+    pub async fn reload(&self, user: &AuthUser) -> Result<ReloadResult, AppError> {
+        guards::require_admin(user)?;
         let mut client = self.agent_client.clone();
         let response = client
             .reload_plugins(proto::ReloadPluginsRequest {})
@@ -205,12 +210,16 @@ impl PluginService {
     pub async fn update(
         &self,
         id: uuid::Uuid,
+        user: &AuthUser,
         enabled: Option<bool>,
         config: Option<serde_json::Value>,
         scope: Option<String>,
     ) -> Result<PluginInfo, AppError> {
         let mut client = self.agent_client.clone();
         let plugin_id = PluginId::from_uuid(id);
+        let repo = PgPluginRepo::new(self.db.clone());
+        let plugin = repo.get_by_id(plugin_id).await?;
+        guards::can_modify_plugin(user, &plugin)?;
         let id_str = id.to_string();
 
         if let Some(enabled) = enabled {
@@ -232,7 +241,6 @@ impl PluginService {
         }
 
         if let Some(config) = config {
-            let repo = PgPluginRepo::new(self.db.clone());
             repo.update_config(plugin_id, config).await?;
         }
 
@@ -267,7 +275,11 @@ impl PluginService {
     }
 
     /// Uninstall a plugin.
-    pub async fn uninstall(&self, id: uuid::Uuid) -> Result<(), AppError> {
+    pub async fn uninstall(&self, id: uuid::Uuid, user: &AuthUser) -> Result<(), AppError> {
+        let plugin_id = PluginId::from_uuid(id);
+        let repo = PgPluginRepo::new(self.db.clone());
+        let plugin = repo.get_by_id(plugin_id).await?;
+        guards::can_modify_plugin(user, &plugin)?;
         let mut client = self.agent_client.clone();
         client
             .uninstall_plugin(proto::UninstallPluginRequest {

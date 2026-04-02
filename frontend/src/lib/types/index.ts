@@ -5,9 +5,10 @@ export interface User {
 	email: string;
 	username: string;
 	status: string;
-	roles: string[];
+	roles: SystemRole[];
 }
 
+export type SystemRole = 'user' | 'admin';
 export type ConversationKind = 'direct' | 'group' | 'inbox';
 export type ConversationUserRole = 'owner' | 'admin' | 'member';
 export type AgentMode = 'always' | 'mention' | 'silent';

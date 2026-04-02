@@ -12,6 +12,7 @@ export interface Plugin {
 	description: string;
 	status: PluginStatus;
 	scope: PluginScope;
+	owner_id: string | null;
 	config: Record<string, unknown>;
 	installed_at: string;
 }

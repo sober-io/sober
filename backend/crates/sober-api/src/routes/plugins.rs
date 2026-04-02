@@ -95,9 +95,9 @@ async fn import_plugins(
 
 async fn reload_plugins(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
 ) -> Result<ApiResponse<ReloadResult>, AppError> {
-    let result = state.plugin.reload().await?;
+    let result = state.plugin.reload(&auth_user).await?;
     Ok(ApiResponse::new(result))
 }
 
@@ -122,23 +122,23 @@ struct UpdatePluginRequest {
 
 async fn update_plugin(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
     Json(body): Json<UpdatePluginRequest>,
 ) -> Result<ApiResponse<PluginInfo>, AppError> {
     let plugin = state
         .plugin
-        .update(id, body.enabled, body.config, body.scope)
+        .update(id, &auth_user, body.enabled, body.config, body.scope)
         .await?;
     Ok(ApiResponse::new(plugin))
 }
 
 async fn uninstall_plugin(
     State(state): State<Arc<AppState>>,
-    _auth_user: AuthUser,
+    auth_user: AuthUser,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<ApiResponse<serde_json::Value>, AppError> {
-    state.plugin.uninstall(id).await?;
+    state.plugin.uninstall(id, &auth_user).await?;
     Ok(ApiResponse::new(serde_json::json!({ "deleted": true })))
 }
 

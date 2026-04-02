@@ -215,6 +215,7 @@ message PluginInfo {
   string config = 7; // JSON string
   string installed_at = 8;
   string scope = 9;  // "system", "user", "workspace"
+  optional string owner_id = 10;
 }
 
 message ListPluginsRequest {
