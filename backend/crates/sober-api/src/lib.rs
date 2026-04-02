@@ -4,6 +4,7 @@
 
 pub mod admin;
 pub mod connections;
+pub mod guards;
 pub mod middleware;
 pub mod routes;
 pub mod services;
