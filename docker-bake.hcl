@@ -7,7 +7,7 @@ variable "TAG" {
 }
 
 group "default" {
-  targets = ["sober-api", "sober-agent", "sober-scheduler", "sober-web", "sober-cli"]
+  targets = ["sober-api", "sober-agent", "sober-scheduler", "sober-gateway", "sober-web", "sober-cli"]
 }
 
 target "_common" {
@@ -34,6 +34,12 @@ target "sober-scheduler" {
   inherits = ["_common"]
   target   = "sober-scheduler"
   tags     = ["${REGISTRY}/sober-scheduler:${TAG}"]
+}
+
+target "sober-gateway" {
+  inherits = ["_common"]
+  target   = "sober-gateway"
+  tags     = ["${REGISTRY}/sober-gateway:${TAG}"]
 }
 
 target "sober-web" {
