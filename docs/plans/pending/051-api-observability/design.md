@@ -207,6 +207,10 @@ Comprehensive `#[instrument]` across all public methods.
 - `sober-plugin`: 3 metrics (`installed` gauge, `audit_runs_total`,
   `sandbox_violations_total`)
 
+**Regenerate dashboards and alerts** after all `metrics.toml` changes:
+run `just dashboards` to regenerate Grafana dashboard JSON and Prometheus
+alert rules from the updated definitions. Commit generated output.
+
 **Document 9 undocumented metrics** -- add to respective `metrics.toml`:
 - `sober-api`: 3 attachment metrics (`uploads_total`, `upload_bytes`,
   `upload_duration_seconds`)

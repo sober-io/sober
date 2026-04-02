@@ -1860,7 +1860,16 @@ description = "Total vision content blocks resolved from attachments"
 labels = ["status"]
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Regenerate dashboards and alert rules**
+
+Run: `just dashboards`
+
+This regenerates Grafana dashboard JSON and Prometheus alert rule YAML from
+the updated `metrics.toml` files. Output goes to:
+- `infra/grafana/dashboards/generated/`
+- `infra/prometheus/alerts/generated/`
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/crates/sober-core/metrics.toml \
@@ -1869,8 +1878,10 @@ git add backend/crates/sober-core/metrics.toml \
        backend/crates/sober-scheduler/metrics.toml \
        backend/crates/sober-db/metrics.toml \
        backend/crates/sober-workspace/metrics.toml \
-       backend/crates/sober-agent/metrics.toml
-git commit -m "chore(metrics): remove 7 ghost metrics, document 9 undocumented metrics"
+       backend/crates/sober-agent/metrics.toml \
+       infra/grafana/dashboards/generated/ \
+       infra/prometheus/alerts/generated/
+git commit -m "chore(metrics): remove 7 ghost metrics, document 9 undocumented, regenerate dashboards"
 ```
 
 ---
