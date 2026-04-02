@@ -391,11 +391,16 @@ impl<R: AgentRepos> Agent<R> {
         content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
     ) -> Result<AgentResponseStream, AgentError> {
+        let start = std::time::Instant::now();
+
         // 1. Pre-flight injection check (before routing to actor).
         let text_content = ContentBlock::extract_text(content);
         let verdict = Mind::check_injection(&text_content);
         match verdict {
             InjectionVerdict::Rejected { reason } => {
+                metrics::counter!("sober_agent_requests_total", "status" => "error").increment(1);
+                metrics::histogram!("sober_agent_request_duration_seconds")
+                    .record(start.elapsed().as_secs_f64());
                 return Err(AgentError::InjectionDetected(reason));
             }
             InjectionVerdict::Flagged { reason } => {
@@ -468,12 +473,18 @@ impl<R: AgentRepos> Agent<R> {
             // Actor exited between the registry lookup and the send.
             // Remove the stale entry and return an error.
             self.registry.remove(&conversation_id);
+            metrics::counter!("sober_agent_requests_total", "status" => "error").increment(1);
+            metrics::histogram!("sober_agent_request_duration_seconds")
+                .record(start.elapsed().as_secs_f64());
             return Err(AgentError::Internal(
                 "conversation actor exited unexpectedly".to_owned(),
             ));
         }
 
         // 5. Return the event stream.
+        metrics::counter!("sober_agent_requests_total", "status" => "ok").increment(1);
+        metrics::histogram!("sober_agent_request_duration_seconds")
+            .record(start.elapsed().as_secs_f64());
         Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(
             event_rx,
         )))
