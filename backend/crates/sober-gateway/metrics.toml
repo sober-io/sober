@@ -1,0 +1,90 @@
+# sober-gateway metrics
+#
+# All metrics are recorded via the `metrics` crate (0.24) facade macros.
+# A recorder (e.g. metrics-exporter-prometheus) must be installed at startup
+# for these to be collected.
+
+[group.gateway_messages]
+name = "Message Gateway"
+description = "Inbound and outbound message handling."
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_messages_received_total"
+type = "counter"
+description = "Total inbound platform messages processed."
+labels = ["platform", "status"]
+# platform: discord, telegram, matrix, whatsapp
+# status: success, error, unmapped
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_messages_sent_total"
+type = "counter"
+description = "Total outbound messages delivered to platforms."
+labels = ["platform", "status"]
+# platform: discord, telegram, matrix, whatsapp
+# status: success, error
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_message_handle_duration_seconds"
+type = "histogram"
+description = "Inbound message processing latency (gateway to agent RPC)."
+labels = ["platform"]
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_message_delivery_duration_seconds"
+type = "histogram"
+description = "Outbound message delivery latency (gateway to platform)."
+labels = ["platform"]
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_unmapped_messages_total"
+type = "counter"
+description = "Messages dropped due to unmapped channel."
+labels = ["platform"]
+
+[[group.gateway_messages.metrics]]
+name = "sober_gateway_buffer_flush_size_bytes"
+type = "histogram"
+description = "Size of buffered content flushed to platforms."
+labels = ["platform"]
+
+[group.gateway_platforms]
+name = "Platform Connections"
+description = "Platform bridge connection state."
+
+[[group.gateway_platforms.metrics]]
+name = "sober_gateway_platform_connections"
+type = "gauge"
+description = "Active platform connections by status."
+labels = ["platform", "status"]
+# status: connected, disconnected, reconnecting
+
+[[group.gateway_platforms.metrics]]
+name = "sober_gateway_platform_errors_total"
+type = "counter"
+description = "Platform SDK errors."
+labels = ["platform", "error_type"]
+# error_type: auth, rate_limit, network, sdk
+
+[alerts]
+
+[[alerts.rules]]
+name = "GatewayHighErrorRate"
+expr = "rate(sober_gateway_platform_errors_total[5m]) > 5"
+for = "5m"
+severity = "warning"
+description = "Gateway platform error rate exceeds 5/min."
+
+[[alerts.rules]]
+name = "GatewayPlatformDisconnected"
+expr = 'sober_gateway_platform_connections{status="disconnected"} > 0'
+for = "5m"
+severity = "warning"
+description = "A gateway platform has been disconnected for >5 minutes."
+
+[[alerts.rules]]
+name = "GatewayHighP95Latency"
+expr = "histogram_quantile(0.95, rate(sober_gateway_message_handle_duration_seconds_bucket[5m])) > 2.0"
+for = "5m"
+severity = "warning"
+description = "Gateway inbound message p95 latency exceeds 2 seconds."
