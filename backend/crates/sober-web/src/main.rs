@@ -23,7 +23,7 @@ use tokio::signal;
 use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 /// Static files built by SvelteKit (`pnpm build` → `frontend/build/`).
 ///
@@ -131,6 +131,7 @@ fn build_router(state: ProxyState, static_dir: Option<&str>) -> Router {
 
 /// Reverse-proxy handler: forwards the request to `sober-api`, preserving the
 /// original URI path (including `/api` prefix).
+#[instrument(skip_all, fields(upstream.path = %original_uri.path()))]
 async fn reverse_proxy(
     State(state): State<ProxyState>,
     original_uri: axum::extract::OriginalUri,
@@ -155,6 +156,7 @@ async fn reverse_proxy(
 
 /// WebSocket reverse proxy: upgrades the client connection, connects to the
 /// upstream `sober-api` WebSocket, and pipes messages between the two.
+#[instrument(skip_all)]
 async fn ws_reverse_proxy(
     State(state): State<ProxyState>,
     headers: http::HeaderMap,
