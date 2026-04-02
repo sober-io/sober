@@ -14,8 +14,8 @@ use sober_core::types::{
 };
 use sober_db::{PgConversationRepo, PgConversationUserRepo, PgMessageRepo, PgUserRepo};
 
-use crate::routes::ws::{CollaboratorInfo, ServerWsMessage};
 use crate::state::AppState;
+use crate::ws_types::{CollaboratorInfo, ServerWsMessage};
 
 /// Returns the collaborator management routes.
 pub fn routes() -> Router<Arc<AppState>> {

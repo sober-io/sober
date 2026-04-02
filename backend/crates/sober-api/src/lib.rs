@@ -8,6 +8,7 @@ pub mod middleware;
 pub mod routes;
 pub mod state;
 pub mod subscribe;
+pub mod ws_types;
 
 /// Generated protobuf types for the agent gRPC service.
 pub mod proto {
