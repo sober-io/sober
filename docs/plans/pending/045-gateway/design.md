@@ -23,14 +23,16 @@ WhatsApp ──┘                    │               │──SQL────
 
 - **gRPC/UDS** to `sober-agent` for `HandleMessage` + `SubscribeConversationUpdates`
   (same pattern as `sober-scheduler`)
+- **gRPC/UDS** server at `/run/sober/gateway.sock` — exposes `ListChannels` RPC
+  so `sober-api` can proxy platform channel listings to the web UI
 - **DB access** via `sober-db` repos for mapping tables, user lookups, config
-- **Admin socket** (UDS) at `/run/sober/gateway.sock` for runtime control
 
 ### Crate Dependencies
 
 ```
 sober-gateway → sober-core   (types, errors)
               → sober-db     (repos, pool)
+              → sober-crypto (credential decryption)
               → sober-agent  (gRPC client — proto only)
 ```
 
@@ -79,6 +81,12 @@ platform messages from unmapped users use this bot's `user_id` in
 `HandleMessage`. The bot user provides a real identity for conversation
 membership and memory scoping.
 
+**Membership requirement:** When a channel mapping is created, the
+`GatewayAdminService` must add the bridge bot user as a member of the
+target conversation (via `_tx` within the mapping creation transaction).
+The agent does not verify membership on `HandleMessage` — the gateway
+and admin service are responsible for ensuring it exists.
+
 ### Event Delivery
 
 The gateway subscribes to `SubscribeConversationUpdates` — the same broadcast
@@ -124,17 +132,18 @@ Conversations must be created in Sõber first (via web UI or API), then mapped
 to an external channel. The gateway does not auto-create conversations.
 
 Admins configure mappings via the web UI: select a platform channel, pick an
-existing Sõber conversation, and set the agent mode. The gateway picks up new
-mappings on its next DB poll or admin socket `reload` command.
+existing Sõber conversation. The gateway picks up new
+mappings on its next DB poll or gRPC `Reload` call.
 
-### Agent Mode Defaults
+### Agent Mode
 
-| Context | Default mode |
-|---------|-------------|
-| DMs     | `Always` — respond to every message |
-| Groups  | `Mention` — respond only when @mentioned |
+Agent mode (`always`, `mention`, `silent`) is a property of the Sõber
+conversation, not the gateway mapping. The agent decides whether to respond
+based on the conversation's `agent_mode` (enforced in `sober-agent`).
 
-Configurable per mapping.
+When creating a conversation for gateway use, the admin sets the appropriate
+agent mode on the conversation itself. The gateway does not override or
+duplicate this setting.
 
 ## User Identity Mapping
 
@@ -161,7 +170,6 @@ Registered platform connections (one row per bot/token).
 | `id` | `uuid` (PK) | `PlatformId` |
 | `platform_type` | `text` | `discord`, `telegram`, `matrix`, `whatsapp` |
 | `display_name` | `text` | User-friendly label |
-| `credentials` | `jsonb` | Encrypted via `sober-crypto` envelope encryption |
 | `is_enabled` | `bool` | Toggle without deleting |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
@@ -177,7 +185,6 @@ Maps external channels to Sõber conversations.
 | `external_channel_id` | `text` | Platform's channel/group/room ID |
 | `external_channel_name` | `text` | Display name (synced from platform) |
 | `conversation_id` | `uuid` (FK) | → `conversations` |
-| `agent_mode` | `text` | `always`, `mention`, `silent` |
 | `is_thread` | `bool` | Whether this maps a thread |
 | `parent_mapping_id` | `uuid` (FK, nullable) | → self, for thread→channel cleanup |
 | `created_at` | `timestamptz` | |
@@ -237,16 +244,15 @@ pub enum GatewayEvent {
         username: String,
         content: String,
     },
-    ThreadCreated {
+    ChannelDeleted {
         platform_id: PlatformId,
-        parent_channel_id: String,
-        thread_id: String,
-        thread_name: String,
+        channel_id: String,
     },
-    ReactionAdded { ... },
-    ChannelDeleted { ... },
 }
 ```
+
+Additional variants (`ThreadCreated`, `ReactionAdded`, etc.) are added when
+those features are implemented.
 
 ### Outbound Message Type
 
@@ -284,9 +290,10 @@ platform-specific format. Inbound messages are normalized to plain text/markdown
 3. Buffer `TextDelta` fragments (don't send token-by-token)
 4. On `Done` event → flush buffered content via `bridge.send_message()`
 
-**Duplicate prevention:** Skip forwarding `NewMessage` events when the `user_id`
-matches a gateway-mapped user and role is `User` — prevents echoing inbound
-messages back to the platform they came from.
+**No echo filtering needed:** The agent only broadcasts `NewMessage` for
+assistant responses — user messages are not broadcast. All assistant responses
+should be forwarded to mapped platforms (cross-channel visibility is the
+intended behavior).
 
 ### Response Buffering Strategy
 
@@ -307,13 +314,19 @@ Platforms have rate limits and different editing capabilities:
 4. For each enabled platform: spawn `PlatformBridge`, call `connect()`
 5. Load all `gateway_channel_mappings` + `gateway_user_mappings` into in-memory `DashMap`
 6. Start `GatewayEvent` processing loop
-7. Open admin socket at `/run/sober/gateway.sock`
+7. Start gRPC server at `/run/sober/gateway.sock`
 
-### Admin Socket Commands
+### gRPC Service
 
-- `status` — list connected platforms, active mappings count
-- `reload` — re-read platform configs from DB, connect/disconnect as needed
-- `disconnect <platform_id>` — graceful disconnect of one platform
+The gateway exposes its own gRPC service at `/run/sober/gateway.sock`:
+
+- `ListChannels(platform_id)` — returns available channels from a connected
+  platform. Called by `sober-api` to serve `GET /platforms/:id/channels`.
+- `Reload()` — re-read platform configs from DB, connect/disconnect as needed.
+- `Status()` — list connected platforms, active mappings count.
+- `Health()` — liveness check.
+
+Proto: `sober.gateway.v1.GatewayService`
 
 ## API Endpoints
 
@@ -321,7 +334,7 @@ All routes live in `sober-api` (not in the gateway binary) under
 `/api/v1/admin/gateway/`, gated by `RequireAdmin` extractor.
 Handlers delegate to a `GatewayAdminService` that reads/writes
 gateway DB tables directly. The gateway binary picks up config
-changes via admin socket `reload` or periodic DB polling.
+changes via gRPC `Reload` or periodic DB polling.
 
 ### Platform Management
 
@@ -332,8 +345,8 @@ changes via admin socket `reload` or periodic DB polling.
 
 ### Channel Mapping Management
 
-- `GET /platforms/:id/channels` — list available channels from platform (proxied
-  to gateway via admin socket; requires gateway to be running and platform connected)
+- `GET /platforms/:id/channels` — list available channels from platform (calls
+  gateway via gRPC; requires gateway to be running and platform connected)
 - `GET /platforms/:id/mappings` — list existing mappings
 - `POST /platforms/:id/mappings` — create manual mapping
 - `DELETE /mappings/:id` — remove mapping (keeps conversation)
@@ -350,7 +363,7 @@ Settings pages:
 
 - **Gateway** — list platforms, add/remove, toggle enabled
 - **Platform detail** — credentials (masked), channel mappings, user mappings
-- **Map channel** — select from platform's channel list, pick or create conversation, set agent mode
+- **Map channel** — select from platform's channel list, pick existing conversation
 
 ## Observability
 
@@ -419,28 +432,28 @@ Structured tracing:
 - **CI**: new target in `docker-bake.hcl`, binary added to `Dockerfile.ci` multi-stage build
 - **Systemd**: `sober-gateway.service` unit file
 - **Install script**: updated to include gateway binary + service
-- **Admin socket**: `/run/sober/gateway.sock`
+- **gRPC socket**: `/run/sober/gateway.sock`
 - **Metrics**: `/metrics` endpoint for Prometheus scraping (same pattern as other services)
 
 ## Credential Storage
 
-Credentials are encrypted JSONB, per-platform shape:
+Platform credentials are stored in the existing `secrets` table using
+`sober-crypto` envelope encryption (MEK/DEK), the same pattern as MCP
+server credentials. Each platform's secrets are stored with
+`secret_type = "gateway_platform"` and `metadata.platform_id = "<uuid>"`.
 
-```json
-// Discord
-{ "bot_token": "encrypted:..." }
+The `credentials` column on `gateway_platforms` is removed — credentials
+are not stored inline. The gateway decrypts credentials at startup and
+on `Reload` using the system MEK.
 
-// Telegram
-{ "bot_token": "encrypted:..." }
+Per-platform credential shapes:
 
-// Matrix
-{ "homeserver_url": "https://...", "access_token": "encrypted:..." }
-
-// WhatsApp
-{ "phone_number_id": "...", "access_token": "encrypted:..." }
-```
-
-Encryption via `sober-crypto` envelope encryption (same as MCP server credentials).
+| Platform | Fields |
+|----------|--------|
+| Discord | `bot_token` |
+| Telegram | `bot_token` |
+| Matrix | `homeserver_url`, `access_token` |
+| WhatsApp | `phone_number_id`, `access_token` |
 
 ## Scope
 
