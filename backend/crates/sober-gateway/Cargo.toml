@@ -18,6 +18,7 @@ sober-db = { path = "../sober-db" }
 sober-crypto = { path = "../sober-crypto" }
 
 anyhow = { workspace = true }
+serenity = { version = "0.12.5", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
 async-trait = "0.1"
 dashmap = "6"
 metrics = { workspace = true }
