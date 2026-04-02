@@ -36,6 +36,14 @@
 		>
 			Plugins
 		</a>
+		<RequireRole role="admin">
+			<a
+				href={resolve('/(app)/settings/gateway')}
+				class={tabClass(resolve('/(app)/settings/gateway'))}
+			>
+				Gateway
+			</a>
+		</RequireRole>
 	</div>
 
 	{@render children()}
