@@ -105,17 +105,13 @@ impl GatewayAdminService {
         let mapping = PgGatewayMappingRepo::create_tx(&mut tx, id, platform_id, &input).await?;
 
         // Add the bridge bot as a member of the mapped conversation.
-        sqlx::query(
-            "INSERT INTO conversation_users \
-             (conversation_id, user_id, role, unread_count, last_read_at, joined_at) \
-             VALUES ($1, $2, 'member', 0, now(), now()) \
-             ON CONFLICT (conversation_id, user_id) DO NOTHING",
+        let bot_user_id = sober_core::types::UserId::from_uuid(BRIDGE_BOT_USER_ID);
+        PgGatewayMappingRepo::add_user_to_conversation_tx(
+            &mut tx,
+            input.conversation_id,
+            bot_user_id,
         )
-        .bind(input.conversation_id.as_uuid())
-        .bind(BRIDGE_BOT_USER_ID)
-        .execute(tx.as_mut())
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        .await?;
 
         tx.commit()
             .await
@@ -164,19 +160,12 @@ impl GatewayAdminService {
         let mapping = PgGatewayUserMappingRepo::create_tx(&mut tx, id, platform_id, &input).await?;
 
         // Add the Sõber user to all conversations currently mapped for this platform.
-        sqlx::query(
-            "INSERT INTO conversation_users \
-             (conversation_id, user_id, role, unread_count, last_read_at, joined_at) \
-             SELECT gcm.conversation_id, $1, 'member', 0, now(), now() \
-             FROM gateway_channel_mappings gcm \
-             WHERE gcm.platform_id = $2 \
-             ON CONFLICT (conversation_id, user_id) DO NOTHING",
+        PgGatewayMappingRepo::add_user_to_mapped_conversations_tx(
+            &mut tx,
+            input.user_id,
+            platform_id,
         )
-        .bind(input.user_id.as_uuid())
-        .bind(platform_id.as_uuid())
-        .execute(tx.as_mut())
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        .await?;
 
         tx.commit()
             .await

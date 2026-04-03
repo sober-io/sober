@@ -142,6 +142,48 @@ impl PgGatewayMappingRepo {
         Self { pool }
     }
 
+    /// Adds a user as a member to all conversations mapped for a platform.
+    pub async fn add_user_to_mapped_conversations_tx(
+        conn: &mut PgConnection,
+        user_id: sober_core::types::UserId,
+        platform_id: PlatformId,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO conversation_users \
+             (conversation_id, user_id, role, unread_count, last_read_at, joined_at) \
+             SELECT gcm.conversation_id, $1, 'member', 0, now(), now() \
+             FROM gateway_channel_mappings gcm \
+             WHERE gcm.platform_id = $2 \
+             ON CONFLICT (conversation_id, user_id) DO NOTHING",
+        )
+        .bind(user_id.as_uuid())
+        .bind(platform_id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+        Ok(())
+    }
+
+    /// Adds a user as a member to a single conversation.
+    pub async fn add_user_to_conversation_tx(
+        conn: &mut PgConnection,
+        conversation_id: ConversationId,
+        user_id: sober_core::types::UserId,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO conversation_users \
+             (conversation_id, user_id, role, unread_count, last_read_at, joined_at) \
+             VALUES ($1, $2, 'member', 0, now(), now()) \
+             ON CONFLICT (conversation_id, user_id) DO NOTHING",
+        )
+        .bind(conversation_id.as_uuid())
+        .bind(user_id.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+        Ok(())
+    }
+
     /// Creates a channel mapping within an existing transaction.
     pub async fn create_tx(
         conn: &mut PgConnection,

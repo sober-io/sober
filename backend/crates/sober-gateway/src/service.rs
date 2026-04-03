@@ -112,7 +112,7 @@ impl GatewayService {
                     .await
                 {
                     error!(error = %e, "failed to handle inbound message");
-                    metrics::counter!("gateway_inbound_errors_total").increment(1);
+                    metrics::counter!("sober_gateway_inbound_errors_total").increment(1);
                 }
             }
             GatewayEvent::ChannelDeleted {
@@ -149,7 +149,7 @@ impl GatewayService {
                     channel_id = %channel_id,
                     "ignoring message for unmapped channel"
                 );
-                metrics::counter!("gateway_unmapped_channel_messages_total").increment(1);
+                metrics::counter!("sober_gateway_unmapped_messages_total").increment(1);
                 return Ok(());
             }
         };
@@ -214,8 +214,9 @@ impl GatewayService {
             .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
 
         let elapsed = start.elapsed().as_secs_f64();
-        metrics::histogram!("gateway_inbound_message_duration_seconds").record(elapsed);
-        metrics::counter!("gateway_inbound_messages_total").increment(1);
+        metrics::histogram!("sober_gateway_message_handle_duration_seconds").record(elapsed);
+        metrics::counter!("sober_gateway_messages_received_total", "status" => "success")
+            .increment(1);
 
         debug!(
             conversation_id = %mapping.conversation_id,

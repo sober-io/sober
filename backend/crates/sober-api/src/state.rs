@@ -71,6 +71,8 @@ pub struct AppState {
     /// Gateway admin service (platform/mapping CRUD).
     pub gateway_admin: Arc<GatewayAdminService>,
     /// Optional gRPC client for the gateway service.
+    /// `None` when the gateway process is not running — all admin endpoints
+    /// except `GET /platforms/:id/channels` work without it.
     pub gateway_client: Option<GatewayClient>,
 }
 
