@@ -7,9 +7,14 @@ export const conversations = (() => {
 	let showArchived = $state(false);
 	let inbox = $state<Conversation | null>(null);
 
+	const totalUnread = $derived(items.reduce((sum, c) => sum + (c.unread_count ?? 0), 0));
+
 	return {
 		get items() {
 			return items;
+		},
+		get totalUnread() {
+			return totalUnread;
 		},
 		get loading() {
 			return loading;

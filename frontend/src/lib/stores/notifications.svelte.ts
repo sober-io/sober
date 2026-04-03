@@ -37,3 +37,74 @@ export const notifications = (() => {
 
 	return { requestPermission, notify };
 })();
+
+/**
+ * Draws a red badge with a count onto the favicon, Discord-style.
+ * Call with 0 to restore the original favicon.
+ */
+export const faviconBadge = (() => {
+	let originalHref: string | null = null;
+	let img: HTMLImageElement | null = null;
+
+	const SIZE = 32;
+	const BADGE_RADIUS = 10;
+
+	const ensureOriginal = (): Promise<HTMLImageElement> => {
+		if (img) return Promise.resolve(img);
+
+		return new Promise((resolve) => {
+			const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+			if (!link) return;
+			originalHref = link.href;
+
+			const image = new Image();
+			image.crossOrigin = 'anonymous';
+			image.onload = () => {
+				img = image;
+				resolve(image);
+			};
+			image.src = originalHref;
+		});
+	};
+
+	const update = async (count: number) => {
+		if (typeof document === 'undefined') return;
+
+		const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+		if (!link) return;
+
+		if (count <= 0) {
+			if (originalHref) link.href = originalHref;
+			return;
+		}
+
+		const image = await ensureOriginal();
+		const canvas = document.createElement('canvas');
+		canvas.width = SIZE;
+		canvas.height = SIZE;
+		const ctx = canvas.getContext('2d')!;
+
+		// Draw original favicon
+		ctx.drawImage(image, 0, 0, SIZE, SIZE);
+
+		// Draw red badge circle (bottom-right)
+		const cx = SIZE - BADGE_RADIUS;
+		const cy = SIZE - BADGE_RADIUS;
+		ctx.beginPath();
+		ctx.arc(cx, cy, BADGE_RADIUS, 0, Math.PI * 2);
+		ctx.fillStyle = '#ef4444';
+		ctx.fill();
+
+		// Draw count text
+		const label = count > 99 ? '99+' : String(count);
+		ctx.fillStyle = '#ffffff';
+		ctx.font = `bold ${label.length > 2 ? 8 : 11}px sans-serif`;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText(label, cx, cy);
+
+		link.href = canvas.toDataURL('image/png');
+	};
+
+	return { update };
+})();
