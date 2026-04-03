@@ -2,6 +2,7 @@
 	import type { GatewayPlatform, CreatePlatformInput, PlatformType } from '$lib/types/gateway';
 	import { ApiError } from '$lib/utils/api';
 	import { gatewayService } from '$lib/services/gateway';
+	import { resolve } from '$app/paths';
 	// Platform list state
 	let platforms = $state<GatewayPlatform[]>([]);
 	let loading = $state(true);
@@ -210,7 +211,7 @@
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-2">
 							<a
-								href={`/settings/gateway/${platform.id}`}
+								href={resolve('/(app)/settings/gateway/[id]', { id: platform.id })}
 								class="text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-100"
 							>
 								{platform.display_name}
@@ -249,7 +250,7 @@
 							{platform.is_enabled ? 'Disable' : 'Enable'}
 						</button>
 						<a
-							href={`/settings/gateway/${platform.id}`}
+							href={resolve('/(app)/settings/gateway/[id]', { id: platform.id })}
 							class="rounded px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
 						>
 							Manage
