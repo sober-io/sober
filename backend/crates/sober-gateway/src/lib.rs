@@ -1,6 +1,7 @@
 //! Sober Gateway — bridges external messaging platforms to Sõber conversations.
 
 pub mod bridge;
+pub mod connector;
 pub mod discord;
 pub mod error;
 pub mod grpc;

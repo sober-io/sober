@@ -60,6 +60,11 @@ impl PlatformBridgeRegistry {
         self.bridges.get(platform_id).map(|v| v.value().clone())
     }
 
+    /// Removes all bridges from the registry, dropping their handles.
+    pub fn clear(&self) {
+        self.bridges.clear();
+    }
+
     /// Returns the status of all connected platforms as `(platform_id, platform_type)` pairs.
     pub fn statuses(&self) -> Vec<(PlatformId, PlatformType)> {
         self.bridges

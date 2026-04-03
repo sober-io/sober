@@ -9,8 +9,10 @@ use sober_core::types::{
     UserMappingId,
 };
 use sober_core::types::{GatewayMappingRepo, GatewayUserMappingRepo};
+use sober_crypto::envelope::Mek;
 use sober_db::{PgGatewayMappingRepo, PgGatewayUserMappingRepo};
 use sqlx::PgPool;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -33,6 +35,10 @@ pub struct GatewayService {
     db: PgPool,
     agent_client: AgentServiceClient<tonic::transport::Channel>,
     bridge_registry: Arc<PlatformBridgeRegistry>,
+    /// Optional MEK for decrypting platform credentials.
+    mek: Option<Arc<Mek>>,
+    /// Sender for inbound gateway events — passed to each bridge on connect.
+    event_tx: mpsc::Sender<GatewayEvent>,
 
     /// Cache: (platform_id, external_channel_id) → GatewayChannelMapping
     channel_cache: DashMap<(PlatformId, String), GatewayChannelMapping>,
@@ -48,15 +54,32 @@ impl GatewayService {
         db: PgPool,
         agent_client: AgentServiceClient<tonic::transport::Channel>,
         bridge_registry: Arc<PlatformBridgeRegistry>,
+        mek: Option<Arc<Mek>>,
+        event_tx: mpsc::Sender<GatewayEvent>,
     ) -> Self {
         Self {
             db,
             agent_client,
             bridge_registry,
+            mek,
+            event_tx,
             channel_cache: DashMap::new(),
             reverse_cache: DashMap::new(),
             user_cache: DashMap::new(),
         }
+    }
+
+    /// Connects all enabled platforms from the database.
+    ///
+    /// Delegates to [`crate::connector::connect_platforms`].
+    pub async fn connect_platforms(&self) -> Result<(), AppError> {
+        crate::connector::connect_platforms(
+            &self.db,
+            self.mek.as_deref(),
+            &self.bridge_registry,
+            &self.event_tx,
+        )
+        .await
     }
 
     /// Loads all channel and user mappings from the database into memory.
@@ -276,9 +299,12 @@ impl GatewayService {
         &self.bridge_registry
     }
 
-    /// Invalidates and reloads all caches from the database.
+    /// Invalidates and reloads all caches from the database, then reconnects platforms.
     pub async fn reload(&self) -> Result<(), AppError> {
-        self.load_caches().await
+        self.load_caches().await?;
+        self.bridge_registry.clear();
+        self.connect_platforms().await?;
+        Ok(())
     }
 
     /// Inserts a mapping into the in-memory caches.
