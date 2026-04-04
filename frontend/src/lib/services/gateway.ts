@@ -57,5 +57,11 @@ export const gatewayService = {
 		}),
 
 	deleteUserMapping: (id: string) =>
-		api<{ deleted: boolean }>(`${BASE}/user-mappings/${id}`, { method: 'DELETE' })
+		api<{ deleted: boolean }>(`${BASE}/user-mappings/${id}`, { method: 'DELETE' }),
+
+	storeCredentials: (platformId: string, credentials: Record<string, string>) =>
+		api<null>(`${BASE}/platforms/${platformId}/credentials`, {
+			method: 'PUT',
+			body: JSON.stringify(credentials)
+		})
 };

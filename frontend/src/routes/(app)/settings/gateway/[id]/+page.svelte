@@ -40,6 +40,56 @@
 	let userSoberId = $state('');
 	let userSubmitting = $state(false);
 
+	// Credentials form state
+	let showCredentials = $state(false);
+	let credentialFields = $state<Record<string, string>>({});
+	let credentialsSubmitting = $state(false);
+	let credentialsSaved = $state(false);
+
+	interface CredentialField {
+		key: string;
+		label: string;
+		type: string;
+	}
+
+	const credentialSchema: Record<string, CredentialField[]> = {
+		discord: [{ key: 'bot_token', label: 'Bot Token', type: 'password' }],
+		telegram: [{ key: 'bot_token', label: 'Bot Token', type: 'password' }],
+		matrix: [
+			{ key: 'homeserver_url', label: 'Homeserver URL', type: 'text' },
+			{ key: 'access_token', label: 'Access Token', type: 'password' }
+		],
+		whatsapp: [
+			{ key: 'phone_number_id', label: 'Phone Number ID', type: 'text' },
+			{ key: 'access_token', label: 'Access Token', type: 'password' }
+		]
+	};
+
+	function initCredentialFields() {
+		if (!platform) return;
+		const schema = credentialSchema[platform.platform_type] ?? [];
+		const fields: Record<string, string> = {};
+		for (const f of schema) {
+			fields[f.key] = '';
+		}
+		credentialFields = fields;
+	}
+
+	async function saveCredentials() {
+		credentialsSubmitting = true;
+		credentialsSaved = false;
+		error = null;
+		try {
+			await gatewayService.storeCredentials(platformId, credentialFields);
+			credentialsSaved = true;
+			showCredentials = false;
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Failed to save credentials';
+		} finally {
+			credentialsSubmitting = false;
+		}
+	}
+
 	// Delete confirm state
 	let deleteMappingConfirmId = $state<string | null>(null);
 	let deleteMappingInProgress = $state<string | null>(null);
@@ -206,6 +256,67 @@
 			</p>
 		</div>
 	</div>
+
+	<!-- Credentials section -->
+	<section class="mb-8">
+		<div class="mb-4 flex items-center justify-between">
+			<h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Credentials</h3>
+			<div class="flex items-center gap-2">
+				{#if credentialsSaved}
+					<span class="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>
+				{/if}
+				<button
+					onclick={() => {
+						showCredentials = !showCredentials;
+						if (showCredentials) initCredentialFields();
+					}}
+					class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+				>
+					{showCredentials ? 'Cancel' : 'Update Credentials'}
+				</button>
+			</div>
+		</div>
+
+		{#if showCredentials}
+			<div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+				<div class="space-y-3">
+					{#each credentialSchema[platform.platform_type] ?? [] as field (field.key)}
+						<div>
+							<label
+								for={`cred-${field.key}`}
+								class="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+							>
+								{field.label}
+							</label>
+							<input
+								id={`cred-${field.key}`}
+								type={field.type}
+								bind:value={credentialFields[field.key]}
+								placeholder={field.label}
+								class="w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+							/>
+						</div>
+					{/each}
+					<div class="flex justify-end">
+						<button
+							onclick={saveCredentials}
+							disabled={credentialsSubmitting}
+							class="rounded-md bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+						>
+							{credentialsSubmitting ? 'Saving...' : 'Save Credentials'}
+						</button>
+					</div>
+				</div>
+				<p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+					After saving, the gateway will pick up the new credentials on next reload.
+				</p>
+			</div>
+		{:else}
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">
+				Credentials are stored but not displayed for security.
+			</p>
+		{/if}
+	</section>
 
 	<!-- Channel Mappings section -->
 	<section class="mb-8">
