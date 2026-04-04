@@ -5066,7 +5066,6 @@ dependencies = [
  "serde_json",
  "serenity",
  "sober-core",
- "sober-crypto",
  "sober-db",
  "sqlx",
  "thiserror 2.0.18",

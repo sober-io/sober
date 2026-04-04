@@ -8,7 +8,6 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use hyper_util::rt::TokioIo;
 use sober_core::config::AppConfig;
-use sober_crypto::envelope::Mek;
 use sober_db::create_pool;
 use sober_gateway::agent_proto::agent_service_client::AgentServiceClient;
 use sober_gateway::bridge::PlatformBridgeRegistry;
@@ -61,13 +60,6 @@ async fn main() -> Result<()> {
 
     info!("connected to agent gRPC service");
 
-    // Load optional MEK for credential decryption.
-    let mek: Option<Arc<Mek>> = config.crypto.master_encryption_key.as_ref().map(|hex| {
-        let mek = Mek::from_hex(hex).expect("invalid MASTER_ENCRYPTION_KEY");
-        info!("master encryption key loaded");
-        Arc::new(mek)
-    });
-
     // Inbound event channel.
     // event_tx is cloned and passed to each bridge when platforms connect.
     let (event_tx, mut event_rx) = mpsc::channel::<GatewayEvent>(1024);
@@ -78,7 +70,6 @@ async fn main() -> Result<()> {
         pool,
         agent_client,
         bridge_registry.clone(),
-        mek,
         event_tx.clone(),
     ));
 

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use serde::Serialize;
 use sober_auth::RequireAdmin;
@@ -46,6 +46,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_platform)
                 .patch(update_platform)
                 .delete(delete_platform),
+        )
+        .route(
+            "/admin/gateway/platforms/{id}/credentials",
+            put(store_credentials),
         )
         .route(
             "/admin/gateway/platforms/{id}/channels",
@@ -222,4 +226,17 @@ async fn delete_user_mapping(
         .delete_user_mapping(UserMappingId::from_uuid(id))
         .await?;
     Ok(ApiResponse::new(serde_json::json!({ "deleted": true })))
+}
+
+async fn store_credentials(
+    State(state): State<Arc<AppState>>,
+    RequireAdmin(_user): RequireAdmin,
+    Path(id): Path<uuid::Uuid>,
+    Json(credentials): Json<serde_json::Value>,
+) -> Result<ApiResponse<serde_json::Value>, AppError> {
+    state
+        .gateway_admin
+        .store_platform_credentials(PlatformId::from_uuid(id), credentials)
+        .await?;
+    Ok(ApiResponse::new(serde_json::json!({ "stored": true })))
 }

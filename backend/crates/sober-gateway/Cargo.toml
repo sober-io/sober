@@ -15,7 +15,6 @@ path = "src/lib.rs"
 [dependencies]
 sober-core = { path = "../sober-core", features = ["postgres", "grpc-telemetry"] }
 sober-db = { path = "../sober-db" }
-sober-crypto = { path = "../sober-crypto" }
 
 anyhow = { workspace = true }
 serenity = { version = "0.12.5", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }

@@ -124,6 +124,34 @@ impl sober_core::types::GatewayPlatformRepo for PgGatewayPlatformRepo {
 
         Ok(())
     }
+
+    async fn store_credentials(
+        &self,
+        id: PlatformId,
+        credentials: &serde_json::Value,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE gateway_platforms SET credentials = $1, updated_at = now() WHERE id = $2",
+        )
+        .bind(credentials)
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
+    async fn get_credentials(&self, id: PlatformId) -> Result<Option<serde_json::Value>, AppError> {
+        let row: Option<(Option<serde_json::Value>,)> =
+            sqlx::query_as("SELECT credentials FROM gateway_platforms WHERE id = $1")
+                .bind(id.as_uuid())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(row.and_then(|r| r.0))
+    }
 }
 
 // ---------------------------------------------------------------------------

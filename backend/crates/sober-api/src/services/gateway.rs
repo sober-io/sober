@@ -72,6 +72,19 @@ impl GatewayAdminService {
         repo.delete(id).await
     }
 
+    /// Stores plaintext credentials for a gateway platform as JSONB.
+    #[instrument(level = "debug", skip(self, credentials), fields(platform.id = %id))]
+    pub async fn store_platform_credentials(
+        &self,
+        id: PlatformId,
+        credentials: serde_json::Value,
+    ) -> Result<(), AppError> {
+        let repo = PgGatewayPlatformRepo::new(self.db.clone());
+        // Verify platform exists.
+        repo.get(id).await?;
+        repo.store_credentials(id, &credentials).await
+    }
+
     // -----------------------------------------------------------------------
     // Channel mappings
     // -----------------------------------------------------------------------

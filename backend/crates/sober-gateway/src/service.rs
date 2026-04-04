@@ -9,7 +9,6 @@ use sober_core::types::{
     UserMappingId,
 };
 use sober_core::types::{GatewayMappingRepo, GatewayUserMappingRepo};
-use sober_crypto::envelope::Mek;
 use sober_db::{PgGatewayMappingRepo, PgGatewayUserMappingRepo};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
@@ -35,8 +34,6 @@ pub struct GatewayService {
     db: PgPool,
     agent_client: AgentServiceClient<tonic::transport::Channel>,
     bridge_registry: Arc<PlatformBridgeRegistry>,
-    /// Optional MEK for decrypting platform credentials.
-    mek: Option<Arc<Mek>>,
     /// Sender for inbound gateway events — passed to each bridge on connect.
     event_tx: mpsc::Sender<GatewayEvent>,
 
@@ -54,14 +51,12 @@ impl GatewayService {
         db: PgPool,
         agent_client: AgentServiceClient<tonic::transport::Channel>,
         bridge_registry: Arc<PlatformBridgeRegistry>,
-        mek: Option<Arc<Mek>>,
         event_tx: mpsc::Sender<GatewayEvent>,
     ) -> Self {
         Self {
             db,
             agent_client,
             bridge_registry,
-            mek,
             event_tx,
             channel_cache: DashMap::new(),
             reverse_cache: DashMap::new(),
@@ -73,13 +68,7 @@ impl GatewayService {
     ///
     /// Delegates to [`crate::connector::connect_platforms`].
     pub async fn connect_platforms(&self) -> Result<(), AppError> {
-        crate::connector::connect_platforms(
-            &self.db,
-            self.mek.as_deref(),
-            &self.bridge_registry,
-            &self.event_tx,
-        )
-        .await
+        crate::connector::connect_platforms(&self.db, &self.bridge_registry, &self.event_tx).await
     }
 
     /// Loads all channel and user mappings from the database into memory.

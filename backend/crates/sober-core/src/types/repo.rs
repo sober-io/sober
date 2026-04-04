@@ -977,6 +977,21 @@ pub trait GatewayPlatformRepo: Send + Sync {
 
     /// Deletes a platform connection.
     fn delete(&self, id: PlatformId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Stores plaintext credentials for a platform as JSONB.
+    fn store_credentials(
+        &self,
+        id: PlatformId,
+        credentials: &serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Loads plaintext credentials for a platform.
+    ///
+    /// Returns `None` if no credentials have been stored yet.
+    fn get_credentials(
+        &self,
+        id: PlatformId,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, AppError>> + Send;
 }
 
 /// Repository for channel-to-conversation mappings.
