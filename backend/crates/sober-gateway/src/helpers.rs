@@ -83,6 +83,46 @@ async fn run_outbound_stream(
         );
 
         match update.event {
+            Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
+                // Skip messages from gateway-mapped users (avoid echo).
+                let is_gateway_user = nm
+                    .user_id
+                    .as_deref()
+                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
+                    .is_some_and(|uuid| {
+                        service.is_gateway_user(&sober_core::types::UserId::from_uuid(uuid))
+                    });
+                if is_gateway_user {
+                    continue;
+                }
+
+                // Forward web user messages to Discord with [username] prefix.
+                let text: String = nm
+                    .content
+                    .iter()
+                    .filter_map(|b| {
+                        use sober_gateway::agent_proto::content_block::Block;
+                        match b.block.as_ref()? {
+                            Block::Text(t) => Some(t.text.as_str()),
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if !text.is_empty() {
+                    // Use user_id to identify the sender. In the future we
+                    // could resolve this to a username from the DB.
+                    let user_label = nm.user_id.as_deref().unwrap_or("web");
+                    let prefixed = format!("**[{user_label}]** {text}");
+                    let msg = sober_gateway::types::PlatformMessage {
+                        text: prefixed,
+                        format: sober_gateway::types::MessageFormat::Markdown,
+                        reply_to: None,
+                    };
+                    deliver_outbound(service.as_ref(), conversation_id, msg).await;
+                }
+            }
             Some(Event::TextDelta(delta)) => {
                 // Trigger typing indicator on first delta for this response.
                 if typing_sent.insert(conversation_id) {

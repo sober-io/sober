@@ -279,6 +279,27 @@ impl<R: AgentRepos> ConversationActor<R> {
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            // Broadcast the user message so all subscribers (API WebSocket,
+            // gateway outbound loop) see it in real-time.
+            let _ = self.ctx.broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: self.conversation_id.to_string(),
+                event: Some(proto::conversation_update::Event::NewMessage(
+                    proto::NewMessage {
+                        message_id: user_msg.id.to_string(),
+                        role: "User".to_owned(),
+                        content: crate::grpc::content_blocks::domain_to_proto(content),
+                        source: match trigger {
+                            TriggerKind::Human => "human",
+                            TriggerKind::Scheduler => "scheduler",
+                            TriggerKind::Replica => "replica",
+                            TriggerKind::Admin => "admin",
+                        }
+                        .to_owned(),
+                        user_id: Some(user_id.to_string()),
+                    },
+                )),
+            });
+
             user_msg.id
         } else {
             MessageId::new()
