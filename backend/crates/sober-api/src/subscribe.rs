@@ -180,6 +180,14 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             })
         }
         proto::conversation_update::Event::NewMessage(nm) => {
+            // Skip user messages that came from the web — ws_dispatch already
+            // delivered them inline to avoid showing them twice in the UI.
+            // Only forward user messages from the gateway (Discord/Telegram/etc.)
+            // so they appear in the web UI in real-time.
+            if nm.role.to_lowercase() == "user" && nm.source != "gateway" {
+                return None;
+            }
+
             let source = serde_json::from_value::<sober_core::types::access::TriggerKind>(
                 serde_json::Value::String(nm.source),
             )

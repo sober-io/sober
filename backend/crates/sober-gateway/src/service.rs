@@ -217,6 +217,7 @@ impl GatewayService {
             content: vec![ContentBlock {
                 block: Some(Block::Text(TextBlock { text: content })),
             }],
+            source: "gateway".to_owned(),
         };
 
         let mut client = self.agent_client.clone();
@@ -281,6 +282,18 @@ impl GatewayService {
             .get(conversation_id)
             .map(|v| v.clone())
             .unwrap_or_default()
+    }
+
+    /// Resolves a Sõber user ID to a username by querying the database.
+    ///
+    /// Returns `None` if the user is not found or the query fails.
+    pub async fn resolve_username(&self, user_id: &UserId) -> Option<String> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT username FROM users WHERE id = $1")
+            .bind(user_id.as_uuid())
+            .fetch_optional(&self.db)
+            .await
+            .ok()?;
+        row.map(|r| r.0)
     }
 
     /// Returns the bridge registry.

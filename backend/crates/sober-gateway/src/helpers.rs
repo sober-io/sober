@@ -84,9 +84,12 @@ async fn run_outbound_stream(
 
         match update.event {
             Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
-                // Forward user messages to Discord with a sender prefix.
-                // Echo prevention: when Discord receives a bot message, the
-                // serenity handler skips it (msg.author.bot == true).
+                // Skip messages that originated from this gateway to avoid echo.
+                if nm.source == "gateway" {
+                    continue;
+                }
+
+                // Forward user messages from the web UI to external platforms with a sender prefix.
                 let text: String = nm
                     .content
                     .iter()
@@ -101,9 +104,20 @@ async fn run_outbound_stream(
                     .join("\n");
 
                 if !text.is_empty() {
-                    // Use user_id to identify the sender. In the future we
-                    // could resolve this to a username from the DB.
-                    let user_label = nm.user_id.as_deref().unwrap_or("web");
+                    // Resolve the user ID to a username for a friendlier prefix.
+                    let user_label = if let Some(ref uid_str) = nm.user_id {
+                        if let Ok(uuid) = uid_str.parse::<uuid::Uuid>() {
+                            let uid = sober_core::types::UserId::from_uuid(uuid);
+                            service
+                                .resolve_username(&uid)
+                                .await
+                                .unwrap_or_else(|| uid_str.clone())
+                        } else {
+                            "web".to_owned()
+                        }
+                    } else {
+                        "web".to_owned()
+                    };
                     let prefixed = format!("**[{user_label}]** {text}");
                     let msg = sober_gateway::types::PlatformMessage {
                         text: prefixed,

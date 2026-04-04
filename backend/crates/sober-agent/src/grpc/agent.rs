@@ -70,6 +70,11 @@ pub(crate) async fn handle_message<R: AgentRepos>(
 
     let agent = Arc::clone(service.agent());
     let content_blocks = content_blocks::proto_to_domain(&req.content);
+    let source = if req.source.is_empty() {
+        "web".to_owned()
+    } else {
+        req.source
+    };
 
     match agent
         .handle_message(
@@ -77,6 +82,7 @@ pub(crate) async fn handle_message<R: AgentRepos>(
             conversation_id,
             &content_blocks,
             sober_core::types::access::TriggerKind::Human,
+            source,
         )
         .await
     {
