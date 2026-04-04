@@ -196,7 +196,7 @@ jobs:
 
           mkdir -p "$STAGING/bin" "$STAGING/systemd" "$STAGING/config"
 
-          for bin in sober sober-api sober-agent sober-scheduler sober-web; do
+          for bin in sober sober-api sober-agent sober-gateway sober-scheduler sober-web; do
             cp "backend/target/$BUILD_TARGET/release/$bin" "$STAGING/bin/" 2>/dev/null || true
           done
 
@@ -255,6 +255,7 @@ jobs:
             docker pull ghcr.io/sober-io/sober/sober-web:${{ needs.tag.outputs.tag }}
             docker pull ghcr.io/sober-io/sober/sober-api:${{ needs.tag.outputs.tag }}
             docker pull ghcr.io/sober-io/sober/sober-agent:${{ needs.tag.outputs.tag }}
+            docker pull ghcr.io/sober-io/sober/sober-gateway:${{ needs.tag.outputs.tag }}
             docker pull ghcr.io/sober-io/sober/sober-scheduler:${{ needs.tag.outputs.tag }}
             ```
 
