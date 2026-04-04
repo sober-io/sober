@@ -107,10 +107,15 @@ impl PlatformBridgeHandle for DiscordBridge {
         })?;
 
         let channel = ChannelId::new(channel_id);
-        channel
-            .say(&self.http, &content.text)
-            .await
-            .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+
+        // Discord has a 2000-character limit per message. Split at line
+        // boundaries when possible to avoid breaking markdown.
+        for chunk in split_for_discord(&content.text) {
+            channel
+                .say(&self.http, chunk)
+                .await
+                .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+        }
 
         Ok(())
     }
@@ -164,5 +169,103 @@ impl PlatformBridgeHandle for DiscordBridge {
 
     fn platform_type(&self) -> PlatformType {
         PlatformType::Discord
+    }
+}
+
+/// Discord's message character limit.
+const DISCORD_MAX_LEN: usize = 2000;
+
+/// Splits text into chunks that fit within Discord's 2000-char limit.
+///
+/// Split priority (best to worst):
+/// 1. Last paragraph break (`\n\n`) — keeps markdown blocks intact
+/// 2. Last newline (`\n`) — keeps lines intact
+/// 3. Last sentence boundary (`. `, `! `, `? `) — keeps sentences intact
+/// 4. Last word boundary (` `) — avoids splitting words
+/// 5. Hard split at limit — last resort
+fn split_for_discord(text: &str) -> Vec<&str> {
+    if text.len() <= DISCORD_MAX_LEN {
+        return vec![text];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.len() <= DISCORD_MAX_LEN {
+            chunks.push(remaining);
+            break;
+        }
+
+        let window = &remaining[..DISCORD_MAX_LEN];
+        let split_at = window
+            .rfind("\n\n")
+            .map(|p| p + 1)
+            .or_else(|| window.rfind('\n').map(|p| p + 1))
+            .or_else(|| {
+                window
+                    .rfind(". ")
+                    .or_else(|| window.rfind("! "))
+                    .or_else(|| window.rfind("? "))
+                    .map(|p| p + 2) // include the punctuation + space
+            })
+            .or_else(|| window.rfind(' ').map(|p| p + 1))
+            .unwrap_or(DISCORD_MAX_LEN);
+
+        chunks.push(&remaining[..split_at]);
+        remaining = &remaining[split_at..];
+    }
+
+    chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_message_is_single_chunk() {
+        let chunks = split_for_discord("hello");
+        assert_eq!(chunks, vec!["hello"]);
+    }
+
+    #[test]
+    fn splits_at_newline_boundary() {
+        let line = "a".repeat(1500);
+        let text = format!("{line}\n{line}");
+        let chunks = split_for_discord(&text);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].len() <= DISCORD_MAX_LEN);
+        assert!(chunks[1].len() <= DISCORD_MAX_LEN);
+    }
+
+    #[test]
+    fn splits_at_sentence_boundary() {
+        // No newlines, but has sentence endings
+        let sentence = "Hello world. ";
+        let count = DISCORD_MAX_LEN / sentence.len() + 5;
+        let text = sentence.repeat(count);
+        let chunks = split_for_discord(&text);
+        assert!(chunks.len() >= 2);
+        // First chunk should end at a sentence boundary
+        assert!(chunks[0].ends_with(". "));
+    }
+
+    #[test]
+    fn splits_at_word_boundary() {
+        // No newlines, no sentence endings, but has spaces
+        let text = "word ".repeat(500);
+        let chunks = split_for_discord(&text);
+        assert!(chunks.len() >= 2);
+        assert!(chunks[0].ends_with(' '));
+    }
+
+    #[test]
+    fn hard_splits_without_any_boundaries() {
+        let text = "a".repeat(3000);
+        let chunks = split_for_discord(&text);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), DISCORD_MAX_LEN);
+        assert_eq!(chunks[1].len(), 1000);
     }
 }
