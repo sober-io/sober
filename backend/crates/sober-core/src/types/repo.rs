@@ -1038,7 +1038,7 @@ pub trait GatewayMappingRepo: Send + Sync {
     -> impl Future<Output = Result<Vec<GatewayChannelMapping>, AppError>> + Send;
 
     /// Returns the owner (creator) of a conversation.
-    fn get_owner(
+    fn get_conversation_owner(
         &self,
         conversation_id: ConversationId,
     ) -> impl Future<Output = Result<UserId, AppError>> + Send;

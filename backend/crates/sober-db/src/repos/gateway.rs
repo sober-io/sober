@@ -381,7 +381,10 @@ impl sober_core::types::GatewayMappingRepo for PgGatewayMappingRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn get_owner(&self, conversation_id: ConversationId) -> Result<UserId, AppError> {
+    async fn get_conversation_owner(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<UserId, AppError> {
         let row: Option<(Uuid,)> =
             sqlx::query_as("SELECT user_id FROM conversations WHERE id = $1")
                 .bind(conversation_id.as_uuid())
