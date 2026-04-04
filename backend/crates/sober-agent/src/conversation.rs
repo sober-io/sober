@@ -291,7 +291,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 event: Some(proto::conversation_update::Event::NewMessage(
                     proto::NewMessage {
                         message_id: user_msg.id.to_string(),
-                        role: "User".to_owned(),
+                        role: "user".to_owned(),
                         content: crate::grpc::content_blocks::domain_to_proto(content),
                         source: source.to_owned(),
                         user_id: Some(user_id.to_string()),
