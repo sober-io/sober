@@ -140,7 +140,7 @@
 				if (entries[0].isIntersecting) {
 					lastReadMessageId = null;
 					const lastMsg = messages[messages.length - 1];
-					if (lastMsg) {
+					if (lastMsg && !lastMsg.streaming) {
 						untrack(() => conversations.markRead(conversationId));
 						conversationService.markRead(conversationId, lastMsg.id);
 					}

@@ -22,6 +22,31 @@ impl GatewayAdminService {
         Self { db, gateway_client }
     }
 
+    /// Lists available channels for a platform by querying the gateway gRPC service.
+    ///
+    /// Returns an error if the gateway service is not connected.
+    #[instrument(level = "debug", skip(self), fields(platform.id = %platform_id))]
+    pub async fn list_available_channels(
+        &self,
+        platform_id: PlatformId,
+    ) -> Result<Vec<crate::gateway_proto::ExternalChannel>, AppError> {
+        let mut client = self.gateway_client.clone().ok_or_else(|| {
+            AppError::Validation("gateway service is not available — it may not be running".into())
+        })?;
+
+        let mut request = tonic::Request::new(crate::gateway_proto::ListChannelsRequest {
+            platform_id: platform_id.to_string(),
+        });
+        sober_core::inject_trace_context(request.metadata_mut());
+
+        let response = client
+            .list_channels(request)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(response.into_inner().channels)
+    }
+
     /// Tells the gateway to reload config. Best-effort — logs and ignores errors.
     async fn notify_gateway_reload(&self) {
         if let Some(mut client) = self.gateway_client.clone()

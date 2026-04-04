@@ -129,24 +129,10 @@ async fn list_available_channels(
     RequireAdmin(_user): RequireAdmin,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<ApiResponse<Vec<ExternalChannelResponse>>, AppError> {
-    let mut client = state
-        .gateway_client
-        .clone()
-        .ok_or_else(|| AppError::Internal("gateway service is not available".into()))?;
-
-    let mut request = tonic::Request::new(gateway_proto::ListChannelsRequest {
-        platform_id: id.to_string(),
-    });
-    sober_core::inject_trace_context(request.metadata_mut());
-
-    let response = client
-        .list_channels(request)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-
-    let channels = response
-        .into_inner()
-        .channels
+    let channels = state
+        .gateway_admin
+        .list_available_channels(PlatformId::from_uuid(id))
+        .await?
         .into_iter()
         .map(ExternalChannelResponse::from)
         .collect();
