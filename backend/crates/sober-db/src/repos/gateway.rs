@@ -3,9 +3,11 @@
 use sober_core::error::AppError;
 use sober_core::types::{
     ConversationId, CreateChannelMapping, CreatePlatform, CreateUserMapping, GatewayChannelMapping,
-    GatewayPlatform, GatewayUserMapping, MappingId, PlatformId, UpdatePlatform, UserMappingId,
+    GatewayPlatform, GatewayUserMapping, MappingId, PlatformId, UpdatePlatform, UserId,
+    UserMappingId,
 };
 use sqlx::{PgConnection, PgPool};
+use uuid::Uuid;
 
 use crate::rows::{GatewayChannelMappingRow, GatewayPlatformRow, GatewayUserMappingRow};
 
@@ -377,6 +379,20 @@ impl sober_core::types::GatewayMappingRepo for PgGatewayMappingRepo {
         .map_err(|e| AppError::Internal(e.into()))?;
 
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn get_conversation_owner(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<UserId, AppError> {
+        let row: Option<(Uuid,)> =
+            sqlx::query_as("SELECT user_id FROM conversations WHERE id = $1")
+                .bind(conversation_id.as_uuid())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+        row.map(|(uuid,)| UserId::from_uuid(uuid))
+            .ok_or_else(|| AppError::NotFound("conversation not found".into()))
     }
 }
 

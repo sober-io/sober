@@ -1,3 +1,0 @@
--- Remove the gateway bot user that was seeded in 20260402000003.
-DELETE FROM user_roles WHERE user_id = '01960000-0000-7000-8000-000000000100';
-DELETE FROM users WHERE id = '01960000-0000-7000-8000-000000000100';

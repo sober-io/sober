@@ -1036,6 +1036,12 @@ pub trait GatewayMappingRepo: Send + Sync {
     /// Lists all channel mappings across all platforms.
     fn list_all(&self)
     -> impl Future<Output = Result<Vec<GatewayChannelMapping>, AppError>> + Send;
+
+    /// Returns the owner (creator) of a conversation.
+    fn get_conversation_owner(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<UserId, AppError>> + Send;
 }
 
 /// Repository for external-user-to-Sõber-user mappings.

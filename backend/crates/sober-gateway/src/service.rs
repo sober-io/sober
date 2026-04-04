@@ -248,19 +248,15 @@ impl GatewayService {
             .unwrap_or_default()
     }
 
-    /// Resolves the owner (creator) of a conversation by querying the database.
+    /// Resolves the owner (creator) of a conversation via the mapping repo.
     async fn resolve_conversation_owner(
         &self,
         conversation_id: ConversationId,
     ) -> Result<UserId, GatewayError> {
-        let row: Option<(uuid::Uuid,)> =
-            sqlx::query_as("SELECT user_id FROM conversations WHERE id = $1")
-                .bind(conversation_id.as_uuid())
-                .fetch_optional(&self.db)
-                .await
-                .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
-        row.map(|(uuid,)| UserId::from_uuid(uuid))
-            .ok_or_else(|| GatewayError::ConnectionFailed("conversation not found".into()))
+        let repo = PgGatewayMappingRepo::new(self.db.clone());
+        repo.get_conversation_owner(conversation_id)
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))
     }
 
     /// Resolves a Sõber user ID to a username by querying the database.
