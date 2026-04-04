@@ -24,6 +24,9 @@ pub trait PlatformBridgeHandle: Send + Sync {
     /// Lists all channels visible to the bot on this platform.
     async fn list_channels(&self) -> Result<Vec<ExternalChannel>, GatewayError>;
 
+    /// Triggers a typing indicator on the given channel.
+    async fn start_typing(&self, channel_id: &str) -> Result<(), GatewayError>;
+
     /// Returns the platform type this bridge connects to.
     fn platform_type(&self) -> PlatformType;
 }

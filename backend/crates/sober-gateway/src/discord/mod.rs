@@ -150,6 +150,18 @@ impl PlatformBridgeHandle for DiscordBridge {
         Ok(channels)
     }
 
+    async fn start_typing(&self, channel_id: &str) -> Result<(), GatewayError> {
+        let channel_id: u64 = channel_id.parse().map_err(|_| {
+            GatewayError::ChannelNotFound(format!("invalid Discord channel ID: {channel_id}"))
+        })?;
+        let channel = ChannelId::new(channel_id);
+        channel
+            .broadcast_typing(&self.http)
+            .await
+            .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+        Ok(())
+    }
+
     fn platform_type(&self) -> PlatformType {
         PlatformType::Discord
     }

@@ -51,6 +51,8 @@ async fn run_outbound_stream(
         .into_inner();
 
     let mut buffer = OutboundBuffer::new();
+    let mut typing_sent: std::collections::HashSet<sober_core::types::ConversationId> =
+        std::collections::HashSet::new();
 
     while let Some(update) = stream
         .message()
@@ -67,12 +69,35 @@ async fn run_outbound_stream(
             }
         };
 
+        let event_name = match &update.event {
+            Some(Event::TextDelta(_)) => "TextDelta",
+            Some(Event::Done(_)) => "Done",
+            Some(Event::NewMessage(_)) => "NewMessage",
+            Some(Event::Error(_)) => "Error",
+            _ => "other",
+        };
+        info!(
+            conversation_id = %conversation_id_str,
+            event = event_name,
+            "outbound: received agent event"
+        );
+
         match update.event {
             Some(Event::TextDelta(delta)) => {
+                // Trigger typing indicator on first delta for this response.
+                if typing_sent.insert(conversation_id) {
+                    trigger_typing(service.as_ref(), conversation_id).await;
+                }
                 buffer.append_delta(conversation_id, &delta.content);
             }
             Some(Event::Done(_)) => {
+                typing_sent.remove(&conversation_id);
                 if let Some(msg) = buffer.flush(&conversation_id) {
+                    info!(
+                        conversation_id = %conversation_id_str,
+                        text_len = msg.text.len(),
+                        "outbound: flushing buffer to platforms"
+                    );
                     deliver_outbound(service.as_ref(), conversation_id, msg).await;
                 }
             }
@@ -92,8 +117,11 @@ async fn deliver_outbound(
     let targets = service.get_outbound_targets(&conversation_id);
 
     if targets.is_empty() {
+        info!(conversation_id = %conversation_id, "outbound: no targets for conversation");
         return;
     }
+
+    info!(conversation_id = %conversation_id, target_count = targets.len(), "outbound: delivering to platforms");
 
     for (platform_id, channel_id) in targets {
         if let Some(bridge) = service.bridge_registry().get(&platform_id) {
@@ -108,6 +136,21 @@ async fn deliver_outbound(
             } else {
                 metrics::counter!("sober_gateway_messages_sent_total", "platform" => "unknown", "status" => "success").increment(1);
             }
+        }
+    }
+}
+
+/// Sends typing indicators to all mapped platform channels for a conversation.
+async fn trigger_typing(
+    service: &GatewayService,
+    conversation_id: sober_core::types::ConversationId,
+) {
+    let targets = service.get_outbound_targets(&conversation_id);
+    for (platform_id, channel_id) in targets {
+        if let Some(bridge) = service.bridge_registry().get(&platform_id)
+            && let Err(e) = bridge.start_typing(&channel_id).await
+        {
+            tracing::debug!(error = %e, "failed to send typing indicator");
         }
     }
 }
