@@ -1,7 +1,7 @@
 [Unit]
 Description=Sober AI Agent System
 After=network-online.target
-Wants=sober-agent.service sober-api.service sober-scheduler.service sober-web.service
+Wants=sober-agent.service sober-api.service sober-gateway.service sober-scheduler.service sober-web.service
 
 [Install]
 WantedBy=multi-user.target

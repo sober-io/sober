@@ -1,0 +1,21 @@
+[Unit]
+Description=Sober Gateway (Messaging Bridge)
+After=network-online.target sober-agent.service
+PartOf=sober.target
+
+[Service]
+Type=simple
+User=sober
+Group=sober
+ExecStart=/opt/sober/bin/sober-gateway
+EnvironmentFile=-/etc/sober/.env
+Environment=SOBER_CONFIG=/etc/sober/config.toml
+StateDirectory=sober
+Restart=on-failure
+RestartSec=5
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=sober.target

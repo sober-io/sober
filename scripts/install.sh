@@ -320,6 +320,11 @@ metrics_port = 9101
 workspace_root = "/var/lib/sober/workspaces"
 sandbox_profile = "standard"
 
+[gateway]
+socket_path = "/run/sober/gateway.sock"
+agent_socket_path = "/run/sober/agent.sock"
+metrics_port = 9102
+
 [web]
 host = "0.0.0.0"
 port = 8080
@@ -378,7 +383,7 @@ collect_config() {
 # -- Systemd ------------------------------------------------------------------
 
 install_systemd() {
-    local services="sober-agent sober-api sober-scheduler sober-web"
+    local services="sober-agent sober-api sober-gateway sober-scheduler sober-web"
 
     # Resolve systemd source: release tarball or repo infra/
     local systemd_src=""
@@ -423,7 +428,7 @@ start_and_verify() {
     while [ "$attempts" -lt "$max_attempts" ]; do
         sleep 2
         all_up=1
-        for svc in sober-agent sober-api sober-scheduler sober-web; do
+        for svc in sober-agent sober-api sober-gateway sober-scheduler sober-web; do
             if ! systemctl is-active --quiet "$svc"; then
                 all_up=0
                 break
@@ -436,7 +441,7 @@ start_and_verify() {
     done
 
     local failed=0
-    for svc in sober-agent sober-api sober-scheduler sober-web; do
+    for svc in sober-agent sober-api sober-gateway sober-scheduler sober-web; do
         if systemctl is-active --quiet "$svc"; then
             info "$svc: running"
         else
