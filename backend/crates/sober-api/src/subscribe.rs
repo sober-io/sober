@@ -5,7 +5,7 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
-use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageSource};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -63,9 +63,10 @@ async fn subscription_loop(
                             // Push live unread notifications for NewMessage events.
                             // The unread count was already incremented by MessageRepo::create;
                             // we just need to notify connected users.
-                            if let Some(proto::conversation_update::Event::NewMessage(_)) =
-                                update.event
-                            {
+                            if matches!(
+                                &update.event,
+                                Some(proto::conversation_update::Event::NewMessage(_))
+                            ) {
                                 push_unread_notifications(&conversation_id, &db, &user_connections)
                                     .await;
                             }
@@ -180,10 +181,16 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             })
         }
         proto::conversation_update::Event::NewMessage(nm) => {
-            let source = serde_json::from_value::<sober_core::types::access::TriggerKind>(
-                serde_json::Value::String(nm.source),
-            )
-            .unwrap_or(sober_core::types::access::TriggerKind::Human);
+            // Skip user messages that came from the web — ws_dispatch already
+            // delivered them inline to avoid showing them twice in the UI.
+            // Only forward user messages from the gateway (Discord/Telegram/etc.)
+            // so they appear in the web UI in real-time.
+            if nm.role.to_lowercase() == "user" && nm.source != "gateway" {
+                return None;
+            }
+
+            // Parse the proto source string into the typed enum.
+            let source: MessageSource = nm.source.parse().unwrap_or(MessageSource::Web);
 
             // Extract text content from proto ContentBlock list and wrap as
             // domain ContentBlock. Full proto-to-domain conversion for non-text
@@ -271,7 +278,7 @@ mod tests {
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
                 assert_eq!(content, vec![ContentBlock::text("hi")]);
-                assert_eq!(source, sober_core::types::access::TriggerKind::Scheduler);
+                assert_eq!(source, MessageSource::Scheduler);
             }
             _ => panic!("unexpected message type"),
         }

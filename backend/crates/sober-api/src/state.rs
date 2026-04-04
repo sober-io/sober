@@ -17,15 +17,20 @@ use tower::service_fn;
 use tracing::info;
 
 use crate::connections::{ConnectionRegistry, UserConnectionRegistry};
+use crate::gateway_proto;
 use crate::proto;
 use crate::services::{
     attachment::AttachmentService, auth::AuthService, collaborator::CollaboratorService,
-    conversation::ConversationService, evolution::EvolutionService, message::MessageService,
-    plugin::PluginService, tag::TagService, user::UserService, ws_dispatch::WsDispatchService,
+    conversation::ConversationService, evolution::EvolutionService, gateway::GatewayAdminService,
+    message::MessageService, plugin::PluginService, tag::TagService, user::UserService,
+    ws_dispatch::WsDispatchService,
 };
 
 /// gRPC client for the agent service, connected via Unix domain socket.
 pub type AgentClient = proto::agent_service_client::AgentServiceClient<Channel>;
+
+/// gRPC client for the gateway service, connected via Unix domain socket.
+pub type GatewayClient = gateway_proto::gateway_service_client::GatewayServiceClient<Channel>;
 
 /// Application state shared across handlers via `axum::extract::State`.
 pub struct AppState {
@@ -63,6 +68,12 @@ pub struct AppState {
     pub attachment: Arc<AttachmentService>,
     /// API-level auth service (inbox creation, user profile).
     pub auth_service: Arc<AuthService>,
+    /// Gateway admin service (platform/mapping CRUD).
+    pub gateway_admin: Arc<GatewayAdminService>,
+    /// Optional gRPC client for the gateway service.
+    /// `None` when the gateway process is not running — all admin endpoints
+    /// except `GET /platforms/:id/channels` work without it.
+    pub gateway_client: Option<GatewayClient>,
 }
 
 impl AppState {
@@ -106,6 +117,7 @@ impl AppState {
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), None));
 
         Arc::new(Self {
             db,
@@ -125,6 +137,8 @@ impl AppState {
             evolution,
             attachment,
             auth_service,
+            gateway_admin,
+            gateway_client: None,
         })
     }
 
@@ -181,6 +195,19 @@ impl AppState {
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
 
+        let gateway_client = match connect_gateway(&config).await {
+            Ok(client) => {
+                info!("connected to gateway gRPC service");
+                Some(client)
+            }
+            Err(e) => {
+                info!(error = %e, "gateway not available (optional)");
+                None
+            }
+        };
+
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), gateway_client.clone()));
+
         Ok(Arc::new(Self {
             db,
             agent_client,
@@ -199,6 +226,8 @@ impl AppState {
             evolution,
             attachment,
             auth_service,
+            gateway_admin,
+            gateway_client,
         }))
     }
 }
@@ -226,4 +255,26 @@ async fn connect_agent(config: &AppConfig) -> Result<AgentClient, AppError> {
         .map_err(|e| AppError::Internal(e.into()))?;
 
     Ok(AgentClient::new(channel))
+}
+
+/// Connects to the gateway gRPC service over a Unix domain socket.
+///
+/// Returns an error if the socket is not available; callers treat this as
+/// optional and store `None` rather than failing startup.
+async fn connect_gateway(config: &AppConfig) -> Result<GatewayClient, AppError> {
+    let socket_path = config.gateway.socket_path.clone();
+
+    let channel = Endpoint::try_from("http://[::]:50051")
+        .map_err(|e| AppError::Internal(e.into()))?
+        .connect_with_connector(service_fn(move |_: Uri| {
+            let path = socket_path.clone();
+            async move {
+                let stream = tokio::net::UnixStream::connect(path).await?;
+                Ok::<_, std::io::Error>(TokioIo::new(stream))
+            }
+        }))
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    Ok(GatewayClient::new(channel))
 }

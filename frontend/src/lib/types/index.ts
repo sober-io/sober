@@ -1,5 +1,7 @@
 // Domain types mirroring backend API response shapes
 
+export type MessageSource = 'web' | 'gateway' | 'scheduler' | 'cli' | 'replica' | 'admin';
+
 export interface User {
 	id: string;
 	email: string;
@@ -162,7 +164,7 @@ export type ServerWsMessage =
 			message_id: string;
 			role: string;
 			content: ContentBlock[];
-			source: string;
+			source: MessageSource;
 			user_id?: string;
 			username?: string;
 	  }

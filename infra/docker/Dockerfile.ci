@@ -47,6 +47,7 @@ RUN cd backend && cargo build --release \
     && cp target/release/sober-api /usr/local/bin/sober-api \
     && cp target/release/sober-agent /usr/local/bin/sober-agent \
     && cp target/release/sober-scheduler /usr/local/bin/sober-scheduler \
+    && cp target/release/sober-gateway /usr/local/bin/sober-gateway \
     && cp target/release/sober-web /usr/local/bin/sober-web \
     && cp target/release/sober /usr/local/bin/sober
 
@@ -95,6 +96,18 @@ COPY --from=builder /usr/local/bin/sober-scheduler /usr/local/bin/sober-schedule
 RUN mkdir -p /run/sober && chown sober:sober /run/sober
 USER sober
 ENTRYPOINT ["sober-scheduler"]
+
+# ============================================================
+# Runtime: sober-gateway
+# ============================================================
+FROM debian:trixie-slim AS sober-gateway
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin sober
+COPY --from=builder /usr/local/bin/sober-gateway /usr/local/bin/sober-gateway
+RUN mkdir -p /run/sober && chown sober:sober /run/sober
+USER sober
+ENTRYPOINT ["sober-gateway"]
 
 # ============================================================
 # Runtime: sober-web

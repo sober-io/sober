@@ -5,6 +5,7 @@ pub mod auth;
 pub mod collaborator;
 pub mod conversation;
 pub mod evolution;
+pub mod gateway;
 pub mod message;
 pub mod plugin;
 pub mod tag;

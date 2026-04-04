@@ -390,6 +390,7 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
+        source: String,
     ) -> Result<AgentResponseStream, AgentError> {
         let start = std::time::Instant::now();
 
@@ -467,6 +468,7 @@ impl<R: AgentRepos> Agent<R> {
             user_id,
             content: content.to_vec(),
             trigger,
+            source,
             event_tx,
         };
         if inbox_tx.send(msg).await.is_err() {

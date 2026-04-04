@@ -1,0 +1,40 @@
+[package]
+name = "sober-gateway"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sober-gateway"
+path = "src/main.rs"
+
+[lib]
+name = "sober_gateway"
+path = "src/lib.rs"
+
+[dependencies]
+sober-core = { path = "../sober-core", features = ["postgres", "grpc-telemetry"] }
+sober-db = { path = "../sober-db" }
+
+anyhow = { workspace = true }
+serenity = { version = "0.12.5", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
+async-trait = "0.1"
+dashmap = "6"
+metrics = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+tracing = { workspace = true }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+tower = { workspace = true }
+uuid = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }

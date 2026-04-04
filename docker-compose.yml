@@ -212,6 +212,24 @@ services:
       sober-agent:
         condition: service_healthy
 
+  sober-gateway:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.gateway
+    ports:
+      - "9102:9102"
+    environment:
+      <<: [*common-env, *crypto-env, *otel-env]
+      SOBER_GATEWAY_SOCKET_PATH: /run/sober/gateway.sock
+      SOBER_GATEWAY_AGENT_SOCKET_PATH: /run/sober/agent.sock
+      SOBER_GATEWAY_METRICS_PORT: "9102"
+      OTEL_SERVICE_NAME: sober-gateway
+    volumes:
+      - sober_sockets:/run/sober
+    depends_on:
+      sober-agent:
+        condition: service_healthy
+
   sober-cli:
     build:
       context: .

@@ -302,6 +302,7 @@ pub(crate) async fn execute_prompt_conversational<R: AgentRepos>(
                 cid,
                 &content,
                 sober_core::types::access::TriggerKind::Scheduler,
+                "scheduler".to_owned(),
             )
             .await
     } else {

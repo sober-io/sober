@@ -5,6 +5,7 @@ pub mod auth;
 pub mod collaborators;
 pub mod conversations;
 pub mod evolution;
+pub mod gateway;
 pub mod health;
 pub mod messages;
 pub mod plugins;
@@ -35,6 +36,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(conversations::routes())
         .merge(collaborators::routes())
         .merge(evolution::routes())
+        .merge(gateway::routes())
         .merge(messages::routes())
         .merge(plugins::routes())
         .merge(tags::routes())

@@ -14,8 +14,8 @@ use super::enums::{
     AgentMode, ArtifactRelation, ArtifactState, ConversationUserRole, EvolutionStatus,
     EvolutionType, JobStatus, PluginScope, PluginStatus, RoleKind, ToolExecutionStatus, UserStatus,
 };
-use super::ids::*;
-use super::input::*;
+use super::ids::{MappingId, PlatformId, UserMappingId, *};
+use super::input::{CreateChannelMapping, CreatePlatform, CreateUserMapping, UpdatePlatform, *};
 use super::tool_execution::{CreateToolExecution, MessageWithExecutions, ToolExecution};
 use crate::error::AppError;
 
@@ -947,6 +947,131 @@ pub trait EvolutionRepo: Send + Sync {
         &self,
         config: EvolutionConfigRow,
     ) -> impl Future<Output = Result<EvolutionConfigRow, AppError>> + Send;
+}
+
+/// Repository for gateway platform connections.
+pub trait GatewayPlatformRepo: Send + Sync {
+    /// Lists all platform connections, optionally filtered to enabled-only.
+    fn list(
+        &self,
+        enabled_only: bool,
+    ) -> impl Future<Output = Result<Vec<GatewayPlatform>, AppError>> + Send;
+
+    /// Gets a platform connection by ID.
+    fn get(&self, id: PlatformId)
+    -> impl Future<Output = Result<GatewayPlatform, AppError>> + Send;
+
+    /// Creates a new platform connection.
+    fn create(
+        &self,
+        id: PlatformId,
+        input: &CreatePlatform,
+    ) -> impl Future<Output = Result<GatewayPlatform, AppError>> + Send;
+
+    /// Updates a platform connection.
+    fn update(
+        &self,
+        id: PlatformId,
+        input: &UpdatePlatform,
+    ) -> impl Future<Output = Result<GatewayPlatform, AppError>> + Send;
+
+    /// Deletes a platform connection.
+    fn delete(&self, id: PlatformId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Stores plaintext credentials for a platform as JSONB.
+    fn store_credentials(
+        &self,
+        id: PlatformId,
+        credentials: &serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Loads plaintext credentials for a platform.
+    ///
+    /// Returns `None` if no credentials have been stored yet.
+    fn get_credentials(
+        &self,
+        id: PlatformId,
+    ) -> impl Future<Output = Result<Option<serde_json::Value>, AppError>> + Send;
+}
+
+/// Repository for channel-to-conversation mappings.
+pub trait GatewayMappingRepo: Send + Sync {
+    /// Lists all channel mappings for a platform.
+    fn list_by_platform(
+        &self,
+        platform_id: PlatformId,
+    ) -> impl Future<Output = Result<Vec<GatewayChannelMapping>, AppError>> + Send;
+
+    /// Finds a channel mapping by its external channel identifier.
+    fn find_by_external_channel(
+        &self,
+        platform_id: PlatformId,
+        external_channel_id: &str,
+    ) -> impl Future<Output = Result<Option<GatewayChannelMapping>, AppError>> + Send;
+
+    /// Finds all channel mappings for a given conversation.
+    fn find_by_conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<Vec<GatewayChannelMapping>, AppError>> + Send;
+
+    /// Creates a new channel mapping.
+    fn create(
+        &self,
+        id: MappingId,
+        platform_id: PlatformId,
+        input: &CreateChannelMapping,
+    ) -> impl Future<Output = Result<GatewayChannelMapping, AppError>> + Send;
+
+    /// Deletes a channel mapping by ID.
+    fn delete(&self, id: MappingId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Deletes all channel mappings for an external channel on a platform.
+    fn delete_by_external_channel(
+        &self,
+        platform_id: PlatformId,
+        external_channel_id: &str,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all channel mappings across all platforms.
+    fn list_all(&self)
+    -> impl Future<Output = Result<Vec<GatewayChannelMapping>, AppError>> + Send;
+
+    /// Returns the owner (creator) of a conversation.
+    fn get_conversation_owner(
+        &self,
+        conversation_id: ConversationId,
+    ) -> impl Future<Output = Result<UserId, AppError>> + Send;
+}
+
+/// Repository for external-user-to-Sõber-user mappings.
+pub trait GatewayUserMappingRepo: Send + Sync {
+    /// Lists all user mappings for a platform.
+    fn list_by_platform(
+        &self,
+        platform_id: PlatformId,
+    ) -> impl Future<Output = Result<Vec<GatewayUserMapping>, AppError>> + Send;
+
+    /// Finds a user mapping by its external user identifier.
+    fn find_by_external_user(
+        &self,
+        platform_id: PlatformId,
+        external_user_id: &str,
+    ) -> impl Future<Output = Result<Option<GatewayUserMapping>, AppError>> + Send;
+
+    /// Creates a new user mapping.
+    fn create(
+        &self,
+        id: UserMappingId,
+        platform_id: PlatformId,
+        input: &CreateUserMapping,
+    ) -> impl Future<Output = Result<GatewayUserMapping, AppError>> + Send;
+
+    /// Deletes a user mapping by ID.
+    fn delete(&self, id: UserMappingId) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Lists all user mappings across all platforms.
+    fn list_all(&self) -> impl Future<Output = Result<Vec<GatewayUserMapping>, AppError>> + Send;
 }
 
 /// Tool execution tracking operations.

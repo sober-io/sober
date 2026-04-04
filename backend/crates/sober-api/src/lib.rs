@@ -16,3 +16,8 @@ pub mod ws_types;
 pub mod proto {
     tonic::include_proto!("sober.agent.v1");
 }
+
+/// Generated protobuf types for the gateway gRPC service.
+pub mod gateway_proto {
+    tonic::include_proto!("sober.gateway.v1");
+}

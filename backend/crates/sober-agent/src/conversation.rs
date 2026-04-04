@@ -48,6 +48,8 @@ pub enum InboxMessage {
         content: Vec<ContentBlock>,
         /// What triggered this interaction (Human, Scheduler, Admin, Replica).
         trigger: TriggerKind,
+        /// Origin identifier for the message (e.g. "web", "gateway", "cli").
+        source: String,
         /// Channel for streaming [`AgentEvent`]s back to the caller.
         event_tx: mpsc::Sender<Result<AgentEvent, AgentError>>,
     },
@@ -123,9 +125,10 @@ impl<R: AgentRepos> ConversationActor<R> {
                     user_id,
                     content,
                     trigger,
+                    source,
                     event_tx,
                 })) => {
-                    self.handle_message(user_id, content, trigger, &event_tx)
+                    self.handle_message(user_id, content, trigger, source, &event_tx)
                         .await;
                 }
                 Ok(Some(InboxMessage::Shutdown)) => {
@@ -175,6 +178,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         user_id: UserId,
         content: Vec<ContentBlock>,
         trigger: TriggerKind,
+        source: String,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) {
         let request_start = Instant::now();
@@ -186,7 +190,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         };
 
         let result = self
-            .handle_message_inner(user_id, &content, trigger, event_tx)
+            .handle_message_inner(user_id, &content, trigger, &source, event_tx)
             .await;
 
         let status_label = if result.is_ok() { "success" } else { "error" };
@@ -227,6 +231,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         user_id: UserId,
         content: &[ContentBlock],
         trigger: TriggerKind,
+        source: &str,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) -> Result<(), AgentError> {
         // Extract text for injection checking and other text-based operations.
@@ -279,6 +284,21 @@ impl<R: AgentRepos> ConversationActor<R> {
                 })
                 .await
                 .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            // Broadcast the user message so all subscribers (API WebSocket,
+            // gateway outbound loop) see it in real-time.
+            let _ = self.ctx.broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: self.conversation_id.to_string(),
+                event: Some(proto::conversation_update::Event::NewMessage(
+                    proto::NewMessage {
+                        message_id: user_msg.id.to_string(),
+                        role: "user".to_owned(),
+                        content: crate::grpc::content_blocks::domain_to_proto(content),
+                        source: source.to_owned(),
+                        user_id: Some(user_id.to_string()),
+                    },
+                )),
+            });
+
             user_msg.id
         } else {
             MessageId::new()
