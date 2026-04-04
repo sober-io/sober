@@ -17,12 +17,22 @@ const BRIDGE_BOT_USER_ID: Uuid = uuid::uuid!("01960000-0000-7000-8000-0000000001
 /// Service for managing gateway platforms, channel mappings, and user mappings.
 pub struct GatewayAdminService {
     db: PgPool,
+    gateway_client: Option<crate::state::GatewayClient>,
 }
 
 impl GatewayAdminService {
     /// Creates a new service backed by the given connection pool.
-    pub fn new(db: PgPool) -> Self {
-        Self { db }
+    pub fn new(db: PgPool, gateway_client: Option<crate::state::GatewayClient>) -> Self {
+        Self { db, gateway_client }
+    }
+
+    /// Tells the gateway to reload config. Best-effort — logs and ignores errors.
+    async fn notify_gateway_reload(&self) {
+        if let Some(mut client) = self.gateway_client.clone()
+            && let Err(e) = client.reload(crate::gateway_proto::ReloadRequest {}).await
+        {
+            tracing::warn!(error = %e, "failed to notify gateway of config change");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -51,7 +61,9 @@ impl GatewayAdminService {
     ) -> Result<GatewayPlatform, AppError> {
         let repo = PgGatewayPlatformRepo::new(self.db.clone());
         let id = PlatformId::new();
-        repo.create(id, &input).await
+        let platform = repo.create(id, &input).await?;
+        self.notify_gateway_reload().await;
+        Ok(platform)
     }
 
     /// Updates an existing gateway platform.
@@ -62,14 +74,18 @@ impl GatewayAdminService {
         input: UpdatePlatform,
     ) -> Result<GatewayPlatform, AppError> {
         let repo = PgGatewayPlatformRepo::new(self.db.clone());
-        repo.update(id, &input).await
+        let platform = repo.update(id, &input).await?;
+        self.notify_gateway_reload().await;
+        Ok(platform)
     }
 
     /// Deletes a gateway platform.
     #[instrument(level = "debug", skip(self), fields(platform.id = %id))]
     pub async fn delete_platform(&self, id: PlatformId) -> Result<(), AppError> {
         let repo = PgGatewayPlatformRepo::new(self.db.clone());
-        repo.delete(id).await
+        repo.delete(id).await?;
+        self.notify_gateway_reload().await;
+        Ok(())
     }
 
     /// Stores plaintext credentials for a gateway platform as JSONB.
@@ -80,9 +96,10 @@ impl GatewayAdminService {
         credentials: serde_json::Value,
     ) -> Result<(), AppError> {
         let repo = PgGatewayPlatformRepo::new(self.db.clone());
-        // Verify platform exists.
         repo.get(id).await?;
-        repo.store_credentials(id, &credentials).await
+        repo.store_credentials(id, &credentials).await?;
+        self.notify_gateway_reload().await;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -130,6 +147,7 @@ impl GatewayAdminService {
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
+        self.notify_gateway_reload().await;
         Ok(mapping)
     }
 
@@ -137,7 +155,9 @@ impl GatewayAdminService {
     #[instrument(level = "debug", skip(self), fields(mapping.id = %id))]
     pub async fn delete_mapping(&self, id: MappingId) -> Result<(), AppError> {
         let repo = PgGatewayMappingRepo::new(self.db.clone());
-        repo.delete(id).await
+        repo.delete(id).await?;
+        self.notify_gateway_reload().await;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

@@ -117,7 +117,7 @@ impl AppState {
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
-        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone()));
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), None));
 
         Arc::new(Self {
             db,
@@ -194,7 +194,6 @@ impl AppState {
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
-        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone()));
 
         let gateway_client = match connect_gateway(&config).await {
             Ok(client) => {
@@ -206,6 +205,8 @@ impl AppState {
                 None
             }
         };
+
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), gateway_client.clone()));
 
         Ok(Arc::new(Self {
             db,
