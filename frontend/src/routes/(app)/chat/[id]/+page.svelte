@@ -541,14 +541,14 @@
 				const active = messages[messages.length - 1];
 				if (active?.role === 'assistant' && (active.streaming || active.thinking)) {
 					active.id = msg.message_id;
-					if (msg.source && msg.source !== 'human') active.source = msg.source;
+					if (msg.source) active.source = msg.source;
 					break;
 				}
 				// Also check the last completed assistant message (done
 				// already fired before new_message arrived).
 				const prev = messages[messages.length - 1];
 				if (prev?.role === 'assistant' && !prev.streaming && !prev.thinking) {
-					if (msg.source && msg.source !== 'human') prev.source = msg.source;
+					if (msg.source) prev.source = msg.source;
 					break;
 				}
 				// New message from scheduler or agent.

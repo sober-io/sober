@@ -586,6 +586,53 @@ impl<'de> Deserialize<'de> for RoleKind {
     }
 }
 
+/// Origin of a message — identifies which system sent it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageSource {
+    /// Sent from the web UI.
+    Web,
+    /// Sent from an external platform via the gateway.
+    Gateway,
+    /// Sent from the scheduler.
+    Scheduler,
+    /// Sent from the CLI.
+    Cli,
+    /// Sent from a replica agent.
+    Replica,
+    /// Sent by an admin.
+    Admin,
+}
+
+impl std::fmt::Display for MessageSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Web => write!(f, "web"),
+            Self::Gateway => write!(f, "gateway"),
+            Self::Scheduler => write!(f, "scheduler"),
+            Self::Cli => write!(f, "cli"),
+            Self::Replica => write!(f, "replica"),
+            Self::Admin => write!(f, "admin"),
+        }
+    }
+}
+
+impl std::str::FromStr for MessageSource {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "web" => Ok(Self::Web),
+            "gateway" => Ok(Self::Gateway),
+            "scheduler" => Ok(Self::Scheduler),
+            "cli" => Ok(Self::Cli),
+            "replica" => Ok(Self::Replica),
+            "admin" => Ok(Self::Admin),
+            _ => Err(()),
+        }
+    }
+}
+
 /// External messaging platform type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "postgres", derive(sqlx::Type))]

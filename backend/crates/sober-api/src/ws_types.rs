@@ -1,6 +1,6 @@
 //! WebSocket message types shared across modules.
 
-use sober_core::types::ContentBlock;
+use sober_core::types::{ContentBlock, MessageSource};
 
 /// Basic user info included in collaborator change WebSocket events.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -113,8 +113,8 @@ pub enum ServerWsMessage {
         role: String,
         /// Message content blocks.
         content: Vec<ContentBlock>,
-        /// What produced this message ("human", "gateway", "scheduler", etc.).
-        source: String,
+        /// What produced this message.
+        source: MessageSource,
         /// User ID of the sender (if applicable).
         #[serde(skip_serializing_if = "Option::is_none")]
         user_id: Option<String>,

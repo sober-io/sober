@@ -1,5 +1,7 @@
 use sober_core::error::AppError;
-use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageRepo, UserId};
+use sober_core::types::{
+    ContentBlock, ConversationId, ConversationUserRepo, MessageRepo, MessageSource, UserId,
+};
 use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
@@ -69,7 +71,7 @@ impl WsDispatchService {
             message_id: uuid::Uuid::now_v7().to_string(),
             role: "user".into(),
             content: content.clone(),
-            source: "web".to_owned(),
+            source: MessageSource::Web,
             user_id: Some(user_id.to_string()),
             username: Some(username.to_string()),
         };

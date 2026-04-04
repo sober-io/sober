@@ -98,6 +98,52 @@ fn strip_metadata_tags(text: &str) -> String {
     result.trim().to_owned()
 }
 
+/// Splits text into chunks that fit within `max_len` characters.
+///
+/// Split priority (best to worst):
+/// 1. Last paragraph break (`\n\n`) — keeps markdown blocks intact
+/// 2. Last newline (`\n`) — keeps lines intact
+/// 3. Last sentence boundary (`. `, `! `, `? `) — keeps sentences intact
+/// 4. Last word boundary (` `) — avoids splitting words
+/// 5. Hard split at limit — last resort
+///
+/// Platform-specific limits: Discord: 2000, Telegram: 4096, Matrix/WhatsApp: ~65535.
+pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
+    if text.len() <= max_len {
+        return vec![text];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.len() <= max_len {
+            chunks.push(remaining);
+            break;
+        }
+
+        let window = &remaining[..max_len];
+        let split_at = window
+            .rfind("\n\n")
+            .map(|p| p + 1)
+            .or_else(|| window.rfind('\n').map(|p| p + 1))
+            .or_else(|| {
+                window
+                    .rfind(". ")
+                    .or_else(|| window.rfind("! "))
+                    .or_else(|| window.rfind("? "))
+                    .map(|p| p + 2) // include the punctuation + space
+            })
+            .or_else(|| window.rfind(' ').map(|p| p + 1))
+            .unwrap_or(max_len);
+
+        chunks.push(&remaining[..split_at]);
+        remaining = &remaining[split_at..];
+    }
+
+    chunks
+}
+
 impl Default for OutboundBuffer {
     fn default() -> Self {
         Self::new()

@@ -184,12 +184,10 @@ impl sober_core::types::UserRepo for PgUserRepo {
     }
 
     async fn has_users(&self) -> Result<bool, AppError> {
-        let (exists,): (bool,) = sqlx::query_as(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email NOT LIKE '%@sober.internal')",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM users)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         Ok(exists)
     }
 

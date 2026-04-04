@@ -4,16 +4,12 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use sober_core::error::AppError;
-use sober_core::types::{
-    ConversationId, CreateUserMapping, GatewayChannelMapping, MappingId, PlatformId, UserId,
-    UserMappingId,
-};
+use sober_core::types::{ConversationId, GatewayChannelMapping, MappingId, PlatformId, UserId};
 use sober_core::types::{GatewayMappingRepo, GatewayUserMappingRepo};
 use sober_db::{PgGatewayMappingRepo, PgGatewayUserMappingRepo};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+use tracing::{debug, error, info};
 
 use crate::agent_proto::{
     ContentBlock, HandleMessageRequest, TextBlock, agent_service_client::AgentServiceClient,
@@ -22,9 +18,6 @@ use crate::agent_proto::{
 use crate::bridge::PlatformBridgeRegistry;
 use crate::error::GatewayError;
 use crate::types::GatewayEvent;
-
-/// The Sõber bot user UUID — used as the actor for all gateway-initiated messages.
-const BOT_USER_UUID: &str = "01960000-0000-7000-8000-000000000100";
 
 /// Core gateway service.
 ///
@@ -144,7 +137,7 @@ impl GatewayService {
         platform_id: PlatformId,
         channel_id: String,
         external_user_id: String,
-        username: String,
+        _username: String,
         content: String,
     ) -> Result<(), GatewayError> {
         let start = std::time::Instant::now();
@@ -171,42 +164,13 @@ impl GatewayService {
         let user_id = match self.user_cache.get(&user_key).map(|v| *v) {
             Some(uid) => uid,
             None => {
-                // Auto-create a user mapping using the bot user as the Sõber user.
-                // In production this is managed by the admin — we fall back to the bot user.
-                let bot_uuid =
-                    Uuid::parse_str(BOT_USER_UUID).expect("BOT_USER_UUID is a valid UUID");
-                let bot_user = UserId::from_uuid(bot_uuid);
-
-                // Persist the new user mapping.
-                let user_mapping_repo = PgGatewayUserMappingRepo::new(self.db.clone());
-                let result = user_mapping_repo
-                    .create(
-                        UserMappingId::new(),
-                        platform_id,
-                        &CreateUserMapping {
-                            external_user_id: external_user_id.clone(),
-                            external_username: username.clone(),
-                            user_id: bot_user,
-                        },
-                    )
-                    .await;
-
-                match result {
-                    Ok(um) => {
-                        self.user_cache.insert(user_key, um.user_id);
-                        um.user_id
-                    }
-                    Err(AppError::Conflict(_)) => {
-                        // Created concurrently — just use the bot user.
-                        warn!(
-                            external_user_id = %external_user_id,
-                            "user mapping conflict, using bot user"
-                        );
-                        self.user_cache.insert(user_key, bot_user);
-                        bot_user
-                    }
-                    Err(e) => return Err(GatewayError::ConnectionFailed(e.to_string())),
-                }
+                // Unmapped external user — use the conversation owner's identity
+                // and let the message prefix carry the external username.
+                let owner_id = self
+                    .resolve_conversation_owner(mapping.conversation_id)
+                    .await?;
+                self.user_cache.insert(user_key, owner_id);
+                owner_id
             }
         };
 
@@ -282,6 +246,21 @@ impl GatewayService {
             .get(conversation_id)
             .map(|v| v.clone())
             .unwrap_or_default()
+    }
+
+    /// Resolves the owner (creator) of a conversation by querying the database.
+    async fn resolve_conversation_owner(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<UserId, GatewayError> {
+        let row: Option<(uuid::Uuid,)> =
+            sqlx::query_as("SELECT user_id FROM conversations WHERE id = $1")
+                .bind(conversation_id.as_uuid())
+                .fetch_optional(&self.db)
+                .await
+                .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
+        row.map(|(uuid,)| UserId::from_uuid(uuid))
+            .ok_or_else(|| GatewayError::ConnectionFailed("conversation not found".into()))
     }
 
     /// Resolves a Sõber user ID to a username by querying the database.

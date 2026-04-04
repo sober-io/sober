@@ -9,10 +9,6 @@ use sober_core::types::{
 use sober_db::{PgGatewayMappingRepo, PgGatewayPlatformRepo, PgGatewayUserMappingRepo};
 use sqlx::PgPool;
 use tracing::instrument;
-use uuid::Uuid;
-
-/// The bridge bot user UUID — added as a member of every mapped conversation.
-const BRIDGE_BOT_USER_ID: Uuid = uuid::uuid!("01960000-0000-7000-8000-000000000100");
 
 /// Service for managing gateway platforms, channel mappings, and user mappings.
 pub struct GatewayAdminService {
@@ -116,37 +112,16 @@ impl GatewayAdminService {
         repo.list_by_platform(platform_id).await
     }
 
-    /// Creates a channel mapping, then adds the bridge bot as a conversation member.
-    ///
-    /// Both operations run in a single transaction.
+    /// Creates a channel mapping.
     #[instrument(level = "debug", skip(self, input), fields(platform.id = %platform_id))]
     pub async fn create_mapping(
         &self,
         platform_id: PlatformId,
         input: CreateChannelMapping,
     ) -> Result<GatewayChannelMapping, AppError> {
-        let mut tx = self
-            .db
-            .begin()
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
-
+        let repo = PgGatewayMappingRepo::new(self.db.clone());
         let id = MappingId::new();
-        let mapping = PgGatewayMappingRepo::create_tx(&mut tx, id, platform_id, &input).await?;
-
-        // Add the bridge bot as a member of the mapped conversation.
-        let bot_user_id = sober_core::types::UserId::from_uuid(BRIDGE_BOT_USER_ID);
-        PgGatewayMappingRepo::add_user_to_conversation_tx(
-            &mut tx,
-            input.conversation_id,
-            bot_user_id,
-        )
-        .await?;
-
-        tx.commit()
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
-
+        let mapping = repo.create(id, platform_id, &input).await?;
         self.notify_gateway_reload().await;
         Ok(mapping)
     }

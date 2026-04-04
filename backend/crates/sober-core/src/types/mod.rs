@@ -28,9 +28,9 @@ pub use domain::{
 pub use enums::{
     AgentMode, ArtifactKind, ArtifactRelation, ArtifactState, AttachmentKind, AutonomyLevel,
     ConversationKind, ConversationUserRole, EvolutionStatus, EvolutionType, JobStatus, MessageRole,
-    PermissionMode, PlatformType, PluginKind, PluginOrigin, PluginScope, PluginStatus, RoleKind,
-    SandboxNetMode, ScopeKind, ToolExecutionSource, ToolExecutionStatus, UserStatus,
-    WorkspaceState, WorktreeState,
+    MessageSource, PermissionMode, PlatformType, PluginKind, PluginOrigin, PluginScope,
+    PluginStatus, RoleKind, SandboxNetMode, ScopeKind, ToolExecutionSource, ToolExecutionStatus,
+    UserStatus, WorkspaceState, WorktreeState,
 };
 pub use ids::{
     ArtifactId, AuditLogId, ConversationAttachmentId, ConversationId, EncryptionKeyId,

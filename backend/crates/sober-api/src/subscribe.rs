@@ -5,7 +5,7 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
-use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageSource};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -189,7 +189,8 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 return None;
             }
 
-            let source = nm.source;
+            // Parse the proto source string into the typed enum.
+            let source: MessageSource = nm.source.parse().unwrap_or(MessageSource::Web);
 
             // Extract text content from proto ContentBlock list and wrap as
             // domain ContentBlock. Full proto-to-domain conversion for non-text
@@ -277,7 +278,7 @@ mod tests {
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
                 assert_eq!(content, vec![ContentBlock::text("hi")]);
-                assert_eq!(source, "scheduler");
+                assert_eq!(source, MessageSource::Scheduler);
             }
             _ => panic!("unexpected message type"),
         }
