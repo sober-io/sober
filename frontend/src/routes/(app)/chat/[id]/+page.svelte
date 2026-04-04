@@ -533,8 +533,11 @@
 						memberMap[msg.user_id] = msg.username;
 					}
 					// Mark as read — user is actively viewing this conversation.
+					// Don't pass the message_id for gateway messages — the
+					// message may not be committed yet when the broadcast arrives.
 					untrack(() => conversations.markRead(conversationId));
-					conversationService.markRead(conversationId, msg.message_id);
+					conversationService.markRead(conversationId).catch(() => {});
+					messages = messages;
 					break;
 				}
 
