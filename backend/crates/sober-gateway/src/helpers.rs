@@ -84,19 +84,9 @@ async fn run_outbound_stream(
 
         match update.event {
             Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
-                // Skip messages from gateway-mapped users (avoid echo).
-                let is_gateway_user = nm
-                    .user_id
-                    .as_deref()
-                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
-                    .is_some_and(|uuid| {
-                        service.is_gateway_user(&sober_core::types::UserId::from_uuid(uuid))
-                    });
-                if is_gateway_user {
-                    continue;
-                }
-
-                // Forward web user messages to Discord with [username] prefix.
+                // Forward user messages to Discord with a sender prefix.
+                // Echo prevention: when Discord receives a bot message, the
+                // serenity handler skips it (msg.author.bot == true).
                 let text: String = nm
                     .content
                     .iter()

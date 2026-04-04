@@ -271,13 +271,6 @@ impl GatewayService {
         Ok(())
     }
 
-    /// Returns true if the given user ID is a gateway-mapped external user.
-    ///
-    /// Used to avoid echoing messages back to the platform they came from.
-    pub fn is_gateway_user(&self, user_id: &UserId) -> bool {
-        self.user_cache.iter().any(|entry| entry.value() == user_id)
-    }
-
     /// Returns all `(platform_id, channel_id)` pairs that should receive
     /// outbound messages for the given conversation.
     pub fn get_outbound_targets(
