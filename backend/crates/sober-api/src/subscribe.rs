@@ -277,7 +277,7 @@ mod tests {
                 assert_eq!(message_id, "msg-1");
                 assert_eq!(role, "Assistant");
                 assert_eq!(content, vec![ContentBlock::text("hi")]);
-                assert_eq!(source, sober_core::types::access::TriggerKind::Scheduler);
+                assert_eq!(source, "scheduler");
             }
             _ => panic!("unexpected message type"),
         }

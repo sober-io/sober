@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use sober_gateway::outbound::OutboundBuffer;
 use sober_gateway::service::GatewayService;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Subscribes to the agent's conversation update stream and delivers
 /// completed responses to mapped external platform channels.
@@ -69,19 +69,6 @@ async fn run_outbound_stream(
             }
         };
 
-        let event_name = match &update.event {
-            Some(Event::TextDelta(_)) => "TextDelta",
-            Some(Event::Done(_)) => "Done",
-            Some(Event::NewMessage(_)) => "NewMessage",
-            Some(Event::Error(_)) => "Error",
-            _ => "other",
-        };
-        info!(
-            conversation_id = %conversation_id_str,
-            event = event_name,
-            "outbound: received agent event"
-        );
-
         match update.event {
             Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
                 // Skip messages that originated from this gateway to avoid echo.
@@ -137,10 +124,10 @@ async fn run_outbound_stream(
             Some(Event::Done(_)) => {
                 typing_sent.remove(&conversation_id);
                 if let Some(msg) = buffer.flush(&conversation_id) {
-                    info!(
+                    debug!(
                         conversation_id = %conversation_id_str,
                         text_len = msg.text.len(),
-                        "outbound: flushing buffer to platforms"
+                        "flushing outbound buffer"
                     );
                     deliver_outbound(service.as_ref(), conversation_id, msg).await;
                 }
@@ -161,11 +148,10 @@ async fn deliver_outbound(
     let targets = service.get_outbound_targets(&conversation_id);
 
     if targets.is_empty() {
-        info!(conversation_id = %conversation_id, "outbound: no targets for conversation");
         return;
     }
 
-    info!(conversation_id = %conversation_id, target_count = targets.len(), "outbound: delivering to platforms");
+    debug!(conversation_id = %conversation_id, target_count = targets.len(), "delivering to platforms");
 
     for (platform_id, channel_id) in targets {
         if let Some(bridge) = service.bridge_registry().get(&platform_id) {
