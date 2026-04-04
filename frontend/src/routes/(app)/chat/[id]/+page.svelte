@@ -508,7 +508,9 @@
 			case 'chat.new_message': {
 				// Own user messages were added optimistically — update the ID
 				// to the real DB ID so tagging/deletion works.
-				if (msg.role === 'user' && msg.user_id === auth.user?.id) {
+				// Skip this for gateway-sourced messages: even if the user_id
+				// matches (mapped Discord user), it's a new message from Discord.
+				if (msg.role === 'user' && msg.user_id === auth.user?.id && msg.source !== 'gateway') {
 					const ownMsg = [...messages].reverse().find((m) => m.role === 'user');
 					if (ownMsg) ownMsg.id = msg.message_id;
 					break;

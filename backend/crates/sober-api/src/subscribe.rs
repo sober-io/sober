@@ -70,8 +70,32 @@ async fn subscription_loop(
                                     .await;
                             }
 
+                            let event_desc = match &update.event {
+                                Some(proto::conversation_update::Event::NewMessage(nm)) => {
+                                    format!("NewMessage(role={}, source={})", nm.role, nm.source)
+                                }
+                                Some(proto::conversation_update::Event::TextDelta(_)) => {
+                                    "TextDelta".to_owned()
+                                }
+                                Some(proto::conversation_update::Event::Done(_)) => {
+                                    "Done".to_owned()
+                                }
+                                _ => "other".to_owned(),
+                            };
+
                             if let Some(ws_msg) = conversation_update_to_ws(update) {
+                                info!(
+                                    conversation_id = %conversation_id,
+                                    event = %event_desc,
+                                    "subscribe: forwarding to WS"
+                                );
                                 registry.send(&conversation_id, ws_msg).await;
+                            } else {
+                                info!(
+                                    conversation_id = %conversation_id,
+                                    event = %event_desc,
+                                    "subscribe: skipped (returned None)"
+                                );
                             }
                         }
                         Err(e) => {
@@ -188,10 +212,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 return None;
             }
 
-            let source = serde_json::from_value::<sober_core::types::access::TriggerKind>(
-                serde_json::Value::String(nm.source),
-            )
-            .unwrap_or(sober_core::types::access::TriggerKind::Human);
+            let source = nm.source;
 
             // Extract text content from proto ContentBlock list and wrap as
             // domain ContentBlock. Full proto-to-domain conversion for non-text

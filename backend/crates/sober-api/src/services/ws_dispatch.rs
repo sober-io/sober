@@ -69,7 +69,7 @@ impl WsDispatchService {
             message_id: uuid::Uuid::now_v7().to_string(),
             role: "user".into(),
             content: content.clone(),
-            source: sober_core::types::access::TriggerKind::Human,
+            source: "web".to_owned(),
             user_id: Some(user_id.to_string()),
             username: Some(username.to_string()),
         };
