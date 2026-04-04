@@ -59,7 +59,9 @@
 		// Read highlighterReady.version to re-derive when shiki finishes loading
 		content ? (highlighterReady.version, renderMarkdown(content)) : ''
 	);
-	const sourceLabel = $derived(source && source !== 'human' ? source : undefined);
+	const sourceLabel = $derived(
+		source && source !== 'human' && source !== 'web' ? source : undefined
+	);
 	const runningToolCount = $derived(
 		toolExecutions?.filter((te) => te.status === 'pending' || te.status === 'running').length ?? 0
 	);
