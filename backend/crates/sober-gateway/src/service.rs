@@ -254,7 +254,7 @@ impl GatewayService {
         conversation_id: ConversationId,
     ) -> Result<UserId, GatewayError> {
         let repo = PgGatewayMappingRepo::new(self.db.clone());
-        repo.get_conversation_owner(conversation_id)
+        repo.get_owner(conversation_id)
             .await
             .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))
     }
