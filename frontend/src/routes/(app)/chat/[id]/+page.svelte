@@ -537,7 +537,7 @@
 					// message may not be committed yet when the broadcast arrives.
 					untrack(() => conversations.markRead(conversationId));
 					conversationService.markRead(conversationId).catch(() => {});
-					messages = messages;
+					messages = [...messages];
 					break;
 				}
 
