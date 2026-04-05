@@ -69,6 +69,22 @@ fn system_jobs() -> Vec<SystemJobDef> {
             }),
         },
         SystemJobDef {
+            name: "system::memory_dedup",
+            schedule: "0 0 2 * * * *",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": crate::executors::memory_dedup::OP,
+            }),
+        },
+        SystemJobDef {
+            name: "system::memory_orphan_cleanup",
+            schedule: "0 0 4 * * * *",
+            payload: serde_json::json!({
+                "type": "internal",
+                "op": crate::executors::memory_orphan_cleanup::OP,
+            }),
+        },
+        SystemJobDef {
             name: "system::trait_evolution_check",
             schedule: "0 0 3 * * * *",
             payload: serde_json::json!({

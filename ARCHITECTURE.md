@@ -95,7 +95,7 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 | `sober-core` | Shared types, error handling, config, domain primitives. Includes evolution types (`EvolutionEvent`, `EvolutionType`, `EvolutionStatus`, `EvolutionConfigRow`), `EvolutionRepo` trait, and `EvolutionConfig` (interval). |
 | `sober-db` | PostgreSQL access layer: pool creation, row types, repository implementations (`Pg*Repo`). Includes `PgEvolutionRepo` for `evolution_events` and `evolution_config` tables. |
 | `sober-auth` | Authentication (password, OIDC, passkeys, HW tokens), RBAC/ABAC |
-| `sober-memory` | Vector storage, memory pruning, scoped retrieval |
+| `sober-memory` | Vector storage, memory pruning, write-time deduplication, scoped retrieval. Per-scope collections (`user_`, `conv_`, `system`). |
 | `sober-agent` | **Binary crate (gRPC server process).** Actor-model agent: one `ConversationActor` per conversation ensures sequential message processing. Write-ahead persistence for tool executions with crash recovery. Real-time LLM streaming. Self-evolution loop: periodic detection job, `propose_*` tools, execution engine, and revert logic. `ExecuteEvolution` / `RevertEvolution` gRPC RPCs. Called by `sober-api` and `sober-scheduler` via gRPC/UDS. Depends on `sober-mind`, `sober-memory`, `sober-crypto`, `sober-llm`, `sober-workspace`, `sober-sandbox`, `sober-plugin-gen`, `sober-skill`. |
 | `sober-plugin` | Plugin registry, WASM host functions (13 host functions via Extism), backend service traits, audit pipeline, blob-backed storage |
 | `sober-plugin-gen` | Plugin generation pipeline: template scaffolding, WASM compilation, and LLM-powered generation. Depends on `sober-core`, `sober-llm`. |
@@ -124,7 +124,7 @@ System (agent identity, global knowledge)
        └── Conversation Scope (session-specific context, auto-loaded per conversation)
 ```
 
-Three active scopes backed by Qdrant payload filtering (no separate collections):
+Three active scopes, each routed to a dedicated Qdrant collection:
 
 | Scope | Stored as | Auto-loaded | Searchable via recall |
 |-------|-----------|-------------|---------------------|
@@ -139,9 +139,13 @@ tool with a conversation_id. Context loading follows principle of least privileg
 ### Vector Storage (Qdrant)
 
 - All knowledge chunks are embedded and indexed
-- Scoped collections: `user_{id}`, `group_{id}`, `system`
+- Scoped collections: `user_{id}`, `conv_{id}`, `system`
+- Write-time deduplication: dense cosine similarity check before store (threshold: 0.92)
+- Batch deduplication: daily scheduled sweep for duplicates that slipped through
+- Orphan cleanup: daily removal of `conv_` collections for deleted conversations
 - Aggressive TTL-based pruning with importance scoring
 - Hybrid search: dense vectors + sparse BM25 for keyword matching
+- Context loading sorted by decayed importance for token budget packing
 
 ---
 

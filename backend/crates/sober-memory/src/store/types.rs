@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sober_core::{MessageId, ScopeId};
+use sober_core::{ConversationId, MessageId, ScopeId, UserId};
 
 /// Memory chunk type discriminant.
 ///
@@ -109,4 +109,38 @@ pub struct MemoryHit {
     pub score: f32,
     /// When the memory was created.
     pub created_at: DateTime<Utc>,
+    /// When this memory starts decaying.
+    pub decay_at: DateTime<Utc>,
+}
+
+/// Outcome of a dedup-aware store operation.
+#[derive(Debug)]
+pub enum StoreOutcome {
+    /// A new point was stored (no duplicate found).
+    Stored { point_id: uuid::Uuid },
+    /// A duplicate was found; the existing point was boosted instead.
+    Deduplicated {
+        existing_point_id: uuid::Uuid,
+        similarity: f32,
+    },
+}
+
+/// Target collection for batch operations.
+#[derive(Debug, Clone)]
+pub enum CollectionTarget {
+    /// A specific user's collection.
+    User(UserId),
+    /// A specific conversation's collection.
+    Conversation(ConversationId),
+    /// The system-wide collection.
+    System,
+}
+
+/// Summary statistics from a batch deduplication run.
+#[derive(Debug, Default)]
+pub struct DedupStats {
+    /// Number of points scanned.
+    pub scanned: u64,
+    /// Number of duplicate points deleted.
+    pub merged: u64,
 }

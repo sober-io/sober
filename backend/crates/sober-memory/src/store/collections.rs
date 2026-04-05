@@ -17,6 +17,21 @@ pub fn system_collection_name() -> &'static str {
     "system"
 }
 
+/// Prefix for conversation-scoped Qdrant collections.
+pub const CONVERSATION_COLLECTION_PREFIX: &str = "conv_";
+
+/// Returns the collection name for a conversation's scoped memory.
+///
+/// Uses the simple (unhyphenated) UUID format from the scope ID.
+#[must_use]
+pub fn conversation_collection_name(scope_id: sober_core::ScopeId) -> String {
+    format!(
+        "{}{}",
+        CONVERSATION_COLLECTION_PREFIX,
+        scope_id.as_uuid().simple()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +59,27 @@ mod tests {
     #[test]
     fn system_collection_is_constant() {
         assert_eq!(system_collection_name(), "system");
+    }
+
+    #[test]
+    fn conversation_collection_contains_no_hyphens() {
+        let scope_id = sober_core::ScopeId::new();
+        let name = conversation_collection_name(scope_id);
+        assert!(!name.contains('-'));
+    }
+
+    #[test]
+    fn conversation_collection_starts_with_prefix() {
+        let scope_id = sober_core::ScopeId::new();
+        let name = conversation_collection_name(scope_id);
+        assert!(name.starts_with(CONVERSATION_COLLECTION_PREFIX));
+    }
+
+    #[test]
+    fn conversation_collection_is_deterministic() {
+        let scope_id = sober_core::ScopeId::new();
+        let a = conversation_collection_name(scope_id);
+        let b = conversation_collection_name(scope_id);
+        assert_eq!(a, b);
     }
 }

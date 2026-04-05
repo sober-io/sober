@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use sober_core::config::MemoryConfig;
 use sober_core::types::ids::{ConversationId, UserId};
 use sober_llm::LlmEngine;
 use sober_memory::{MemoryStore, StoreChunk};
@@ -23,15 +24,17 @@ pub fn spawn_extraction_ingestion(
     user_id: UserId,
     conversation_id: ConversationId,
     extractions: Vec<MemoryExtraction>,
-    half_life_days: u32,
+    memory_config: &MemoryConfig,
 ) {
     let llm = Arc::clone(llm);
     let memory = Arc::clone(memory);
+    let memory_config = memory_config.clone();
 
     let ingest_span = tracing::info_span!("ingestion.embed_and_store", user.id = %user_id, conversation.id = %conversation_id);
     tokio::spawn(
         async move {
-            let decay_at = chrono::Utc::now() + chrono::Duration::days(half_life_days as i64);
+            let decay_at = chrono::Utc::now()
+                + chrono::Duration::days(memory_config.decay_half_life_days as i64);
 
             // Batch embed all extraction contents.
             let texts: Vec<&str> = extractions.iter().map(|e| e.content.as_str()).collect();
@@ -73,8 +76,8 @@ pub fn spawn_extraction_ingestion(
 
                 let importance = crate::extraction::extraction_importance(chunk_type);
 
-                if let Err(e) = memory
-                    .store(
+                match memory
+                    .store_with_dedup(
                         user_id,
                         StoreChunk {
                             dense_vector,
@@ -85,10 +88,16 @@ pub fn spawn_extraction_ingestion(
                             importance,
                             decay_at,
                         },
+                        &memory_config,
                     )
                     .await
                 {
-                    warn!(error = %e, "extraction ingestion: failed to store");
+                    Ok(outcome) => {
+                        debug!(?outcome, "extraction ingestion: stored memory");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "extraction ingestion: failed to store");
+                    }
                 }
             }
 

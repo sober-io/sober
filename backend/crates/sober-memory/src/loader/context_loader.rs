@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use sober_core::config::MemoryConfig;
 use sober_core::{Message, MessageRepo, ScopeId, UserId};
 
 use super::types::{LoadRequest, LoadedContext};
 use crate::error::MemoryError;
+use crate::scoring;
 use crate::store::ChunkType;
 use crate::store::{MemoryHit, MemoryStore, StoreQuery};
 
@@ -97,8 +99,23 @@ impl<M: MessageRepo> ContextLoader<M> {
             tokio::join!(messages_fut, conv_search_fut, user_search_fut);
 
         let all_messages = messages_result.map_err(|e| MemoryError::Repo(e.to_string()))?;
-        let all_conv_memories = conv_search_result?;
-        let all_user_memories = user_search_result?;
+        let mut all_conv_memories = conv_search_result?;
+        let mut all_user_memories = user_search_result?;
+
+        // Sort by decayed importance (highest first) for token budget packing.
+        let now = Utc::now();
+        let half_life = config.decay_half_life_days;
+        let sort_by_decayed = |hits: &mut Vec<MemoryHit>| {
+            hits.sort_by(|a, b| {
+                let elapsed_a = (now - a.decay_at).num_seconds().max(0) as f64 / 86400.0;
+                let elapsed_b = (now - b.decay_at).num_seconds().max(0) as f64 / 86400.0;
+                let da = scoring::decay(a.importance, elapsed_a, half_life);
+                let db = scoring::decay(b.importance, elapsed_b, half_life);
+                db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        };
+        sort_by_decayed(&mut all_conv_memories);
+        sort_by_decayed(&mut all_user_memories);
 
         // System scope search (sequential — budget may be near-exhausted)
         let system_query = StoreQuery {

@@ -583,6 +583,7 @@ mod tests {
                 importance: 0.8,
                 score: 0.95,
                 created_at: chrono::Utc::now(),
+                decay_at: chrono::Utc::now(),
             }],
             system_memories: vec![MemoryHit {
                 point_id: uuid::Uuid::nil(),
@@ -593,6 +594,7 @@ mod tests {
                 importance: 1.0,
                 score: 0.80,
                 created_at: chrono::Utc::now(),
+                decay_at: chrono::Utc::now(),
             }],
             estimated_tokens: 100,
         };

@@ -208,6 +208,13 @@ pub trait ConversationRepo: Send + Sync {
         &self,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<Conversation>, AppError>> + Send;
+
+    /// Checks which conversation IDs from the input list exist in the database.
+    /// Returns only the IDs that exist.
+    fn filter_existing_ids(
+        &self,
+        ids: &[ConversationId],
+    ) -> impl Future<Output = Result<Vec<ConversationId>, AppError>> + Send;
 }
 
 /// Message operations.

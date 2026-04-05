@@ -19,7 +19,9 @@ use sober_core::config::{MemoryConfig, QdrantConfig};
 use sober_core::{ScopeId, UserId};
 
 use super::bm25;
-use super::collections::{system_collection_name, user_collection_name};
+use super::collections::{
+    conversation_collection_name, system_collection_name, user_collection_name,
+};
 use super::types::ChunkType;
 use super::types::{MemoryHit, StoreChunk, StoreQuery};
 use crate::error::MemoryError;
@@ -41,6 +43,36 @@ const DENSE_VECTOR_NAME: &str = "dense";
 
 /// Sparse BM25 vector name in Qdrant named vectors.
 const SPARSE_VECTOR_NAME: &str = "bm25";
+
+/// Batch size for scrolling points during deduplication.
+const SCROLL_BATCH_SIZE: u32 = 100;
+
+/// Scope label for metrics.
+enum ScopeLabel {
+    Global,
+    User,
+    Conversation,
+}
+
+impl ScopeLabel {
+    fn from_ids(scope_id: ScopeId, user_id: UserId) -> Self {
+        if scope_id == ScopeId::GLOBAL {
+            Self::Global
+        } else if scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
+            Self::User
+        } else {
+            Self::Conversation
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::User => "user",
+            Self::Conversation => "conversation",
+        }
+    }
+}
 
 /// Qdrant-backed vector memory store.
 ///
@@ -92,11 +124,7 @@ impl MemoryStore {
         chunk: StoreChunk,
     ) -> Result<uuid::Uuid, MemoryError> {
         let chunk_type_label = chunk.chunk_type.to_string();
-        let scope_label = if chunk.scope_id == sober_core::ScopeId::GLOBAL {
-            "global"
-        } else {
-            "user"
-        };
+        let scope_label = ScopeLabel::from_ids(chunk.scope_id, user_id);
 
         let collection = self.collection_for_scope(user_id, chunk.scope_id);
         self.create_collection_if_missing(&collection).await?;
@@ -130,7 +158,7 @@ impl MemoryStore {
             .await
             .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
 
-        counter!("sober_memory_chunks_stored_total", "chunk_type" => chunk_type_label, "scope" => scope_label).increment(1);
+        counter!("sober_memory_chunks_stored_total", "chunk_type" => chunk_type_label, "scope" => scope_label.as_str()).increment(1);
 
         Ok(point_id)
     }
@@ -148,15 +176,21 @@ impl MemoryStore {
             return Ok(Vec::new());
         }
 
-        let scope_label = if query.scope_id == sober_core::ScopeId::GLOBAL {
-            "global"
-        } else {
-            "user"
-        };
+        let scope_label = ScopeLabel::from_ids(query.scope_id, user_id);
         let search_type = "hybrid";
         let start = Instant::now();
 
         let collection = self.collection_for_scope(user_id, query.scope_id);
+
+        // Return empty results if the collection doesn't exist yet.
+        if !self
+            .client
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?
+        {
+            return Ok(Vec::new());
+        }
 
         let sparse = bm25::compute_sparse_vector(&query.query_text);
         let sparse_indices: Vec<u32> = sparse.iter().map(|(i, _)| *i).collect();
@@ -211,9 +245,9 @@ impl MemoryStore {
         }
 
         let elapsed = start.elapsed().as_secs_f64();
-        counter!("sober_memory_search_total", "scope" => scope_label, "search_type" => search_type)
+        counter!("sober_memory_search_total", "scope" => scope_label.as_str(), "search_type" => search_type)
             .increment(1);
-        histogram!("sober_memory_search_duration_seconds", "scope" => scope_label, "search_type" => search_type).record(elapsed);
+        histogram!("sober_memory_search_duration_seconds", "scope" => scope_label.as_str(), "search_type" => search_type).record(elapsed);
         histogram!("sober_memory_search_results_count").record(hits.len() as f64);
 
         Ok(hits)
@@ -371,14 +405,349 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Searches for a memory that is semantically similar to the given dense vector.
+    ///
+    /// Performs a dense-only cosine query (no BM25/RRF) limited to the given scope.
+    /// Returns `None` when the collection does not exist or no result meets the threshold.
+    pub async fn find_similar(
+        &self,
+        user_id: UserId,
+        scope_id: ScopeId,
+        dense_vector: &[f32],
+        threshold: f32,
+    ) -> Result<Option<MemoryHit>, MemoryError> {
+        let start = Instant::now();
+        let collection = self.collection_for_scope(user_id, scope_id);
+
+        // Short-circuit when the collection hasn't been created yet.
+        let exists = self
+            .client
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        if !exists {
+            histogram!("sober_memory_dedup_check_duration_seconds")
+                .record(start.elapsed().as_secs_f64());
+            return Ok(None);
+        }
+
+        let scope_filter = Filter::must(vec![Condition::matches(
+            fields::SCOPE_ID,
+            scope_id.to_string(),
+        )]);
+
+        let qb = QueryPointsBuilder::new(&collection)
+            .query(VectorInput::new_dense(dense_vector.to_vec()))
+            .using(DENSE_VECTOR_NAME)
+            .filter(scope_filter)
+            .score_threshold(threshold)
+            .limit(1)
+            .with_payload(true);
+
+        let result = self
+            .client
+            .query(qb)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        histogram!("sober_memory_dedup_check_duration_seconds")
+            .record(start.elapsed().as_secs_f64());
+
+        let hit = result
+            .result
+            .first()
+            .and_then(|p| self.scored_point_to_hit(p));
+
+        Ok(hit)
+    }
+
+    /// Stores a memory chunk with write-time deduplication.
+    ///
+    /// If a sufficiently similar memory already exists (cosine similarity >=
+    /// `config.dedup_similarity_threshold`), its importance is boosted and
+    /// [`StoreOutcome::Deduplicated`] is returned. Otherwise the chunk is stored
+    /// normally and [`StoreOutcome::Stored`] is returned.
+    ///
+    /// Setting `dedup_similarity_threshold` to `1.0` in config disables dedup
+    /// (a vector can never be 100% similar to a different vector in practice).
+    pub async fn store_with_dedup(
+        &self,
+        user_id: UserId,
+        chunk: StoreChunk,
+        config: &MemoryConfig,
+    ) -> Result<super::types::StoreOutcome, MemoryError> {
+        let threshold = config.dedup_similarity_threshold as f32;
+        let chunk_type_label = chunk.chunk_type.to_string();
+
+        // Threshold >= 1.0 means dedup is disabled — skip the similarity check.
+        if threshold >= 1.0 {
+            let point_id = self.store(user_id, chunk).await?;
+            counter!("sober_memory_dedup_total", "outcome" => "stored", "chunk_type" => chunk_type_label)
+                .increment(1);
+            return Ok(super::types::StoreOutcome::Stored { point_id });
+        }
+
+        let scope_id = chunk.scope_id;
+        if let Some(existing) = self
+            .find_similar(user_id, scope_id, &chunk.dense_vector, threshold)
+            .await?
+        {
+            let existing_point_id = existing.point_id;
+            let similarity = existing.score;
+            self.apply_retrieval_boost(user_id, scope_id, existing_point_id, config)
+                .await?;
+            counter!("sober_memory_dedup_total", "outcome" => "deduplicated", "chunk_type" => chunk_type_label)
+                .increment(1);
+            return Ok(super::types::StoreOutcome::Deduplicated {
+                existing_point_id,
+                similarity,
+            });
+        }
+
+        let point_id = self.store(user_id, chunk).await?;
+        counter!("sober_memory_dedup_total", "outcome" => "stored", "chunk_type" => chunk_type_label)
+            .increment(1);
+        Ok(super::types::StoreOutcome::Stored { point_id })
+    }
+
+    /// Deletes a Qdrant collection by name.
+    ///
+    /// No-op if the collection does not exist.
+    pub async fn delete_collection(&self, name: &str) -> Result<(), MemoryError> {
+        let exists = self
+            .client
+            .collection_exists(name)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        if !exists {
+            return Ok(());
+        }
+
+        self.client
+            .delete_collection(name)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        tracing::info!(collection = name, "deleted qdrant collection");
+        Ok(())
+    }
+
+    /// Returns the names of all existing Qdrant collections.
+    pub async fn list_collections(&self) -> Result<Vec<String>, MemoryError> {
+        let response = self
+            .client
+            .list_collections()
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        Ok(response.collections.into_iter().map(|c| c.name).collect())
+    }
+
+    /// Scans the target collection and removes near-duplicate points.
+    ///
+    /// For each scope group, computes pairwise cosine similarity between
+    /// all points. When a pair exceeds `config.dedup_similarity_threshold`,
+    /// the point with lower importance (tiebreak: newer `created_at`) is
+    /// marked for deletion. Deletes are flushed in batches of 50.
+    ///
+    /// Returns [`DedupStats`] with the number of points scanned and merged.
+    pub async fn deduplicate(
+        &self,
+        target: super::types::CollectionTarget,
+        config: &MemoryConfig,
+    ) -> Result<super::types::DedupStats, MemoryError> {
+        use super::types::CollectionTarget;
+
+        let start = Instant::now();
+
+        let collection = match target {
+            CollectionTarget::User(user_id) => user_collection_name(user_id),
+            CollectionTarget::Conversation(conv_id) => {
+                conversation_collection_name(ScopeId::from_uuid(*conv_id.as_uuid()))
+            }
+            CollectionTarget::System => system_collection_name().to_owned(),
+        };
+
+        let exists = self
+            .client
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        if !exists {
+            return Ok(super::types::DedupStats::default());
+        }
+
+        let threshold = config.dedup_similarity_threshold as f32;
+        let mut stats = super::types::DedupStats::default();
+        let mut to_delete: Vec<qdrant_client::qdrant::PointId> = Vec::new();
+        let mut offset: Option<qdrant_client::qdrant::PointId> = None;
+
+        loop {
+            let mut sb = ScrollPointsBuilder::new(&collection)
+                .limit(SCROLL_BATCH_SIZE)
+                .with_payload(true)
+                .with_vectors(true);
+
+            if let Some(ref o) = offset {
+                sb = sb.offset(o.clone());
+            }
+
+            let result = self
+                .client
+                .scroll(sb)
+                .await
+                .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+            // Group points by scope_id within the batch.
+            let mut scope_groups: std::collections::HashMap<
+                String,
+                Vec<qdrant_client::qdrant::RetrievedPoint>,
+            > = std::collections::HashMap::new();
+
+            for point in result.result {
+                stats.scanned += 1;
+                let scope_id =
+                    Self::payload_str(&point.payload, fields::SCOPE_ID).unwrap_or_default();
+                scope_groups.entry(scope_id).or_default().push(point);
+            }
+
+            // Within each scope group, find pairs above the similarity threshold.
+            let mut marked: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            for points in scope_groups.values() {
+                for i in 0..points.len() {
+                    for j in (i + 1)..points.len() {
+                        let a = &points[i];
+                        let b = &points[j];
+
+                        let id_a =
+                            a.id.as_ref()
+                                .and_then(|id| {
+                                    use qdrant_client::qdrant::point_id::PointIdOptions;
+                                    match &id.point_id_options {
+                                        Some(PointIdOptions::Uuid(s)) => Some(s.clone()),
+                                        _ => None,
+                                    }
+                                })
+                                .unwrap_or_default();
+
+                        let id_b =
+                            b.id.as_ref()
+                                .and_then(|id| {
+                                    use qdrant_client::qdrant::point_id::PointIdOptions;
+                                    match &id.point_id_options {
+                                        Some(PointIdOptions::Uuid(s)) => Some(s.clone()),
+                                        _ => None,
+                                    }
+                                })
+                                .unwrap_or_default();
+
+                        if marked.contains(&id_a) || marked.contains(&id_b) {
+                            continue;
+                        }
+
+                        let similarity = Self::cosine_similarity_from_points(a, b);
+                        if similarity < threshold {
+                            continue;
+                        }
+
+                        // Keep higher importance; tiebreak: keep older (smaller created_at).
+                        let imp_a =
+                            Self::payload_f64(&a.payload, fields::IMPORTANCE).unwrap_or(1.0);
+                        let imp_b =
+                            Self::payload_f64(&b.payload, fields::IMPORTANCE).unwrap_or(1.0);
+
+                        let discard_id = if (imp_a - imp_b).abs() > f64::EPSILON {
+                            if imp_a >= imp_b {
+                                id_b.clone()
+                            } else {
+                                id_a.clone()
+                            }
+                        } else {
+                            // Tiebreak: keep the older one (discard the newer).
+                            let created_a = Self::payload_str(&a.payload, fields::CREATED_AT)
+                                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                                .map(|dt| dt.timestamp());
+                            let created_b = Self::payload_str(&b.payload, fields::CREATED_AT)
+                                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                                .map(|dt| dt.timestamp());
+                            match (created_a, created_b) {
+                                (Some(ta), Some(tb)) => {
+                                    if ta <= tb {
+                                        id_b.clone()
+                                    } else {
+                                        id_a.clone()
+                                    }
+                                }
+                                _ => id_b.clone(),
+                            }
+                        };
+
+                        marked.insert(discard_id.clone());
+
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&discard_id) {
+                            to_delete.push(uuid.to_string().into());
+                        }
+
+                        // Flush deletes in batches of 50.
+                        if to_delete.len() >= 50 {
+                            let batch = std::mem::take(&mut to_delete);
+                            let batch_len = batch.len() as u64;
+                            self.client
+                                .delete_points(
+                                    DeletePointsBuilder::new(&collection)
+                                        .points(PointsIdsList { ids: batch })
+                                        .wait(true),
+                                )
+                                .await
+                                .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+                            stats.merged += batch_len;
+                        }
+                    }
+                }
+            }
+
+            match result.next_page_offset {
+                Some(next) => offset = Some(next),
+                None => break,
+            }
+        }
+
+        // Flush any remaining deletes.
+        if !to_delete.is_empty() {
+            let remaining = to_delete.len() as u64;
+            self.client
+                .delete_points(
+                    DeletePointsBuilder::new(&collection)
+                        .points(PointsIdsList { ids: to_delete })
+                        .wait(true),
+                )
+                .await
+                .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+            stats.merged += remaining;
+        }
+
+        let elapsed = start.elapsed().as_secs_f64();
+        counter!("sober_memory_batch_dedup_runs_total").increment(1);
+        histogram!("sober_memory_batch_dedup_duration_seconds").record(elapsed);
+        counter!("sober_memory_batch_dedup_merged_total").increment(stats.merged);
+
+        Ok(stats)
+    }
+
     // -- Private helpers --
 
     /// Determines the collection name based on scope.
     fn collection_for_scope(&self, user_id: UserId, scope_id: ScopeId) -> String {
         if scope_id == ScopeId::GLOBAL {
             system_collection_name().to_owned()
-        } else {
+        } else if scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
             user_collection_name(user_id)
+        } else {
+            conversation_collection_name(scope_id)
         }
     }
 
@@ -461,6 +830,55 @@ impl MemoryStore {
             .map(|i| i as u64)
     }
 
+    /// Computes the cosine similarity between the dense vectors of two [`RetrievedPoint`]s.
+    ///
+    /// Returns `0.0` if either point has no dense vector or if the vectors have
+    /// mismatched lengths.
+    fn cosine_similarity_from_points(
+        a: &qdrant_client::qdrant::RetrievedPoint,
+        b: &qdrant_client::qdrant::RetrievedPoint,
+    ) -> f32 {
+        fn extract_dense(point: &qdrant_client::qdrant::RetrievedPoint) -> Option<Vec<f32>> {
+            use qdrant_client::qdrant::vector_output::Vector;
+            use qdrant_client::qdrant::vectors_output::VectorsOptions;
+
+            let vectors = point.vectors.as_ref()?;
+            match vectors.vectors_options.as_ref()? {
+                VectorsOptions::Vectors(named) => {
+                    let vec_output = named.vectors.get(DENSE_VECTOR_NAME)?;
+                    match vec_output.vector.as_ref()? {
+                        Vector::Dense(dv) => Some(dv.data.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        let va = match extract_dense(a) {
+            Some(v) => v,
+            None => return 0.0,
+        };
+        let vb = match extract_dense(b) {
+            Some(v) => v,
+            None => return 0.0,
+        };
+
+        if va.len() != vb.len() || va.is_empty() {
+            return 0.0;
+        }
+
+        let dot: f32 = va.iter().zip(vb.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = va.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = vb.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 0.0;
+        }
+
+        dot / (norm_a * norm_b)
+    }
+
     /// Converts a scored point from Qdrant into a [`MemoryHit`].
     fn scored_point_to_hit(&self, point: &qdrant_client::qdrant::ScoredPoint) -> Option<MemoryHit> {
         let point_id = point.id.as_ref().and_then(|id| {
@@ -497,6 +915,11 @@ impl MemoryStore {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
 
+        let decay_at = Self::payload_str(payload, fields::DECAY_AT)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(created_at);
+
         Some(MemoryHit {
             point_id,
             content,
@@ -506,6 +929,150 @@ impl MemoryStore {
             importance,
             score: point.score,
             created_at,
+            decay_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sober_core::ConversationId;
+
+    fn test_store() -> MemoryStore {
+        MemoryStore {
+            client: Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()),
+            dense_vector_size: 128,
+        }
+    }
+
+    #[test]
+    fn collection_for_scope_routes_global_to_system() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let name = store.collection_for_scope(user_id, ScopeId::GLOBAL);
+        assert_eq!(name, "system");
+    }
+
+    #[test]
+    fn collection_for_scope_routes_user_to_user_collection() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let user_scope = ScopeId::from_uuid(*user_id.as_uuid());
+        let name = store.collection_for_scope(user_id, user_scope);
+        assert!(
+            name.starts_with("user_"),
+            "expected user_ prefix, got {name}"
+        );
+    }
+
+    #[test]
+    fn collection_for_scope_routes_conversation_to_conv_collection() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let conv_id = ConversationId::new();
+        let conv_scope = ScopeId::from_uuid(*conv_id.as_uuid());
+        let name = store.collection_for_scope(user_id, conv_scope);
+        assert!(
+            name.starts_with("conv_"),
+            "expected conv_ prefix, got {name}"
+        );
+    }
+
+    #[test]
+    fn scope_label_from_ids_global() {
+        let user_id = UserId::new();
+        assert_eq!(
+            ScopeLabel::from_ids(ScopeId::GLOBAL, user_id).as_str(),
+            "global"
+        );
+    }
+
+    #[test]
+    fn scope_label_from_ids_user() {
+        let user_id = UserId::new();
+        let user_scope = ScopeId::from_uuid(*user_id.as_uuid());
+        assert_eq!(ScopeLabel::from_ids(user_scope, user_id).as_str(), "user");
+    }
+
+    #[test]
+    fn scope_label_from_ids_conversation() {
+        let user_id = UserId::new();
+        let conv_scope = ScopeId::from_uuid(*ConversationId::new().as_uuid());
+        assert_eq!(
+            ScopeLabel::from_ids(conv_scope, user_id).as_str(),
+            "conversation"
+        );
+    }
+
+    fn make_retrieved_point(vectors: Option<Vec<f32>>) -> qdrant_client::qdrant::RetrievedPoint {
+        use qdrant_client::qdrant::{
+            DenseVector, NamedVectorsOutput, VectorOutput, VectorsOutput, vector_output::Vector,
+            vectors_output::VectorsOptions,
+        };
+
+        let vectors_field = vectors.map(|data| VectorsOutput {
+            vectors_options: Some(VectorsOptions::Vectors(NamedVectorsOutput {
+                vectors: [(
+                    DENSE_VECTOR_NAME.to_owned(),
+                    #[allow(deprecated)]
+                    VectorOutput {
+                        data: vec![],
+                        indices: None,
+                        vectors_count: None,
+                        vector: Some(Vector::Dense(DenseVector { data })),
+                    },
+                )]
+                .into(),
+            })),
+        });
+
+        qdrant_client::qdrant::RetrievedPoint {
+            id: None,
+            payload: Default::default(),
+            vectors: vectors_field,
+            shard_key: None,
+            order_value: None,
+        }
+    }
+
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "identical vectors should have similarity 1.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![0.0, 1.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            sim.abs() < 1e-6,
+            "orthogonal vectors should have similarity ~0.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_opposite_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![-1.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            (sim + 1.0).abs() < 1e-6,
+            "opposite vectors should have similarity -1.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_missing_vectors_returns_zero() {
+        let a = make_retrieved_point(None);
+        let b = make_retrieved_point(Some(vec![1.0, 0.0]));
+        assert_eq!(MemoryStore::cosine_similarity_from_points(&a, &b), 0.0);
     }
 }

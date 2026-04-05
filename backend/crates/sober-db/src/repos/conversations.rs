@@ -533,6 +533,21 @@ impl sober_core::types::ConversationRepo for PgConversationRepo {
 
         Ok(rows.into_iter().map(Into::into).collect())
     }
+
+    async fn filter_existing_ids(
+        &self,
+        ids: &[ConversationId],
+    ) -> Result<Vec<ConversationId>, AppError> {
+        let uuids: Vec<uuid::Uuid> = ids.iter().map(|id| *id.as_uuid()).collect();
+        let rows =
+            sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM conversations WHERE id = ANY($1)")
+                .bind(&uuids)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+
+        Ok(rows.into_iter().map(ConversationId::from_uuid).collect())
+    }
 }
 
 /// Helper row type for the tag + conversation_id join.

@@ -155,9 +155,32 @@ fn build_executor_registry(
     registry.register(
         "memory_pruning",
         Arc::new(MemoryPruningExecutor::new(
-            memory_store,
+            Arc::clone(&memory_store),
             config.memory.clone(),
         )),
+    );
+
+    // Memory dedup executor
+    registry.register(
+        sober_scheduler::executors::memory_dedup::OP,
+        Arc::new(
+            sober_scheduler::executors::memory_dedup::MemoryDedupExecutor::new(
+                Arc::clone(&memory_store),
+                config.memory.clone(),
+            ),
+        ),
+    );
+
+    // Orphan collection cleanup executor
+    let orphan_conv_repo = Arc::new(sober_db::PgConversationRepo::new(pool.clone()));
+    registry.register(
+        sober_scheduler::executors::memory_orphan_cleanup::OP,
+        Arc::new(
+            sober_scheduler::executors::memory_orphan_cleanup::MemoryOrphanCleanupExecutor::new(
+                Arc::clone(&memory_store),
+                orphan_conv_repo,
+            ),
+        ),
     );
 
     // Session cleanup executor
