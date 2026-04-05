@@ -10,37 +10,36 @@ the agent's multimodal pipeline (blob storage, image processing, vision) already
 support attachments — only the gateway layer needs wiring.
 
 ```
-Inbound:  Discord attachment → download CDN → UploadAttachment RPC → blob store → ContentBlock → agent
-Outbound: agent NewMessage w/ ImageBlock → GetAttachmentContent RPC → fetch blob → platform send_files
+Inbound:  Discord attachment → download CDN → process_and_store_attachment() → ContentBlock → HandleMessage
+Outbound: agent NewMessage w/ ImageBlock → gateway fetches blob directly → platform send_files
 ```
 
 ## Architecture
 
-### Communication — Two New Agent RPCs
+### Direct Blob Access — No Agent RPCs
 
-The gateway communicates with the agent exclusively via gRPC/UDS. Rather than
-introducing a new cross-service HTTP dependency (gateway → sober-api), add two
-RPCs to the existing `AgentService`:
+The gateway already has a `PgPool` (for mappings, user lookups, config). Adding
+`Arc<BlobStore>` is one field. With these two, the gateway can call the shared
+`process_and_store_attachment()` function directly — no need to proxy through
+the agent.
 
-| RPC | Direction | Purpose |
-|-----|-----------|---------|
-| `UploadAttachment` | gateway → agent | Send raw bytes + metadata, receive `conversation_attachment_id` |
-| `GetAttachmentContent` | gateway → agent | Send attachment ID, receive blob bytes + metadata |
+**Why not route through the agent?**
+- The agent's job is LLM orchestration, not file storage. Attachment processing
+  (validate → resize → store blob → create DB record) is purely mechanical.
+- Adding `UploadAttachment` / `GetAttachmentContent` RPCs would make the agent
+  a blob proxy, streaming up to 25 MB files through gRPC for no reason.
+- The gateway already has DB access. Adding blob access is trivial.
 
-This keeps the gateway thin (no blob store, no DB writes) and follows the
-existing pattern where `HandleMessage` and `SubscribeConversationUpdates` are
-the gateway's only agent touchpoints.
-
-**Why not reuse sober-api's HTTP endpoints?**
-- Adds auth token management and a new service dependency
-- Co-located UDS is faster and simpler than HTTP
-- The agent already has `BlobStore` and `PgConversationAttachmentRepo`
+**Why not a separate attachment service?**
+- The entire attachment pipeline is one function + one DB table + a
+  content-addressed directory. No independent scaling need, no separate
+  lifecycle. A whole binary process for that is more infrastructure than logic.
 
 ### Shared Attachment Logic
 
 The core upload pipeline (validate content type → derive kind → process image →
 store blob → create DB record) currently lives in `sober-api/src/services/attachment.rs`.
-Extract it into `sober-workspace::attachment` so both sober-api and sober-agent
+Extract it into `sober-workspace::attachment` so both sober-api and sober-gateway
 can reuse it without duplication.
 
 ```rust
@@ -57,24 +56,17 @@ pub async fn process_and_store_attachment(
 
 sober-api's `AttachmentService::upload` becomes: verify membership → call this function.
 
-### gRPC Message Size
-
-Default gRPC limit is 4 MB. Discord allows 25 MB attachments (100 MB with Nitro).
-Configure `max_encoding_message_size(50 MB)` and `max_decoding_message_size(50 MB)`
-on both the agent server and gateway client. Safe since they communicate over a
-co-located Unix domain socket.
-
 ### Gateway Types
 
 ```rust
-// Inbound: platform → agent
+// Inbound: platform → gateway → blob store
 pub struct InboundAttachment {
     pub filename: String,
     pub content_type: Option<String>,
     pub data: Vec<u8>,
 }
 
-// Outbound: agent → platform
+// Outbound: blob store → gateway → platform
 pub struct OutboundAttachment {
     pub filename: String,
     pub content_type: String,
@@ -93,7 +85,7 @@ Discord msg.attachments
   → InboundAttachment { filename, content_type, data }
   → GatewayEvent::MessageReceived { ..., attachments }
   → GatewayService::handle_event()
-      → UploadAttachment RPC (parallel per attachment)
+      → process_and_store_attachment() directly (parallel per attachment)
       → Build ContentBlock per returned kind
       → HandleMessage RPC with text + attachment blocks
 ```
@@ -108,7 +100,7 @@ don't block the message.
 SubscribeConversationUpdates stream
   → Event::NewMessage (role: "assistant")
       → Check content for non-text blocks (ImageBlock, FileBlock, etc.)
-      → GetAttachmentContent RPC per attachment (parallel)
+      → attachments().get_by_id() + blob_store.retrieve() directly
       → Build OutboundAttachment { filename, content_type, data }
       → PlatformMessage { text: "", attachments }
       → deliver_outbound()
@@ -131,44 +123,12 @@ The `PlatformBridgeHandle` trait doesn't change — `send_message` already takes
 `PlatformMessage`, and each implementation handles attachments per its platform's
 API. If attachments exceed the per-message limit, split across multiple sends.
 
-### Proto Changes
-
-```protobuf
-// Added to AgentService
-rpc UploadAttachment(UploadAttachmentRequest) returns (UploadAttachmentResponse);
-rpc GetAttachmentContent(GetAttachmentContentRequest) returns (GetAttachmentContentResponse);
-
-message UploadAttachmentRequest {
-  string conversation_id = 1;
-  string user_id = 2;
-  string filename = 3;
-  bytes data = 4;
-}
-
-message UploadAttachmentResponse {
-  string conversation_attachment_id = 1;
-  string kind = 2;        // "image", "document", "audio", "video"
-  string content_type = 3;
-}
-
-message GetAttachmentContentRequest {
-  string conversation_attachment_id = 1;
-}
-
-message GetAttachmentContentResponse {
-  bytes data = 1;
-  string content_type = 2;
-  string filename = 3;
-  string kind = 4;
-}
-```
-
 ### Metrics
 
 | Metric | Type | Labels |
 |--------|------|--------|
 | `sober_gateway_attachments_downloaded_total` | counter | platform, status |
-| `sober_gateway_attachments_uploaded_total` | counter | platform, kind, status |
+| `sober_gateway_attachments_stored_total` | counter | platform, kind, status |
 | `sober_gateway_attachments_fetched_total` | counter | kind, status |
 | `sober_gateway_attachment_download_duration_seconds` | histogram | platform |
 | `sober_gateway_attachment_download_bytes` | histogram | platform |
@@ -178,8 +138,8 @@ message GetAttachmentContentResponse {
 New `GatewayError` variants:
 
 - `AttachmentDownloadFailed(String)` — CDN download failure (timeout, 404, etc.)
-- `AttachmentUploadFailed(String)` — UploadAttachment RPC failure
-- `AttachmentFetchFailed(String)` — GetAttachmentContent RPC failure
+- `AttachmentStoreFailed(String)` — process_and_store_attachment failure
+- `AttachmentFetchFailed(String)` — blob retrieval failure
 
 All are non-fatal: text content is still processed/delivered. Failed attachments
 are logged and metered but do not block the message pipeline.
@@ -190,8 +150,7 @@ are logged and metered but do not block the message pipeline.
 |-------|---------|
 | `sober-workspace` | New `attachment` module with shared upload logic |
 | `sober-api` | Thin wrapper around shared attachment function |
-| `sober-agent` | Implement `UploadAttachment` + `GetAttachmentContent` RPCs |
-| `sober-gateway` | Types, Discord handler, service, outbound loop, error variants |
+| `sober-gateway` | Add `BlobStore`, types, Discord handler, service, outbound loop, error variants |
 
 ## Not in Scope
 
