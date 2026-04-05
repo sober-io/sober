@@ -436,14 +436,9 @@ impl RememberTool {
 
         Ok(ToolOutput {
             content: format!(
-                "Stored as {} (importance: {:.1}): \"{}\"",
+                "Stored as {} (importance: {:.1}): \"{content}\"",
                 chunk_type_label(chunk_type),
                 importance,
-                if content.len() > 100 {
-                    format!("{}...", &content[..100])
-                } else {
-                    content
-                }
             ),
             is_error: false,
         })

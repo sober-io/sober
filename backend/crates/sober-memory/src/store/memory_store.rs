@@ -182,6 +182,16 @@ impl MemoryStore {
 
         let collection = self.collection_for_scope(user_id, query.scope_id);
 
+        // Return empty results if the collection doesn't exist yet.
+        if !self
+            .client
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?
+        {
+            return Ok(Vec::new());
+        }
+
         let sparse = bm25::compute_sparse_vector(&query.query_text);
         let sparse_indices: Vec<u32> = sparse.iter().map(|(i, _)| *i).collect();
         let sparse_values: Vec<f32> = sparse.iter().map(|(_, v)| *v).collect();

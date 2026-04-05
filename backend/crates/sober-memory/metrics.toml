@@ -55,3 +55,49 @@ name = "sober_memory_pruned_chunks_total"
 type = "counter"
 description = "Total memory chunks removed by pruning."
 labels = []
+
+[groups.dedup]
+name = "Deduplication"
+description = "Write-time and batch deduplication metrics."
+
+[[groups.dedup.metrics]]
+name = "sober_memory_dedup_total"
+type = "counter"
+description = "Total write-time dedup outcomes."
+labels = ["outcome", "chunk_type"]
+
+[[groups.dedup.metrics]]
+name = "sober_memory_dedup_check_duration_seconds"
+type = "histogram"
+description = "Duration of write-time similarity checks in seconds."
+labels = []
+
+[[groups.dedup.metrics]]
+name = "sober_memory_batch_dedup_runs_total"
+type = "counter"
+description = "Total batch deduplication runs."
+labels = []
+
+[[groups.dedup.metrics]]
+name = "sober_memory_batch_dedup_duration_seconds"
+type = "histogram"
+description = "Duration of batch deduplication runs in seconds."
+labels = []
+
+[[groups.dedup.metrics]]
+name = "sober_memory_batch_dedup_merged_total"
+type = "counter"
+description = "Total points merged during batch deduplication."
+labels = []
+
+[[groups.dedup.metrics]]
+name = "sober_memory_orphan_cleanup_runs_total"
+type = "counter"
+description = "Total orphan collection cleanup runs."
+labels = []
+
+[[groups.dedup.metrics]]
+name = "sober_memory_orphan_cleanup_deleted_total"
+type = "counter"
+description = "Total orphan collections deleted."
+labels = []
