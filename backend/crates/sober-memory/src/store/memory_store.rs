@@ -44,6 +44,36 @@ const DENSE_VECTOR_NAME: &str = "dense";
 /// Sparse BM25 vector name in Qdrant named vectors.
 const SPARSE_VECTOR_NAME: &str = "bm25";
 
+/// Batch size for scrolling points during deduplication.
+const SCROLL_BATCH_SIZE: u32 = 100;
+
+/// Scope label for metrics.
+enum ScopeLabel {
+    Global,
+    User,
+    Conversation,
+}
+
+impl ScopeLabel {
+    fn from_ids(scope_id: ScopeId, user_id: UserId) -> Self {
+        if scope_id == ScopeId::GLOBAL {
+            Self::Global
+        } else if scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
+            Self::User
+        } else {
+            Self::Conversation
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::User => "user",
+            Self::Conversation => "conversation",
+        }
+    }
+}
+
 /// Qdrant-backed vector memory store.
 ///
 /// Manages per-user collections and a system collection, providing
@@ -94,13 +124,7 @@ impl MemoryStore {
         chunk: StoreChunk,
     ) -> Result<uuid::Uuid, MemoryError> {
         let chunk_type_label = chunk.chunk_type.to_string();
-        let scope_label = if chunk.scope_id == sober_core::ScopeId::GLOBAL {
-            "global"
-        } else if chunk.scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
-            "user"
-        } else {
-            "conversation"
-        };
+        let scope_label = ScopeLabel::from_ids(chunk.scope_id, user_id);
 
         let collection = self.collection_for_scope(user_id, chunk.scope_id);
         self.create_collection_if_missing(&collection).await?;
@@ -134,7 +158,7 @@ impl MemoryStore {
             .await
             .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
 
-        counter!("sober_memory_chunks_stored_total", "chunk_type" => chunk_type_label, "scope" => scope_label).increment(1);
+        counter!("sober_memory_chunks_stored_total", "chunk_type" => chunk_type_label, "scope" => scope_label.as_str()).increment(1);
 
         Ok(point_id)
     }
@@ -152,13 +176,7 @@ impl MemoryStore {
             return Ok(Vec::new());
         }
 
-        let scope_label = if query.scope_id == sober_core::ScopeId::GLOBAL {
-            "global"
-        } else if query.scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
-            "user"
-        } else {
-            "conversation"
-        };
+        let scope_label = ScopeLabel::from_ids(query.scope_id, user_id);
         let search_type = "hybrid";
         let start = Instant::now();
 
@@ -217,9 +235,9 @@ impl MemoryStore {
         }
 
         let elapsed = start.elapsed().as_secs_f64();
-        counter!("sober_memory_search_total", "scope" => scope_label, "search_type" => search_type)
+        counter!("sober_memory_search_total", "scope" => scope_label.as_str(), "search_type" => search_type)
             .increment(1);
-        histogram!("sober_memory_search_duration_seconds", "scope" => scope_label, "search_type" => search_type).record(elapsed);
+        histogram!("sober_memory_search_duration_seconds", "scope" => scope_label.as_str(), "search_type" => search_type).record(elapsed);
         histogram!("sober_memory_search_results_count").record(hits.len() as f64);
 
         Ok(hits)
@@ -559,7 +577,7 @@ impl MemoryStore {
 
         loop {
             let mut sb = ScrollPointsBuilder::new(&collection)
-                .limit(100)
+                .limit(SCROLL_BATCH_SIZE)
                 .with_payload(true)
                 .with_vectors(true);
 
@@ -949,5 +967,102 @@ mod tests {
             name.starts_with("conv_"),
             "expected conv_ prefix, got {name}"
         );
+    }
+
+    #[test]
+    fn scope_label_from_ids_global() {
+        let user_id = UserId::new();
+        assert_eq!(
+            ScopeLabel::from_ids(ScopeId::GLOBAL, user_id).as_str(),
+            "global"
+        );
+    }
+
+    #[test]
+    fn scope_label_from_ids_user() {
+        let user_id = UserId::new();
+        let user_scope = ScopeId::from_uuid(*user_id.as_uuid());
+        assert_eq!(ScopeLabel::from_ids(user_scope, user_id).as_str(), "user");
+    }
+
+    #[test]
+    fn scope_label_from_ids_conversation() {
+        let user_id = UserId::new();
+        let conv_scope = ScopeId::from_uuid(*ConversationId::new().as_uuid());
+        assert_eq!(
+            ScopeLabel::from_ids(conv_scope, user_id).as_str(),
+            "conversation"
+        );
+    }
+
+    fn make_retrieved_point(vectors: Option<Vec<f32>>) -> qdrant_client::qdrant::RetrievedPoint {
+        use qdrant_client::qdrant::{
+            DenseVector, NamedVectorsOutput, VectorOutput, VectorsOutput, vector_output::Vector,
+            vectors_output::VectorsOptions,
+        };
+
+        let vectors_field = vectors.map(|data| VectorsOutput {
+            vectors_options: Some(VectorsOptions::Vectors(NamedVectorsOutput {
+                vectors: [(
+                    DENSE_VECTOR_NAME.to_owned(),
+                    #[allow(deprecated)]
+                    VectorOutput {
+                        data: vec![],
+                        indices: None,
+                        vectors_count: None,
+                        vector: Some(Vector::Dense(DenseVector { data })),
+                    },
+                )]
+                .into(),
+            })),
+        });
+
+        qdrant_client::qdrant::RetrievedPoint {
+            id: None,
+            payload: Default::default(),
+            vectors: vectors_field,
+            shard_key: None,
+            order_value: None,
+        }
+    }
+
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "identical vectors should have similarity 1.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![0.0, 1.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            sim.abs() < 1e-6,
+            "orthogonal vectors should have similarity ~0.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_opposite_vectors() {
+        let a = make_retrieved_point(Some(vec![1.0, 0.0]));
+        let b = make_retrieved_point(Some(vec![-1.0, 0.0]));
+        let sim = MemoryStore::cosine_similarity_from_points(&a, &b);
+        assert!(
+            (sim + 1.0).abs() < 1e-6,
+            "opposite vectors should have similarity -1.0, got {sim}"
+        );
+    }
+
+    #[test]
+    fn cosine_similarity_missing_vectors_returns_zero() {
+        let a = make_retrieved_point(None);
+        let b = make_retrieved_point(Some(vec![1.0, 0.0]));
+        assert_eq!(MemoryStore::cosine_similarity_from_points(&a, &b), 0.0);
     }
 }

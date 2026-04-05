@@ -429,38 +429,22 @@ impl RememberTool {
             decay_at,
         };
 
-        let outcome = self
-            .memory
+        self.memory
             .store_with_dedup(user_id, chunk, &self.memory_config)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("memory store failed: {e}")))?;
 
-        let response = match outcome {
-            sober_memory::StoreOutcome::Stored { point_id } => {
-                format!(
-                    "Stored as {} (importance: {:.1}, id: {}): \"{}\"",
-                    chunk_type_label(chunk_type),
-                    importance,
-                    point_id,
-                    if content.len() > 100 {
-                        format!("{}...", &content[..100])
-                    } else {
-                        content
-                    }
-                )
-            }
-            sober_memory::StoreOutcome::Deduplicated {
-                existing_point_id,
-                similarity,
-            } => {
-                format!(
-                    "Similar memory already exists (id: {existing_point_id}, similarity: {similarity:.2}). Boosted existing instead of creating duplicate."
-                )
-            }
-        };
-
         Ok(ToolOutput {
-            content: response,
+            content: format!(
+                "Stored as {} (importance: {:.1}): \"{}\"",
+                chunk_type_label(chunk_type),
+                importance,
+                if content.len() > 100 {
+                    format!("{}...", &content[..100])
+                } else {
+                    content
+                }
+            ),
             is_error: false,
         })
     }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use sober_core::config::MemoryConfig;
 use sober_core::error::AppError;
 use sober_core::types::{Job, UserId};
+use sober_memory::store::CONVERSATION_COLLECTION_PREFIX;
 use sober_memory::{CollectionTarget, MemoryStore};
 use tracing::{info, instrument};
 
@@ -14,7 +15,7 @@ use crate::executor::{ExecutionResult, JobExecutor};
 /// Operation key for job registration.
 pub const OP: &str = "memory_dedup";
 
-/// Sweeps a user's (and optionally conversation) collections for duplicates.
+/// Sweeps a user's and all conversation collections for duplicates.
 pub struct MemoryDedupExecutor {
     memory_store: Arc<MemoryStore>,
     memory_config: MemoryConfig,
@@ -46,25 +47,25 @@ impl JobExecutor for MemoryDedupExecutor {
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
-        // Dedup conversation collections if specified in payload
+        // Enumerate and dedup all conversation collections
         let mut conv_merged: u64 = 0;
-        if let Some(conv_ids) = job
-            .payload
-            .get("conversation_ids")
-            .and_then(|v| v.as_array())
-        {
-            for val in conv_ids {
-                if let Some(id_str) = val.as_str()
-                    && let Ok(uuid) = uuid::Uuid::parse_str(id_str)
-                {
-                    let conv_id = sober_core::ConversationId::from_uuid(uuid);
-                    let stats = self
-                        .memory_store
-                        .deduplicate(CollectionTarget::Conversation(conv_id), &self.memory_config)
-                        .await
-                        .map_err(|e| AppError::Internal(e.into()))?;
-                    conv_merged += stats.merged;
-                }
+        let collections = self
+            .memory_store
+            .list_collections()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        for name in &collections {
+            if let Some(uuid_str) = name.strip_prefix(CONVERSATION_COLLECTION_PREFIX)
+                && let Ok(uuid) = uuid::Uuid::parse_str(uuid_str)
+            {
+                let conv_id = sober_core::ConversationId::from_uuid(uuid);
+                let stats = self
+                    .memory_store
+                    .deduplicate(CollectionTarget::Conversation(conv_id), &self.memory_config)
+                    .await
+                    .map_err(|e| AppError::Internal(e.into()))?;
+                conv_merged += stats.merged;
             }
         }
 
