@@ -92,32 +92,27 @@ just build    # Build all targets
 
 ```mermaid
 flowchart TD
-    Clients["Clients\n(PWA · CLI · API)"]
+    PWA["PWA (Svelte)"]
+    CLI["CLI (sober)"]
     Platforms["External Platforms\n(Discord · Telegram · Matrix · WhatsApp)"]
     Web["sober-web\n(reverse proxy + static files)"]
-    API["sober-api\n(HTTP/WS gateway)"]
-    Agent["sober-agent\n(orchestrator)"]
-    Auth["sober-auth"]
-    Plugin["sober-plugin"]
+    API["sober-api\n(HTTP/WS gateway · auth)"]
+    Agent["sober-agent\n(orchestrator · plugins)"]
     Scheduler["sober-scheduler\n(tick engine)"]
     Gateway["sober-gateway\n(platform bridge)"]
-    Memory["sober-memory"]
-    Crypto["sober-crypto"]
-    LLM["sober-llm"]
+    LLM["LLM Providers"]
     Storage["Storage\n(PostgreSQL · Qdrant · S3)"]
 
-    Clients --> Web
-    Web --> API
-    API --> Agent
-    API --> Auth
-    API --> Plugin
-    Scheduler -->|gRPC| Agent
+    PWA --> Web -->|HTTP| API
+    CLI -->|gRPC| Agent
+    CLI -->|gRPC| Scheduler
+    API -->|gRPC| Agent
+    API -->|gRPC| Gateway
+    Scheduler <-->|gRPC| Agent
     Gateway -->|gRPC| Agent
     Platforms --> Gateway
-    Agent --> Memory
-    Agent --> Crypto
     Agent --> LLM
-    Memory --> Storage
+    Storage --- CLI & API & Agent & Scheduler & Gateway
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design, crate map, security model, and prompt assembly pipeline.

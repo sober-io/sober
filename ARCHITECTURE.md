@@ -23,63 +23,50 @@ to its parent, operates in isolated contexts, and can be delegated work autonomo
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Clients                              │
-│  PWA (Svelte)  │  CLI (sober)  │  API                       │
-└──────┬──────────────┬───────────────────────────────────────┘
-       │              │
-       ▼              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    sober-web (reverse proxy)                 │
-│  Embedded static files │ SPA fallback │ API/WS proxy        │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌─────────────────────────────────────────────────────────────┐
-│                    API Gateway (sober-api)                   │
-│  Rate Limiting │ Auth Middleware │ Channel Routing │ Admin Socket │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ gRPC/UDS
-       ┌───────────────────┼───────────────────┐
-       ▼                   ▼                   ▼
-┌──────────────┐  ┌────────────────┐  ┌────────────────┐
-│  sober-auth  │  │  sober-agent   │  │  sober-plugin  │
-│              │  │                │  │                │
-│ • Password   │  │ • Actor Model  │  │ • Registry     │
-│ • OIDC       │  │ • Orchestrator │  │ • Sandbox      │
-│ • Passkeys   │  │ • Write-ahead  │  │ • Audit Engine │
-│ • HW Tokens  │  │ • Streaming    │  │ • Code Gen     │
-│ • RBAC/ABAC  │  │                │  │                │
-└──────────────┘  └───────┬────────┘  └────────────────┘
-                          │ gRPC/UDS            ▲ gRPC/UDS
-                          ▲                     │
-                          │          ┌──────────┴──────────┐
-                 ┌────────┴────────┐ │   sober-gateway     │
-                 │ sober-scheduler │ │                     │
-                 │                 │ │ • Discord/Telegram  │
-                 │ • Tick Engine   │ │ • Matrix/WhatsApp   │
-                 │ • Cron + Interval│ │ • Channel Mapping  │
-                 │ • Job Persist   │ │ • Inbound Routing   │
-                 │ • Admin Socket  │ │ • Outbound Delivery │
-                 └─────────────────┘ └──────────┬──────────┘
-                          │                     │
-       ┌──────────────────┘    ┌────────────────┴─────────────────┐
-       │                       │         External Platforms        │
-       │                       │  Discord │ Telegram │ Matrix │ WA │
-       │                       └───────────────────────────────────┘
-       ▼
-       ┌──────────────────┬──────────────┐
-       ▼                  ▼              ▼
-┌──────────────┐  ┌────────────────┐  ┌────────────────┐
-│ sober-memory │  │  sober-crypto  │  │   sober-llm    │
-│              │  │                │  │                │
-│ • Vector DB  │  │ • Keypair Gen  │  │ • Anthropic    │
-│ • Chunk Types│  │ • Envelope Enc │  │ • OpenAI       │
-│ • Pruning    │  │ • Signing      │  │ • Local/Ollama │
-│ • Scoping    │  │                │  │ • Router       │
-│              │  │                │  │                │
-└──────────────┘  └────────────────┘  └────────────────┘
-       │
-       ▼
+┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+│ PWA (Svelte) │         │ CLI (sober)  │         │ API clients  │
+└──────┬───────┘         └──┬─────┬──┬──┘         └──────┬───────┘
+       │                    │     │  │                    │
+       ▼                    │     │  │                    │
+┌───────────────────────────│─────│──│────────────────────│───────┐
+│    sober-web              │     │  │                    │       │
+│    Embedded static files │ SPA fallback │ API/WS proxy         │
+└───────────────┬───────────│─────│──│────────────────────│───────┘
+                │ HTTP      │     │  │                    │
+                ▼           │     │  │                    ▼
+┌───────────────────────────│─────│──│───────────────────────────┐
+│    sober-api              │     │  │                           │
+│    Rate Limiting │ Auth (sober-auth) │ Channel Routing         │
+└──────┬────────────────────│─────│──│──────────────┬────────────┘
+       │ gRPC/UDS           │     │  │              │ gRPC/UDS
+       │     ┌──────────────┘     │  │              │ (optional)
+       │     │  gRPC/UDS          │  │              │
+       ▼     ▼                    │  │              ▼
+┌──────────────────────────┐      │  │   ┌──────────────────────┐
+│       sober-agent        │◄─────│──│───│   sober-gateway      │
+│                          │gRPC  │  │   │                      │
+│ • Actor Model            │      │  │   │ • Discord/Telegram   │
+│ • Plugins (sober-plugin) │      │  │   │ • Matrix/WhatsApp    │
+│ • Write-ahead Persistence│      │  │   │ • Channel Mapping    │
+│ • LLM Streaming          │      │  │   │ • Inbound Routing    │
+│ • MCP Servers            │      │  │   │ • Outbound Delivery  │
+└──────────┬───────────────┘      │  │   └──────────┬───────────┘
+           │ gRPC/UDS             │  │              │
+           │ (bidirectional)      │  │   ┌──────────┴───────────┐
+           ▼                      │  │   │  External Platforms   │
+┌──────────────────────────┐      │  │   │ Discord│Telegram│... │
+│      sober-scheduler     │◄─────┘  │   └──────────────────────┘
+│                          │gRPC     │
+│ • Tick Engine            │         │
+│ • Cron + Interval        │         │
+│ • Job Persist            │         │
+│ • Local Executors        │         │
+│ • Admin Socket           │         │
+└──────────────────────────┘         │
+                                     │
+          ┌──────────────────────────┘
+          │  All services + CLI
+          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     Storage Layer                            │
 │  PostgreSQL (relational)  │  Qdrant (vectors)  │  S3 (blob) │
