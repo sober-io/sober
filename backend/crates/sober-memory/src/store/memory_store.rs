@@ -377,6 +377,112 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Searches for a memory that is semantically similar to the given dense vector.
+    ///
+    /// Performs a dense-only cosine query (no BM25/RRF) limited to the given scope.
+    /// Returns `None` when the collection does not exist or no result meets the threshold.
+    pub async fn find_similar(
+        &self,
+        user_id: UserId,
+        scope_id: ScopeId,
+        dense_vector: &[f32],
+        threshold: f32,
+    ) -> Result<Option<MemoryHit>, MemoryError> {
+        let start = Instant::now();
+        let collection = self.collection_for_scope(user_id, scope_id);
+
+        // Short-circuit when the collection hasn't been created yet.
+        let exists = self
+            .client
+            .collection_exists(&collection)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        if !exists {
+            histogram!("sober_memory_dedup_check_duration_seconds")
+                .record(start.elapsed().as_secs_f64());
+            return Ok(None);
+        }
+
+        let scope_filter = Filter::must(vec![Condition::matches(
+            fields::SCOPE_ID,
+            scope_id.to_string(),
+        )]);
+
+        let qb = QueryPointsBuilder::new(&collection)
+            .query(VectorInput::new_dense(dense_vector.to_vec()))
+            .using(DENSE_VECTOR_NAME)
+            .filter(scope_filter)
+            .score_threshold(threshold)
+            .limit(1)
+            .with_payload(true);
+
+        let result = self
+            .client
+            .query(qb)
+            .await
+            .map_err(|e| MemoryError::Qdrant(e.to_string()))?;
+
+        histogram!("sober_memory_dedup_check_duration_seconds")
+            .record(start.elapsed().as_secs_f64());
+
+        let hit = result
+            .result
+            .first()
+            .and_then(|p| self.scored_point_to_hit(p));
+
+        Ok(hit)
+    }
+
+    /// Stores a memory chunk with write-time deduplication.
+    ///
+    /// If a sufficiently similar memory already exists (cosine similarity >=
+    /// `config.dedup_similarity_threshold`), its importance is boosted and
+    /// [`StoreOutcome::Deduplicated`] is returned. Otherwise the chunk is stored
+    /// normally and [`StoreOutcome::Stored`] is returned.
+    ///
+    /// Setting `dedup_similarity_threshold` to `1.0` in config disables dedup
+    /// (a vector can never be 100% similar to a different vector in practice).
+    pub async fn store_with_dedup(
+        &self,
+        user_id: UserId,
+        chunk: StoreChunk,
+        config: &MemoryConfig,
+    ) -> Result<super::types::StoreOutcome, MemoryError> {
+        let threshold = config.dedup_similarity_threshold as f32;
+        let chunk_type_label = chunk.chunk_type.to_string();
+
+        // Threshold >= 1.0 means dedup is disabled — skip the similarity check.
+        if threshold >= 1.0 {
+            let point_id = self.store(user_id, chunk).await?;
+            counter!("sober_memory_dedup_total", "outcome" => "stored", "chunk_type" => chunk_type_label)
+                .increment(1);
+            return Ok(super::types::StoreOutcome::Stored { point_id });
+        }
+
+        let scope_id = chunk.scope_id;
+        if let Some(existing) = self
+            .find_similar(user_id, scope_id, &chunk.dense_vector, threshold)
+            .await?
+        {
+            let existing_point_id = existing.point_id;
+            let similarity = existing.score;
+            self.apply_retrieval_boost(user_id, scope_id, existing_point_id, config)
+                .await?;
+            counter!("sober_memory_dedup_total", "outcome" => "deduplicated", "chunk_type" => chunk_type_label)
+                .increment(1);
+            return Ok(super::types::StoreOutcome::Deduplicated {
+                existing_point_id,
+                similarity,
+            });
+        }
+
+        let point_id = self.store(user_id, chunk).await?;
+        counter!("sober_memory_dedup_total", "outcome" => "stored", "chunk_type" => chunk_type_label)
+            .increment(1);
+        Ok(super::types::StoreOutcome::Stored { point_id })
+    }
+
     // -- Private helpers --
 
     /// Determines the collection name based on scope.
