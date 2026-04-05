@@ -71,6 +71,8 @@ pub const DEFAULT_MEMORY_DECAY_HALF_LIFE_DAYS: u32 = 30;
 pub const DEFAULT_MEMORY_RETRIEVAL_BOOST: f64 = 0.2;
 /// Default memory prune threshold.
 pub const DEFAULT_MEMORY_PRUNE_THRESHOLD: f64 = 0.1;
+/// Default dedup similarity threshold (cosine, 0.0–1.0).
+pub const DEFAULT_MEMORY_DEDUP_SIMILARITY_THRESHOLD: f64 = 0.92;
 /// Default ACP agent CLI args.
 pub const DEFAULT_ACP_ARGS: &str = "acp";
 /// Default evolution check interval.
@@ -401,6 +403,10 @@ pub struct MemoryConfig {
     pub retrieval_boost: f64,
     /// Importance threshold below which memories are pruned.
     pub prune_threshold: f64,
+    /// Cosine similarity threshold for write-time deduplication.
+    /// Memories with similarity >= this value are considered duplicates.
+    /// Set to 1.0 to disable dedup.
+    pub dedup_similarity_threshold: f64,
 }
 
 impl Default for MemoryConfig {
@@ -409,6 +415,7 @@ impl Default for MemoryConfig {
             decay_half_life_days: DEFAULT_MEMORY_DECAY_HALF_LIFE_DAYS,
             retrieval_boost: DEFAULT_MEMORY_RETRIEVAL_BOOST,
             prune_threshold: DEFAULT_MEMORY_PRUNE_THRESHOLD,
+            dedup_similarity_threshold: DEFAULT_MEMORY_DEDUP_SIMILARITY_THRESHOLD,
         }
     }
 }
@@ -940,6 +947,11 @@ mod tests {
         assert_eq!(config.mcp.max_consecutive_failures, 3);
         assert_eq!(config.memory.decay_half_life_days, 30);
         assert_eq!(config.memory.prune_threshold, 0.1);
+        assert!(
+            (config.memory.dedup_similarity_threshold - 0.92).abs() < f64::EPSILON,
+            "default dedup threshold should be 0.92, got {}",
+            config.memory.dedup_similarity_threshold
+        );
     }
 
     #[test]

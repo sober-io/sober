@@ -497,6 +497,11 @@ impl MemoryStore {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
 
+        let decay_at = Self::payload_str(payload, fields::DECAY_AT)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(created_at);
+
         Some(MemoryHit {
             point_id,
             content,
@@ -506,6 +511,7 @@ impl MemoryStore {
             importance,
             score: point.score,
             created_at,
+            decay_at,
         })
     }
 }

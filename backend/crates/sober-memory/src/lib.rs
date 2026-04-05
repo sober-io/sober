@@ -11,4 +11,7 @@ pub mod store;
 pub use error::MemoryError;
 pub use loader::{ContextLoader, LoadRequest, LoadedContext};
 pub use scoring::{boost, decay, should_prune};
-pub use store::{ChunkType, MemoryHit, MemoryStore, StoreChunk, StoreQuery};
+pub use store::{
+    ChunkType, CollectionTarget, DedupStats, MemoryHit, MemoryStore, StoreChunk, StoreOutcome,
+    StoreQuery,
+};
