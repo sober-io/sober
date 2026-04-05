@@ -15,6 +15,7 @@ use sober_gateway::grpc::GatewayGrpcService;
 use sober_gateway::proto::gateway_service_server::GatewayServiceServer;
 use sober_gateway::service::GatewayService;
 use sober_gateway::types::GatewayEvent;
+use sober_workspace::BlobStore;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -64,6 +65,13 @@ async fn main() -> Result<()> {
     // event_tx is cloned and passed to each bridge when platforms connect.
     let (event_tx, mut event_rx) = mpsc::channel::<GatewayEvent>(1024);
 
+    // Blob store for direct attachment storage/retrieval.
+    let blob_root = config
+        .workspace_root
+        .join(sober_workspace::SOBER_DIR)
+        .join("blobs");
+    let blob_store = Arc::new(BlobStore::new(blob_root));
+
     // Set up bridge registry and gateway service.
     let bridge_registry = Arc::new(PlatformBridgeRegistry::new());
     let service = Arc::new(GatewayService::new(
@@ -71,6 +79,7 @@ async fn main() -> Result<()> {
         agent_client,
         bridge_registry.clone(),
         event_tx.clone(),
+        blob_store,
     ));
 
     service

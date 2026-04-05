@@ -7,11 +7,11 @@ use serenity::model::id::UserId as DiscordUserId;
 use serenity::prelude::*;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use sober_core::types::PlatformId;
 
-use crate::types::GatewayEvent;
+use crate::types::{GatewayEvent, InboundAttachment};
 
 /// Serenity event handler that receives Discord events and forwards them
 /// into the gateway event channel.
@@ -54,8 +54,50 @@ impl EventHandler for DiscordHandler {
             platform_id = %self.platform_id,
             channel_id = %msg.channel_id,
             author = %msg.author.name,
+            attachment_count = msg.attachments.len(),
             "received Discord message"
         );
+
+        // Download attachments from Discord CDN.
+        let mut attachments = Vec::with_capacity(msg.attachments.len());
+        for attachment in &msg.attachments {
+            let start = std::time::Instant::now();
+            match download_attachment(&attachment.url, &attachment.filename).await {
+                Ok(inbound) => {
+                    metrics::counter!(
+                        "sober_gateway_attachments_downloaded_total",
+                        "platform" => "discord",
+                        "status" => "success",
+                    )
+                    .increment(1);
+                    metrics::histogram!(
+                        "sober_gateway_attachment_download_duration_seconds",
+                        "platform" => "discord",
+                    )
+                    .record(start.elapsed().as_secs_f64());
+                    metrics::histogram!(
+                        "sober_gateway_attachment_download_bytes",
+                        "platform" => "discord",
+                    )
+                    .record(inbound.data.len() as f64);
+                    attachments.push(inbound);
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        filename = %attachment.filename,
+                        url = %attachment.url,
+                        "failed to download Discord attachment, skipping"
+                    );
+                    metrics::counter!(
+                        "sober_gateway_attachments_downloaded_total",
+                        "platform" => "discord",
+                        "status" => "error",
+                    )
+                    .increment(1);
+                }
+            }
+        }
 
         let event = GatewayEvent::MessageReceived {
             platform_id: self.platform_id,
@@ -63,11 +105,43 @@ impl EventHandler for DiscordHandler {
             user_id: msg.author.id.to_string(),
             username: msg.author.name.clone(),
             content: msg.content.clone(),
-            attachments: vec![],
+            attachments,
         };
 
         if let Err(e) = self.event_tx.send(event).await {
             tracing::error!(error = %e, "failed to forward Discord message to event loop");
         }
     }
+}
+
+/// Downloads an attachment from a platform CDN URL.
+async fn download_attachment(url: &str, filename: &str) -> Result<InboundAttachment, String> {
+    let response = reqwest::Client::new()
+        .get(url)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned());
+
+    let data = response
+        .bytes()
+        .await
+        .map_err(|e| format!("failed to read body: {e}"))?
+        .to_vec();
+
+    Ok(InboundAttachment {
+        filename: filename.to_owned(),
+        content_type,
+        data,
+    })
 }

@@ -11,6 +11,8 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
+use sober_workspace::BlobStore;
+
 use crate::agent_proto::{
     ContentBlock, HandleMessageRequest, TextBlock, agent_service_client::AgentServiceClient,
     content_block::Block,
@@ -29,6 +31,8 @@ pub struct GatewayService {
     bridge_registry: Arc<PlatformBridgeRegistry>,
     /// Sender for inbound gateway events — passed to each bridge on connect.
     event_tx: mpsc::Sender<GatewayEvent>,
+    /// Blob store for direct attachment storage/retrieval.
+    blob_store: Arc<BlobStore>,
 
     /// Cache: (platform_id, external_channel_id) → GatewayChannelMapping
     channel_cache: DashMap<(PlatformId, String), GatewayChannelMapping>,
@@ -45,12 +49,14 @@ impl GatewayService {
         agent_client: AgentServiceClient<tonic::transport::Channel>,
         bridge_registry: Arc<PlatformBridgeRegistry>,
         event_tx: mpsc::Sender<GatewayEvent>,
+        blob_store: Arc<BlobStore>,
     ) -> Self {
         Self {
             db,
             agent_client,
             bridge_registry,
             event_tx,
+            blob_store,
             channel_cache: DashMap::new(),
             reverse_cache: DashMap::new(),
             user_cache: DashMap::new(),
@@ -147,8 +153,11 @@ impl GatewayService {
         external_user_id: String,
         _username: String,
         content: String,
-        _attachments: Vec<crate::types::InboundAttachment>,
+        attachments: Vec<crate::types::InboundAttachment>,
     ) -> Result<(), GatewayError> {
+        use crate::agent_proto::{AudioBlock, FileBlock, ImageBlock, VideoBlock};
+        use sober_core::types::AttachmentKind;
+
         let start = std::time::Instant::now();
 
         // Look up channel mapping.
@@ -173,8 +182,6 @@ impl GatewayService {
         let user_id = match self.user_cache.get(&user_key).map(|v| *v) {
             Some(uid) => uid,
             None => {
-                // Unmapped external user — use the conversation owner's identity
-                // and let the message prefix carry the external username.
                 let owner_id = self
                     .resolve_conversation_owner(mapping.conversation_id)
                     .await?;
@@ -183,13 +190,84 @@ impl GatewayService {
             }
         };
 
+        // Build content blocks: text first, then stored attachments.
+        let mut content_blocks = Vec::new();
+
+        if !content.is_empty() {
+            content_blocks.push(ContentBlock {
+                block: Some(Block::Text(TextBlock { text: content })),
+            });
+        }
+
+        let platform_label = self
+            .bridge_registry
+            .get(&platform_id)
+            .map(|b| b.platform_type().to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+
+        for attachment in attachments {
+            match sober_workspace::attachment::process_and_store_attachment(
+                &self.db,
+                &self.blob_store,
+                mapping.conversation_id,
+                user_id,
+                attachment.filename.clone(),
+                attachment.data,
+            )
+            .await
+            {
+                Ok(stored) => {
+                    let block = match stored.kind {
+                        AttachmentKind::Image => Block::Image(ImageBlock {
+                            conversation_attachment_id: stored.id.to_string(),
+                            alt: Some(attachment.filename),
+                        }),
+                        AttachmentKind::Audio => Block::Audio(AudioBlock {
+                            conversation_attachment_id: stored.id.to_string(),
+                        }),
+                        AttachmentKind::Video => Block::Video(VideoBlock {
+                            conversation_attachment_id: stored.id.to_string(),
+                        }),
+                        AttachmentKind::Document => Block::File(FileBlock {
+                            conversation_attachment_id: stored.id.to_string(),
+                        }),
+                    };
+                    content_blocks.push(ContentBlock { block: Some(block) });
+
+                    let kind_label = match stored.kind {
+                        AttachmentKind::Image => "image",
+                        AttachmentKind::Audio => "audio",
+                        AttachmentKind::Video => "video",
+                        AttachmentKind::Document => "document",
+                    };
+                    metrics::counter!(
+                        "sober_gateway_attachments_stored_total",
+                        "platform" => platform_label.clone(),
+                        "kind" => kind_label,
+                        "status" => "success",
+                    )
+                    .increment(1);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        filename = %attachment.filename,
+                        "failed to store attachment, skipping"
+                    );
+                }
+            }
+        }
+
+        // Skip if there's nothing to send (no text and all attachments failed).
+        if content_blocks.is_empty() {
+            return Ok(());
+        }
+
         // Forward to agent.
         let request = HandleMessageRequest {
             user_id: user_id.to_string(),
             conversation_id: mapping.conversation_id.to_string(),
-            content: vec![ContentBlock {
-                block: Some(Block::Text(TextBlock { text: content })),
-            }],
+            content: content_blocks,
             source: "gateway".to_owned(),
         };
 
@@ -200,13 +278,6 @@ impl GatewayService {
             .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
 
         let elapsed = start.elapsed().as_secs_f64();
-        // Use platform_id as label since we don't have platform_type here.
-        // The dashboard can join on this or we resolve the type from the registry.
-        let platform_label = self
-            .bridge_registry
-            .get(&platform_id)
-            .map(|b| b.platform_type().to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
         metrics::histogram!("sober_gateway_message_handle_duration_seconds", "platform" => platform_label.clone()).record(elapsed);
         metrics::counter!("sober_gateway_messages_received_total", "platform" => platform_label, "status" => "success")
             .increment(1);
@@ -285,6 +356,16 @@ impl GatewayService {
             .await
             .ok()?;
         row.map(|r| r.0)
+    }
+
+    /// Returns the database pool.
+    pub fn db(&self) -> &PgPool {
+        &self.db
+    }
+
+    /// Returns the blob store for attachment retrieval.
+    pub fn blob_store(&self) -> &Arc<BlobStore> {
+        &self.blob_store
     }
 
     /// Returns the bridge registry.

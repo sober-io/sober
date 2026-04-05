@@ -122,6 +122,91 @@ async fn run_outbound_stream(
                 }
                 buffer.append_delta(conversation_id, &delta.content);
             }
+            Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "assistant" => {
+                use sober_gateway::agent_proto::content_block::Block;
+
+                // Check for non-text content blocks (images, files, etc.)
+                let attachment_ids: Vec<(String, &str)> = nm
+                    .content
+                    .iter()
+                    .filter_map(|b| match b.block.as_ref()? {
+                        Block::Image(img) => {
+                            Some((img.conversation_attachment_id.clone(), "image"))
+                        }
+                        Block::File(f) => Some((f.conversation_attachment_id.clone(), "document")),
+                        Block::Audio(a) => Some((a.conversation_attachment_id.clone(), "audio")),
+                        Block::Video(v) => Some((v.conversation_attachment_id.clone(), "video")),
+                        Block::Text(_) => None,
+                    })
+                    .collect();
+
+                if attachment_ids.is_empty() {
+                    continue;
+                }
+
+                // Fetch attachment data directly from DB + blob store.
+                let repo = sober_db::PgConversationAttachmentRepo::new(service.db().clone());
+                let mut outbound_attachments = Vec::new();
+                for (attachment_id_str, kind_label) in &attachment_ids {
+                    let Ok(uuid) = attachment_id_str.parse::<uuid::Uuid>() else {
+                        warn!(attachment_id = %attachment_id_str, "invalid attachment UUID in outbound message");
+                        continue;
+                    };
+                    let attachment_id =
+                        sober_core::types::ConversationAttachmentId::from_uuid(uuid);
+
+                    use sober_core::types::ConversationAttachmentRepo;
+                    match repo.get_by_id(attachment_id).await {
+                        Ok(attachment) => {
+                            match service.blob_store().retrieve(&attachment.blob_key).await {
+                                Ok(data) => {
+                                    outbound_attachments.push(
+                                        sober_gateway::types::OutboundAttachment {
+                                            filename: attachment.filename,
+                                            content_type: attachment.content_type,
+                                            data,
+                                        },
+                                    );
+                                    metrics::counter!(
+                                        "sober_gateway_attachments_fetched_total",
+                                        "kind" => *kind_label,
+                                        "status" => "success",
+                                    )
+                                    .increment(1);
+                                }
+                                Err(e) => {
+                                    error!(error = %e, attachment_id = %attachment_id_str, "failed to retrieve blob");
+                                    metrics::counter!(
+                                        "sober_gateway_attachments_fetched_total",
+                                        "kind" => *kind_label,
+                                        "status" => "error",
+                                    )
+                                    .increment(1);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = %e, attachment_id = %attachment_id_str, "failed to fetch attachment metadata");
+                            metrics::counter!(
+                                "sober_gateway_attachments_fetched_total",
+                                "kind" => *kind_label,
+                                "status" => "error",
+                            )
+                            .increment(1);
+                        }
+                    }
+                }
+
+                if !outbound_attachments.is_empty() {
+                    let msg = sober_gateway::types::PlatformMessage {
+                        text: String::new(),
+                        format: sober_gateway::types::MessageFormat::Markdown,
+                        reply_to: None,
+                        attachments: outbound_attachments,
+                    };
+                    deliver_outbound(service.as_ref(), conversation_id, msg).await;
+                }
+            }
             Some(Event::Done(_)) => {
                 typing_sent.remove(&conversation_id);
                 if let Some(msg) = buffer.flush(&conversation_id) {

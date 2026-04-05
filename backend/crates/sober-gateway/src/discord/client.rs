@@ -110,13 +110,42 @@ impl PlatformBridgeHandle for DiscordBridge {
 
         let channel = ChannelId::new(channel_id);
 
-        // Discord has a 2000-character limit per message. Split at natural
-        // boundaries when possible to avoid breaking markdown.
-        for chunk in split_message(&content.text, DISCORD_MAX_LEN) {
-            channel
-                .say(&self.http, chunk)
-                .await
-                .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+        if content.attachments.is_empty() {
+            // Text-only path — existing behaviour.
+            for chunk in split_message(&content.text, DISCORD_MAX_LEN) {
+                channel
+                    .say(&self.http, chunk)
+                    .await
+                    .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+            }
+        } else {
+            // Send with file attachments. Discord allows max 10 files per message.
+            use serenity::builder::{CreateAttachment, CreateMessage};
+
+            for file_chunk in content.attachments.chunks(10) {
+                let mut msg = CreateMessage::new();
+
+                if !content.text.is_empty() {
+                    let text = if content.text.len() > DISCORD_MAX_LEN {
+                        &content.text[..DISCORD_MAX_LEN]
+                    } else {
+                        &content.text
+                    };
+                    msg = msg.content(text);
+                }
+
+                for attachment in file_chunk {
+                    msg = msg.add_file(CreateAttachment::bytes(
+                        attachment.data.clone(),
+                        &attachment.filename,
+                    ));
+                }
+
+                channel
+                    .send_message(&self.http, msg)
+                    .await
+                    .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+            }
         }
 
         Ok(())
