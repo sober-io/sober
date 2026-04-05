@@ -128,7 +128,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
 
             // For non-human triggers the prompt wasn't stored in the DB,
             // so the context loader didn't include it. Add it explicitly.
-            if params.trigger != TriggerKind::Human {
+            if params.trigger != TriggerKind::Human && !params.content.is_empty() {
                 llm_messages.push(LlmMessage::user(params.content));
             }
 

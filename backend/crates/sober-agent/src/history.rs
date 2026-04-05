@@ -150,6 +150,14 @@ pub fn to_llm_messages(
             MessageRole::Event => continue,
 
             MessageRole::User => {
+                // Skip empty user messages — LLMs reject them.
+                let has_non_text = msg
+                    .content
+                    .iter()
+                    .any(|b| !matches!(b, ContentBlock::Text { .. }));
+                if msg.text_content().is_empty() && !has_non_text {
+                    continue;
+                }
                 result.push(LlmMessage {
                     role: "user".to_owned(),
                     content: Some(resolve_content_blocks(&msg.content, attachments, vision)),
