@@ -16,3 +16,6 @@ scrape_configs:
   - job_name: sober-scheduler
     static_configs:
       - targets: ['sober-scheduler:9101']
+  - job_name: sober-gateway
+    static_configs:
+      - targets: ['sober-gateway:9102']

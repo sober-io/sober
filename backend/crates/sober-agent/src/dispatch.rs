@@ -143,97 +143,107 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                 .or_insert(serde_json::Value::Bool(false));
         }
 
-        let _tool_redacted = req
+        let tool_redacted = req
             .tool_registry
             .get_tool(tool_name)
             .is_some_and(|t| t.metadata().redacted);
 
         // -----------------------------------------------------------
         // Step 1: Write-ahead — create pending tool execution row
+        // (skip for redacted tools — they have no persisted assistant
+        // message, so the FK on conversation_message_id would fail)
         // -----------------------------------------------------------
-        let exec = match ctx
-            .repos
-            .tool_executions()
-            .create_pending(CreateToolExecution {
-                conversation_id: req.conversation_id,
-                conversation_message_id: req.assistant_message_id,
-                tool_call_id: tc.id.clone(),
-                tool_name: tool_name.clone(),
-                input: tool_input.clone(),
-                source: ToolExecutionSource::Builtin,
-                plugin_id: None,
-            })
-            .await
-        {
-            Ok(exec) => exec,
-            Err(e) => {
-                warn!(
-                    tool = %tool_name,
-                    error = %e,
-                    "failed to create pending tool execution row"
-                );
-                // Fall through without write-ahead — push a synthetic error
-                // result so the LLM knows persistence failed.
-                any_errors = true;
-                results.push(ToolResult {
+        let exec = if tool_redacted {
+            None
+        } else {
+            match ctx
+                .repos
+                .tool_executions()
+                .create_pending(CreateToolExecution {
+                    conversation_id: req.conversation_id,
+                    conversation_message_id: req.assistant_message_id,
                     tool_call_id: tc.id.clone(),
-                    name: tool_name.clone(),
-                    output: format!("Internal error: failed to record tool execution: {e}"),
-                    is_error: true,
-                });
-                continue;
+                    tool_name: tool_name.clone(),
+                    input: tool_input.clone(),
+                    source: ToolExecutionSource::Builtin,
+                    plugin_id: None,
+                })
+                .await
+            {
+                Ok(exec) => Some(exec),
+                Err(e) => {
+                    warn!(
+                        tool = %tool_name,
+                        error = %e,
+                        "failed to create pending tool execution row"
+                    );
+                    // Fall through without write-ahead — push a synthetic error
+                    // result so the LLM knows persistence failed.
+                    any_errors = true;
+                    results.push(ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        name: tool_name.clone(),
+                        output: format!("Internal error: failed to record tool execution: {e}"),
+                        is_error: true,
+                    });
+                    continue;
+                }
             }
         };
 
-        let exec_id = exec.id;
-        let exec_id_str = exec_id.to_string();
+        let exec_id = exec.as_ref().map(|e| e.id);
+        let exec_id_str = exec_id.map(|id| id.to_string()).unwrap_or_default();
         let msg_id_str = req.assistant_message_id.to_string();
 
         // -----------------------------------------------------------
         // Step 2: Send pending event (include input so the frontend can display it)
         // -----------------------------------------------------------
-        let input_json = serde_json::to_string(&tool_input).ok();
-        send_execution_update(
-            req.event_tx,
-            &ctx.broadcast_tx,
-            &conv_id_str,
-            &exec_id_str,
-            &msg_id_str,
-            &tc.id,
-            tool_name,
-            ToolExecutionStatus::Pending,
-            None,
-            None,
-            input_json.as_deref(),
-        )
-        .await;
+        if exec.is_some() {
+            let input_json = serde_json::to_string(&tool_input).ok();
+            send_execution_update(
+                req.event_tx,
+                &ctx.broadcast_tx,
+                &conv_id_str,
+                &exec_id_str,
+                &msg_id_str,
+                &tc.id,
+                tool_name,
+                ToolExecutionStatus::Pending,
+                None,
+                None,
+                input_json.as_deref(),
+            )
+            .await;
+        }
 
         // -----------------------------------------------------------
         // Step 3: Transition to running
         // -----------------------------------------------------------
-        if let Err(e) = ctx
-            .repos
-            .tool_executions()
-            .update_status(exec_id, ToolExecutionStatus::Running, None, None)
-            .await
-        {
-            warn!(tool = %tool_name, error = %e, "failed to mark tool execution as running");
-        }
+        if let Some(eid) = exec_id {
+            if let Err(e) = ctx
+                .repos
+                .tool_executions()
+                .update_status(eid, ToolExecutionStatus::Running, None, None)
+                .await
+            {
+                warn!(tool = %tool_name, error = %e, "failed to mark tool execution as running");
+            }
 
-        send_execution_update(
-            req.event_tx,
-            &ctx.broadcast_tx,
-            &conv_id_str,
-            &exec_id_str,
-            &msg_id_str,
-            &tc.id,
-            tool_name,
-            ToolExecutionStatus::Running,
-            None,
-            None,
-            None,
-        )
-        .await;
+            send_execution_update(
+                req.event_tx,
+                &ctx.broadcast_tx,
+                &conv_id_str,
+                &exec_id_str,
+                &msg_id_str,
+                &tc.id,
+                tool_name,
+                ToolExecutionStatus::Running,
+                None,
+                None,
+                None,
+            )
+            .await;
+        }
 
         // Save the command for audit logging before tool_input is potentially moved.
         let shell_command = if tool_name == "shell" {
@@ -293,29 +303,31 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             (Some(output.as_str()), None)
         };
 
-        if let Err(e) = ctx
-            .repos
-            .tool_executions()
-            .update_status(exec_id, final_status, db_output, db_error)
-            .await
-        {
-            warn!(tool = %tool_name, error = %e, "failed to record tool execution result");
-        }
+        if let Some(eid) = exec_id {
+            if let Err(e) = ctx
+                .repos
+                .tool_executions()
+                .update_status(eid, final_status, db_output, db_error)
+                .await
+            {
+                warn!(tool = %tool_name, error = %e, "failed to record tool execution result");
+            }
 
-        send_execution_update(
-            req.event_tx,
-            &ctx.broadcast_tx,
-            &conv_id_str,
-            &exec_id_str,
-            &msg_id_str,
-            &tc.id,
-            tool_name,
-            final_status,
-            if !is_error { Some(&output) } else { None },
-            if is_error { Some(&output) } else { None },
-            None,
-        )
-        .await;
+            send_execution_update(
+                req.event_tx,
+                &ctx.broadcast_tx,
+                &conv_id_str,
+                &exec_id_str,
+                &msg_id_str,
+                &tc.id,
+                tool_name,
+                final_status,
+                if !is_error { Some(&output) } else { None },
+                if is_error { Some(&output) } else { None },
+                None,
+            )
+            .await;
+        }
 
         // Tool results are now persisted via ToolExecution records (Step 4/5 above).
         // No separate Tool-role message is needed.

@@ -55,7 +55,14 @@ impl PlatformBridgeRegistry {
 
     /// Removes the bridge for the given platform.
     pub fn remove(&self, platform_id: &PlatformId) {
-        self.bridges.remove(platform_id);
+        if let Some((_, bridge)) = self.bridges.remove(platform_id) {
+            metrics::gauge!(
+                "sober_gateway_platform_connections",
+                "platform" => bridge.platform_type().to_string(),
+                "status" => "connected",
+            )
+            .decrement(1.0);
+        }
     }
 
     /// Returns the bridge for the given platform, if connected.

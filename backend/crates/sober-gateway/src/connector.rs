@@ -43,17 +43,33 @@ pub async fn connect_platforms(
         )
         .await
         {
-            Ok(()) => info!(
-                platform_id = %platform.id,
-                platform_type = %platform.platform_type,
-                name = %platform.display_name,
-                "platform connected"
-            ),
-            Err(e) => error!(
-                platform_id = %platform.id,
-                error = %e,
-                "failed to connect platform — skipping"
-            ),
+            Ok(()) => {
+                metrics::gauge!(
+                    "sober_gateway_platform_connections",
+                    "platform" => platform.platform_type.to_string(),
+                    "status" => "connected",
+                )
+                .increment(1.0);
+                info!(
+                    platform_id = %platform.id,
+                    platform_type = %platform.platform_type,
+                    name = %platform.display_name,
+                    "platform connected"
+                );
+            }
+            Err(e) => {
+                metrics::gauge!(
+                    "sober_gateway_platform_connections",
+                    "platform" => platform.platform_type.to_string(),
+                    "status" => "disconnected",
+                )
+                .increment(1.0);
+                error!(
+                    platform_id = %platform.id,
+                    error = %e,
+                    "failed to connect platform — skipping"
+                );
+            }
         }
     }
 

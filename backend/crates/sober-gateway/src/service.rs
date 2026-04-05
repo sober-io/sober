@@ -116,8 +116,8 @@ impl GatewayService {
                     .handle_message(platform_id, channel_id, user_id, username, content)
                     .await
                 {
-                    error!(error = %e, "failed to handle inbound message");
-                    metrics::counter!("sober_gateway_inbound_errors_total").increment(1);
+                    error!(error = %e, platform_id = %platform_id, "failed to handle inbound message");
+                    metrics::counter!("sober_gateway_inbound_errors_total", "platform" => platform_id.to_string()).increment(1);
                 }
             }
             GatewayEvent::ChannelDeleted {
@@ -154,7 +154,7 @@ impl GatewayService {
                     channel_id = %channel_id,
                     "ignoring message for unmapped channel"
                 );
-                metrics::counter!("sober_gateway_unmapped_messages_total").increment(1);
+                metrics::counter!("sober_gateway_unmapped_messages_total", "platform" => platform_id.to_string()).increment(1);
                 return Ok(());
             }
         };
@@ -191,8 +191,15 @@ impl GatewayService {
             .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
 
         let elapsed = start.elapsed().as_secs_f64();
-        metrics::histogram!("sober_gateway_message_handle_duration_seconds").record(elapsed);
-        metrics::counter!("sober_gateway_messages_received_total", "status" => "success")
+        // Use platform_id as label since we don't have platform_type here.
+        // The dashboard can join on this or we resolve the type from the registry.
+        let platform_label = self
+            .bridge_registry
+            .get(&platform_id)
+            .map(|b| b.platform_type().to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        metrics::histogram!("sober_gateway_message_handle_duration_seconds", "platform" => platform_label.clone()).record(elapsed);
+        metrics::counter!("sober_gateway_messages_received_total", "platform" => platform_label, "status" => "success")
             .increment(1);
 
         debug!(

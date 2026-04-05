@@ -155,6 +155,8 @@ async fn deliver_outbound(
 
     for (platform_id, channel_id) in targets {
         if let Some(bridge) = service.bridge_registry().get(&platform_id) {
+            let platform_label = bridge.platform_type().to_string();
+            let start = std::time::Instant::now();
             if let Err(e) = bridge.send_message(&channel_id, msg.clone()).await {
                 error!(
                     error = %e,
@@ -162,10 +164,12 @@ async fn deliver_outbound(
                     channel_id = %channel_id,
                     "failed to deliver outbound message"
                 );
-                metrics::counter!("sober_gateway_platform_errors_total", "platform" => "unknown", "error_type" => "sdk").increment(1);
+                metrics::counter!("sober_gateway_platform_errors_total", "platform" => platform_label.clone(), "error_type" => "sdk").increment(1);
+                metrics::counter!("sober_gateway_messages_sent_total", "platform" => platform_label.clone(), "status" => "error").increment(1);
             } else {
-                metrics::counter!("sober_gateway_messages_sent_total", "platform" => "unknown", "status" => "success").increment(1);
+                metrics::counter!("sober_gateway_messages_sent_total", "platform" => platform_label.clone(), "status" => "success").increment(1);
             }
+            metrics::histogram!("sober_gateway_message_delivery_duration_seconds", "platform" => platform_label).record(start.elapsed().as_secs_f64());
         }
     }
 }
