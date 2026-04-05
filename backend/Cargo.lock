@@ -5305,6 +5305,8 @@ dependencies = [
  "serde_json",
  "sha2",
  "sober-core",
+ "sober-db",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

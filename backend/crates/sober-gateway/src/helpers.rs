@@ -110,6 +110,7 @@ async fn run_outbound_stream(
                         text: prefixed,
                         format: sober_gateway::types::MessageFormat::Markdown,
                         reply_to: None,
+                        attachments: Vec::new(),
                     };
                     deliver_outbound(service.as_ref(), conversation_id, msg).await;
                 }

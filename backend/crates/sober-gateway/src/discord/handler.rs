@@ -63,6 +63,7 @@ impl EventHandler for DiscordHandler {
             user_id: msg.author.id.to_string(),
             username: msg.author.name.clone(),
             content: msg.content.clone(),
+            attachments: vec![],
         };
 
         if let Err(e) = self.event_tx.send(event).await {

@@ -111,9 +111,17 @@ impl GatewayService {
                 user_id,
                 username,
                 content,
+                attachments,
             } => {
                 if let Err(e) = self
-                    .handle_message(platform_id, channel_id, user_id, username, content)
+                    .handle_message(
+                        platform_id,
+                        channel_id,
+                        user_id,
+                        username,
+                        content,
+                        attachments,
+                    )
                     .await
                 {
                     error!(error = %e, platform_id = %platform_id, "failed to handle inbound message");
@@ -139,6 +147,7 @@ impl GatewayService {
         external_user_id: String,
         _username: String,
         content: String,
+        _attachments: Vec<crate::types::InboundAttachment>,
     ) -> Result<(), GatewayError> {
         let start = std::time::Instant::now();
 

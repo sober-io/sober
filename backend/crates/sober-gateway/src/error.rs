@@ -21,6 +21,15 @@ pub enum GatewayError {
         platform_id: String,
         channel_id: String,
     },
+
+    #[error("attachment download failed: {0}")]
+    AttachmentDownloadFailed(String),
+
+    #[error("attachment store failed: {0}")]
+    AttachmentStoreFailed(String),
+
+    #[error("attachment fetch failed: {0}")]
+    AttachmentFetchFailed(String),
 }
 
 impl From<GatewayError> for AppError {

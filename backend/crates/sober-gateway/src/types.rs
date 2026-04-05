@@ -2,6 +2,28 @@
 
 use sober_core::types::PlatformId;
 
+/// An attachment downloaded from an external platform.
+#[derive(Debug)]
+pub struct InboundAttachment {
+    /// Original filename from the platform.
+    pub filename: String,
+    /// MIME content type reported by the platform.
+    pub content_type: Option<String>,
+    /// Raw file bytes (already downloaded from platform CDN).
+    pub data: Vec<u8>,
+}
+
+/// An attachment to send to an external platform.
+#[derive(Debug, Clone)]
+pub struct OutboundAttachment {
+    /// Filename to present on the platform.
+    pub filename: String,
+    /// MIME content type.
+    pub content_type: String,
+    /// Raw file bytes.
+    pub data: Vec<u8>,
+}
+
 /// Events emitted by platform bridges into the gateway event loop.
 #[derive(Debug)]
 pub enum GatewayEvent {
@@ -17,6 +39,8 @@ pub enum GatewayEvent {
         username: String,
         /// The message text content.
         content: String,
+        /// File attachments from the platform message.
+        attachments: Vec<InboundAttachment>,
     },
     /// An external channel was deleted and its mapping should be removed.
     ChannelDeleted {
@@ -36,6 +60,8 @@ pub struct PlatformMessage {
     pub format: MessageFormat,
     /// Optional external message ID to reply to.
     pub reply_to: Option<String>,
+    /// File attachments to send with the message.
+    pub attachments: Vec<OutboundAttachment>,
 }
 
 /// Message formatting options for external platforms.
