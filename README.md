@@ -92,13 +92,15 @@ just build    # Build all targets
 
 ```mermaid
 flowchart TD
-    Clients["Clients\n(PWA · CLI · Discord · WhatsApp · API)"]
+    Clients["Clients\n(PWA · CLI · API)"]
+    Platforms["External Platforms\n(Discord · Telegram · Matrix · WhatsApp)"]
     Web["sober-web\n(reverse proxy + static files)"]
     API["sober-api\n(HTTP/WS gateway)"]
     Agent["sober-agent\n(orchestrator)"]
     Auth["sober-auth"]
     Plugin["sober-plugin"]
     Scheduler["sober-scheduler\n(tick engine)"]
+    Gateway["sober-gateway\n(platform bridge)"]
     Memory["sober-memory"]
     Crypto["sober-crypto"]
     LLM["sober-llm"]
@@ -110,6 +112,8 @@ flowchart TD
     API --> Auth
     API --> Plugin
     Scheduler -->|gRPC| Agent
+    Gateway -->|gRPC| Agent
+    Platforms --> Gateway
     Agent --> Memory
     Agent --> Crypto
     Agent --> LLM
