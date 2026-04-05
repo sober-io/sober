@@ -162,7 +162,7 @@ impl Tool for ActivateSkillTool {
                 "required": ["name"]
             }),
             context_modifying: false,
-            redacted: true,
+            redacted: false,
             visibility: ToolVisibility::Public,
         }
     }
@@ -288,7 +288,7 @@ mod tests {
 
         assert_eq!(meta.name, "activate_skill");
         assert!(!meta.context_modifying);
-        assert!(meta.redacted);
+        assert!(!meta.redacted);
 
         let schema = &meta.input_schema;
         let enum_values = schema["properties"]["name"]["enum"].as_array().unwrap();
