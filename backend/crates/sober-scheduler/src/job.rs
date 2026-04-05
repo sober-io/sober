@@ -25,14 +25,18 @@ impl JobSchedule {
     /// Parse a schedule string.
     ///
     /// Interval format: `"every: <duration>"` where duration is like `30s`, `5m`, `1h`.
-    /// Cron format: a standard cron expression (5 or 7 fields).
+    /// Cron format: a standard cron expression. Accepts 5-field (min hour dom month dow),
+    /// 6-field (sec min hour dom month dow), or 7-field (sec min hour dom month dow year).
+    /// 5-field expressions are expanded by prepending `0` (seconds) and appending `*` (year).
+    /// 6-field expressions get `*` (year) appended.
     pub fn parse(s: &str) -> Result<Self, SchedulerError> {
         let trimmed = s.trim();
         if let Some(interval_str) = trimmed.strip_prefix("every:") {
             let dur = parse_duration(interval_str.trim())?;
             Ok(JobSchedule::Interval(dur))
         } else {
-            let schedule = cron::Schedule::from_str(trimmed)
+            let cron_expr = normalize_cron(trimmed);
+            let schedule = cron::Schedule::from_str(&cron_expr)
                 .map_err(|e| SchedulerError::InvalidCron(format!("{trimmed}: {e}")))?;
             Ok(JobSchedule::Cron(Box::new(schedule)))
         }
@@ -70,6 +74,20 @@ impl JobSchedule {
 impl fmt::Display for JobSchedule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_schedule_string())
+    }
+}
+
+/// Normalize a cron expression to the 7-field format required by the `cron` crate.
+///
+/// - 5 fields (standard): `min hour dom month dow` → `0 min hour dom month dow *`
+/// - 6 fields: `sec min hour dom month dow` → `sec min hour dom month dow *`
+/// - 7 fields: passed through as-is.
+fn normalize_cron(s: &str) -> String {
+    let fields: Vec<&str> = s.split_whitespace().collect();
+    match fields.len() {
+        5 => format!("0 {s} *"),
+        6 => format!("{s} *"),
+        _ => s.to_owned(),
     }
 }
 
@@ -134,6 +152,18 @@ mod tests {
     #[test]
     fn parse_cron_expression() {
         let schedule = JobSchedule::parse("0 0 9 * * MON-FRI *").unwrap();
+        assert!(matches!(schedule, JobSchedule::Cron(_)));
+    }
+
+    #[test]
+    fn parse_cron_5_field() {
+        let schedule = JobSchedule::parse("0 8 * * *").unwrap();
+        assert!(matches!(schedule, JobSchedule::Cron(_)));
+    }
+
+    #[test]
+    fn parse_cron_6_field() {
+        let schedule = JobSchedule::parse("0 0 9 * * MON-FRI").unwrap();
         assert!(matches!(schedule, JobSchedule::Cron(_)));
     }
 
