@@ -398,15 +398,20 @@ async fn delete_collection_removes_conversation_memories() {
         .unwrap();
 
     // Verify it exists
-    let query = StoreQuery {
-        dense_vector: vec![0.4; 128],
-        query_text: "ephemeral fact".to_owned(),
-        scope_id: conv_scope,
-        limit: 10,
-        score_threshold: None,
-        chunk_type_filter: None,
-    };
-    let before = store.search(user_id, query.clone()).await.unwrap();
+    let before = store
+        .search(
+            user_id,
+            StoreQuery {
+                dense_vector: vec![0.4; 128],
+                query_text: "ephemeral fact".to_owned(),
+                scope_id: conv_scope,
+                limit: 10,
+                score_threshold: None,
+                chunk_type_filter: None,
+            },
+        )
+        .await
+        .unwrap();
     assert!(!before.is_empty(), "chunk should exist before deletion");
 
     // Delete the conversation collection
@@ -414,7 +419,20 @@ async fn delete_collection_removes_conversation_memories() {
     store.delete_collection(&coll_name).await.unwrap();
 
     // After deletion, search should return empty (collection gone)
-    let after = store.search(user_id, query).await.unwrap();
+    let after = store
+        .search(
+            user_id,
+            StoreQuery {
+                dense_vector: vec![0.4; 128],
+                query_text: "ephemeral fact".to_owned(),
+                scope_id: conv_scope,
+                limit: 10,
+                score_threshold: None,
+                chunk_type_filter: None,
+            },
+        )
+        .await
+        .unwrap();
     assert!(
         after.is_empty(),
         "no results should be returned after collection deletion"

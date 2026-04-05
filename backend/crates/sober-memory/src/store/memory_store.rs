@@ -909,6 +909,7 @@ impl MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sober_core::ConversationId;
 
     fn test_store() -> MemoryStore {
         MemoryStore {
