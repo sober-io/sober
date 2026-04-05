@@ -48,6 +48,46 @@ type = "histogram"
 description = "Size of buffered content flushed to platforms."
 labels = ["platform"]
 
+[group.gateway_attachments]
+name = "Attachment Processing"
+description = "Inbound download, storage, and outbound retrieval of media attachments."
+
+[[group.gateway_attachments.metrics]]
+name = "sober_gateway_attachments_downloaded_total"
+type = "counter"
+description = "Number of attachments downloaded from platform CDNs."
+labels = ["platform", "status"]
+# platform: discord, telegram, matrix, whatsapp
+# status: success, error
+
+[[group.gateway_attachments.metrics]]
+name = "sober_gateway_attachments_stored_total"
+type = "counter"
+description = "Number of attachments stored via the shared pipeline."
+labels = ["platform", "kind", "status"]
+# kind: image, audio, video, document
+# status: success
+
+[[group.gateway_attachments.metrics]]
+name = "sober_gateway_attachments_fetched_total"
+type = "counter"
+description = "Number of attachments fetched from blob store for outbound delivery."
+labels = ["kind", "status"]
+# kind: image, audio, video, document
+# status: success, error
+
+[[group.gateway_attachments.metrics]]
+name = "sober_gateway_attachment_download_duration_seconds"
+type = "histogram"
+description = "Time to download attachments from platform CDNs."
+labels = ["platform"]
+
+[[group.gateway_attachments.metrics]]
+name = "sober_gateway_attachment_download_bytes"
+type = "histogram"
+description = "Size of downloaded attachments in bytes."
+labels = ["platform"]
+
 [group.gateway_platforms]
 name = "Platform Connections"
 description = "Platform bridge connection state."
