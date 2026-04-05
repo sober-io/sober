@@ -19,7 +19,9 @@ use sober_core::config::{MemoryConfig, QdrantConfig};
 use sober_core::{ScopeId, UserId};
 
 use super::bm25;
-use super::collections::{system_collection_name, user_collection_name};
+use super::collections::{
+    conversation_collection_name, system_collection_name, user_collection_name,
+};
 use super::types::ChunkType;
 use super::types::{MemoryHit, StoreChunk, StoreQuery};
 use crate::error::MemoryError;
@@ -94,8 +96,10 @@ impl MemoryStore {
         let chunk_type_label = chunk.chunk_type.to_string();
         let scope_label = if chunk.scope_id == sober_core::ScopeId::GLOBAL {
             "global"
-        } else {
+        } else if chunk.scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
             "user"
+        } else {
+            "conversation"
         };
 
         let collection = self.collection_for_scope(user_id, chunk.scope_id);
@@ -150,8 +154,10 @@ impl MemoryStore {
 
         let scope_label = if query.scope_id == sober_core::ScopeId::GLOBAL {
             "global"
-        } else {
+        } else if query.scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
             "user"
+        } else {
+            "conversation"
         };
         let search_type = "hybrid";
         let start = Instant::now();
@@ -377,8 +383,10 @@ impl MemoryStore {
     fn collection_for_scope(&self, user_id: UserId, scope_id: ScopeId) -> String {
         if scope_id == ScopeId::GLOBAL {
             system_collection_name().to_owned()
-        } else {
+        } else if scope_id == ScopeId::from_uuid(*user_id.as_uuid()) {
             user_collection_name(user_id)
+        } else {
+            conversation_collection_name(scope_id)
         }
     }
 
@@ -513,5 +521,51 @@ impl MemoryStore {
             created_at,
             decay_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sober_core::{ConversationId, ScopeId, UserId};
+
+    fn test_store() -> MemoryStore {
+        MemoryStore {
+            client: Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()),
+            dense_vector_size: 128,
+        }
+    }
+
+    #[test]
+    fn collection_for_scope_routes_global_to_system() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let name = store.collection_for_scope(user_id, ScopeId::GLOBAL);
+        assert_eq!(name, "system");
+    }
+
+    #[test]
+    fn collection_for_scope_routes_user_to_user_collection() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let user_scope = ScopeId::from_uuid(*user_id.as_uuid());
+        let name = store.collection_for_scope(user_id, user_scope);
+        assert!(
+            name.starts_with("user_"),
+            "expected user_ prefix, got {name}"
+        );
+    }
+
+    #[test]
+    fn collection_for_scope_routes_conversation_to_conv_collection() {
+        let store = test_store();
+        let user_id = UserId::new();
+        let conv_id = ConversationId::new();
+        let conv_scope = ScopeId::from_uuid(*conv_id.as_uuid());
+        let name = store.collection_for_scope(user_id, conv_scope);
+        assert!(
+            name.starts_with("conv_"),
+            "expected conv_ prefix, got {name}"
+        );
     }
 }
