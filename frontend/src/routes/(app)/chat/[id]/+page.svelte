@@ -577,6 +577,10 @@
 					last.streaming = false;
 					last.thinking = false;
 					last.id = msg.message_id;
+					// Replace streamed content with cleaned text (extraction blocks stripped).
+					if (msg.content) {
+						last.content = msg.content;
+					}
 					// Convert accumulated streaming text to contentBlocks
 					if (!last.contentBlocks && last.content) {
 						last.contentBlocks = [{ type: 'text', text: last.content }];

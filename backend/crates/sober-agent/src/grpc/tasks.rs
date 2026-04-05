@@ -338,6 +338,7 @@ pub(crate) async fn send_done_stub(
 ) {
     let done = to_proto_event(AgentEvent::Done {
         message_id: sober_core::MessageId::new(),
+        content: None,
         usage: crate::stream::Usage {
             prompt_tokens: 0,
             completion_tokens: 0,
@@ -377,6 +378,7 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
         }),
         AgentEvent::Done {
             message_id,
+            content,
             usage,
             artifact_ref,
         } => Event::Done(proto::Done {
@@ -384,6 +386,7 @@ pub(crate) fn to_proto_event(event: AgentEvent) -> proto::AgentEvent {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
             artifact_ref: artifact_ref.unwrap_or_default(),
+            content: content.unwrap_or_default(),
         }),
         AgentEvent::TitleGenerated(title) => Event::TitleGenerated(proto::TitleGenerated { title }),
         AgentEvent::ConfirmRequest {

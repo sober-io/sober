@@ -456,12 +456,11 @@ impl Tool for RememberTool {
     fn metadata(&self) -> ToolMetadata {
         ToolMetadata {
             name: "remember".to_owned(),
-            description: "Store important information in long-term memory. Most extraction \
-                happens automatically via extraction blocks, but use this tool directly when:\n\
-                - The user explicitly asks you to remember something\n\
-                - You need to store something complex that benefits from precise wording\n\
-                - You want to store with a specific importance score or chunk type\n\
-                - You realize mid-conversation that an earlier fact should be stored\n\n\
+            description: "Store information in long-term memory. ONLY use this tool when \
+                the user EXPLICITLY asks you to remember something (e.g. \"remember that...\", \
+                \"store this\", \"save this for later\"). For all other memory extraction, \
+                use <memory_extractions> blocks at the end of your response — never call \
+                this tool as a substitute for extraction blocks.\n\n\
                 Scope: 'user' (default) for personal details about the user. 'system' for \
                 knowledge about yourself — capabilities, configuration, learned behaviors."
                 .to_owned(),

@@ -321,6 +321,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             let _ = event_tx
                 .send(Ok(AgentEvent::Done {
                     message_id: user_msg_id,
+                    content: None,
                     usage: Usage {
                         prompt_tokens: 0,
                         completion_tokens: 0,

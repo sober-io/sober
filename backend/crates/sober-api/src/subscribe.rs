@@ -155,6 +155,11 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
         proto::conversation_update::Event::Done(done) => Some(ServerWsMessage::ChatDone {
             conversation_id: cid,
             message_id: done.message_id,
+            content: if done.content.is_empty() {
+                None
+            } else {
+                Some(done.content)
+            },
         }),
         proto::conversation_update::Event::ThinkingDelta(td) => {
             Some(ServerWsMessage::ChatThinking {

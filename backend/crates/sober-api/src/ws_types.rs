@@ -55,6 +55,9 @@ pub enum ServerWsMessage {
         conversation_id: String,
         /// ID of the stored assistant message.
         message_id: String,
+        /// Final cleaned content (extraction blocks stripped). Empty if unchanged.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
     },
     /// Thinking/reasoning content from the model.
     #[serde(rename = "chat.thinking")]

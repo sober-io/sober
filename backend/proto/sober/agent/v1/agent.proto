@@ -115,7 +115,7 @@ message ToolExecutionUpdate {
   optional string error = 7;
   optional string input = 8;        // JSON-encoded tool arguments
 }
-message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; string artifact_ref = 4; }
+message Done { string message_id = 1; uint32 prompt_tokens = 2; uint32 completion_tokens = 3; string artifact_ref = 4; string content = 5; }
 message Error { string message = 1; }
 message ThinkingDelta { string content = 1; }
 message TitleGenerated { string title = 1; }

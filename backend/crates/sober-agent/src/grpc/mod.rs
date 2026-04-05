@@ -337,6 +337,7 @@ mod tests {
     fn to_proto_event_done() {
         let event = AgentEvent::Done {
             message_id: MessageId::new(),
+            content: None,
             usage: crate::stream::Usage {
                 prompt_tokens: 100,
                 completion_tokens: 50,

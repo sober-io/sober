@@ -500,6 +500,11 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             .event_tx
             .send(Ok(AgentEvent::Done {
                 message_id: assistant_msg_id,
+                content: if text != content_buffer {
+                    Some(text.clone())
+                } else {
+                    None
+                },
                 usage: Usage {
                     prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                     completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
@@ -514,6 +519,11 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                 completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
                 artifact_ref: String::new(),
+                content: if text != content_buffer {
+                    text.clone()
+                } else {
+                    String::new()
+                },
             })),
         });
 

@@ -47,6 +47,8 @@ pub enum AgentEvent {
     Done {
         /// Unique identifier for the resulting message.
         message_id: MessageId,
+        /// Final cleaned text (extraction blocks stripped).
+        content: Option<String>,
         /// Token usage statistics.
         usage: Usage,
         /// Optional reference to a stored artifact (e.g. workspace blob path).

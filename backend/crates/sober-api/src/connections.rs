@@ -164,6 +164,7 @@ mod tests {
         let msg = ServerWsMessage::ChatDone {
             conversation_id: "conv-1".to_owned(),
             message_id: "msg-1".to_owned(),
+            content: None,
         };
         let delivered = registry.send("conv-1", msg).await;
         assert_eq!(delivered, 1);

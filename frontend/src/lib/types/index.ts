@@ -157,7 +157,7 @@ export type ServerWsMessage =
 			error?: string;
 			input?: string;
 	  }
-	| { type: 'chat.done'; conversation_id: string; message_id: string }
+	| { type: 'chat.done'; conversation_id: string; message_id: string; content?: string }
 	| {
 			type: 'chat.new_message';
 			conversation_id: string;
