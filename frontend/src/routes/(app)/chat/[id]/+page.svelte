@@ -864,7 +864,7 @@
 		<div
 			bind:this={messagesContainer}
 			onscroll={handleScroll}
-			class="h-full space-y-4 overflow-y-auto p-4"
+			class="h-full space-y-4 overflow-y-auto overflow-x-hidden p-4"
 		>
 			<div bind:this={sentinel}></div>
 

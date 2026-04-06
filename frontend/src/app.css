@@ -68,6 +68,10 @@
 }
 
 /* Shiki code blocks inside tool call panels */
+.tool-code {
+	max-width: 100%;
+}
+
 .tool-code pre.shiki {
 	border-radius: 0.375rem;
 	padding: 0.5rem 0.75rem;

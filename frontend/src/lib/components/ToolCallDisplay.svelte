@@ -34,14 +34,6 @@
 	});
 
 	const OUTPUT_LIMIT = 2000;
-	const isOutputTruncated = $derived(
-		displayOutput !== undefined && displayOutput.length > OUTPUT_LIMIT
-	);
-	const visibleOutput = $derived.by(() => {
-		if (displayOutput === undefined) return undefined;
-		if (outputExpanded || displayOutput.length <= OUTPUT_LIMIT) return displayOutput;
-		return displayOutput.slice(0, OUTPUT_LIMIT);
-	});
 
 	/** Try to pretty-print a string as JSON. Returns null if not valid JSON. */
 	function tryFormatJson(str: string): string | null {
@@ -53,6 +45,23 @@
 			return null;
 		}
 	}
+
+	/** Full output, pretty-printed if JSON. */
+	const formattedDisplayOutput = $derived.by(() => {
+		if (displayOutput === undefined) return undefined;
+		const asJson = tryFormatJson(displayOutput);
+		return asJson ?? displayOutput;
+	});
+
+	const isOutputTruncated = $derived(
+		formattedDisplayOutput !== undefined && formattedDisplayOutput.length > OUTPUT_LIMIT
+	);
+	const visibleOutput = $derived.by(() => {
+		if (formattedDisplayOutput === undefined) return undefined;
+		if (outputExpanded || formattedDisplayOutput.length <= OUTPUT_LIMIT)
+			return formattedDisplayOutput;
+		return formattedDisplayOutput.slice(0, OUTPUT_LIMIT);
+	});
 
 	/** Highlight code with shiki if available, otherwise escape for <pre>. */
 	function highlightCode(code: string, lang: string): string {
@@ -74,13 +83,13 @@
 		return highlightCode(json, 'json');
 	});
 
-	/** Try to detect and highlight output content. */
+	/** Highlight output content (shiki for JSON, escaped HTML otherwise). */
 	const formattedOutput = $derived.by(() => {
 		if (visibleOutput === undefined) return undefined;
 		const _v = highlighterReady.version; // re-derive when shiki loads
 		void _v;
-		const asJson = tryFormatJson(visibleOutput);
-		if (asJson) return { html: highlightCode(asJson, 'json'), isHighlighted: true };
+		const outputIsJson = displayOutput !== undefined && tryFormatJson(displayOutput) !== null;
+		if (outputIsJson) return { html: highlightCode(visibleOutput, 'json'), isHighlighted: true };
 		return { html: escapeHtml(visibleOutput), isHighlighted: false };
 	});
 </script>
@@ -134,7 +143,7 @@
 	</button>
 
 	{#if expanded}
-		<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
+		<div class="min-w-0 overflow-hidden border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
 			<!-- eslint-disable svelte/no-at-html-tags -- shiki-highlighted or manually escaped -->
 			<div class="tool-code max-h-60 overflow-auto whitespace-pre-wrap break-words rounded text-xs">
@@ -161,7 +170,7 @@
 						onclick={() => (outputExpanded = true)}
 						class="mt-1 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
 					>
-						Show full output ({displayOutput?.length.toLocaleString()} chars)
+						Show full output ({formattedDisplayOutput?.length.toLocaleString()} chars)
 					</button>
 				{/if}
 			{/if}
