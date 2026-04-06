@@ -190,12 +190,22 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             // delivered them inline to avoid showing them twice in the UI.
             // Only forward user messages from the gateway (Discord/Telegram/etc.)
             // so they appear in the web UI in real-time.
-            if nm.role() == proto::MessageRole::User && nm.source != "gateway" {
+            if nm.role() == proto::MessageRole::User && nm.source() != proto::MessageSource::Gateway
+            {
                 return None;
             }
 
-            // Parse the proto source string into the typed enum.
-            let source: MessageSource = nm.source.parse().unwrap_or(MessageSource::Web);
+            // Convert proto enum to domain enum.
+            let source: MessageSource = match nm.source() {
+                proto::MessageSource::Web | proto::MessageSource::Unspecified => MessageSource::Web,
+                proto::MessageSource::Gateway => MessageSource::Gateway,
+                proto::MessageSource::Scheduler => MessageSource::Scheduler,
+                proto::MessageSource::Cli => MessageSource::Cli,
+                proto::MessageSource::Replica => MessageSource::Replica,
+                proto::MessageSource::Admin => MessageSource::Admin,
+                proto::MessageSource::Human => MessageSource::Web,
+                proto::MessageSource::System => MessageSource::Web,
+            };
 
             let content: Vec<ContentBlock> = nm
                 .content
@@ -263,7 +273,7 @@ mod tests {
                             text: "hi".to_owned(),
                         })),
                     }],
-                    source: "scheduler".to_owned(),
+                    source: proto::MessageSource::Scheduler.into(),
                     user_id: None,
                 },
             )),

@@ -390,7 +390,7 @@ impl<R: AgentRepos> Agent<R> {
         conversation_id: ConversationId,
         content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
-        source: String,
+        source: i32,
     ) -> Result<AgentResponseStream, AgentError> {
         let start = std::time::Instant::now();
 

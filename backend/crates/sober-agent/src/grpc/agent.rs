@@ -70,8 +70,8 @@ pub(crate) async fn handle_message<R: AgentRepos>(
 
     let agent = Arc::clone(service.agent());
     let content_blocks = content_blocks::proto_to_domain(&req.content);
-    let source = if req.source.is_empty() {
-        "web".to_owned()
+    let source = if req.source == proto::MessageSource::Unspecified as i32 {
+        proto::MessageSource::Web as i32
     } else {
         req.source
     };

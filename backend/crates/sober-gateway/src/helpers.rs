@@ -40,7 +40,7 @@ async fn run_outbound_stream(
     agent_channel: tonic::transport::Channel,
 ) -> Result<()> {
     use sober_gateway::agent_proto::{
-        MessageRole, SubscribeRequest, agent_service_client::AgentServiceClient,
+        MessageRole, MessageSource, SubscribeRequest, agent_service_client::AgentServiceClient,
         conversation_update::Event,
     };
 
@@ -73,7 +73,7 @@ async fn run_outbound_stream(
         match update.event {
             Some(Event::NewMessage(ref nm)) if nm.role() == MessageRole::User => {
                 // Skip messages that originated from this gateway to avoid echo.
-                if nm.source == "gateway" {
+                if nm.source() == MessageSource::Gateway {
                     continue;
                 }
 

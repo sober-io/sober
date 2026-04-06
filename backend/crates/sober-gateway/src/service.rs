@@ -267,7 +267,7 @@ impl GatewayService {
             user_id: user_id.to_string(),
             conversation_id: mapping.conversation_id.to_string(),
             content: content_blocks,
-            source: "gateway".to_owned(),
+            source: crate::agent_proto::MessageSource::Gateway.into(),
         };
 
         let mut client = self.agent_client.clone();

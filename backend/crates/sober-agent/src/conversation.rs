@@ -48,8 +48,8 @@ pub enum InboxMessage {
         content: Vec<ContentBlock>,
         /// What triggered this interaction (Human, Scheduler, Admin, Replica).
         trigger: TriggerKind,
-        /// Origin identifier for the message (e.g. "web", "gateway", "cli").
-        source: String,
+        /// Proto `MessageSource` enum value identifying the origin.
+        source: i32,
         /// Channel for streaming [`AgentEvent`]s back to the caller.
         event_tx: mpsc::Sender<Result<AgentEvent, AgentError>>,
     },
@@ -178,7 +178,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         user_id: UserId,
         content: Vec<ContentBlock>,
         trigger: TriggerKind,
-        source: String,
+        source: i32,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) {
         let request_start = Instant::now();
@@ -190,7 +190,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         };
 
         let result = self
-            .handle_message_inner(user_id, &content, trigger, &source, event_tx)
+            .handle_message_inner(user_id, &content, trigger, source, event_tx)
             .await;
 
         let status_label = if result.is_ok() { "success" } else { "error" };
@@ -231,7 +231,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         user_id: UserId,
         content: &[ContentBlock],
         trigger: TriggerKind,
-        source: &str,
+        source: i32,
         event_tx: &mpsc::Sender<Result<AgentEvent, AgentError>>,
     ) -> Result<(), AgentError> {
         // Extract text for injection checking and other text-based operations.
@@ -293,7 +293,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                         message_id: user_msg.id.to_string(),
                         role: proto::MessageRole::User.into(),
                         content: crate::grpc::content_blocks::domain_to_proto(content),
-                        source: source.to_owned(),
+                        source,
                         user_id: Some(user_id.to_string()),
                     },
                 )),

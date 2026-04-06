@@ -99,7 +99,7 @@ impl WsDispatchService {
             user_id: user_id.to_string(),
             conversation_id: conv_id_str.clone(),
             content: proto_blocks,
-            source: "web".to_owned(),
+            source: proto::MessageSource::Web.into(),
         });
 
         let span = tracing::info_span!(
