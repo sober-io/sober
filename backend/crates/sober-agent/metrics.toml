@@ -94,6 +94,24 @@ description = "Evolution reverts by type."
 labels = ["type"]
 # type: plugin, skill, instruction, automation
 
+[group.fetch_url]
+name = "URL Fetching"
+description = "Metrics for the fetch_url tool: HTTP method/status breakdown and response sizes."
+
+[[group.fetch_url.metrics]]
+name = "sober_agent_tool_fetch_url_requests_total"
+type = "counter"
+description = "Total fetch_url HTTP requests by method and response status class."
+labels = ["method", "status_class"]
+# method: GET, POST, PUT, PATCH, DELETE, HEAD
+# status_class: 2xx, 3xx, 4xx, 5xx, network_error
+
+[[group.fetch_url.metrics]]
+name = "sober_agent_tool_fetch_url_response_bytes"
+type = "histogram"
+description = "Response body size in bytes for fetch_url requests."
+labels = []
+
 [group.vision]
 name = "Vision"
 description = "Metrics for multimodal vision content block resolution."

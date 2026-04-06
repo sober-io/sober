@@ -1,7 +1,8 @@
-//! URL fetching tool implementation.
+//! HTTP request tool implementation.
 //!
-//! Fetches the content of a URL, validates content type and size, strips HTML
-//! tags when applicable, and truncates output to fit within LLM context limits.
+//! Makes HTTP requests (GET, POST, PUT, PATCH, DELETE, HEAD) with optional
+//! headers and body. Validates content type and size, strips HTML tags when
+//! applicable, and truncates output to fit within LLM context limits.
 
 use std::time::Duration;
 
@@ -191,7 +192,7 @@ impl Tool for FetchUrlTool {
         ToolMetadata {
             name: "fetch_url".to_owned(),
             description:
-                "Fetch the content of a URL. Supports text-based content types including HTML, plain text, JSON, XML, YAML, and more."
+                "Make an HTTP request to a URL. Supports GET, POST, PUT, PATCH, DELETE, and HEAD methods. Supports text-based content types including HTML, plain text, JSON, XML, YAML, and more."
                     .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -199,6 +200,22 @@ impl Tool for FetchUrlTool {
                     "url": {
                         "type": "string",
                         "description": "The URL to fetch (must start with http:// or https://)."
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method. Defaults to GET.",
+                        "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+                    },
+                    "headers": {
+                        "type": "object",
+                        "description": "Optional HTTP headers to include in the request (e.g. {\"Authorization\": \"Bearer token\", \"Content-Type\": \"application/json\"}).",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional request body. Typically used with POST, PUT, or PATCH."
                     }
                 },
                 "required": ["url"]
@@ -233,12 +250,72 @@ impl FetchUrlTool {
             ));
         }
 
-        let resp = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("HTTP request failed: {e}")))?;
+        let method = input
+            .get("method")
+            .and_then(|v| v.as_str())
+            .unwrap_or("GET");
+
+        let mut request = match method {
+            "GET" => self.client.get(url),
+            "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
+            "PATCH" => self.client.patch(url),
+            "DELETE" => self.client.delete(url),
+            "HEAD" => self.client.head(url),
+            _ => {
+                return Err(ToolError::InvalidInput(format!(
+                    "unsupported HTTP method: {method}"
+                )));
+            }
+        };
+
+        // Apply optional custom headers.
+        if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
+            for (key, value) in headers {
+                let value_str = value.as_str().ok_or_else(|| {
+                    ToolError::InvalidInput(format!("header value for '{key}' must be a string"))
+                })?;
+                request = request.header(key.as_str(), value_str);
+            }
+        }
+
+        // Apply optional request body.
+        if let Some(body) = input.get("body").and_then(|v| v.as_str()) {
+            request = request.body(body.to_owned());
+        }
+
+        let resp = request.send().await.map_err(|e| {
+            metrics::counter!(
+                "sober_agent_tool_fetch_url_requests_total",
+                "method" => method.to_owned(),
+                "status_class" => "network_error",
+            )
+            .increment(1);
+            ToolError::ExecutionFailed(format!("HTTP request failed: {e}"))
+        })?;
+
+        let status = resp.status();
+        let status_class = format!("{}xx", status.as_u16() / 100);
+        metrics::counter!(
+            "sober_agent_tool_fetch_url_requests_total",
+            "method" => method.to_owned(),
+            "status_class" => status_class,
+        )
+        .increment(1);
+
+        // HEAD requests return no body — report status and headers only.
+        if method == "HEAD" {
+            let mut output = format!("HTTP {status}\n");
+            for (key, value) in resp.headers() {
+                if let Ok(v) = value.to_str() {
+                    output.push_str(&format!("{}: {v}\n", key.as_str()));
+                }
+            }
+            return Ok(ToolOutput {
+                content: output,
+                is_error: false,
+            });
+        }
 
         // Check content type.
         let content_type = resp
@@ -264,25 +341,35 @@ impl FetchUrlTool {
             )));
         }
 
-        let body = resp
+        let resp_body = resp
             .bytes()
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("failed to read body: {e}")))?;
 
-        if body.len() > MAX_BODY_SIZE {
+        if resp_body.len() > MAX_BODY_SIZE {
             return Err(ToolError::ExecutionFailed(format!(
                 "response too large: {} bytes (max {MAX_BODY_SIZE})",
-                body.len()
+                resp_body.len()
             )));
         }
 
-        // Strip null bytes: valid UTF-8 but rejected by PostgreSQL TEXT columns.
-        let text = String::from_utf8_lossy(&body).replace('\0', "");
+        metrics::histogram!("sober_agent_tool_fetch_url_response_bytes")
+            .record(resp_body.len() as f64);
 
-        let mut output = if is_html {
+        // Strip null bytes: valid UTF-8 but rejected by PostgreSQL TEXT columns.
+        let text = String::from_utf8_lossy(&resp_body).replace('\0', "");
+
+        let content = if is_html {
             strip_html_tags(&text)
         } else {
             text
+        };
+
+        // Prepend status line for non-2xx responses so the LLM sees the error.
+        let mut output = if !status.is_success() {
+            format!("HTTP {status}\n\n{content}")
+        } else {
+            content
         };
 
         // Truncate to MAX_OUTPUT_LEN at a char boundary.
@@ -297,7 +384,7 @@ impl FetchUrlTool {
 
         Ok(ToolOutput {
             content: output,
-            is_error: false,
+            is_error: !status.is_success(),
         })
     }
 }

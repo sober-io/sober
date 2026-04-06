@@ -37,20 +37,36 @@ Returns a numbered list: title, URL, and a content snippet for each result.
 
 #### `fetch_url`
 
-Fetch and extract the text content of a URL. HTML is stripped of scripts and styles; block-level elements are converted to newlines. Output is truncated to 8 000 characters.
+Make an HTTP request to a URL and return the text content. Supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, and `HEAD` methods with optional headers and request body. HTML responses are stripped of scripts and styles; block-level elements are converted to newlines. Output is truncated to 64 000 characters. Non-2xx responses include the status line and set the error flag.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `url` | string | yes | Must start with `http://` or `https://`. |
+| `method` | string | no | HTTP method: `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`. |
+| `headers` | object | no | Key-value HTTP headers (e.g. `{"Authorization": "Bearer token"}`). |
+| `body` | string | no | Request body. Typically used with `POST`, `PUT`, or `PATCH`. |
 
-Supported content types: all `text/*` types, `application/json`, `application/xml`, `application/xhtml+xml`, `application/javascript`, `application/yaml`, `application/toml`, `application/csv`, `application/ld+json`, `application/rss+xml`, `application/atom+xml`. Binary content (images, PDFs, video) is rejected. Maximum response body: 10 MB. Request timeout: 10 seconds.
+Supported content types: all `text/*` types, `application/json`, `application/xml`, `application/xhtml+xml`, `application/javascript`, `application/yaml`, `application/toml`, `application/csv`, `application/ld+json`, `application/rss+xml`, `application/atom+xml`. Binary content (images, PDFs, video) is rejected. Maximum response body: 10 MB. Request timeout: 10 seconds. `HEAD` requests return the status line and response headers only.
 
-**User says:** "Read the content of https://example.com/report.html and summarise it." or "What does this page say: https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"
+**User says:** "Read the content of https://example.com/report.html and summarise it." or "POST this JSON to the API endpoint." or "Check the headers on this URL."
 
-**Example**
+**Examples**
 
 ```json
 { "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html" }
+```
+
+```json
+{
+  "url": "https://api.example.com/data",
+  "method": "POST",
+  "headers": { "Authorization": "Bearer sk-...", "Content-Type": "application/json" },
+  "body": "{\"query\": \"latest results\"}"
+}
+```
+
+```json
+{ "url": "https://example.com", "method": "HEAD" }
 ```
 
 ---
