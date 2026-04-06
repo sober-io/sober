@@ -13,6 +13,9 @@ use sober_core::types::PlatformId;
 
 use crate::types::{GatewayEvent, InboundAttachment};
 
+/// Timeout for downloading attachments from platform CDNs.
+const ATTACHMENT_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Serenity event handler that receives Discord events and forwards them
 /// into the gateway event channel.
 pub struct DiscordHandler {
@@ -118,7 +121,7 @@ impl EventHandler for DiscordHandler {
 async fn download_attachment(url: &str, filename: &str) -> Result<InboundAttachment, String> {
     let response = reqwest::Client::new()
         .get(url)
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(ATTACHMENT_DOWNLOAD_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {e}"))?;

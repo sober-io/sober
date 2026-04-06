@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use sober_core::error::AppError;
-use sober_core::types::{ConversationId, GatewayChannelMapping, MappingId, PlatformId, UserId};
+use sober_core::types::{
+    AttachmentKind, ConversationId, GatewayChannelMapping, MappingId, PlatformId, UserId,
+};
 use sober_core::types::{GatewayMappingRepo, GatewayUserMappingRepo};
 use sober_db::{PgGatewayMappingRepo, PgGatewayUserMappingRepo};
 use sqlx::PgPool;
@@ -14,8 +16,8 @@ use tracing::{debug, error, info};
 use sober_workspace::BlobStore;
 
 use crate::agent_proto::{
-    ContentBlock, HandleMessageRequest, TextBlock, agent_service_client::AgentServiceClient,
-    content_block::Block,
+    AudioBlock, ContentBlock, FileBlock, HandleMessageRequest, ImageBlock, TextBlock, VideoBlock,
+    agent_service_client::AgentServiceClient, content_block::Block,
 };
 use crate::bridge::PlatformBridgeRegistry;
 use crate::error::GatewayError;
@@ -155,9 +157,6 @@ impl GatewayService {
         content: String,
         attachments: Vec<crate::types::InboundAttachment>,
     ) -> Result<(), GatewayError> {
-        use crate::agent_proto::{AudioBlock, FileBlock, ImageBlock, VideoBlock};
-        use sober_core::types::AttachmentKind;
-
         let start = std::time::Instant::now();
 
         // Look up channel mapping.

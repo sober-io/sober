@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serenity::builder::{CreateAttachment, CreateMessage};
 use serenity::http::Http;
 use serenity::model::channel::ChannelType;
 use serenity::model::id::ChannelId;
@@ -21,6 +22,9 @@ use super::handler::DiscordHandler;
 
 /// Discord's message character limit.
 const DISCORD_MAX_LEN: usize = 2000;
+
+/// Discord's maximum number of file attachments per message.
+const DISCORD_MAX_FILES_PER_MSG: usize = 10;
 
 /// Discord platform bridge.
 ///
@@ -119,10 +123,7 @@ impl PlatformBridgeHandle for DiscordBridge {
                     .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
             }
         } else {
-            // Send with file attachments. Discord allows max 10 files per message.
-            use serenity::builder::{CreateAttachment, CreateMessage};
-
-            for file_chunk in content.attachments.chunks(10) {
+            for file_chunk in content.attachments.chunks(DISCORD_MAX_FILES_PER_MSG) {
                 let mut msg = CreateMessage::new();
 
                 if !content.text.is_empty() {
