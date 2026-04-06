@@ -53,11 +53,11 @@ describe('ToolCallDisplay', () => {
 		// Input section visible
 		expect(screen.getByText('Input')).toBeInTheDocument();
 
-		// Keys should be syntax-highlighted (rendered via @html with colored spans)
-		const pre = container.querySelector('pre');
-		expect(pre).toBeInTheDocument();
-		expect(pre?.innerHTML).toContain('"query"');
-		expect(pre?.innerHTML).toContain('"test"');
+		// JSON content rendered inside tool-code container
+		const codeDiv = container.querySelector('.tool-code');
+		expect(codeDiv).toBeInTheDocument();
+		expect(codeDiv?.textContent).toContain('"query"');
+		expect(codeDiv?.textContent).toContain('"test"');
 	});
 
 	it('shows output when expanded and output provided', async () => {
@@ -85,7 +85,7 @@ describe('ToolCallDisplay', () => {
 		expect(outputPre?.className).toContain('text-red');
 	});
 
-	it('formats nested JSON input with syntax highlighting', async () => {
+	it('formats JSON input with syntax highlighting', async () => {
 		const user = userEvent.setup();
 		const { container } = render(ToolCallDisplay, {
 			props: {
@@ -96,18 +96,16 @@ describe('ToolCallDisplay', () => {
 
 		await user.click(screen.getByText('tool'));
 
-		const pre = container.querySelector('pre');
-		const html = pre?.innerHTML ?? '';
+		const codeDiv = container.querySelector('.tool-code');
+		const html = codeDiv?.innerHTML ?? '';
 
-		// Keys highlighted in sky color
-		expect(html).toContain('text-sky-600');
-		// Strings in emerald
-		expect(html).toContain('text-emerald-600');
-		// Numbers in amber
-		expect(html).toContain('text-amber-600');
-		// Booleans in violet
-		expect(html).toContain('text-violet-600');
-		// Null in zinc
-		expect(html).toContain('text-zinc-400');
+		// Shiki renders with inline style color attributes
+		expect(html).toContain('style="color:');
+		// All JSON keys and values are present
+		expect(codeDiv?.textContent).toContain('"name"');
+		expect(codeDiv?.textContent).toContain('"test"');
+		expect(codeDiv?.textContent).toContain('42');
+		expect(codeDiv?.textContent).toContain('true');
+		expect(codeDiv?.textContent).toContain('null');
 	});
 });

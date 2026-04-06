@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { highlighterReady } from '$lib/utils/markdown.svelte';
+	import { getHighlighter } from '$lib/utils/markdown.svelte';
+
 	interface Props {
 		toolName: string;
 		input: unknown;
@@ -40,54 +43,46 @@
 		return displayOutput.slice(0, OUTPUT_LIMIT);
 	});
 
-	/** Format a JSON value into colored HTML spans. */
-	function formatJson(value: unknown, indent = 0): string {
-		const pad = '  '.repeat(indent);
-		const padInner = '  '.repeat(indent + 1);
-
-		if (value === null) return '<span class="text-zinc-400">null</span>';
-		if (value === undefined) return '<span class="text-zinc-400">undefined</span>';
-
-		if (typeof value === 'string') {
-			const escaped = value
-				.replace(/&/g, '&amp;')
-				.replace(/</g, '&lt;')
-				.replace(/>/g, '&gt;')
-				.replace(/"/g, '&quot;');
-			if (value.length > 200) {
-				const short = escaped.slice(0, 200);
-				return `<span class="text-emerald-600 dark:text-emerald-400">"${short}…"</span>`;
-			}
-			return `<span class="text-emerald-600 dark:text-emerald-400">"${escaped}"</span>`;
+	/** Try to pretty-print a string as JSON. Returns null if not valid JSON. */
+	function tryFormatJson(str: string): string | null {
+		const trimmed = str.trim();
+		if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return null;
+		try {
+			return JSON.stringify(JSON.parse(trimmed), null, 2);
+		} catch {
+			return null;
 		}
-
-		if (typeof value === 'number')
-			return `<span class="text-amber-600 dark:text-amber-400">${value}</span>`;
-		if (typeof value === 'boolean')
-			return `<span class="text-violet-600 dark:text-violet-400">${value}</span>`;
-
-		if (Array.isArray(value)) {
-			if (value.length === 0) return '[]';
-			const items = value.map((v) => `${padInner}${formatJson(v, indent + 1)}`).join(',\n');
-			return `[\n${items}\n${pad}]`;
-		}
-
-		if (typeof value === 'object') {
-			const entries = Object.entries(value as Record<string, unknown>);
-			if (entries.length === 0) return '{}';
-			const lines = entries
-				.map(
-					([k, v]) =>
-						`${padInner}<span class="text-sky-600 dark:text-sky-400">"${k}"</span>: ${formatJson(v, indent + 1)}`
-				)
-				.join(',\n');
-			return `{\n${lines}\n${pad}}`;
-		}
-
-		return String(value);
 	}
 
-	const formattedInput = $derived(formatJson(input));
+	/** Highlight code with shiki if available, otherwise escape for <pre>. */
+	function highlightCode(code: string, lang: string): string {
+		const hl = getHighlighter();
+		if (hl) {
+			return hl.codeToHtml(code, { lang, theme: 'github-dark' });
+		}
+		return escapeHtml(code);
+	}
+
+	function escapeHtml(s: string): string {
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
+	const formattedInput = $derived.by(() => {
+		const _v = highlighterReady.version; // re-derive when shiki loads
+		void _v;
+		const json = JSON.stringify(input, null, 2);
+		return highlightCode(json, 'json');
+	});
+
+	/** Try to detect and highlight output content. */
+	const formattedOutput = $derived.by(() => {
+		if (visibleOutput === undefined) return undefined;
+		const _v = highlighterReady.version; // re-derive when shiki loads
+		void _v;
+		const asJson = tryFormatJson(visibleOutput);
+		if (asJson) return { html: highlightCode(asJson, 'json'), isHighlighted: true };
+		return { html: escapeHtml(visibleOutput), isHighlighted: false };
+	});
 </script>
 
 <div
@@ -141,18 +136,26 @@
 	{#if expanded}
 		<div class="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700">
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
-			<!-- eslint-disable svelte/no-at-html-tags -- manually HTML-escaped in formatJson -->
-			<pre
-				class="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
-			<!-- eslint-enable svelte/no-at-html-tags -->
+			<!-- eslint-disable svelte/no-at-html-tags -- shiki-highlighted or manually escaped -->
+			<div class="tool-code max-h-60 overflow-auto whitespace-pre-wrap break-words rounded text-xs">
+				{@html formattedInput}
+			</div>
 
-			{#if visibleOutput !== undefined}
+			{#if formattedOutput !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
-				<pre
-					class={[
-						'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
-						showError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
-					]}>{visibleOutput}</pre>
+				{#if formattedOutput.isHighlighted}
+					<div
+						class="tool-code max-h-80 overflow-auto whitespace-pre-wrap break-words rounded text-xs"
+					>
+						{@html formattedOutput.html}
+					</div>
+				{:else}
+					<pre
+						class={[
+							'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
+							showError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
+						]}>{@html formattedOutput.html}</pre>
+				{/if}
 				{#if isOutputTruncated && !outputExpanded}
 					<button
 						onclick={() => (outputExpanded = true)}
@@ -162,6 +165,7 @@
 					</button>
 				{/if}
 			{/if}
+			<!-- eslint-enable svelte/no-at-html-tags -->
 		</div>
 	{/if}
 </div>

@@ -53,6 +53,11 @@ const SHIKI_LANG_ALIASES: Record<string, string> = {
 	svx: 'svelte'
 };
 
+/** Return the shiki highlighter instance if loaded, or null. */
+export function getHighlighter(): Highlighter | null {
+	return highlighter;
+}
+
 /** Load shiki highlighter in the background. Until loaded, code renders unstyled. */
 if (typeof window !== 'undefined') {
 	createHighlighter({
