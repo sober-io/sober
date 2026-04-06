@@ -26,7 +26,7 @@
 	{#if thinkingContent}
 		<div
 			bind:this={scrollContainer}
-			class="mt-1 max-h-40 overflow-y-auto border-t border-zinc-200 pt-1.5 text-xs leading-relaxed text-zinc-400 whitespace-pre-wrap dark:border-zinc-700 dark:text-zinc-500"
+			class="mt-1 max-h-40 overflow-y-auto break-words border-t border-zinc-200 pt-1.5 text-xs leading-relaxed text-zinc-400 whitespace-pre-wrap dark:border-zinc-700 dark:text-zinc-500"
 		>
 			{thinkingContent}
 		</div>

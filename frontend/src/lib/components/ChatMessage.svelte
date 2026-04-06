@@ -138,7 +138,7 @@
 				{#if hasThinkingContent && !thinking}
 					<div
 						class={[
-							'my-2 rounded-md border text-sm',
+							'my-2 min-w-0 overflow-hidden rounded-md border text-sm',
 							streaming
 								? 'animate-reasoning-pulse border-zinc-300 dark:border-zinc-600'
 								: 'border-zinc-200 dark:border-zinc-700'

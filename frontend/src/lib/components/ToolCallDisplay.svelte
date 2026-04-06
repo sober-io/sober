@@ -90,7 +90,9 @@
 	const formattedInput = $derived(formatJson(input));
 </script>
 
-<div class="my-2 rounded-md border border-zinc-200 text-sm dark:border-zinc-700">
+<div
+	class="my-2 min-w-0 overflow-hidden rounded-md border border-zinc-200 text-sm dark:border-zinc-700"
+>
 	<button
 		onclick={() => (expanded = !expanded)}
 		class="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
@@ -141,14 +143,14 @@
 			<div class="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Input</div>
 			<!-- eslint-disable svelte/no-at-html-tags -- manually HTML-escaped in formatJson -->
 			<pre
-				class="max-h-60 max-w-full overflow-auto rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
+				class="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{@html formattedInput}</pre>
 			<!-- eslint-enable svelte/no-at-html-tags -->
 
 			{#if visibleOutput !== undefined}
 				<div class="mt-2 mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">Output</div>
 				<pre
 					class={[
-						'max-h-80 max-w-full overflow-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
+						'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800',
 						showError ? 'text-red-600 dark:text-red-400' : 'text-zinc-700 dark:text-zinc-300'
 					]}>{visibleOutput}</pre>
 				{#if isOutputTruncated && !outputExpanded}
