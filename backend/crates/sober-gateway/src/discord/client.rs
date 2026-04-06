@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serenity::builder::{CreateAttachment, CreateMessage};
 use serenity::http::Http;
 use serenity::model::channel::ChannelType;
 use serenity::model::id::ChannelId;
@@ -21,6 +22,9 @@ use super::handler::DiscordHandler;
 
 /// Discord's message character limit.
 const DISCORD_MAX_LEN: usize = 2000;
+
+/// Discord's maximum number of file attachments per message.
+const DISCORD_MAX_FILES_PER_MSG: usize = 10;
 
 /// Discord platform bridge.
 ///
@@ -54,6 +58,7 @@ impl DiscordBridge {
             platform_id,
             event_tx,
             bot_user_id: Mutex::new(None),
+            http_client: reqwest::Client::new(),
         };
 
         let mut client = Client::builder(bot_token, intents)
@@ -110,13 +115,39 @@ impl PlatformBridgeHandle for DiscordBridge {
 
         let channel = ChannelId::new(channel_id);
 
-        // Discord has a 2000-character limit per message. Split at natural
-        // boundaries when possible to avoid breaking markdown.
-        for chunk in split_message(&content.text, DISCORD_MAX_LEN) {
-            channel
-                .say(&self.http, chunk)
-                .await
-                .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+        if content.attachments.is_empty() {
+            // Text-only path — existing behaviour.
+            for chunk in split_message(&content.text, DISCORD_MAX_LEN) {
+                channel
+                    .say(&self.http, chunk)
+                    .await
+                    .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+            }
+        } else {
+            for file_chunk in content.attachments.chunks(DISCORD_MAX_FILES_PER_MSG) {
+                let mut msg = CreateMessage::new();
+
+                if !content.text.is_empty() {
+                    let text = if content.text.len() > DISCORD_MAX_LEN {
+                        &content.text[..DISCORD_MAX_LEN]
+                    } else {
+                        &content.text
+                    };
+                    msg = msg.content(text);
+                }
+
+                for attachment in file_chunk {
+                    msg = msg.add_file(CreateAttachment::bytes(
+                        attachment.data.clone(),
+                        &attachment.filename,
+                    ));
+                }
+
+                channel
+                    .send_message(&self.http, msg)
+                    .await
+                    .map_err(|e| GatewayError::SendFailed(e.to_string()))?;
+            }
         }
 
         Ok(())

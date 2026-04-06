@@ -4,7 +4,7 @@
 //! is the first 2 hex characters. This prevents any single directory from
 //! accumulating too many entries.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use metrics::{counter, histogram};
@@ -22,6 +22,13 @@ impl BlobStore {
     /// Create a new blob store rooted at the given directory.
     pub fn new(root: PathBuf) -> Self {
         Self { root }
+    }
+
+    /// Creates a blob store at the standard location within a workspace root.
+    ///
+    /// The blobs directory is `{workspace_root}/.sober/blobs/`.
+    pub fn from_workspace_root(workspace_root: &Path) -> Self {
+        Self::new(workspace_root.join(crate::SOBER_DIR).join("blobs"))
     }
 
     /// Store data and return its content-addressed key (hex SHA-256).

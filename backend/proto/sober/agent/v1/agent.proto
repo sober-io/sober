@@ -56,7 +56,7 @@ message HandleMessageRequest {
   string user_id = 1;
   string conversation_id = 2;
   repeated ContentBlock content = 3;
-  string source = 4;  // "web", "gateway", "cli" — identifies the origin
+  MessageSource source = 4;
 }
 
 // Returned immediately by HandleMessage after storing the user message.
@@ -148,13 +148,34 @@ message SetPermissionModeResponse {}
 // Empty request for subscribing to all conversation updates.
 message SubscribeRequest {}
 
+// Role of a conversation message.
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
+  MESSAGE_ROLE_EVENT = 4;
+}
+
+// Source that produced a message.
+enum MessageSource {
+  MESSAGE_SOURCE_UNSPECIFIED = 0;
+  MESSAGE_SOURCE_WEB = 1;
+  MESSAGE_SOURCE_GATEWAY = 2;
+  MESSAGE_SOURCE_SCHEDULER = 3;
+  MESSAGE_SOURCE_CLI = 4;
+  MESSAGE_SOURCE_REPLICA = 5;
+  MESSAGE_SOURCE_ADMIN = 6;
+  MESSAGE_SOURCE_HUMAN = 7;
+  MESSAGE_SOURCE_SYSTEM = 8;
+}
+
 // A new message stored in the conversation.
 message NewMessage {
   string message_id = 1;
-  string role = 2;
+  MessageRole role = 2;
   repeated ContentBlock content = 3;
-  // What produced this message: "human", "scheduler", "replica", "admin", "system".
-  string source = 4;
+  MessageSource source = 4;
   // The user who triggered the message (empty for system/scheduler).
   optional string user_id = 5;
 }

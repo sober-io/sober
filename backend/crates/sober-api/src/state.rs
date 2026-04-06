@@ -88,11 +88,7 @@ impl AppState {
         auth: Arc<SoberAuthService<PgUserRepo, PgSessionRepo, PgRoleRepo>>,
         config: AppConfig,
     ) -> Arc<Self> {
-        let blob_root = config
-            .workspace_root
-            .join(sober_workspace::SOBER_DIR)
-            .join("blobs");
-        let blob_store = Arc::new(BlobStore::new(blob_root));
+        let blob_store = Arc::new(BlobStore::from_workspace_root(&config.workspace_root));
         let connections = ConnectionRegistry::new();
         let user_connections = UserConnectionRegistry::new();
 
@@ -165,11 +161,7 @@ impl AppState {
             config.auth.session_ttl_seconds,
         ));
 
-        let blob_root = config
-            .workspace_root
-            .join(sober_workspace::SOBER_DIR)
-            .join("blobs");
-        let blob_store = Arc::new(BlobStore::new(blob_root));
+        let blob_store = Arc::new(BlobStore::from_workspace_root(&config.workspace_root));
         let connections = ConnectionRegistry::new();
         let user_connections = UserConnectionRegistry::new();
 

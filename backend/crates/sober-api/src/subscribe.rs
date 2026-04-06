@@ -190,31 +190,41 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             // delivered them inline to avoid showing them twice in the UI.
             // Only forward user messages from the gateway (Discord/Telegram/etc.)
             // so they appear in the web UI in real-time.
-            if nm.role.to_lowercase() == "user" && nm.source != "gateway" {
+            if nm.role() == proto::MessageRole::User && nm.source() != proto::MessageSource::Gateway
+            {
                 return None;
             }
 
-            // Parse the proto source string into the typed enum.
-            let source: MessageSource = nm.source.parse().unwrap_or(MessageSource::Web);
+            // Convert proto enum to domain enum.
+            let source: MessageSource = match nm.source() {
+                proto::MessageSource::Web | proto::MessageSource::Unspecified => MessageSource::Web,
+                proto::MessageSource::Gateway => MessageSource::Gateway,
+                proto::MessageSource::Scheduler => MessageSource::Scheduler,
+                proto::MessageSource::Cli => MessageSource::Cli,
+                proto::MessageSource::Replica => MessageSource::Replica,
+                proto::MessageSource::Admin => MessageSource::Admin,
+                proto::MessageSource::Human => MessageSource::Web,
+                proto::MessageSource::System => MessageSource::Web,
+            };
 
-            // Extract text content from proto ContentBlock list and wrap as
-            // domain ContentBlock. Full proto-to-domain conversion for non-text
-            // blocks can be added later when the API has its own conversion layer.
-            let extracted_text: String = nm
+            let content: Vec<ContentBlock> = nm
                 .content
                 .iter()
-                .filter_map(|b| match b.block.as_ref()? {
-                    proto::content_block::Block::Text(t) => Some(t.text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+                .filter_map(|b| crate::proto_convert::proto_to_content_block(b.block.as_ref()?))
+                .collect();
+
+            let role_str = nm
+                .role()
+                .as_str_name()
+                .strip_prefix("MESSAGE_ROLE_")
+                .unwrap_or("unspecified")
+                .to_lowercase();
 
             Some(ServerWsMessage::ChatNewMessage {
                 conversation_id: cid,
                 message_id: nm.message_id,
-                role: nm.role,
-                content: vec![ContentBlock::text(extracted_text)],
+                role: role_str,
+                content,
                 source,
                 user_id: nm.user_id.filter(|s| !s.is_empty()),
                 username: None,
@@ -257,13 +267,13 @@ mod tests {
             event: Some(proto::conversation_update::Event::NewMessage(
                 proto::NewMessage {
                     message_id: "msg-1".to_owned(),
-                    role: "Assistant".to_owned(),
+                    role: proto::MessageRole::Assistant.into(),
                     content: vec![proto::ContentBlock {
                         block: Some(proto::content_block::Block::Text(proto::TextBlock {
                             text: "hi".to_owned(),
                         })),
                     }],
-                    source: "scheduler".to_owned(),
+                    source: proto::MessageSource::Scheduler.into(),
                     user_id: None,
                 },
             )),
@@ -281,7 +291,7 @@ mod tests {
             } => {
                 assert_eq!(conversation_id, "conv-1");
                 assert_eq!(message_id, "msg-1");
-                assert_eq!(role, "Assistant");
+                assert_eq!(role, "assistant");
                 assert_eq!(content, vec![ContentBlock::text("hi")]);
                 assert_eq!(source, MessageSource::Scheduler);
             }

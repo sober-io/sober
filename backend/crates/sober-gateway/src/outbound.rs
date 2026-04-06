@@ -46,6 +46,7 @@ impl OutboundBuffer {
                     text: cleaned,
                     format: MessageFormat::Markdown,
                     reply_to: None,
+                    attachments: Vec::new(),
                 })
             }
         })

@@ -40,7 +40,8 @@ async fn run_outbound_stream(
     agent_channel: tonic::transport::Channel,
 ) -> Result<()> {
     use sober_gateway::agent_proto::{
-        SubscribeRequest, agent_service_client::AgentServiceClient, conversation_update::Event,
+        MessageRole, MessageSource, SubscribeRequest, agent_service_client::AgentServiceClient,
+        conversation_update::Event,
     };
 
     let mut client = AgentServiceClient::new(agent_channel);
@@ -70,49 +71,73 @@ async fn run_outbound_stream(
         };
 
         match update.event {
-            Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
+            Some(Event::NewMessage(ref nm)) if nm.role() == MessageRole::User => {
                 // Skip messages that originated from this gateway to avoid echo.
-                if nm.source == "gateway" {
+                if nm.source() == MessageSource::Gateway {
                     continue;
                 }
 
-                // Forward user messages from the web UI to external platforms with a sender prefix.
-                let text: String = nm
-                    .content
-                    .iter()
-                    .filter_map(|b| {
-                        use sober_gateway::agent_proto::content_block::Block;
-                        match b.block.as_ref()? {
-                            Block::Text(t) => Some(t.text.as_str()),
-                            _ => None,
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                use sober_gateway::agent_proto::content_block::Block;
 
-                if !text.is_empty() {
-                    // Resolve the user ID to a username for a friendlier prefix.
-                    let user_label = if let Some(ref uid_str) = nm.user_id {
-                        if let Ok(uuid) = uid_str.parse::<uuid::Uuid>() {
-                            let uid = sober_core::types::UserId::from_uuid(uuid);
-                            service
-                                .resolve_username(&uid)
-                                .await
-                                .unwrap_or_else(|| uid_str.clone())
-                        } else {
-                            "web".to_owned()
+                // Extract text and attachment IDs from content blocks.
+                let mut text_parts = Vec::new();
+                let mut attachment_ids: Vec<(String, &str)> = Vec::new();
+                for b in &nm.content {
+                    match b.block.as_ref() {
+                        Some(Block::Text(t)) => text_parts.push(t.text.as_str()),
+                        Some(Block::Image(img)) => {
+                            attachment_ids.push((img.conversation_attachment_id.clone(), "image"));
                         }
+                        Some(Block::File(f)) => {
+                            attachment_ids.push((f.conversation_attachment_id.clone(), "document"));
+                        }
+                        Some(Block::Audio(a)) => {
+                            attachment_ids.push((a.conversation_attachment_id.clone(), "audio"));
+                        }
+                        Some(Block::Video(v)) => {
+                            attachment_ids.push((v.conversation_attachment_id.clone(), "video"));
+                        }
+                        None => {}
+                    }
+                }
+
+                let text = text_parts.join("\n");
+
+                // Fetch attachment blobs for outbound delivery.
+                let outbound_attachments =
+                    fetch_outbound_attachments(&service, &attachment_ids).await;
+
+                if text.is_empty() && outbound_attachments.is_empty() {
+                    continue;
+                }
+
+                // Resolve the user ID to a username for a friendlier prefix.
+                let user_label = if let Some(ref uid_str) = nm.user_id {
+                    if let Ok(uuid) = uid_str.parse::<uuid::Uuid>() {
+                        let uid = sober_core::types::UserId::from_uuid(uuid);
+                        service
+                            .resolve_username(&uid)
+                            .await
+                            .unwrap_or_else(|| uid_str.clone())
                     } else {
                         "web".to_owned()
-                    };
-                    let prefixed = format!("**[{user_label}]** {text}");
-                    let msg = sober_gateway::types::PlatformMessage {
-                        text: prefixed,
-                        format: sober_gateway::types::MessageFormat::Markdown,
-                        reply_to: None,
-                    };
-                    deliver_outbound(service.as_ref(), conversation_id, msg).await;
-                }
+                    }
+                } else {
+                    "web".to_owned()
+                };
+
+                let prefixed = if text.is_empty() {
+                    String::new()
+                } else {
+                    format!("**[{user_label}]** {text}")
+                };
+                let msg = sober_gateway::types::PlatformMessage {
+                    text: prefixed,
+                    format: sober_gateway::types::MessageFormat::Markdown,
+                    reply_to: None,
+                    attachments: outbound_attachments,
+                };
+                deliver_outbound(service.as_ref(), conversation_id, msg).await;
             }
             Some(Event::TextDelta(delta)) => {
                 // Trigger typing indicator on first delta for this response.
@@ -120,6 +145,41 @@ async fn run_outbound_stream(
                     trigger_typing(service.as_ref(), conversation_id).await;
                 }
                 buffer.append_delta(conversation_id, &delta.content);
+            }
+            Some(Event::NewMessage(ref nm)) if nm.role() == MessageRole::Assistant => {
+                use sober_gateway::agent_proto::content_block::Block;
+
+                // Check for non-text content blocks (images, files, etc.)
+                let attachment_ids: Vec<(String, &str)> = nm
+                    .content
+                    .iter()
+                    .filter_map(|b| match b.block.as_ref()? {
+                        Block::Image(img) => {
+                            Some((img.conversation_attachment_id.clone(), "image"))
+                        }
+                        Block::File(f) => Some((f.conversation_attachment_id.clone(), "document")),
+                        Block::Audio(a) => Some((a.conversation_attachment_id.clone(), "audio")),
+                        Block::Video(v) => Some((v.conversation_attachment_id.clone(), "video")),
+                        Block::Text(_) => None,
+                    })
+                    .collect();
+
+                if attachment_ids.is_empty() {
+                    continue;
+                }
+
+                let outbound_attachments =
+                    fetch_outbound_attachments(&service, &attachment_ids).await;
+
+                if !outbound_attachments.is_empty() {
+                    let msg = sober_gateway::types::PlatformMessage {
+                        text: String::new(),
+                        format: sober_gateway::types::MessageFormat::Markdown,
+                        reply_to: None,
+                        attachments: outbound_attachments,
+                    };
+                    deliver_outbound(service.as_ref(), conversation_id, msg).await;
+                }
             }
             Some(Event::Done(_)) => {
                 typing_sent.remove(&conversation_id);
@@ -187,6 +247,64 @@ async fn trigger_typing(
             tracing::debug!(error = %e, "failed to send typing indicator");
         }
     }
+}
+
+/// Fetches attachment data from DB + blob store for outbound delivery.
+async fn fetch_outbound_attachments(
+    service: &Arc<GatewayService>,
+    attachment_ids: &[(String, &str)],
+) -> Vec<sober_gateway::types::OutboundAttachment> {
+    use sober_core::types::ConversationAttachmentRepo;
+
+    let repo = sober_db::PgConversationAttachmentRepo::new(service.db().clone());
+    let mut result = Vec::new();
+
+    for &(ref attachment_id_str, kind_label) in attachment_ids {
+        let kind_label = kind_label.to_owned();
+        let Ok(uuid) = attachment_id_str.parse::<uuid::Uuid>() else {
+            warn!(attachment_id = %attachment_id_str, "invalid attachment UUID in outbound message");
+            continue;
+        };
+        let attachment_id = sober_core::types::ConversationAttachmentId::from_uuid(uuid);
+
+        match repo.get_by_id(attachment_id).await {
+            Ok(attachment) => match service.blob_store().retrieve(&attachment.blob_key).await {
+                Ok(data) => {
+                    result.push(sober_gateway::types::OutboundAttachment {
+                        filename: attachment.filename,
+                        content_type: attachment.content_type,
+                        data,
+                    });
+                    metrics::counter!(
+                        "sober_gateway_attachments_fetched_total",
+                        "kind" => kind_label.clone(),
+                        "status" => "success",
+                    )
+                    .increment(1);
+                }
+                Err(e) => {
+                    error!(error = %e, attachment_id = %attachment_id_str, "failed to retrieve blob");
+                    metrics::counter!(
+                        "sober_gateway_attachments_fetched_total",
+                        "kind" => kind_label.clone(),
+                        "status" => "error",
+                    )
+                    .increment(1);
+                }
+            },
+            Err(e) => {
+                error!(error = %e, attachment_id = %attachment_id_str, "failed to fetch attachment metadata");
+                metrics::counter!(
+                    "sober_gateway_attachments_fetched_total",
+                    "kind" => kind_label.clone(),
+                    "status" => "error",
+                )
+                .increment(1);
+            }
+        }
+    }
+
+    result
 }
 
 /// Waits for SIGTERM or Ctrl-C.

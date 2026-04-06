@@ -4,6 +4,7 @@
 //! workspace config parsing, snapshot management, and worktree management.
 //! Database operations (`Pg*Repo`) live in `sober-db`, not here.
 
+pub mod attachment;
 pub mod blob;
 pub mod config;
 pub mod error;
