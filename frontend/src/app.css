@@ -40,10 +40,20 @@
 	background-color: var(--shiki-color-background, #24292e) !important;
 }
 
+/* Prevent any pre/code from breaking out of the bubble */
+.chat-prose pre {
+	overflow-x: auto;
+}
+
+.chat-prose code {
+	overflow-wrap: anywhere;
+}
+
 /* Table improvements for chat context */
 .chat-prose table {
-	width: 100%;
-	border-collapse: collapse;
+	display: block;
+	overflow-x: auto;
+	max-width: 100%;
 	font-size: 0.8125rem;
 }
 

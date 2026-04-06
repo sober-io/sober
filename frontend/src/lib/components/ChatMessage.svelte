@@ -97,7 +97,12 @@
 	</div>
 {:else}
 	<div class={['flex', isUser ? 'justify-end' : 'justify-start', ephemeral && 'opacity-75']}>
-		<div class={['group relative flex max-w-[80%] flex-col', isUser ? 'items-end' : 'items-start']}>
+		<div
+			class={[
+				'group relative flex max-w-[80%] min-w-0 flex-col',
+				isUser ? 'items-end' : 'items-start'
+			]}
+		>
 			{#if senderUsername}
 				<span class="mb-0.5 text-xs font-medium text-zinc-500 dark:text-zinc-400"
 					>{senderUsername}</span
@@ -111,7 +116,7 @@
 			{/if}
 			<div
 				class={[
-					'rounded-lg px-4 py-2 text-sm',
+					'min-w-0 overflow-hidden rounded-lg px-4 py-2 text-sm break-words',
 					isUser
 						? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
 						: sourceLabel
