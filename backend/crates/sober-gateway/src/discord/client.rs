@@ -58,6 +58,7 @@ impl DiscordBridge {
             platform_id,
             event_tx,
             bot_user_id: Mutex::new(None),
+            http_client: reqwest::Client::new(),
         };
 
         let mut client = Client::builder(bot_token, intents)

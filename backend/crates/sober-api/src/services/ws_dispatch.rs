@@ -88,8 +88,10 @@ impl WsDispatchService {
             .await;
 
         // Convert content blocks to proto format.
-        let proto_blocks: Vec<proto::ContentBlock> =
-            content.into_iter().map(content_block_to_proto).collect();
+        let proto_blocks: Vec<proto::ContentBlock> = content
+            .into_iter()
+            .map(crate::proto_convert::content_block_to_proto)
+            .collect();
 
         // Call unary HandleMessage RPC — fire and forget.
         let mut agent_client = self.agent_client.clone();
@@ -178,43 +180,5 @@ impl WsDispatchService {
             warn!(error = %e, mode, "failed to set permission mode");
         }
         Ok(())
-    }
-}
-
-fn content_block_to_proto(block: ContentBlock) -> proto::ContentBlock {
-    match block {
-        ContentBlock::Text { text } => proto::ContentBlock {
-            block: Some(proto::content_block::Block::Text(proto::TextBlock { text })),
-        },
-        ContentBlock::Image {
-            conversation_attachment_id,
-            alt,
-        } => proto::ContentBlock {
-            block: Some(proto::content_block::Block::Image(proto::ImageBlock {
-                conversation_attachment_id: conversation_attachment_id.to_string(),
-                alt,
-            })),
-        },
-        ContentBlock::File {
-            conversation_attachment_id,
-        } => proto::ContentBlock {
-            block: Some(proto::content_block::Block::File(proto::FileBlock {
-                conversation_attachment_id: conversation_attachment_id.to_string(),
-            })),
-        },
-        ContentBlock::Audio {
-            conversation_attachment_id,
-        } => proto::ContentBlock {
-            block: Some(proto::content_block::Block::Audio(proto::AudioBlock {
-                conversation_attachment_id: conversation_attachment_id.to_string(),
-            })),
-        },
-        ContentBlock::Video {
-            conversation_attachment_id,
-        } => proto::ContentBlock {
-            block: Some(proto::content_block::Block::Video(proto::VideoBlock {
-                conversation_attachment_id: conversation_attachment_id.to_string(),
-            })),
-        },
     }
 }

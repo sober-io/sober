@@ -6,6 +6,7 @@ pub mod admin;
 pub mod connections;
 pub mod guards;
 pub mod middleware;
+pub mod proto_convert;
 pub mod routes;
 pub mod services;
 pub mod state;

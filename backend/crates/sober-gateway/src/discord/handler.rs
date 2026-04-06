@@ -25,6 +25,8 @@ pub struct DiscordHandler {
     pub event_tx: mpsc::Sender<GatewayEvent>,
     /// The bot's own Discord user ID, set on Ready.
     pub bot_user_id: Mutex<Option<DiscordUserId>>,
+    /// Shared HTTP client for attachment downloads (reuses connection pool).
+    pub http_client: reqwest::Client,
 }
 
 #[async_trait]
@@ -65,7 +67,9 @@ impl EventHandler for DiscordHandler {
         let mut attachments = Vec::with_capacity(msg.attachments.len());
         for attachment in &msg.attachments {
             let start = std::time::Instant::now();
-            match download_attachment(&attachment.url, &attachment.filename).await {
+            match download_attachment(&self.http_client, &attachment.url, &attachment.filename)
+                .await
+            {
                 Ok(inbound) => {
                     metrics::counter!(
                         "sober_gateway_attachments_downloaded_total",
@@ -118,8 +122,12 @@ impl EventHandler for DiscordHandler {
 }
 
 /// Downloads an attachment from a platform CDN URL.
-async fn download_attachment(url: &str, filename: &str) -> Result<InboundAttachment, String> {
-    let response = reqwest::Client::new()
+async fn download_attachment(
+    client: &reqwest::Client,
+    url: &str,
+    filename: &str,
+) -> Result<InboundAttachment, String> {
+    let response = client
         .get(url)
         .timeout(ATTACHMENT_DOWNLOAD_TIMEOUT)
         .send()

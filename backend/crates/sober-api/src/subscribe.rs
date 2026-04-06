@@ -5,9 +5,7 @@
 //! connections via the [`ConnectionRegistry`].
 
 use futures::StreamExt;
-use sober_core::types::{
-    ContentBlock, ConversationAttachmentId, ConversationId, ConversationUserRepo, MessageSource,
-};
+use sober_core::types::{ContentBlock, ConversationId, ConversationUserRepo, MessageSource};
 use sober_db::PgConversationUserRepo;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -202,7 +200,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             let content: Vec<ContentBlock> = nm
                 .content
                 .iter()
-                .filter_map(|b| proto_to_content_block(b.block.as_ref()?))
+                .filter_map(|b| crate::proto_convert::proto_to_content_block(b.block.as_ref()?))
                 .collect();
 
             Some(ServerWsMessage::ChatNewMessage {
@@ -213,38 +211,6 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 source,
                 user_id: nm.user_id.filter(|s| !s.is_empty()),
                 username: None,
-            })
-        }
-    }
-}
-
-/// Converts a proto content block variant to a domain `ContentBlock`.
-fn proto_to_content_block(block: &proto::content_block::Block) -> Option<ContentBlock> {
-    match block {
-        proto::content_block::Block::Text(t) => Some(ContentBlock::text(&t.text)),
-        proto::content_block::Block::Image(img) => {
-            let id = img.conversation_attachment_id.parse::<uuid::Uuid>().ok()?;
-            Some(ContentBlock::Image {
-                conversation_attachment_id: ConversationAttachmentId::from_uuid(id),
-                alt: img.alt.clone(),
-            })
-        }
-        proto::content_block::Block::File(f) => {
-            let id = f.conversation_attachment_id.parse::<uuid::Uuid>().ok()?;
-            Some(ContentBlock::File {
-                conversation_attachment_id: ConversationAttachmentId::from_uuid(id),
-            })
-        }
-        proto::content_block::Block::Audio(a) => {
-            let id = a.conversation_attachment_id.parse::<uuid::Uuid>().ok()?;
-            Some(ContentBlock::Audio {
-                conversation_attachment_id: ConversationAttachmentId::from_uuid(id),
-            })
-        }
-        proto::content_block::Block::Video(v) => {
-            let id = v.conversation_attachment_id.parse::<uuid::Uuid>().ok()?;
-            Some(ContentBlock::Video {
-                conversation_attachment_id: ConversationAttachmentId::from_uuid(id),
             })
         }
     }
