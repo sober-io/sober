@@ -66,11 +66,7 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel::<GatewayEvent>(1024);
 
     // Blob store for direct attachment storage/retrieval.
-    let blob_root = config
-        .workspace_root
-        .join(sober_workspace::SOBER_DIR)
-        .join("blobs");
-    let blob_store = Arc::new(BlobStore::new(blob_root));
+    let blob_store = Arc::new(BlobStore::from_workspace_root(&config.workspace_root));
 
     // Set up bridge registry and gateway service.
     let bridge_registry = Arc::new(PlatformBridgeRegistry::new());

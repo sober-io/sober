@@ -479,7 +479,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             event: Some(proto::conversation_update::Event::NewMessage(
                 proto::NewMessage {
                     message_id: assistant_msg_id.to_string(),
-                    role: "Assistant".to_owned(),
+                    role: proto::MessageRole::Assistant.into(),
                     content: crate::grpc::content_blocks::domain_to_proto(&[ContentBlock::text(
                         text.clone(),
                     )]),

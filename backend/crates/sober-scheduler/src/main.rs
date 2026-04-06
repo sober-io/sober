@@ -190,11 +190,7 @@ fn build_executor_registry(
     );
 
     // Artifact executor
-    let blob_root = config
-        .workspace_root
-        .join(sober_workspace::SOBER_DIR)
-        .join("blobs");
-    let blob_store = Arc::new(BlobStore::new(blob_root));
+    let blob_store = Arc::new(BlobStore::from_workspace_root(&config.workspace_root));
 
     let sandbox_profile = match config.scheduler.sandbox_profile.as_str() {
         "unrestricted" => SandboxProfile::Unrestricted,

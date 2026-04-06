@@ -139,11 +139,7 @@ async fn main() -> Result<()> {
     }
 
     // 12. Create blob store for workspace artifacts
-    let blob_store = Arc::new(BlobStore::new(
-        workspace_root
-            .join(sober_workspace::SOBER_DIR)
-            .join("blobs"),
-    ));
+    let blob_store = Arc::new(BlobStore::from_workspace_root(&workspace_root));
 
     // 13. Create shared scheduler client handle (connected in background later)
     let scheduler_client: SharedSchedulerClient = Arc::new(tokio::sync::RwLock::new(None));

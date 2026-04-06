@@ -190,7 +190,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
             // delivered them inline to avoid showing them twice in the UI.
             // Only forward user messages from the gateway (Discord/Telegram/etc.)
             // so they appear in the web UI in real-time.
-            if nm.role.to_lowercase() == "user" && nm.source != "gateway" {
+            if nm.role() == proto::MessageRole::User && nm.source != "gateway" {
                 return None;
             }
 
@@ -203,10 +203,17 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 .filter_map(|b| crate::proto_convert::proto_to_content_block(b.block.as_ref()?))
                 .collect();
 
+            let role_str = nm
+                .role()
+                .as_str_name()
+                .strip_prefix("MESSAGE_ROLE_")
+                .unwrap_or("unspecified")
+                .to_lowercase();
+
             Some(ServerWsMessage::ChatNewMessage {
                 conversation_id: cid,
                 message_id: nm.message_id,
-                role: nm.role,
+                role: role_str,
                 content,
                 source,
                 user_id: nm.user_id.filter(|s| !s.is_empty()),
@@ -250,7 +257,7 @@ mod tests {
             event: Some(proto::conversation_update::Event::NewMessage(
                 proto::NewMessage {
                     message_id: "msg-1".to_owned(),
-                    role: "Assistant".to_owned(),
+                    role: proto::MessageRole::Assistant.into(),
                     content: vec![proto::ContentBlock {
                         block: Some(proto::content_block::Block::Text(proto::TextBlock {
                             text: "hi".to_owned(),
@@ -274,7 +281,7 @@ mod tests {
             } => {
                 assert_eq!(conversation_id, "conv-1");
                 assert_eq!(message_id, "msg-1");
-                assert_eq!(role, "Assistant");
+                assert_eq!(role, "assistant");
                 assert_eq!(content, vec![ContentBlock::text("hi")]);
                 assert_eq!(source, MessageSource::Scheduler);
             }

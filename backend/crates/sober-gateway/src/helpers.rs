@@ -40,7 +40,8 @@ async fn run_outbound_stream(
     agent_channel: tonic::transport::Channel,
 ) -> Result<()> {
     use sober_gateway::agent_proto::{
-        SubscribeRequest, agent_service_client::AgentServiceClient, conversation_update::Event,
+        MessageRole, SubscribeRequest, agent_service_client::AgentServiceClient,
+        conversation_update::Event,
     };
 
     let mut client = AgentServiceClient::new(agent_channel);
@@ -70,7 +71,7 @@ async fn run_outbound_stream(
         };
 
         match update.event {
-            Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "user" => {
+            Some(Event::NewMessage(ref nm)) if nm.role() == MessageRole::User => {
                 // Skip messages that originated from this gateway to avoid echo.
                 if nm.source == "gateway" {
                     continue;
@@ -145,7 +146,7 @@ async fn run_outbound_stream(
                 }
                 buffer.append_delta(conversation_id, &delta.content);
             }
-            Some(Event::NewMessage(ref nm)) if nm.role.to_lowercase() == "assistant" => {
+            Some(Event::NewMessage(ref nm)) if nm.role() == MessageRole::Assistant => {
                 use sober_gateway::agent_proto::content_block::Block;
 
                 // Check for non-text content blocks (images, files, etc.)

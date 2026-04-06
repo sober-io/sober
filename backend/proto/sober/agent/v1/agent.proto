@@ -148,10 +148,19 @@ message SetPermissionModeResponse {}
 // Empty request for subscribing to all conversation updates.
 message SubscribeRequest {}
 
+// Role of a conversation message.
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
+  MESSAGE_ROLE_EVENT = 4;
+}
+
 // A new message stored in the conversation.
 message NewMessage {
   string message_id = 1;
-  string role = 2;
+  MessageRole role = 2;
   repeated ContentBlock content = 3;
   // What produced this message: "human", "scheduler", "replica", "admin", "system".
   string source = 4;
