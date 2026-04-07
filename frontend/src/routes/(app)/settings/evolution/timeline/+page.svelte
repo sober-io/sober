@@ -22,6 +22,7 @@
 	let error = $state<string | null>(null);
 	let hasMore = $state(false);
 	let actionLoading = $state<string | null>(null);
+	let deleteConfirmId = $state<string | null>(null);
 
 	const typeOptions: { label: string; value: TypeFilter }[] = [
 		{ label: 'All', value: 'all' },
@@ -138,6 +139,20 @@
 			events = events.map((e) => (e.id === id ? updated : e));
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : `Failed to ${status} evolution`;
+		} finally {
+			actionLoading = null;
+		}
+	}
+
+	async function deleteEvolution(id: string) {
+		actionLoading = id;
+		error = null;
+		try {
+			await evolutionService.delete(id);
+			events = events.filter((e) => e.id !== id);
+			deleteConfirmId = null;
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Failed to delete evolution';
 		} finally {
 			actionLoading = null;
 		}
@@ -353,7 +368,7 @@
 						{/if}
 
 						<!-- Actions -->
-						{#if event.status === 'proposed' || event.status === 'active' || event.status === 'failed'}
+						{#if event.status === 'proposed' || event.status === 'active' || event.status === 'failed' || event.status === 'rejected' || event.status === 'reverted'}
 							<div
 								class="flex items-center gap-2 border-t border-zinc-100 px-4 py-2 dark:border-zinc-800"
 							>
@@ -387,6 +402,30 @@
 										class="rounded px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50 dark:text-sky-400 dark:hover:bg-sky-950"
 									>
 										{isActioning ? 'Retrying...' : 'Retry'}
+									</button>
+								{/if}
+								<!-- Delete (available for all deletable statuses) -->
+								{#if deleteConfirmId === event.id}
+									<button
+										onclick={() => deleteEvolution(event.id)}
+										disabled={isActioning}
+										class="rounded px-2.5 py-1 text-xs font-medium bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
+									>
+										Confirm Delete
+									</button>
+									<button
+										onclick={() => (deleteConfirmId = null)}
+										class="rounded px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+									>
+										Cancel
+									</button>
+								{:else}
+									<button
+										onclick={() => (deleteConfirmId = event.id)}
+										disabled={isActioning}
+										class="rounded px-2.5 py-1 text-xs font-medium text-zinc-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-400"
+									>
+										Delete
 									</button>
 								{/if}
 							</div>

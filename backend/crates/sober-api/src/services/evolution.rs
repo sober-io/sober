@@ -112,6 +112,37 @@ impl EvolutionService {
         repo.get_by_id(id).await
     }
 
+    /// Permanently deletes an evolution event.
+    ///
+    /// For active evolutions, reverts artifacts via gRPC first.
+    /// Blocked for approved/executing statuses.
+    #[instrument(skip(self), fields(evolution.id = %id))]
+    pub async fn delete_event(&self, id: EvolutionEventId) -> Result<(), AppError> {
+        let repo = PgEvolutionRepo::new(self.db.clone());
+        let event = repo.get_by_id(id).await?;
+
+        validate_deletable(&event.status)?;
+
+        // Active evolutions need artifact cleanup before deletion.
+        if event.status == EvolutionStatus::Active {
+            let mut client = self.agent_client.clone();
+            let mut request = tonic::Request::new(proto::RevertEvolutionRequest {
+                evolution_event_id: id.to_string(),
+            });
+            sober_core::inject_trace_context(request.metadata_mut());
+            client
+                .revert_evolution(request)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+        }
+
+        repo.delete(id).await?;
+
+        metrics::counter!("sober_evolution_deletes_total").increment(1);
+
+        Ok(())
+    }
+
     /// Get evolution config.
     #[instrument(level = "debug", skip(self))]
     pub async fn get_config(&self) -> Result<EvolutionConfigResponse, AppError> {
@@ -193,9 +224,45 @@ fn validate_status_transition(
     }
 }
 
+fn validate_deletable(status: &EvolutionStatus) -> Result<(), AppError> {
+    const DELETABLE: &[EvolutionStatus] = &[
+        EvolutionStatus::Proposed,
+        EvolutionStatus::Rejected,
+        EvolutionStatus::Failed,
+        EvolutionStatus::Reverted,
+        EvolutionStatus::Active,
+    ];
+
+    if DELETABLE.contains(status) {
+        Ok(())
+    } else {
+        Err(AppError::Validation(format!(
+            "cannot delete evolution in '{}' status — wait for execution to complete",
+            serde_json::to_string(status)
+                .unwrap_or_default()
+                .trim_matches('"'),
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deletable_statuses() {
+        assert!(validate_deletable(&EvolutionStatus::Proposed).is_ok());
+        assert!(validate_deletable(&EvolutionStatus::Rejected).is_ok());
+        assert!(validate_deletable(&EvolutionStatus::Failed).is_ok());
+        assert!(validate_deletable(&EvolutionStatus::Reverted).is_ok());
+        assert!(validate_deletable(&EvolutionStatus::Active).is_ok());
+    }
+
+    #[test]
+    fn non_deletable_statuses() {
+        assert!(validate_deletable(&EvolutionStatus::Approved).is_err());
+        assert!(validate_deletable(&EvolutionStatus::Executing).is_err());
+    }
 
     #[test]
     fn valid_transitions() {
