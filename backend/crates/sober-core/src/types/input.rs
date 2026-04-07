@@ -38,6 +38,8 @@ pub struct CreateSession {
 /// Input for creating a new message.
 #[derive(Debug, Clone)]
 pub struct CreateMessage {
+    /// Pre-generated message ID (caller provides to allow returning it before DB write).
+    pub id: Option<super::ids::MessageId>,
     /// The conversation to add the message to.
     pub conversation_id: ConversationId,
     /// Author type.

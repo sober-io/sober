@@ -47,7 +47,7 @@ impl PgMessageRepo {
         conn: &mut PgConnection,
         input: CreateMessage,
     ) -> Result<Message, AppError> {
-        let id = Uuid::now_v7();
+        let id = input.id.map_or_else(Uuid::now_v7, |mid| *mid.as_uuid());
         let row = sqlx::query_as::<_, MessageRow>(
             &format!(
                 "INSERT INTO conversation_messages (id, conversation_id, role, content, reasoning, token_count, metadata, user_id) \

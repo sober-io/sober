@@ -214,7 +214,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_user: AuthU
 
                 if let Err(e) = state
                     .ws_dispatch
-                    .send_message(conv_id, user_id, &username, content, out_tx.clone())
+                    .send_message(conv_id, user_id, &username, content)
                     .await
                 {
                     let _ = out_tx

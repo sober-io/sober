@@ -37,6 +37,7 @@ use crate::dispatch::{self, DispatchOutcome};
 use crate::error::AgentError;
 use crate::grpc::proto;
 use crate::history;
+use crate::secret_registry::SecretRegistry;
 use crate::stream::{AgentEvent, Usage};
 use crate::tools::ToolRegistry;
 
@@ -72,6 +73,8 @@ pub struct TurnParams<'a, R: AgentRepos> {
     pub workspace_dir: Option<PathBuf>,
     /// Skill catalog XML for system prompt injection.
     pub skill_catalog_xml: String,
+    /// Per-turn secret registry for redacting sensitive values from persistence.
+    pub secret_registry: Arc<SecretRegistry>,
 }
 
 /// Runs the full agentic turn: context load → stream LLM → tool dispatch → repeat.
@@ -317,6 +320,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                         .repos
                         .messages()
                         .create(CreateMessage {
+                            id: None,
                             conversation_id: params.conversation_id,
                             role: MessageRole::Assistant,
                             content: vec![ContentBlock::text(content_buffer.clone())],
@@ -348,6 +352,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 event_tx: params.event_tx,
                 user_id: params.user_id,
                 workspace_id: params.workspace_id,
+                secret_registry: &params.secret_registry,
             };
             let outcome: DispatchOutcome =
                 dispatch::execute_tool_calls(params.ctx, &dispatch_req).await;
@@ -418,25 +423,37 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             assistant_text = text.clone();
         }
 
+        // Redact secrets from the text and reasoning before persistence and
+        // broadcast. The unredacted versions stay in `content_buffer` and
+        // `reasoning_buffer` for LLM context.
+        let persisted_text = params.secret_registry.redact(&text);
+        let persisted_reasoning = if reasoning_buffer.is_empty() {
+            None
+        } else {
+            Some(params.secret_registry.redact(&reasoning_buffer))
+        };
+
         // Store the assistant response. If tool calls ran earlier in this
         // turn, update the existing message; otherwise create a new one.
         let assistant_msg_id = if let Some(existing_id) = turn_assistant_msg_id {
             // Update the message that was created during tool-call phase.
-            params
-                .ctx
-                .repos
-                .messages()
-                .update_content(
-                    existing_id,
-                    &[ContentBlock::text(text.clone())],
-                    if reasoning_buffer.is_empty() {
-                        None
-                    } else {
-                        Some(&reasoning_buffer)
-                    },
-                )
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            // Skip when persisted_text is empty — the write-ahead message
+            // already has the text streamed alongside tool calls. Overwriting
+            // with empty text erases the visible response (happens when the
+            // follow-up iteration is only extraction blocks).
+            if !persisted_text.is_empty() {
+                params
+                    .ctx
+                    .repos
+                    .messages()
+                    .update_content(
+                        existing_id,
+                        &[ContentBlock::text(persisted_text.clone())],
+                        persisted_reasoning.as_deref(),
+                    )
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            }
             existing_id
         } else {
             let assistant_msg = params
@@ -444,14 +461,11 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .repos
                 .messages()
                 .create(CreateMessage {
+                    id: None,
                     conversation_id: params.conversation_id,
                     role: MessageRole::Assistant,
-                    content: vec![ContentBlock::text(text.clone())],
-                    reasoning: if reasoning_buffer.is_empty() {
-                        None
-                    } else {
-                        Some(reasoning_buffer.clone())
-                    },
+                    content: vec![ContentBlock::text(persisted_text.clone())],
+                    reasoning: persisted_reasoning.clone(),
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
                     user_id: None,
@@ -473,7 +487,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             );
         }
 
-        // Broadcast NewMessage for the assistant message.
+        // Broadcast NewMessage for the assistant message (with redacted text).
         let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
             conversation_id: conv_id_str.clone(),
             event: Some(proto::conversation_update::Event::NewMessage(
@@ -481,7 +495,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     message_id: assistant_msg_id.to_string(),
                     role: proto::MessageRole::Assistant.into(),
                     content: crate::grpc::content_blocks::domain_to_proto(&[ContentBlock::text(
-                        text.clone(),
+                        persisted_text.clone(),
                     )]),
                     source: match params.trigger {
                         TriggerKind::Human => proto::MessageSource::Human,
@@ -500,8 +514,8 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
             .event_tx
             .send(Ok(AgentEvent::Done {
                 message_id: assistant_msg_id,
-                content: if text != content_buffer {
-                    Some(text.clone())
+                content: if persisted_text != content_buffer {
+                    Some(persisted_text.clone())
                 } else {
                     None
                 },
@@ -519,8 +533,8 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 prompt_tokens: usage_stats.map_or(0, |u| u.prompt_tokens),
                 completion_tokens: usage_stats.map_or(0, |u| u.completion_tokens),
                 artifact_ref: String::new(),
-                content: if text != content_buffer {
-                    text.clone()
+                content: if persisted_text != content_buffer {
+                    persisted_text.clone()
                 } else {
                     String::new()
                 },
@@ -532,10 +546,36 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         // -----------------------------------------------------------------
         auto_generate_title(params, &conv_id_str, &assistant_text).await;
 
+        // Post-hoc redaction of the user's original message.
+        redact_user_message_if_needed(params).await;
+
+        // Send redacted assistant reasoning to the frontend so the thinking
+        // panel replaces any plaintext secrets from ThinkingDelta events.
+        if !params.secret_registry.is_empty()
+            && let Some(ref reasoning) = persisted_reasoning
+        {
+            let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.clone(),
+                event: Some(proto::conversation_update::Event::MessageUpdated(
+                    proto::MessageUpdated {
+                        message_id: assistant_msg_id.to_string(),
+                        content: serde_json::to_string(&[ContentBlock::text(
+                            persisted_text.clone(),
+                        )])
+                        .unwrap_or_default(),
+                        reasoning: Some(reasoning.clone()),
+                    },
+                )),
+            });
+        }
+
         metrics::histogram!("sober_agent_loop_iterations_per_request")
             .record(f64::from(iteration + 1));
         return Ok(());
     }
+
+    // Post-hoc redaction even on max-iterations exit.
+    redact_user_message_if_needed(params).await;
 
     metrics::histogram!("sober_agent_loop_iterations_per_request")
         .record(f64::from(params.ctx.config.max_tool_iterations));
@@ -547,6 +587,88 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Redacts registered secret values from the user's original message if any
+/// secrets were registered during this turn.
+///
+/// Loads the message, replaces secret values with `[REDACTED: name]`, updates
+/// the DB, and sends a `MessageUpdated` event so the frontend refreshes.
+async fn redact_user_message_if_needed<R: AgentRepos>(params: &TurnParams<'_, R>) {
+    if params.secret_registry.is_empty() {
+        return;
+    }
+
+    let msg = match params
+        .ctx
+        .repos
+        .messages()
+        .get_by_id(params.user_msg_id)
+        .await
+    {
+        Ok(msg) => msg,
+        Err(e) => {
+            warn!(error = %e, "failed to load user message for redaction");
+            return;
+        }
+    };
+
+    // Redact each text content block.
+    let mut changed = false;
+    let redacted_content: Vec<ContentBlock> = msg
+        .content
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text { text } => {
+                let redacted = params.secret_registry.redact(text);
+                if redacted != *text {
+                    changed = true;
+                    ContentBlock::text(redacted)
+                } else {
+                    block.clone()
+                }
+            }
+            _ => block.clone(),
+        })
+        .collect();
+
+    if !changed {
+        return;
+    }
+
+    // Update the message in DB.
+    if let Err(e) = params
+        .ctx
+        .repos
+        .messages()
+        .update_content(
+            params.user_msg_id,
+            &redacted_content,
+            msg.reasoning.as_deref(),
+        )
+        .await
+    {
+        warn!(error = %e, "failed to update user message with redacted content");
+        return;
+    }
+
+    // Notify the frontend via broadcast.
+    let update = proto::ConversationUpdate {
+        conversation_id: params.conversation_id.to_string(),
+        event: Some(proto::conversation_update::Event::MessageUpdated(
+            proto::MessageUpdated {
+                message_id: params.user_msg_id.to_string(),
+                content: serde_json::to_string(&redacted_content).unwrap_or_default(),
+                reasoning: None,
+            },
+        )),
+    };
+    let _ = params.ctx.broadcast_tx.send(update);
+
+    info!(
+        message_id = %params.user_msg_id,
+        "redacted secret values from user message"
+    );
+}
 
 /// Builds the system prompt and conversation history messages for an LLM call.
 ///

@@ -312,7 +312,7 @@ pub(crate) async fn execute_prompt_conversational<R: AgentRepos>(
     };
 
     match result {
-        Ok(mut stream) => {
+        Ok((_msg_id, mut stream)) => {
             use futures::StreamExt;
             while let Some(event_result) = stream.next().await {
                 let proto_event = match event_result {

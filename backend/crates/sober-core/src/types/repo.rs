@@ -1098,6 +1098,13 @@ pub trait ToolExecutionRepo: Send + Sync {
         error: Option<&str>,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
+    /// Overwrites the persisted input JSON (e.g., for post-execution secret redaction).
+    fn update_input(
+        &self,
+        id: ToolExecutionId,
+        input: &serde_json::Value,
+    ) -> impl Future<Output = Result<(), AppError>> + Send;
+
     /// Finds incomplete (pending/running) executions for crash recovery.
     fn find_incomplete(
         &self,

@@ -125,6 +125,19 @@ pub enum ServerWsMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         username: Option<String>,
     },
+    /// A message's content was updated (e.g., secret redaction).
+    #[serde(rename = "chat.message_updated")]
+    ChatMessageUpdated {
+        /// Conversation this event belongs to.
+        conversation_id: String,
+        /// ID of the updated message.
+        message_id: String,
+        /// Updated content blocks (JSON-encoded).
+        content: String,
+        /// Redacted reasoning/thinking content (if present).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning: Option<String>,
+    },
     /// Unread count changed for a conversation.
     #[serde(rename = "chat.unread")]
     ChatUnread {

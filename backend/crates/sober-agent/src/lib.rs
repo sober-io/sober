@@ -14,6 +14,7 @@ pub mod extraction;
 pub mod grpc;
 pub mod history;
 pub mod ingestion;
+pub mod secret_registry;
 pub mod stream;
 pub mod system_jobs;
 pub mod tools;

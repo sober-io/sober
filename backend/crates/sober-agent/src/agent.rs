@@ -391,7 +391,7 @@ impl<R: AgentRepos> Agent<R> {
         content: &[sober_core::types::ContentBlock],
         trigger: TriggerKind,
         source: i32,
-    ) -> Result<AgentResponseStream, AgentError> {
+    ) -> Result<(sober_core::MessageId, AgentResponseStream), AgentError> {
         let start = std::time::Instant::now();
 
         // 1. Pre-flight injection check (before routing to actor).
@@ -463,8 +463,10 @@ impl<R: AgentRepos> Agent<R> {
             inbox_tx
         };
 
-        // 4. Send the message to the actor's inbox.
+        // 4. Pre-generate user message ID and send to the actor's inbox.
+        let user_msg_id = sober_core::MessageId::new();
         let msg = InboxMessage::UserMessage {
+            message_id: user_msg_id,
             user_id,
             content: content.to_vec(),
             trigger,
@@ -487,9 +489,10 @@ impl<R: AgentRepos> Agent<R> {
         metrics::counter!("sober_agent_requests_total", "status" => "ok").increment(1);
         metrics::histogram!("sober_agent_request_duration_seconds")
             .record(start.elapsed().as_secs_f64());
-        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(
-            event_rx,
-        )))
+        Ok((
+            user_msg_id,
+            Box::pin(tokio_stream::wrappers::ReceiverStream::new(event_rx)),
+        ))
     }
 
     // -----------------------------------------------------------------------
