@@ -12,6 +12,7 @@
 	let configDirty = $state(false);
 	let activeTypeFilter = $state<'all' | EvolutionType>('all');
 	let revertConfirmId = $state<string | null>(null);
+	let deleteConfirmId = $state<string | null>(null);
 	let actionInProgress = $state<string | null>(null);
 
 	// Editable config copy
@@ -131,6 +132,20 @@
 			events = events.map((e) => (e.id === id ? { ...e, status: 'approved' as const } : e));
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Failed to retry evolution';
+		} finally {
+			actionInProgress = null;
+		}
+	}
+
+	async function deleteEvent(id: string) {
+		actionInProgress = id;
+		error = null;
+		try {
+			await evolutionService.delete(id);
+			events = events.filter((e) => e.id !== id);
+			deleteConfirmId = null;
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Failed to delete evolution';
 		} finally {
 			actionInProgress = null;
 		}
@@ -350,6 +365,13 @@
 								>
 									Reject
 								</button>
+								<button
+									onclick={() => deleteEvent(event.id)}
+									disabled={actionInProgress === event.id}
+									class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+								>
+									Delete
+								</button>
 							</div>
 						</div>
 					</div>
@@ -454,7 +476,7 @@
 											disabled={actionInProgress === event.id}
 											class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
 										>
-											Confirm
+											Confirm Revert
 										</button>
 										<button
 											onclick={() => (revertConfirmId = null)}
@@ -470,6 +492,28 @@
 											Revert
 										</button>
 									{/if}
+								{/if}
+								{#if deleteConfirmId === event.id}
+									<button
+										onclick={() => deleteEvent(event.id)}
+										disabled={actionInProgress === event.id}
+										class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+									>
+										Confirm Delete
+									</button>
+									<button
+										onclick={() => (deleteConfirmId = null)}
+										class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+									>
+										Cancel
+									</button>
+								{:else if event.status !== 'approved' && event.status !== 'executing'}
+									<button
+										onclick={() => (deleteConfirmId = event.id)}
+										class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-500 hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
+									>
+										Delete
+									</button>
 								{/if}
 							</div>
 						</div>
