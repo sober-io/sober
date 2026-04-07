@@ -365,13 +365,28 @@
 								>
 									Reject
 								</button>
-								<button
-									onclick={() => deleteEvent(event.id)}
-									disabled={actionInProgress === event.id}
-									class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-								>
-									Delete
-								</button>
+								{#if deleteConfirmId === event.id}
+									<button
+										onclick={() => deleteEvent(event.id)}
+										disabled={actionInProgress === event.id}
+										class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+									>
+										Confirm Delete
+									</button>
+									<button
+										onclick={() => (deleteConfirmId = null)}
+										class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+									>
+										Cancel
+									</button>
+								{:else}
+									<button
+										onclick={() => (deleteConfirmId = event.id)}
+										class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+									>
+										Delete
+									</button>
+								{/if}
 							</div>
 						</div>
 					</div>
@@ -486,7 +501,10 @@
 										</button>
 									{:else}
 										<button
-											onclick={() => (revertConfirmId = event.id)}
+											onclick={() => {
+												deleteConfirmId = null;
+												revertConfirmId = event.id;
+											}}
 											class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
 										>
 											Revert
@@ -509,7 +527,10 @@
 									</button>
 								{:else if event.status !== 'approved' && event.status !== 'executing'}
 									<button
-										onclick={() => (deleteConfirmId = event.id)}
+										onclick={() => {
+											revertConfirmId = null;
+											deleteConfirmId = event.id;
+										}}
 										class="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-500 hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-800 dark:hover:bg-red-950 dark:hover:text-red-400"
 									>
 										Delete
