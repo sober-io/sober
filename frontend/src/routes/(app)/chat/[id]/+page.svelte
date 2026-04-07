@@ -514,6 +514,11 @@
 				// matches (mapped Discord user), it's a new message from Discord.
 				if (msg.role === 'user' && msg.user_id === auth.user?.id && msg.source !== 'gateway') {
 					const ownMsg = [...messages].reverse().find((m) => m.role === 'user');
+					console.log('[REDACT-DEBUG] new_message own user', {
+						found: !!ownMsg,
+						oldId: ownMsg?.id,
+						newId: msg.message_id
+					});
 					if (ownMsg) ownMsg.id = msg.message_id;
 					break;
 				}
@@ -616,6 +621,11 @@
 			}
 			case 'chat.message_updated': {
 				const target = messages.find((m) => m.id === msg.message_id);
+				console.log('[REDACT-DEBUG] message_updated', {
+					targetFound: !!target,
+					msgId: msg.message_id,
+					allIds: messages.map((m) => m.id)
+				});
 				if (target) {
 					try {
 						const blocks: ContentBlock[] = JSON.parse(msg.content);

@@ -320,6 +320,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                         .repos
                         .messages()
                         .create(CreateMessage {
+                            id: None,
                             conversation_id: params.conversation_id,
                             role: MessageRole::Assistant,
                             content: vec![ContentBlock::text(content_buffer.clone())],
@@ -460,6 +461,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                 .repos
                 .messages()
                 .create(CreateMessage {
+                    id: None,
                     conversation_id: params.conversation_id,
                     role: MessageRole::Assistant,
                     content: vec![ContentBlock::text(persisted_text.clone())],

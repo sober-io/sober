@@ -42,6 +42,9 @@ use crate::turn::{self, TurnParams};
 pub enum InboxMessage {
     /// A user (or scheduler/replica) message to process through the agentic loop.
     UserMessage {
+        /// Pre-generated message ID (allows the gRPC handler to return it
+        /// before the actor stores the message).
+        message_id: MessageId,
         /// The authenticated user sending the message.
         user_id: UserId,
         /// The message content blocks.
@@ -122,13 +125,14 @@ impl<R: AgentRepos> ConversationActor<R> {
         loop {
             match tokio::time::timeout(Self::IDLE_TIMEOUT, self.inbox.recv()).await {
                 Ok(Some(InboxMessage::UserMessage {
+                    message_id,
                     user_id,
                     content,
                     trigger,
                     source,
                     event_tx,
                 })) => {
-                    self.handle_message(user_id, content, trigger, source, &event_tx)
+                    self.handle_message(message_id, user_id, content, trigger, source, &event_tx)
                         .await;
                 }
                 Ok(Some(InboxMessage::Shutdown)) => {
@@ -175,6 +179,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     /// 8. Report metrics and broadcast errors.
     async fn handle_message(
         &self,
+        message_id: MessageId,
         user_id: UserId,
         content: Vec<ContentBlock>,
         trigger: TriggerKind,
@@ -190,7 +195,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         };
 
         let result = self
-            .handle_message_inner(user_id, &content, trigger, source, event_tx)
+            .handle_message_inner(message_id, user_id, &content, trigger, source, event_tx)
             .await;
 
         let status_label = if result.is_ok() { "success" } else { "error" };
@@ -228,6 +233,7 @@ impl<R: AgentRepos> ConversationActor<R> {
     #[instrument(skip(self, content, event_tx), fields(trigger = ?trigger))]
     async fn handle_message_inner(
         &self,
+        pre_generated_msg_id: MessageId,
         user_id: UserId,
         content: &[ContentBlock],
         trigger: TriggerKind,
@@ -274,6 +280,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 .repos
                 .messages()
                 .create(CreateMessage {
+                    id: Some(pre_generated_msg_id),
                     conversation_id: self.conversation_id,
                     role: MessageRole::User,
                     content: content.to_vec(),

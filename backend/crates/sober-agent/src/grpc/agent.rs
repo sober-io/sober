@@ -86,7 +86,7 @@ pub(crate) async fn handle_message<R: AgentRepos>(
         )
         .await
     {
-        Ok(stream) => {
+        Ok((user_msg_id, stream)) => {
             span.record("otel.status_code", "OK");
             // The stream must be consumed to drive the spawned task, but
             // we don't need its output — the broadcast channel delivers
@@ -102,12 +102,8 @@ pub(crate) async fn handle_message<R: AgentRepos>(
                 .instrument(drainer_span),
             );
 
-            // Return a placeholder message_id. The actual user message ID
-            // is not directly available from handle_message's current API,
-            // so we return a new UUID. The frontend uses Done.message_id
-            // for the assistant message.
             Ok(Response::new(proto::HandleMessageResponse {
-                message_id: sober_core::MessageId::new().to_string(),
+                message_id: user_msg_id.to_string(),
             }))
         }
         Err(e) => {

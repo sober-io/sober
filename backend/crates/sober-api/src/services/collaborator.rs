@@ -340,6 +340,7 @@ impl CollaboratorService {
         PgMessageRepo::create_tx(
             conn,
             CreateMessage {
+                id: None,
                 conversation_id,
                 role: MessageRole::Event,
                 content: vec![ContentBlock::text(content)],

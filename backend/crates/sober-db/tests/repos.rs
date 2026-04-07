@@ -300,6 +300,7 @@ async fn message_create_and_list(pool: PgPool) {
 
     let msg = msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![sober_core::types::ContentBlock::text("Hello")],
@@ -315,6 +316,7 @@ async fn message_create_and_list(pool: PgPool) {
 
     msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::Assistant,
             content: vec![sober_core::types::ContentBlock::text("Hi there")],
@@ -663,6 +665,7 @@ async fn insert_message(
 ) -> Result<sober_core::types::Message, sober_core::error::AppError> {
     msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id,
             role: MessageRole::User,
             content: vec![sober_core::types::ContentBlock::text(content)],
@@ -876,6 +879,7 @@ async fn text_only_message_roundtrip(pool: PgPool) {
 
     let msg = msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![ContentBlock::text("hello")],
@@ -931,6 +935,7 @@ async fn multimodal_message_with_attachment(pool: PgPool) {
     // Create a message with both text and image content blocks
     let msg = msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![
@@ -1057,6 +1062,7 @@ async fn delete_orphaned_attachments(pool: PgPool) {
     // Create a message referencing only the first attachment
     msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![
@@ -1140,6 +1146,7 @@ async fn find_unreferenced_by_message(pool: PgPool) {
     // message1 references attachment1 only
     msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![ContentBlock::Image {
@@ -1157,6 +1164,7 @@ async fn find_unreferenced_by_message(pool: PgPool) {
     // message2 references both attachment1 and attachment2
     let msg2 = msg_repo
         .create(CreateMessage {
+            id: None,
             conversation_id: conv.id,
             role: MessageRole::User,
             content: vec![
