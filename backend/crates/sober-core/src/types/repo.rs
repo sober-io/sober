@@ -932,6 +932,9 @@ pub trait EvolutionRepo: Send + Sync {
         result: serde_json::Value,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
 
+    /// Hard-deletes an evolution event by ID.
+    fn delete(&self, id: EvolutionEventId) -> impl Future<Output = Result<(), AppError>> + Send;
+
     /// Counts events auto-approved today (decided_by IS NULL, status IN (approved, executing, active)).
     fn count_auto_approved_today(&self) -> impl Future<Output = Result<i64, AppError>> + Send;
 

@@ -179,6 +179,20 @@ impl sober_core::types::EvolutionRepo for PgEvolutionRepo {
         Ok(())
     }
 
+    async fn delete(&self, id: EvolutionEventId) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM evolution_events WHERE id = $1")
+            .bind(id.as_uuid())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("evolution event".into()));
+        }
+
+        Ok(())
+    }
+
     async fn count_auto_approved_today(&self) -> Result<i64, AppError> {
         let (count,): (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM evolution_events \
