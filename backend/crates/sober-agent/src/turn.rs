@@ -436,17 +436,23 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
         // turn, update the existing message; otherwise create a new one.
         let assistant_msg_id = if let Some(existing_id) = turn_assistant_msg_id {
             // Update the message that was created during tool-call phase.
-            params
-                .ctx
-                .repos
-                .messages()
-                .update_content(
-                    existing_id,
-                    &[ContentBlock::text(persisted_text.clone())],
-                    persisted_reasoning.as_deref(),
-                )
-                .await
-                .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            // Skip when persisted_text is empty — the write-ahead message
+            // already has the text streamed alongside tool calls. Overwriting
+            // with empty text erases the visible response (happens when the
+            // follow-up iteration is only extraction blocks).
+            if !persisted_text.is_empty() {
+                params
+                    .ctx
+                    .repos
+                    .messages()
+                    .update_content(
+                        existing_id,
+                        &[ContentBlock::text(persisted_text.clone())],
+                        persisted_reasoning.as_deref(),
+                    )
+                    .await
+                    .map_err(|e| AgentError::ContextLoadFailed(e.to_string()))?;
+            }
             existing_id
         } else {
             let assistant_msg = params
