@@ -754,10 +754,6 @@ impl Tool for SchedulerTools {
                         "type": "string",
                         "description": "Workspace UUID (optional for create and list)."
                     },
-                    "conversation_id": {
-                        "type": "string",
-                        "description": "Conversation UUID to deliver results to (optional for create)."
-                    },
                     "limit": {
                         "type": "integer",
                         "description": "Max number of runs to return (optional for runs action)."

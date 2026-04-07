@@ -130,20 +130,27 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             }
         };
 
-        // Inject caller context into tool input so tools can authorize
+        // Force-inject caller context into tool input so tools can authorize
         // and associate results with the originating conversation.
+        // Always overwrite — the LLM may emit null/empty values for these
+        // fields, and `entry().or_insert()` would leave those untouched.
         if let serde_json::Value::Object(ref mut map) = tool_input {
-            map.entry("owner_id")
-                .or_insert_with(|| serde_json::Value::String(req.user_id.to_string()));
-            map.entry("conversation_id")
-                .or_insert_with(|| serde_json::Value::String(req.conversation_id.to_string()));
+            map.insert(
+                "owner_id".into(),
+                serde_json::Value::String(req.user_id.to_string()),
+            );
+            map.insert(
+                "conversation_id".into(),
+                serde_json::Value::String(req.conversation_id.to_string()),
+            );
             if let Some(ws_id) = req.workspace_id {
-                map.entry("workspace_id")
-                    .or_insert_with(|| serde_json::Value::String(ws_id.to_string()));
+                map.insert(
+                    "workspace_id".into(),
+                    serde_json::Value::String(ws_id.to_string()),
+                );
             }
             // TODO: resolve from RoleRepo when RBAC is wired into the agent
-            map.entry("is_admin")
-                .or_insert(serde_json::Value::Bool(false));
+            map.insert("is_admin".into(), serde_json::Value::Bool(false));
         }
 
         let tool_redacted = req
