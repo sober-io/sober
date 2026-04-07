@@ -20,7 +20,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/evolution", get(list_events))
         .route("/evolution/config", get(get_config).patch(update_config))
         .route("/evolution/timeline", get(get_timeline))
-        .route("/evolution/{id}", get(get_event).patch(update_event))
+        .route(
+            "/evolution/{id}",
+            get(get_event).patch(update_event).delete(delete_event),
+        )
 }
 
 #[derive(serde::Deserialize)]
@@ -70,6 +73,18 @@ async fn update_event(
         .update_event(EvolutionEventId::from_uuid(id), body.status, user.user_id)
         .await?;
     Ok(ApiResponse::new(updated))
+}
+
+async fn delete_event(
+    State(state): State<Arc<AppState>>,
+    RequireAdmin(_user): RequireAdmin,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<axum::http::StatusCode, AppError> {
+    state
+        .evolution
+        .delete_event(EvolutionEventId::from_uuid(id))
+        .await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 async fn get_config(
