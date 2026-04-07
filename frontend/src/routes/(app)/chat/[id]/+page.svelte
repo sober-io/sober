@@ -471,6 +471,7 @@
 				if (idx >= 0) {
 					const done =
 						msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
+
 					target.toolExecutions = target.toolExecutions.map((te) =>
 						te.id === msg.id
 							? {
@@ -574,6 +575,7 @@
 			}
 			case 'chat.done': {
 				const last = messages[messages.length - 1];
+
 				if (last) {
 					last.streaming = false;
 					last.thinking = false;
@@ -614,6 +616,7 @@
 			}
 			case 'chat.message_updated': {
 				const target = messages.find((m) => m.id === msg.message_id);
+
 				if (target) {
 					try {
 						target.contentBlocks = JSON.parse(msg.content);

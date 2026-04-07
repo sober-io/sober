@@ -4,7 +4,6 @@ use sober_core::types::{
 };
 use sober_db::{PgConversationUserRepo, PgMessageRepo};
 use sqlx::PgPool;
-use tokio::sync::mpsc;
 use tracing::{error, instrument, warn};
 
 use crate::connections::ConnectionRegistry;
@@ -51,26 +50,53 @@ impl WsDispatchService {
         Ok(())
     }
 
-    /// Process a chat message: verify membership, broadcast, and fire-and-forget gRPC.
-    #[instrument(skip(self, content, error_tx), fields(conversation.id = %conversation_id))]
+    /// Process a chat message: verify membership, store via gRPC, then broadcast.
+    #[instrument(skip(self, content), fields(conversation.id = %conversation_id))]
     pub async fn send_message(
         &self,
         conversation_id: ConversationId,
         user_id: UserId,
         username: &str,
         content: Vec<ContentBlock>,
-        error_tx: mpsc::Sender<ServerWsMessage>,
     ) -> Result<(), AppError> {
         crate::services::verify_membership(&self.db, conversation_id, user_id).await?;
 
         let conv_id_str = conversation_id.to_string();
 
-        // Broadcast the user's message to all subscribers.
+        // Convert content blocks to proto format.
+        let proto_blocks: Vec<proto::ContentBlock> = content
+            .iter()
+            .cloned()
+            .map(crate::proto_convert::content_block_to_proto)
+            .collect();
+
+        // Call unary HandleMessage RPC — returns immediately with the stored
+        // message ID. The agent processes the turn asynchronously.
+        let mut agent_client = self.agent_client.clone();
+        let mut request = tonic::Request::new(proto::HandleMessageRequest {
+            user_id: user_id.to_string(),
+            conversation_id: conv_id_str.clone(),
+            content: proto_blocks,
+            source: proto::MessageSource::Web.into(),
+        });
+        sober_core::inject_trace_context(request.metadata_mut());
+
+        let response = agent_client.handle_message(request).await.map_err(|e| {
+            error!(
+                error.message = %e.message(),
+                error.type_ = %e.code(),
+                "HandleMessage RPC failed"
+            );
+            AppError::Internal(anyhow::anyhow!("agent error: {}", e.message()).into())
+        })?;
+        let message_id = response.into_inner().message_id;
+
+        // Broadcast the user's message with the real DB ID to all subscribers.
         let user_msg = ServerWsMessage::ChatNewMessage {
             conversation_id: conv_id_str.clone(),
-            message_id: uuid::Uuid::now_v7().to_string(),
+            message_id,
             role: "user".into(),
-            content: content.clone(),
+            content,
             source: MessageSource::Web,
             user_id: Some(user_id.to_string()),
             username: Some(username.to_string()),
@@ -86,66 +112,6 @@ impl WsDispatchService {
                 },
             )
             .await;
-
-        // Convert content blocks to proto format.
-        let proto_blocks: Vec<proto::ContentBlock> = content
-            .into_iter()
-            .map(crate::proto_convert::content_block_to_proto)
-            .collect();
-
-        // Call unary HandleMessage RPC — fire and forget.
-        let mut agent_client = self.agent_client.clone();
-        let mut request = tonic::Request::new(proto::HandleMessageRequest {
-            user_id: user_id.to_string(),
-            conversation_id: conv_id_str.clone(),
-            content: proto_blocks,
-            source: proto::MessageSource::Web.into(),
-        });
-
-        let span = tracing::info_span!(
-            "ws.handle_message",
-            otel.kind = "client",
-            rpc.service = "AgentService",
-            rpc.method = "HandleMessage",
-            rpc.system = "grpc",
-            user.id = %user_id,
-            conversation.id = %conv_id_str,
-            otel.status_code = tracing::field::Empty,
-        );
-        {
-            use tracing_opentelemetry::OpenTelemetrySpanExt;
-            let cx = span.context();
-            opentelemetry::global::get_text_map_propagator(|p| {
-                p.inject_context(
-                    &cx,
-                    &mut sober_core::MetadataMapInjector(request.metadata_mut()),
-                );
-            });
-        }
-        tokio::spawn(tracing::Instrument::instrument(
-            async move {
-                match agent_client.handle_message(request).await {
-                    Ok(_) => {
-                        tracing::Span::current().record("otel.status_code", "OK");
-                    }
-                    Err(e) => {
-                        tracing::Span::current().record("otel.status_code", "ERROR");
-                        error!(
-                            error.message = %e.message(),
-                            error.type_ = %e.code(),
-                            "HandleMessage RPC failed"
-                        );
-                        let _ = error_tx
-                            .send(ServerWsMessage::ChatError {
-                                conversation_id: conv_id_str,
-                                error: e.message().to_owned(),
-                            })
-                            .await;
-                    }
-                }
-            },
-            span,
-        ));
 
         Ok(())
     }
