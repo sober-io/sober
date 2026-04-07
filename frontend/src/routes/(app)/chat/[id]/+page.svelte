@@ -478,6 +478,7 @@
 									status: msg.status,
 									output: msg.output ?? te.output,
 									error: msg.error ?? te.error,
+									input: msg.input ? JSON.parse(msg.input) : te.input,
 									_durationMs: done && te._startedAt ? now - te._startedAt : te._durationMs
 								}
 							: te
@@ -609,6 +610,17 @@
 						reason: msg.reason
 					}
 				];
+				break;
+			}
+			case 'chat.message_updated': {
+				const target = messages.find((m) => m.id === msg.message_id);
+				if (target) {
+					try {
+						target.contentBlocks = JSON.parse(msg.content);
+					} catch {
+						// Ignore malformed content updates.
+					}
+				}
 				break;
 			}
 			case 'chat.collaborator_added': {

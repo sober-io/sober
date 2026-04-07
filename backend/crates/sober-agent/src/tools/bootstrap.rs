@@ -101,6 +101,8 @@ pub struct TurnContext {
     /// Prevents the same skill from being injected twice across multiple turns.
     /// NOT the skill cache — that's managed by [`SkillLoader`]'s TTL cache.
     pub skill_activation_state: Option<Arc<std::sync::Mutex<SkillActivationState>>>,
+    /// Per-turn secret registry — decrypted values are registered here for redaction.
+    pub secret_registry: Arc<crate::secret_registry::SecretRegistry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +308,7 @@ impl<R: AgentRepos> ToolBootstrap<R> {
                 mek: Arc::clone(mek),
                 user_id: ctx.user_id,
                 conversation_id: Some(ctx.conversation_id),
+                secret_registry: Arc::clone(&ctx.secret_registry),
             });
             tools.push(Arc::new(StoreSecretTool::new(Arc::clone(&secret_ctx))));
             tools.push(Arc::new(ReadSecretTool::new(Arc::clone(&secret_ctx))));
@@ -478,6 +481,7 @@ mod tests {
             workspace_dir: None,
             workspace_settings: None,
             skill_activation_state: None,
+            secret_registry: Arc::new(crate::secret_registry::SecretRegistry::new()),
         };
         assert!(ctx.workspace_id.is_none());
         assert!(ctx.workspace_dir.is_none());

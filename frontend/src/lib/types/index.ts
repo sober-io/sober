@@ -179,6 +179,12 @@ export type ServerWsMessage =
 			affects: string[];
 			reason: string;
 	  }
+	| {
+			type: 'chat.message_updated';
+			conversation_id: string;
+			message_id: string;
+			content: string;
+	  }
 	| { type: 'chat.unread'; conversation_id: string; unread_count: number }
 	| {
 			type: 'chat.collaborator_added';

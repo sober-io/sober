@@ -97,6 +97,26 @@ impl sober_core::types::ToolExecutionRepo for PgToolExecutionRepo {
         Ok(())
     }
 
+    async fn update_input(
+        &self,
+        id: ToolExecutionId,
+        input: &serde_json::Value,
+    ) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE conversation_tool_executions SET input = $2 WHERE id = $1")
+                .bind(id.as_uuid())
+                .bind(input)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("tool_execution".into()));
+        }
+
+        Ok(())
+    }
+
     async fn find_incomplete(
         &self,
         conversation_id: ConversationId,

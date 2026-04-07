@@ -19,6 +19,8 @@ use sober_crypto::envelope::{Dek, EncryptedBlob, Mek};
 use tracing::instrument;
 use uuid::Uuid;
 
+use crate::secret_registry::SecretRegistry;
+
 /// Shared context for all secret tools.
 ///
 /// Holds the repos, MEK, and caller identity needed to encrypt/decrypt secrets.
@@ -28,6 +30,8 @@ pub struct SecretToolContext<S: SecretRepo, A: AuditLogRepo> {
     pub mek: Arc<Mek>,
     pub user_id: UserId,
     pub conversation_id: Option<ConversationId>,
+    /// Per-turn secret registry — decrypted values are registered here for redaction.
+    pub secret_registry: Arc<SecretRegistry>,
 }
 
 /// Non-sensitive metadata keys that are safe to extract from the secret data
@@ -95,6 +99,24 @@ fn extract_metadata(data: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(metadata)
 }
 
+/// Registers sensitive leaf values from a secret's decrypted JSON into the
+/// per-turn [`SecretRegistry`].
+///
+/// Only registers string values whose keys are NOT in [`METADATA_KEYS`]
+/// (those are non-sensitive and already stored in plaintext).
+fn register_secret_values(registry: &SecretRegistry, data: &serde_json::Value, secret_name: &str) {
+    if let Some(obj) = data.as_object() {
+        for (key, value) in obj {
+            if METADATA_KEYS.contains(&key.as_str()) {
+                continue;
+            }
+            if let Some(s) = value.as_str() {
+                registry.register(s, secret_name);
+            }
+        }
+    }
+}
+
 /// Writes an audit log entry, logging any failure without propagating it.
 async fn write_audit<A: AuditLogRepo>(
     repo: &A,
@@ -157,6 +179,10 @@ impl<S: SecretRepo, A: AuditLogRepo> StoreSecretTool<S, A> {
                 "'data' must be a JSON object".into(),
             ));
         }
+
+        // Register sensitive values for redaction so the dispatch layer
+        // can redact the tool input that contains them.
+        register_secret_values(&self.ctx.secret_registry, data, &name);
 
         // Determine scope: "user" = None (available across conversations),
         // "conversation" (default) = scoped to current conversation.
@@ -223,7 +249,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for StoreSecretToo
             description: "Encrypt and store a secret (API key, credentials, tokens) in the \
                 secure vault. Secrets are AES-256-GCM encrypted at rest. Use scope 'conversation' \
                 (default) to limit access to this conversation, or 'user' for cross-conversation \
-                access."
+                access. IMPORTANT: After storing, confirm success by name only — never repeat \
+                or echo the secret value in your response."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -313,6 +340,11 @@ impl<S: SecretRepo, A: AuditLogRepo> ReadSecretTool<S, A> {
         let decrypted_str = String::from_utf8(plaintext)
             .map_err(|e| ToolError::ExecutionFailed(format!("invalid UTF-8 in secret: {e}")))?;
 
+        // Register sensitive values in the per-turn secret registry for redaction.
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&decrypted_str) {
+            register_secret_values(&self.ctx.secret_registry, &parsed, name);
+        }
+
         write_audit(
             self.ctx.audit_repo.as_ref(),
             user_id,
@@ -335,7 +367,8 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for ReadSecretTool
             name: "read_secret".to_owned(),
             description: "Decrypt and retrieve a stored secret by name. Use this when you need \
                 credentials (API keys, tokens) to call external services. The decrypted value is \
-                for internal use only and will not be shown to the user."
+                for internal use only — never include it in your response text. Pass it directly \
+                to tools (fetch_url headers, shell env vars) without quoting it."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -583,5 +616,115 @@ mod tests {
         let data = serde_json::json!({});
         let meta = extract_metadata(&data);
         assert!(meta.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn register_secret_values_registers_sensitive_keys_only() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!({
+            "provider": "openai",
+            "api_key": "sk-secret-123",
+            "base_url": "https://api.openai.com",
+            "token": "ghp_sensitive"
+        });
+        register_secret_values(&registry, &data, "my-secret");
+
+        // Sensitive values are registered.
+        assert_eq!(
+            registry.redact("header: sk-secret-123"),
+            "header: [REDACTED: my-secret]"
+        );
+        assert_eq!(
+            registry.redact("token: ghp_sensitive"),
+            "token: [REDACTED: my-secret]"
+        );
+        // Metadata values are NOT registered.
+        assert_eq!(registry.redact("provider: openai"), "provider: openai");
+        assert_eq!(
+            registry.redact("url: https://api.openai.com"),
+            "url: https://api.openai.com"
+        );
+    }
+
+    #[test]
+    fn register_secret_values_skips_non_string_values() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!({
+            "api_key": "sk-secret",
+            "port": 8080,
+            "enabled": true
+        });
+        register_secret_values(&registry, &data, "test");
+
+        // Only the string value is registered.
+        assert_eq!(registry.redact("key=sk-secret"), "key=[REDACTED: test]");
+        // Non-string values are not registered (and wouldn't match anyway).
+        assert_eq!(registry.redact("port 8080"), "port 8080");
+    }
+
+    #[test]
+    fn register_secret_values_skips_non_object() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!("just a string");
+        register_secret_values(&registry, &data, "test");
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn register_secret_values_redacts_in_json_input() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!({
+            "password": "super-secret-password"
+        });
+        register_secret_values(&registry, &data, "my-creds");
+
+        let tool_input = serde_json::json!({
+            "name": "my-creds",
+            "data": {"password": "super-secret-password"}
+        });
+        let input_str = serde_json::to_string(&tool_input).unwrap();
+        let redacted = registry.redact(&input_str);
+        assert!(
+            !redacted.contains("super-secret-password"),
+            "secret value should be redacted from JSON: {redacted}"
+        );
+        assert!(
+            redacted.contains("[REDACTED: my-creds]"),
+            "should contain redaction marker: {redacted}"
+        );
+    }
+
+    #[test]
+    fn register_secret_values_redacts_in_user_message() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!({
+            "key": "sk-proj-abc123xyz"
+        });
+        register_secret_values(&registry, &data, "openai-key");
+
+        let user_msg = "store my openai key sk-proj-abc123xyz please";
+        let redacted = registry.redact(user_msg);
+        assert_eq!(
+            redacted,
+            "store my openai key [REDACTED: openai-key] please"
+        );
+    }
+
+    #[test]
+    fn register_secret_values_multiple_fields_all_registered() {
+        let registry = SecretRegistry::new();
+        let data = serde_json::json!({
+            "username": "admin",
+            "password": "s3cret-pass",
+            "provider": "github"  // metadata key — skipped
+        });
+        register_secret_values(&registry, &data, "db-creds");
+
+        assert_eq!(
+            registry.redact("user=admin pass=s3cret-pass"),
+            "user=[REDACTED: db-creds] pass=[REDACTED: db-creds]"
+        );
+        // Metadata key value not registered.
+        assert_eq!(registry.redact("provider=github"), "provider=github");
     }
 }

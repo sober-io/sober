@@ -333,6 +333,7 @@ impl<R: AgentRepos> ConversationActor<R> {
         }
 
         // 5. Build per-turn tool registry
+        let secret_registry = Arc::new(crate::secret_registry::SecretRegistry::new());
         let tool_registry = {
             let turn_ctx = TurnContext {
                 user_id,
@@ -341,6 +342,7 @@ impl<R: AgentRepos> ConversationActor<R> {
                 workspace_dir: workspace_dir.clone(),
                 workspace_settings: workspace_settings.clone(),
                 skill_activation_state: Some(Arc::clone(&self.skill_activations)),
+                secret_registry: Arc::clone(&secret_registry),
             };
             Arc::new(
                 self.ctx
@@ -385,6 +387,7 @@ impl<R: AgentRepos> ConversationActor<R> {
             workspace_id: conversation.workspace_id,
             workspace_dir,
             skill_catalog_xml,
+            secret_registry,
         };
 
         turn::run_turn(&params).await

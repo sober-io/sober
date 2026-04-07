@@ -28,6 +28,7 @@ use crate::broadcast::ConversationUpdateSender;
 use crate::context::AgentContext;
 use crate::error::AgentError;
 use crate::grpc::proto;
+use crate::secret_registry::SecretRegistry;
 use crate::stream::AgentEvent;
 use crate::tools::ToolRegistry;
 
@@ -74,6 +75,8 @@ pub struct DispatchRequest<'a> {
     pub user_id: UserId,
     /// The workspace associated with this conversation, if any.
     pub workspace_id: Option<WorkspaceId>,
+    /// Per-turn secret registry for redacting sensitive values.
+    pub secret_registry: &'a Arc<SecretRegistry>,
 }
 
 /// Details of a confirmation request extracted from [`ToolError::NeedsConfirmation`].
@@ -148,6 +151,20 @@ pub async fn execute_tool_calls<R: AgentRepos>(
             .get_tool(tool_name)
             .is_some_and(|t| t.metadata().redacted);
 
+        // Redact sensitive values from the serialized input for persistence/broadcast.
+        // The original `tool_input` is kept unredacted for actual tool execution.
+        let redacted_input = if !tool_redacted {
+            serde_json::to_string(&tool_input).ok().map(|s| {
+                let redacted = req.secret_registry.redact(&s);
+                match serde_json::from_str::<serde_json::Value>(&redacted) {
+                    Ok(val) => val,
+                    Err(_) => serde_json::Value::String(redacted),
+                }
+            })
+        } else {
+            None
+        };
+
         // -----------------------------------------------------------
         // Step 1: Write-ahead — create pending tool execution row
         // (skip for redacted tools — they have no persisted assistant
@@ -164,7 +181,7 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                     conversation_message_id: req.assistant_message_id,
                     tool_call_id: tc.id.clone(),
                     tool_name: tool_name.clone(),
-                    input: tool_input.clone(),
+                    input: redacted_input.clone().unwrap_or_else(|| tool_input.clone()),
                     source: ToolExecutionSource::Builtin,
                     plugin_id: None,
                 })
@@ -196,10 +213,12 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         let msg_id_str = req.assistant_message_id.to_string();
 
         // -----------------------------------------------------------
-        // Step 2: Send pending event (include input so the frontend can display it)
+        // Step 2: Send pending event (include redacted input so the frontend can display it)
         // -----------------------------------------------------------
         if exec.is_some() {
-            let input_json = serde_json::to_string(&tool_input).ok();
+            let input_json = redacted_input
+                .as_ref()
+                .and_then(|v| serde_json::to_string(v).ok());
             send_execution_update(
                 req.event_tx,
                 &ctx.broadcast_tx,
@@ -290,17 +309,55 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         .record(tool_start.elapsed().as_secs_f64());
 
         // -----------------------------------------------------------
-        // Step 5: Transition to completed/failed
+        // Step 5: Re-redact input after execution (tools like store_secret
+        // register secrets during execution, after the initial input was
+        // already persisted) and transition to completed/failed.
         // -----------------------------------------------------------
+
+        // Re-redact the input now that the registry may have new entries
+        // (tools like store_secret register secrets during execution).
+        let final_redacted_input = serde_json::to_string(&tool_input).ok().map(|s| {
+            let redacted = req.secret_registry.redact(&s);
+            match serde_json::from_str::<serde_json::Value>(&redacted) {
+                Ok(val) => val,
+                Err(_) => serde_json::Value::String(redacted),
+            }
+        });
+        let input_changed = final_redacted_input.as_ref() != redacted_input.as_ref();
+
+        if let Some(eid) = exec_id
+            // Update the stored input if redaction changed after execution.
+            && input_changed
+            && let Some(ref new_input) = final_redacted_input
+            && let Err(e) = ctx
+                .repos
+                .tool_executions()
+                .update_input(eid, new_input)
+                .await
+        {
+            warn!(tool = %tool_name, error = %e, "failed to re-redact tool execution input");
+        }
+
+        let redacted_output = req.secret_registry.redact(&output);
         let final_status = if is_error {
             ToolExecutionStatus::Failed
         } else {
             ToolExecutionStatus::Completed
         };
         let (db_output, db_error) = if is_error {
-            (None, Some(output.as_str()))
+            (None, Some(redacted_output.as_str()))
         } else {
-            (Some(output.as_str()), None)
+            (Some(redacted_output.as_str()), None)
+        };
+
+        // Include the redacted input in the completed/failed event so the
+        // frontend replaces any plaintext it received in the pending event.
+        let final_input_json = if input_changed {
+            final_redacted_input
+                .as_ref()
+                .and_then(|v| serde_json::to_string(v).ok())
+        } else {
+            None
         };
 
         if let Some(eid) = exec_id {
@@ -322,9 +379,17 @@ pub async fn execute_tool_calls<R: AgentRepos>(
                 &tc.id,
                 tool_name,
                 final_status,
-                if !is_error { Some(&output) } else { None },
-                if is_error { Some(&output) } else { None },
-                None,
+                if !is_error {
+                    Some(&redacted_output)
+                } else {
+                    None
+                },
+                if is_error {
+                    Some(&redacted_output)
+                } else {
+                    None
+                },
+                final_input_json.as_deref(),
             )
             .await;
         }
@@ -332,14 +397,15 @@ pub async fn execute_tool_calls<R: AgentRepos>(
         // Tool results are now persisted via ToolExecution records (Step 4/5 above).
         // No separate Tool-role message is needed.
 
-        // Audit logging for shell tool runs.
+        // Audit logging for shell tool runs (with redacted command).
         if let Some(ref cmd) = shell_command {
+            let redacted_cmd = req.secret_registry.redact(cmd);
             let _ = crate::audit::log_shell_exec(
                 ctx.repos.audit_log(),
                 req.user_id,
                 req.workspace_id,
                 serde_json::json!({
-                    "command": cmd,
+                    "command": redacted_cmd,
                     "conversation_id": req.conversation_id.to_string(),
                 }),
             )
