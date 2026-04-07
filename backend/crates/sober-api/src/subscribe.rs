@@ -235,6 +235,7 @@ fn conversation_update_to_ws(update: proto::ConversationUpdate) -> Option<Server
                 conversation_id: cid,
                 message_id: mu.message_id,
                 content: mu.content,
+                reasoning: mu.reasoning,
             })
         }
     }

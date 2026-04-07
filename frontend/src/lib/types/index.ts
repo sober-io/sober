@@ -184,6 +184,7 @@ export type ServerWsMessage =
 			conversation_id: string;
 			message_id: string;
 			content: string;
+			reasoning?: string;
 	  }
 	| { type: 'chat.unread'; conversation_id: string; unread_count: number }
 	| {

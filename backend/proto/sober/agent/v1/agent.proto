@@ -188,7 +188,8 @@ message TitleChanged {
 // A message's content was updated (e.g., post-hoc secret redaction).
 message MessageUpdated {
   string message_id = 1;
-  string content = 2;  // JSON-encoded ContentBlock array
+  string content = 2;           // JSON-encoded ContentBlock array
+  optional string reasoning = 3; // Redacted reasoning/thinking content
 }
 
 // --- Skill listing types ---

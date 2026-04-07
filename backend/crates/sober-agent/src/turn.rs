@@ -463,7 +463,7 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
                     conversation_id: params.conversation_id,
                     role: MessageRole::Assistant,
                     content: vec![ContentBlock::text(persisted_text.clone())],
-                    reasoning: persisted_reasoning,
+                    reasoning: persisted_reasoning.clone(),
                     token_count: usage_stats.map(|u| u.total_tokens as i32),
                     metadata: None,
                     user_id: None,
@@ -546,6 +546,26 @@ pub async fn run_turn<R: AgentRepos>(params: &TurnParams<'_, R>) -> Result<(), A
 
         // Post-hoc redaction of the user's original message.
         redact_user_message_if_needed(params).await;
+
+        // Send redacted assistant reasoning to the frontend so the thinking
+        // panel replaces any plaintext secrets from ThinkingDelta events.
+        if !params.secret_registry.is_empty()
+            && let Some(ref reasoning) = persisted_reasoning
+        {
+            let _ = params.ctx.broadcast_tx.send(proto::ConversationUpdate {
+                conversation_id: conv_id_str.clone(),
+                event: Some(proto::conversation_update::Event::MessageUpdated(
+                    proto::MessageUpdated {
+                        message_id: assistant_msg_id.to_string(),
+                        content: serde_json::to_string(&[ContentBlock::text(
+                            persisted_text.clone(),
+                        )])
+                        .unwrap_or_default(),
+                        reasoning: Some(reasoning.clone()),
+                    },
+                )),
+            });
+        }
 
         metrics::histogram!("sober_agent_loop_iterations_per_request")
             .record(f64::from(iteration + 1));
@@ -636,6 +656,7 @@ async fn redact_user_message_if_needed<R: AgentRepos>(params: &TurnParams<'_, R>
             proto::MessageUpdated {
                 message_id: params.user_msg_id.to_string(),
                 content: serde_json::to_string(&redacted_content).unwrap_or_default(),
+                reasoning: None,
             },
         )),
     };

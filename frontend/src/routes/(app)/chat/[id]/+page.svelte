@@ -616,12 +616,19 @@
 			}
 			case 'chat.message_updated': {
 				const target = messages.find((m) => m.id === msg.message_id);
-
 				if (target) {
 					try {
-						target.contentBlocks = JSON.parse(msg.content);
+						const blocks: ContentBlock[] = JSON.parse(msg.content);
+						target.contentBlocks = blocks;
+						target.content = blocks
+							.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+							.map((b) => b.text)
+							.join('\n');
 					} catch {
 						// Ignore malformed content updates.
+					}
+					if (msg.reasoning) {
+						target.thinkingContent = msg.reasoning;
 					}
 				}
 				break;
