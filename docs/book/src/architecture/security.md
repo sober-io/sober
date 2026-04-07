@@ -127,6 +127,34 @@ Permissions are scoped. A user may hold `ReadKnowledge` for their own scope with
 
 Permission scopes: `knowledge`, `tools`, `agent`, `admin`.
 
+## Secret Redaction
+
+Secrets stored via the `store_secret` tool are protected from leaking into persisted records, audit logs, and WebSocket broadcasts through a two-layer redaction system.
+
+### Layer 1: Per-Turn SecretRegistry
+
+A `SecretRegistry` is created at the start of each agentic turn. It collects plaintext secret values as they pass through `read_secret` (after decryption) and `store_secret` (from the input data fields). Only sensitive leaf values are registered — metadata fields (provider, server, base_url, model, description) are excluded.
+
+The dispatch layer calls `registry.redact(text)` on all data before persistence:
+
+| Storage path | What is redacted |
+|---|---|
+| Tool execution input | Before `create_pending` and after execution (re-redacted) |
+| Tool execution output | Before `update_status` |
+| Audit log details | Shell commands, confirmation details |
+| Assistant message text | Before DB storage and WS broadcast |
+| Assistant reasoning | Before DB storage |
+
+Registered values are replaced with `[REDACTED: secret-name]`. The LLM context window retains unredacted values so it can reason correctly — only persistence and broadcast paths are redacted.
+
+### Layer 2: Post-hoc User Message Redaction
+
+After `store_secret` succeeds, the user's original message (which may contain the pasted secret) is retroactively redacted in the database. A `MessageUpdated` WebSocket event notifies the frontend to replace the displayed message in real-time.
+
+### Prompt Defense
+
+The agent's safety instructions and tool descriptions explicitly forbid echoing, quoting, or repeating secret values in responses. This prevents secrets from appearing in the real-time text stream (TextDelta events), which cannot be redacted at the token level.
+
 ## Context Isolation
 
 Memory scopes are enforced at the query level. Each memory chunk carries a scope UUID in its Qdrant payload. The context loading pipeline applies scope filters on every query, ensuring chunks from different user scopes are never mixed.

@@ -258,4 +258,38 @@ mod tests {
             "both occurrences should be redacted"
         );
     }
+
+    /// Verifies that redacting empty text returns empty text (Phase 4 guard).
+    #[test]
+    fn redact_empty_text_returns_empty() {
+        let reg = SecretRegistry::new();
+        reg.register("some-secret-value", "my-key");
+        assert_eq!(reg.redact(""), "");
+    }
+
+    /// Verifies that redaction doesn't affect text with no matching secrets.
+    #[test]
+    fn redact_no_match_returns_unchanged() {
+        let reg = SecretRegistry::new();
+        reg.register("specific-secret-value", "my-key");
+        let text = "Your password has been stored securely as my-key.";
+        assert_eq!(reg.redact(text), text, "name-only text should be unchanged");
+    }
+
+    /// Verifies multiple secrets from different tools in the same turn.
+    #[test]
+    fn multiple_secrets_across_tools() {
+        let reg = SecretRegistry::new();
+        // read_secret registers one
+        reg.register("sk-existing-key", "openai");
+        // store_secret registers another
+        reg.register("ghp_new_token", "github");
+
+        let text = "Using sk-existing-key for API and storing ghp_new_token";
+        let redacted = reg.redact(text);
+        assert_eq!(
+            redacted,
+            "Using [REDACTED: openai] for API and storing [REDACTED: github]"
+        );
+    }
 }
