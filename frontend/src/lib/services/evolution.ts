@@ -18,6 +18,11 @@ export const evolutionService = {
 			body: JSON.stringify({ status })
 		}),
 
+	delete: (id: string) =>
+		api<void>(`/evolution/${id}`, {
+			method: 'DELETE'
+		}),
+
 	getConfig: () => api<EvolutionConfig>('/evolution/config'),
 
 	updateConfig: (config: Partial<EvolutionConfig>) =>

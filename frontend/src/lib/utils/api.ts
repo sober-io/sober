@@ -24,6 +24,10 @@ export const api = async <T>(path: string, options?: RequestInit): Promise<T> =>
 		throw new ApiError(res.status, body);
 	}
 
+	if (res.status === 204) {
+		return undefined as T;
+	}
+
 	const json: ApiData<T> = await res.json();
 	return json.data;
 };
