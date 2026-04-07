@@ -224,17 +224,16 @@ fn validate_status_transition(
     }
 }
 
-/// Statuses from which an evolution event can be permanently deleted.
-const DELETABLE_STATUSES: &[EvolutionStatus] = &[
-    EvolutionStatus::Proposed,
-    EvolutionStatus::Rejected,
-    EvolutionStatus::Failed,
-    EvolutionStatus::Reverted,
-    EvolutionStatus::Active,
-];
-
 fn validate_deletable(status: &EvolutionStatus) -> Result<(), AppError> {
-    if DELETABLE_STATUSES.contains(status) {
+    const DELETABLE: &[EvolutionStatus] = &[
+        EvolutionStatus::Proposed,
+        EvolutionStatus::Rejected,
+        EvolutionStatus::Failed,
+        EvolutionStatus::Reverted,
+        EvolutionStatus::Active,
+    ];
+
+    if DELETABLE.contains(status) {
         Ok(())
     } else {
         Err(AppError::Validation(format!(
