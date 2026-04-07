@@ -249,8 +249,7 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for StoreSecretToo
             description: "Encrypt and store a secret (API key, credentials, tokens) in the \
                 secure vault. Secrets are AES-256-GCM encrypted at rest. Use scope 'conversation' \
                 (default) to limit access to this conversation, or 'user' for cross-conversation \
-                access. IMPORTANT: After storing, confirm success by name only — never repeat \
-                or echo the secret value in your response."
+                access."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -367,8 +366,7 @@ impl<S: SecretRepo + 'static, A: AuditLogRepo + 'static> Tool for ReadSecretTool
             name: "read_secret".to_owned(),
             description: "Decrypt and retrieve a stored secret by name. Use this when you need \
                 credentials (API keys, tokens) to call external services. The decrypted value is \
-                for internal use only — never include it in your response text. Pass it directly \
-                to tools (fetch_url headers, shell env vars) without quoting it."
+                for internal use only and will not be shown to the user."
                 .to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
