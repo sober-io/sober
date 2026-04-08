@@ -70,10 +70,6 @@ pub struct AppState {
     pub auth_service: Arc<AuthService>,
     /// Gateway admin service (platform/mapping CRUD).
     pub gateway_admin: Arc<GatewayAdminService>,
-    /// Optional gRPC client for the gateway service.
-    /// `None` when the gateway process is not running — all admin endpoints
-    /// except `GET /platforms/:id/channels` work without it.
-    pub gateway_client: Option<GatewayClient>,
 }
 
 impl AppState {
@@ -113,7 +109,8 @@ impl AppState {
         ));
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
-        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), None));
+        let gateway_client = connect_gateway_lazy(&config);
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), gateway_client));
 
         Arc::new(Self {
             db,
@@ -134,7 +131,6 @@ impl AppState {
             attachment,
             auth_service,
             gateway_admin,
-            gateway_client: None,
         })
     }
 
@@ -187,18 +183,8 @@ impl AppState {
         let attachment = Arc::new(AttachmentService::new(db.clone(), blob_store.clone()));
         let auth_service = Arc::new(AuthService::new(db.clone()));
 
-        let gateway_client = match connect_gateway(&config).await {
-            Ok(client) => {
-                info!("connected to gateway gRPC service");
-                Some(client)
-            }
-            Err(e) => {
-                info!(error = %e, "gateway not available (optional)");
-                None
-            }
-        };
-
-        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), gateway_client.clone()));
+        let gateway_client = connect_gateway_lazy(&config);
+        let gateway_admin = Arc::new(GatewayAdminService::new(db.clone(), gateway_client));
 
         Ok(Arc::new(Self {
             db,
@@ -219,7 +205,6 @@ impl AppState {
             attachment,
             auth_service,
             gateway_admin,
-            gateway_client,
         }))
     }
 }
@@ -249,24 +234,22 @@ async fn connect_agent(config: &AppConfig) -> Result<AgentClient, AppError> {
     Ok(AgentClient::new(channel))
 }
 
-/// Connects to the gateway gRPC service over a Unix domain socket.
+/// Creates a lazy gateway gRPC client over a Unix domain socket.
 ///
-/// Returns an error if the socket is not available; callers treat this as
-/// optional and store `None` rather than failing startup.
-async fn connect_gateway(config: &AppConfig) -> Result<GatewayClient, AppError> {
+/// Returns immediately without connecting. The underlying channel connects
+/// on first use and reconnects automatically if the gateway restarts.
+fn connect_gateway_lazy(config: &AppConfig) -> GatewayClient {
     let socket_path = config.gateway.socket_path.clone();
 
     let channel = Endpoint::try_from("http://[::]:50051")
-        .map_err(|e| AppError::Internal(e.into()))?
-        .connect_with_connector(service_fn(move |_: Uri| {
+        .expect("static URI is valid")
+        .connect_with_connector_lazy(service_fn(move |_: Uri| {
             let path = socket_path.clone();
             async move {
                 let stream = tokio::net::UnixStream::connect(path).await?;
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
-        }))
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        }));
 
-    Ok(GatewayClient::new(channel))
+    GatewayClient::new(channel)
 }

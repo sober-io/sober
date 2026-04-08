@@ -10,29 +10,29 @@ use sober_db::{PgGatewayMappingRepo, PgGatewayPlatformRepo, PgGatewayUserMapping
 use sqlx::PgPool;
 use tracing::instrument;
 
+use crate::state::GatewayClient;
+
 /// Service for managing gateway platforms, channel mappings, and user mappings.
 pub struct GatewayAdminService {
     db: PgPool,
-    gateway_client: Option<crate::state::GatewayClient>,
+    gateway_client: GatewayClient,
 }
 
 impl GatewayAdminService {
     /// Creates a new service backed by the given connection pool.
-    pub fn new(db: PgPool, gateway_client: Option<crate::state::GatewayClient>) -> Self {
+    pub fn new(db: PgPool, gateway_client: GatewayClient) -> Self {
         Self { db, gateway_client }
     }
 
     /// Lists available channels for a platform by querying the gateway gRPC service.
     ///
-    /// Returns an error if the gateway service is not connected.
+    /// Returns an error if the gateway service is not reachable.
     #[instrument(level = "debug", skip(self), fields(platform.id = %platform_id))]
     pub async fn list_available_channels(
         &self,
         platform_id: PlatformId,
     ) -> Result<Vec<crate::gateway_proto::ExternalChannel>, AppError> {
-        let mut client = self.gateway_client.clone().ok_or_else(|| {
-            AppError::Validation("gateway service is not available — it may not be running".into())
-        })?;
+        let mut client = self.gateway_client.clone();
 
         let mut request = tonic::Request::new(crate::gateway_proto::ListChannelsRequest {
             platform_id: platform_id.to_string(),
@@ -47,11 +47,11 @@ impl GatewayAdminService {
         Ok(response.into_inner().channels)
     }
 
-    /// Tells the gateway to reload config. Best-effort — logs and ignores errors.
+    /// Tells the gateway to reload caches and reconnect platforms.
+    /// Best-effort — logs on failure.
     async fn notify_gateway_reload(&self) {
-        if let Some(mut client) = self.gateway_client.clone()
-            && let Err(e) = client.reload(crate::gateway_proto::ReloadRequest {}).await
-        {
+        let mut client = self.gateway_client.clone();
+        if let Err(e) = client.reload(crate::gateway_proto::ReloadRequest {}).await {
             tracing::warn!(error = %e, "failed to notify gateway of config change");
         }
     }
@@ -204,6 +204,7 @@ impl GatewayAdminService {
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
 
+        self.notify_gateway_reload().await;
         Ok(mapping)
     }
 
@@ -211,6 +212,8 @@ impl GatewayAdminService {
     #[instrument(level = "debug", skip(self), fields(user_mapping.id = %id))]
     pub async fn delete_user_mapping(&self, id: UserMappingId) -> Result<(), AppError> {
         let repo = PgGatewayUserMappingRepo::new(self.db.clone());
-        repo.delete(id).await
+        repo.delete(id).await?;
+        self.notify_gateway_reload().await;
+        Ok(())
     }
 }
